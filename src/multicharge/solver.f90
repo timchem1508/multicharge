@@ -20,26 +20,25 @@ module solver
             class(mchrg_solver_type), intent(in) :: self
             real(wp), intent(in)  :: amat(:, :)
             real(wp), intent(in)  :: xvec(:)
-            real(wp), intent(out) :: vrhs(:)
-            real(wp), intent(out), optional :: ainv(:, :)
+            real(wp), allocatable, intent(out) :: vrhs(:)
+            real(wp), allocatable, intent(out), optional :: ainv(:, :)
             logical, intent(in), optional :: cpq
             type(error_type), allocatable, intent(out) :: error
             integer , intent(out), optional :: info
         end subroutine solve_if
-    end interface
 
-    abstract interface
         subroutine update_if(self, cache, amat, xvec, vrhs, ainv, cpq, info)
             import :: mchrg_solver_type, cache_container, wp
             class(mchrg_solver_type), intent(in) :: self
             type(cache_container), intent(inout) :: cache
             real(wp), intent(in)  :: amat(:, :)
             real(wp), intent(in)  :: xvec(:)
-            real(wp), intent(out) :: vrhs(:)
-            real(wp), intent(out), optional :: ainv(:, :)
+            real(wp), allocatable, intent(out) :: vrhs(:)
+            real(wp), allocatable, intent(out), optional :: ainv(:, :)
             logical, intent(in), optional :: cpq
             integer , intent(out), optional :: info
-        end subroutine update_if   
+        end subroutine update_if  
+
     end interface
 
     ! Direct solver using LAPACK
@@ -64,13 +63,24 @@ subroutine update_direct(self, cache, amat, xvec, vrhs, ainv, cpq, info)
     type(cache_container), intent(inout) :: cache
     real(wp), intent(in)  :: amat(:, :)
     real(wp), intent(in)  :: xvec(:)
-    real(wp), intent(out) :: vrhs(:)
-    real(wp), intent(out), optional :: ainv(:, :)
+    real(wp), allocatable, intent(out) :: vrhs(:)
+    real(wp), allocatable, intent(out), optional :: ainv(:, :)
     logical, intent(in), optional :: cpq
     integer , intent(out), optional :: info
     
-    ! This is a stub implementation
-    ! In a real implementation, you might update the cache with factorization data
+    integer :: ndim
+    
+    ndim = size(xvec)
+    
+    ! Allocate and initialize vrhs
+    allocate(vrhs(ndim))
+    vrhs = xvec
+    
+    ! Allocate and initialize ainv if present
+    if (present(ainv)) then
+        allocate(ainv(ndim, ndim))
+        ainv = amat
+    end if
     
     if (present(info)) info = 0
 end subroutine update_direct
@@ -81,185 +91,188 @@ subroutine update_cg(self, cache, amat, xvec, vrhs, ainv, cpq, info)
     type(cache_container), intent(inout) :: cache
     real(wp), intent(in)  :: amat(:, :)
     real(wp), intent(in)  :: xvec(:)
-    real(wp), intent(out) :: vrhs(:)
-    real(wp), intent(out), optional :: ainv(:, :)
+    real(wp), allocatable, intent(out) :: vrhs(:)
+    real(wp), allocatable, intent(out), optional :: ainv(:, :)
     logical, intent(in), optional :: cpq
     integer , intent(out), optional :: info
     
-    ! This is a stub implementation
-    ! In a real implementation, you might update the cache with preconditioner data
+    integer :: ndim
+    
+    ndim = size(xvec)
+    
+    ! Allocate and initialize vrhs (initial guess for CG is zero)
+    allocate(vrhs(ndim))
+    vrhs = 0.0_wp ! we can start from zero guess, then switch to the local charges
+    
+    ! Allocate ainv if present (though CG doesn't use it)
+    if (present(ainv)) then
+        allocate(ainv(ndim, ndim))
+    end if
     
     if (present(info)) info = 0
 end subroutine update_cg
 
 subroutine solve_direct(self, amat, xvec, vrhs, ainv, cpq, error, info)
-       class(direct_solver_type), intent(in) :: self
-       type(error_type), allocatable, intent(out) :: error
-       real(wp), intent(in)  :: amat(:, :)
-       real(wp), intent(in)  :: xvec(:)
-       real(wp), intent(out) :: vrhs(:)
-       real(wp), intent(out), optional :: ainv(:, :)
-       logical, intent(in), optional :: cpq
-       integer , intent(out), optional :: info
+    class(direct_solver_type), intent(in) :: self
+    type(error_type), allocatable, intent(out) :: error
+    real(wp), intent(in)  :: amat(:, :)
+    real(wp), intent(in)  :: xvec(:)
+    real(wp), allocatable, intent(out) :: vrhs(:)
+    real(wp), allocatable, intent(out), optional :: ainv(:, :)
+    logical, intent(in), optional :: cpq
+    integer , intent(out), optional :: info
 
-       integer  :: local_info
-       integer :: ndim, ic, jc
-       integer , allocatable :: ipiv(:)
-       logical :: want_cpq
-       type(cache_container), allocatable :: cache
+    integer  :: local_info
+    integer :: ndim, ic, jc
+    integer , allocatable :: ipiv(:)
+    logical :: want_cpq
+    type(cache_container), allocatable :: cache
 
-       ! Dimensions match check (do this before calling update)
-       ndim = size(xvec)
-       if (size(amat,1) /= ndim .or. size(amat,2) /= ndim .or. size(vrhs) /= ndim) then
-          call fatal_error(error, "solve_direct: dimension mismatch.")
-          if (present(info)) info = -1 
-          return
-       end if
+    ! Dimensions match check
+    ndim = size(xvec)
+    if (size(amat,1) /= ndim .or. size(amat,2) /= ndim) then
+        call fatal_error(error, "solve_direct: dimension mismatch.")
+        if (present(info)) info = -1 
+        return
+    end if
+    
+    ! Update cache and prepare vrhs and ainv
+    allocate(cache)
+    call self%update(cache, amat, xvec, vrhs, ainv, cpq, info)
 
-       vrhs = xvec
-       ainv = amat
-       
-       vrhs = xvec
-       ainv = amat
+    
+    ! Logical: solve coupled-perturbed equations flag
+    want_cpq = .false.
+    if (present(cpq)) want_cpq = cpq
 
-       ! Update cache
-       allocate(cache)
-       call self%update(cache, amat, xvec, vrhs, ainv, cpq, info)    ! <-- call bound procedure without explicit self
+    allocate(ipiv(ndim))
+    call sytrf(ainv, ipiv, info=local_info, uplo='l')
+    if (local_info /= 0) then
+        call fatal_error(error, "solve_direct: Bunch-Kaufman factorization failed.")
+        if (present(info)) info = local_info
+        return
+    end if
 
-       ! Logical: compute inverse flag
-       want_cpq = .false.
-       if (present(cpq)) want_cpq = cpq
-
-       call sytrf(ainv, ipiv, info=local_info, uplo='l')
-       if (local_info /= 0) then
-          call fatal_error(error, "solve_direct: Bunch-Kaufman factorization failed.")
-          if (present(info)) info = local_info
-          return
-       end if
-
-       if (want_cpq) then
-          call sytri(ainv, ipiv, info=local_info, uplo='l')
-          if (local_info /= 0) then
-             call fatal_error(error, "solve_direct: Inversion of factorized matrix failed.")
-             if (present(info)) info = local_info
-             return
-          end if
-          call symv(ainv, xvec, vrhs, uplo='l')
-          do ic = 1, ndim
-             do jc = ic + 1, ndim
+    if (want_cpq) then
+        call sytri(ainv, ipiv, info=local_info, uplo='l')
+        if (local_info /= 0) then
+            call fatal_error(error, "solve_direct: Inversion of factorized matrix failed.")
+            if (present(info)) info = local_info
+            return
+        end if
+        call symv(ainv, xvec, vrhs, uplo='l')
+        do ic = 1, ndim
+            do jc = ic + 1, ndim
                 ainv(ic, jc) = ainv(jc, ic)
-             end do
-          end do
-       else
-          call sytrs(ainv, vrhs, ipiv, info=local_info, uplo='l')
-          if (local_info /= 0) then
-             call fatal_error(error, "solve_direct: Solving factorized system failed.")
-             if (present(info)) info = local_info
-             return
-          end if
-       end if
+            end do
+        end do
+    else
+        call sytrs(ainv, vrhs, ipiv, info=local_info, uplo='l')
+        if (local_info /= 0) then
+            call fatal_error(error, "solve_direct: Solving factorized system failed.")
+            if (present(info)) info = local_info
+            return
+        end if
+    end if
 
-       if (present(info)) info = local_info
+    if (present(info)) info = local_info
 end subroutine solve_direct
 
 subroutine solve_cg(self, amat, xvec, vrhs, ainv, cpq, error, info)
-       class(cg_solver_type), intent(in) :: self
-       type(error_type), allocatable, intent(out) :: error
-       real(wp), intent(in)  :: amat(:, :)
-       real(wp), intent(in)  :: xvec(:)
-       real(wp), intent(out) :: vrhs(:)
-       real(wp), intent(out), optional :: ainv(:, :)
-       logical, intent(in), optional :: cpq
-       integer , intent(out), optional :: info
-       
-       integer :: ndim, it, maxit
-       real(wp) :: tol, bnorm, rnorm, alpha, beta, denom
-       real(wp), allocatable :: r(:), p(:), z(:), Ap(:), Mdiag(:)
-       integer  :: local_info
-       real(wp) :: rz_old, rz_new
-       type(cache_container), allocatable :: cache
-       
-       ! Dimensions match check (do this before calling update)
-       ndim = size(xvec)
-       if (size(amat,1) /= ndim .or. size(amat,2) /= ndim .or. size(vrhs) /= ndim) then
-          call fatal_error(error, "solve_direct: dimension mismatch.")
-          if (present(info)) info = -1 
-          return
-       end if
+    class(cg_solver_type), intent(in) :: self
+    type(error_type), allocatable, intent(out) :: error
+    real(wp), intent(in)  :: amat(:, :)
+    real(wp), intent(in)  :: xvec(:)
+    real(wp), allocatable, intent(out) :: vrhs(:)
+    real(wp), intent(out), allocatable, optional :: ainv(:, :) ! not used in CG
+    logical, intent(in), optional :: cpq
+    integer , intent(out), optional :: info
+    
+    integer :: ndim, it, maxit
+    real(wp) :: tol, bnorm, rnorm, alpha, beta, denom
+    real(wp), allocatable :: r(:), p(:), z(:), Ap(:), Mdiag(:)
+    integer  :: local_info
+    real(wp) :: rz_old, rz_new
+    type(cache_container), allocatable :: cache
+    
+    ! Dimensions match check
+    ndim = size(xvec)
+    if (size(amat,1) /= ndim .or. size(amat,2) /= ndim) then  ! REMOVED: .or. size(vrhs) /= ndim
+        call fatal_error(error, "solve_cg: dimension mismatch.")
+        if (present(info)) info = -1 
+        return
+    end if
 
-       ! Prepare/cache and allow update to modify vrhs/ainv
-       allocate(cache)
-       call self%update(cache, amat, xvec, vrhs, ainv, cpq, info)   ! <-- no explicit self
+    ! Prepare/cache - update will allocate and initialize vrhs
+    allocate(cache)
+    call self%update(cache, amat, xvec, vrhs, ainv, cpq, info)
  
-       ! Global thresholds
-       tol = 1.0e-8_wp
-       maxit = max(10, ndim*10)
+    ! Global thresholds
+    tol = 1.0e-8_wp
+    maxit = max(10, ndim*10)
 
-       allocate(r(ndim), p(ndim), z(ndim), Ap(ndim), Mdiag(ndim))
+    allocate(r(ndim), p(ndim), z(ndim), Ap(ndim), Mdiag(ndim))
 
+    ! Jacobi preconditioner (inverse of diagonal)
+    do it = 1, ndim
+        Mdiag(it)=amat(it,it)
+        if (abs(Mdiag(it)) < tol**3) Mdiag(it) = tol**3
+        Mdiag(it) = 1.0_wp / Mdiag(it)
+    end do
 
-         ! Jacobi preconditioner (inverse of diagonal)
-       do it = 1, ndim
-           Mdiag(it)=amat(it,it)
-           if (abs(Mdiag(it)) < tol**3) Mdiag(it) = tol**3
-           Mdiag(it) = 1.0_wp / Mdiag(it)
-       end do
+    ! Initial residual r = b - A*x (x=vrhs, which is 0.0_wp from update_cg)
+    call gemv(amat, vrhs, Ap, alpha=1.0_wp, beta=0.0_wp, trans='n')
+    ! Residual compute
+    r = xvec - Ap
+    ! Apply preconditioner z = M * r
+    z = r * Mdiag
+    ! Initial search direction
+    p = z
+    ! Initial direction update factor
+    bnorm = sqrt(sum(xvec*xvec))
+    if (bnorm < tol**3) bnorm = 1.0_wp
+    rnorm = sqrt(sum(r*r))
+    if (rnorm / bnorm <= tol) then
+        if (present(info)) info = 0 
+        return
+    end if
 
-       vrhs = 0.0_wp  ! initial guess zero, later the local charge vector will be added
+    ! Dynamical residual
+    rz_old = sum(r*z)
+    local_info = -1 
 
-         ! Initial residual r = b - A*x (x=0)
-       call gemv(amat, vrhs, Ap, alpha=1.0_wp, beta=0.0_wp, trans='n')
-       ! Residual compute
-       r = xvec - Ap
-       ! Apply preconditioner z = M * r
-       z = r * Mdiag
-       ! Initial search direction
-       p = z
-       ! Initial direction udate factor
-       bnorm = sqrt(sum(xvec*xvec))
-         if (bnorm < tol**3) bnorm = 1.0_wp
-         rnorm = sqrt(sum(r*r))
-         if (rnorm / bnorm <= tol) then
-            if (present(info)) info = 0 
-            return
-         end if
+    ! Conjugate Gradient iterations
+    do it = 1, maxit
+        call gemv(amat, p, Ap, alpha=1.0_wp, beta=0.0_wp, trans='n')
+        ! Compute step size alpha
+        denom = sum(p * Ap)
+        if (abs(denom) < tol**4) then
+            local_info = 0 
+            exit
+        end if
+        alpha = rz_old / denom
+        ! Update solution and residual
+        vrhs = vrhs + alpha * p
+        r = r - alpha * Ap
+        ! Check convergence
+        rnorm = sqrt(sum(r*r))
+        if (rnorm / bnorm <= tol) then
+            local_info = 0 
+            exit
+        end if
+        ! Apply preconditioner z = M * r
+        z = r * Mdiag
+        rz_new = sum(r * z)
+        beta = rz_new / rz_old
+        p = z + beta * p
+        rz_old = rz_new
+        if (it == maxit) then
+            local_info = 1   ! did not converge
+            call fatal_error(error, "solve_cg: CG did not converge within max iterations.")
+        end if
+    end do
 
-       ! Dynamical residual
-       rz_old = sum(r*z)
-       local_info = -1 
-
-       ! Conjugate Gradient iterations
-       do it = 1, maxit
-           call gemv(amat, p, Ap, alpha=1.0_wp, beta=0.0_wp, trans='n')
-           ! Compute step size alpha
-           denom = sum(p * Ap)
-              if (abs(denom) < tol**4) then
-                 local_info = 0 
-                 exit
-              end if
-           alpha = rz_old / denom
-           ! Update solution and residual
-           vrhs = vrhs + alpha * p
-           r = r - alpha * Ap
-           ! Check convergence
-           rnorm = sqrt(sum(r*r))
-              if (rnorm / bnorm <= tol) then
-                 local_info = 0 
-                 exit
-              end if
-           ! Apply preconditioner z = M * r
-           z = r * Mdiag
-           rz_new = sum(r * z)
-           beta = rz_new / rz_old
-           p = z + beta * p
-           rz_old = rz_new
-           if (it == maxit) then
-              local_info = 1   ! did not converge
-              call fatal_error(error, "solve_cg: CG did not converge within max iterations.")
-           end if
-       end do
-
-       if (present(info)) info = local_info
+    if (present(info)) info = local_info
 end subroutine solve_cg
 
 
