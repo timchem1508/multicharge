@@ -1,73 +1,124 @@
-#ifndef IK
-#define IK i4
-#endif
-
-
 module solver
-    use mctc_env, only: wp, ik => IK, fatal_error
+    use mctc_env, only: error_type, fatal_error, wp
     use multicharge_blas, only: symv, gemv
     use multicharge_lapack, only: sytrf, sytrs, sytri
     use multicharge_model_cache, only: model_cache, cache_container
-    use multicharge_model_type, only: local_charge 
     implicit none
     private
 
     public :: mchrg_solver_type, new_mchrg_solver
- 
+
     type, abstract :: mchrg_solver_type
     contains
        procedure(solve_if), deferred :: solve
-       procedure(update), deferred :: update
+       procedure(update_if), deferred :: update
     end type mchrg_solver_type
- 
 
     abstract interface
-        subroutine update(self, cache, amat, xvec, vrhs, ainv, cpq)
-            import :: mchrg_model_type, structure_type, cache_container, wp
+        subroutine solve_if(self, amat, xvec, vrhs, ainv, cpq, error, info)
+            import :: mchrg_solver_type, error_type, wp
+            class(mchrg_solver_type), intent(in) :: self
+            real(wp), intent(in)  :: amat(:, :)
+            real(wp), intent(in)  :: xvec(:)
+            real(wp), intent(out) :: vrhs(:)
+            real(wp), intent(out), optional :: ainv(:, :)
+            logical, intent(in), optional :: cpq
+            type(error_type), allocatable, intent(out) :: error
+            integer , intent(out), optional :: info
+        end subroutine solve_if
+    end interface
+
+    abstract interface
+        subroutine update_if(self, cache, amat, xvec, vrhs, ainv, cpq, info)
+            import :: mchrg_solver_type, cache_container, wp
             class(mchrg_solver_type), intent(in) :: self
             type(cache_container), intent(inout) :: cache
             real(wp), intent(in)  :: amat(:, :)
             real(wp), intent(in)  :: xvec(:)
             real(wp), intent(out) :: vrhs(:)
-            real(wp), intent(out), optional :: ainv(:, :)    ! <-- made optional for consistency
+            real(wp), intent(out), optional :: ainv(:, :)
             logical, intent(in), optional :: cpq
-            integer(ik), intent(out), optional :: info
-        end subroutine update   
+            integer , intent(out), optional :: info
+        end subroutine update_if   
     end interface
 
-contains
-
-    ! direct solver concrete type (was referenced but missing)
+    ! Direct solver using LAPACK
     type, extends(mchrg_solver_type) :: direct_solver_type
     contains
        procedure :: solve => solve_direct
-       procedure :: update   ! note: concrete update must be provided elsewhere
+       procedure :: update => update_direct
     end type direct_solver_type
 
+    ! CG solver with Jacobi preconditioner
+    type, extends(mchrg_solver_type) :: cg_solver_type
+    contains
+       procedure :: solve => solve_cg
+       procedure :: update => update_cg
+    end type cg_solver_type
+
+contains
+
+! Update method for direct solver (does nothing in this implementation)
+subroutine update_direct(self, cache, amat, xvec, vrhs, ainv, cpq, info)
+    class(direct_solver_type), intent(in) :: self
+    type(cache_container), intent(inout) :: cache
+    real(wp), intent(in)  :: amat(:, :)
+    real(wp), intent(in)  :: xvec(:)
+    real(wp), intent(out) :: vrhs(:)
+    real(wp), intent(out), optional :: ainv(:, :)
+    logical, intent(in), optional :: cpq
+    integer , intent(out), optional :: info
+    
+    ! This is a stub implementation
+    ! In a real implementation, you might update the cache with factorization data
+    
+    if (present(info)) info = 0
+end subroutine update_direct
+
+! Update method for CG solver (does nothing in this implementation)
+subroutine update_cg(self, cache, amat, xvec, vrhs, ainv, cpq, info)
+    class(cg_solver_type), intent(in) :: self
+    type(cache_container), intent(inout) :: cache
+    real(wp), intent(in)  :: amat(:, :)
+    real(wp), intent(in)  :: xvec(:)
+    real(wp), intent(out) :: vrhs(:)
+    real(wp), intent(out), optional :: ainv(:, :)
+    logical, intent(in), optional :: cpq
+    integer , intent(out), optional :: info
+    
+    ! This is a stub implementation
+    ! In a real implementation, you might update the cache with preconditioner data
+    
+    if (present(info)) info = 0
+end subroutine update_cg
+
 subroutine solve_direct(self, amat, xvec, vrhs, ainv, cpq, error, info)
-       class(mchrg_solver_type), intent(in) :: self
+       class(direct_solver_type), intent(in) :: self
        type(error_type), allocatable, intent(out) :: error
        real(wp), intent(in)  :: amat(:, :)
        real(wp), intent(in)  :: xvec(:)
        real(wp), intent(out) :: vrhs(:)
-       real(wp), intent(out) :: ainv(:, :)
+       real(wp), intent(out), optional :: ainv(:, :)
        logical, intent(in), optional :: cpq
-       integer(ik), intent(out), optional :: info
+       integer , intent(out), optional :: info
 
-       integer(ik) :: local_info
+       integer  :: local_info
        integer :: ndim, ic, jc
-       integer(ik), allocatable :: ipiv(:)
+       integer , allocatable :: ipiv(:)
        logical :: want_cpq
        type(cache_container), allocatable :: cache
 
        ! Dimensions match check (do this before calling update)
        ndim = size(xvec)
        if (size(amat,1) /= ndim .or. size(amat,2) /= ndim .or. size(vrhs) /= ndim) then
-          call fatal_error(local_info, "solve_direct: dimension mismatch.")
-          if (present(info)) info = -1_ik
+          call fatal_error(error, "solve_direct: dimension mismatch.")
+          if (present(info)) info = -1 
           return
        end if
 
+       vrhs = xvec
+       ainv = amat
+       
        vrhs = xvec
        ainv = amat
 
@@ -111,34 +162,28 @@ subroutine solve_direct(self, amat, xvec, vrhs, ainv, cpq, error, info)
        if (present(info)) info = local_info
 end subroutine solve_direct
 
-    ! CG solver with Jacobi preconditioner
-    type, extends(mchrg_solver_type) :: cg_solver_type
-    contains
-       procedure :: solve => solve_cg
-    end type cg_solver_type
-
 subroutine solve_cg(self, amat, xvec, vrhs, ainv, cpq, error, info)
-       class(mchrg_solver_type), intent(in) :: self
+       class(cg_solver_type), intent(in) :: self
        type(error_type), allocatable, intent(out) :: error
        real(wp), intent(in)  :: amat(:, :)
        real(wp), intent(in)  :: xvec(:)
        real(wp), intent(out) :: vrhs(:)
        real(wp), intent(out), optional :: ainv(:, :)
        logical, intent(in), optional :: cpq
-       integer(ik), intent(out), optional :: info
+       integer , intent(out), optional :: info
        
        integer :: ndim, it, maxit
        real(wp) :: tol, bnorm, rnorm, alpha, beta, denom
        real(wp), allocatable :: r(:), p(:), z(:), Ap(:), Mdiag(:)
-       integer(ik) :: local_info
+       integer  :: local_info
        real(wp) :: rz_old, rz_new
        type(cache_container), allocatable :: cache
        
        ! Dimensions match check (do this before calling update)
        ndim = size(xvec)
        if (size(amat,1) /= ndim .or. size(amat,2) /= ndim .or. size(vrhs) /= ndim) then
-          call fatal_error(local_info, "solve_direct: dimension mismatch.")
-          if (present(info)) info = -1_ik
+          call fatal_error(error, "solve_direct: dimension mismatch.")
+          if (present(info)) info = -1 
           return
        end if
 
@@ -175,13 +220,13 @@ subroutine solve_cg(self, amat, xvec, vrhs, ainv, cpq, error, info)
          if (bnorm < tol**3) bnorm = 1.0_wp
          rnorm = sqrt(sum(r*r))
          if (rnorm / bnorm <= tol) then
-            if (present(info)) info = 0_ik
+            if (present(info)) info = 0 
             return
          end if
 
        ! Dynamical residual
        rz_old = sum(r*z)
-       local_info = -1_ik
+       local_info = -1 
 
        ! Conjugate Gradient iterations
        do it = 1, maxit
@@ -189,7 +234,7 @@ subroutine solve_cg(self, amat, xvec, vrhs, ainv, cpq, error, info)
            ! Compute step size alpha
            denom = sum(p * Ap)
               if (abs(denom) < tol**4) then
-                 local_info = 0_ik
+                 local_info = 0 
                  exit
               end if
            alpha = rz_old / denom
@@ -199,7 +244,7 @@ subroutine solve_cg(self, amat, xvec, vrhs, ainv, cpq, error, info)
            ! Check convergence
            rnorm = sqrt(sum(r*r))
               if (rnorm / bnorm <= tol) then
-                 local_info = 0_ik
+                 local_info = 0 
                  exit
               end if
            ! Apply preconditioner z = M * r
@@ -209,13 +254,14 @@ subroutine solve_cg(self, amat, xvec, vrhs, ainv, cpq, error, info)
            p = z + beta * p
            rz_old = rz_new
            if (it == maxit) then
-              local_info = 1_ik  ! did not converge
+              local_info = 1   ! did not converge
               call fatal_error(error, "solve_cg: CG did not converge within max iterations.")
            end if
        end do
 
        if (present(info)) info = local_info
 end subroutine solve_cg
+
 
 function new_mchrg_solver(use_cg) result(solver)
     logical, intent(in), optional :: use_cg
