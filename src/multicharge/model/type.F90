@@ -33,6 +33,7 @@ module multicharge_model_type
    use multicharge_lapack, only: sytrf, sytrs, sytri
    use multicharge_wignerseitz, only: wignerseitz_cell_type, new_wignerseitz_cell
    use multicharge_model_cache, only: model_cache, cache_container
+   use solver, only: new_mchrg_solver, mchrg_solver_type
    implicit none
    private
 
@@ -185,6 +186,7 @@ subroutine solve(self, mol, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
    logical :: grad, cpq, dcn
    integer(ik) :: info
    integer(ik), allocatable :: ipiv(:)
+   class(mchrg_solver_type), allocatable :: solver
 
    ! Variables for solving ES equation
    real(wp), allocatable :: xvec(:), vrhs(:), amat(:, :)
@@ -216,36 +218,11 @@ subroutine solve(self, mol, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
    vrhs = xvec
    ainv = amat
 
-   ! Factorize the Coulomb matrix
-   allocate(ipiv(ndim))
-   call sytrf(ainv, ipiv, info=info, uplo='l')
+   ! Solve linear system (or produce inverse) via pluggable solver
+   solver = new_mchrg_solver()            ! allocates a concrete solver (CG or direct)
+   call solver%solve(amat, xvec, vrhs, ainv, cpq, error, info)
    if (info /= 0) then
-      call fatal_error(error, "Bunch-Kaufman factorization failed.")
       return
-   end if
-
-   if (cpq) then
-      ! Inverted matrix is needed for coupled-perturbed equations
-      call sytri(ainv, ipiv, info=info, uplo='l')
-      if (info /= 0) then
-         call fatal_error(error, "Inversion of factorized matrix failed.")
-         return
-      end if
-      ! Solve the linear system
-      call symv(ainv, xvec, vrhs, uplo='l')
-      do ic = 1, ndim
-         do jc = ic + 1, ndim
-            ainv(ic, jc) = ainv(jc, ic)
-         end do
-      end do
-   else
-      ! Solve the linear system
-      call sytrs(ainv, vrhs, ipiv, info=info, uplo='l')
-      if (info /= 0) then
-         call fatal_error(error, "Solution of linear system failed.")
-         return
-      end if
-
    end if
 
    if (present(qvec)) then

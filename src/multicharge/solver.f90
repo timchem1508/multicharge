@@ -1,280 +1,241 @@
+#ifndef IK
+#define IK i4
+#endif
 
-!> Generate a solver
+
 module solver
-    use mctc_env, only: error_type, fatal_error, wp, ik => IK
-    use mctc_io, only: structure_type
-    use mctc_io_constants, only: pi
-    use mctc_io_math, only: matinv_3x3
-    use mctc_cutoff, only: get_lattice_points
-    use mctc_ncoord, only: ncoord_type
-    use multicharge_blas, only: gemv, symv, gemm
+    use mctc_env, only: wp, ik => IK, fatal_error
+    use multicharge_blas, only: symv, gemv
     use multicharge_lapack, only: sytrf, sytrs, sytri
-    use multicharge_wignerseitz, only: wignerseitz_cell_type, new_wignerseitz_cell
     use multicharge_model_cache, only: model_cache, cache_container
+    use multicharge_model_type, only: local_charge 
     implicit none
     private
-    public :: solver_type
 
-    type, abstract :: solver_type
-        !> Electronegativity
-        real(wp), allocatable :: chi(:)
-        !> Charge width
-        real(wp), allocatable :: rad(:)
-        !> Chemical hardness
-        real(wp), allocatable :: eta(:)
-        !> CN scaling factor for electronegativity
-        real(wp), allocatable :: kcnchi(:)
-        !> Local charge scaling factor for electronegativity
-        real(wp), allocatable :: kqchi(:)
-        !> Local charge scaling factor for chemical hardness
-        real(wp), allocatable :: kqeta(:)
-        !> CN scaling factor for charge width
-        real(wp), allocatable :: kcnrad
-        !> Coordination number
-        class(ncoord_type), allocatable :: ncoord
-        !> Electronegativity weighted CN for local charge
-        class(ncoord_type), allocatable :: ncoord_en
-        contains
-            !> Solve linear equations for the charge model using matrix inversion
-            procedure :: lapack_solver
-            !> Solve linear equations for the charge model iteratively using conjugate gradient
-            procedure :: iterative
-            !> Update cache
-            procedure(update), deferred :: update
-            !> Get charges
-            procedure, pointer :: get_charges
-    end type solver_type
+    public :: mchrg_solver_type, new_mchrg_solver
+ 
+    type, abstract :: mchrg_solver_type
+    contains
+       procedure(solve_if), deferred :: solve
+       procedure(update), deferred :: update
+    end type mchrg_solver_type
+ 
 
     abstract interface
-        subroutine update(self, mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
+        subroutine update(self, cache, amat, xvec, vrhs, ainv, cpq)
             import :: mchrg_model_type, structure_type, cache_container, wp
-            class(mchrg_model_type), intent(in) :: self
-            type(structure_type), intent(in) :: mol
+            class(mchrg_solver_type), intent(in) :: self
             type(cache_container), intent(inout) :: cache
-            real(wp), intent(in) :: cn(:)
-            real(wp), intent(in), optional :: qloc(:)
-            real(wp), intent(in), optional :: dcndr(:, :, :)
-            real(wp), intent(in), optional :: dcndL(:, :, :)
-            real(wp), intent(in), optional :: dqlocdr(:, :, :)
-            real(wp), intent(in), optional :: dqlocdL(:, :, :)
+            real(wp), intent(in)  :: amat(:, :)
+            real(wp), intent(in)  :: xvec(:)
+            real(wp), intent(out) :: vrhs(:)
+            real(wp), intent(out), optional :: ainv(:, :)    ! <-- made optional for consistency
+            logical, intent(in), optional :: cpq
+            integer(ik), intent(out), optional :: info
         end subroutine update   
-
-        subroutine get_coulomb_matrix(self, mol, cache, amat)
-            import :: mchrg_model_type, structure_type, cache_container, wp
-            class(mchrg_model_type), intent(in) :: self
-            type(structure_type), intent(in) :: mol
-            type(cache_container), intent(inout) :: cache
-            real(wp), intent(out) :: amat(:, :)
-         end subroutine get_coulomb_matrix
-   
-         subroutine get_coulomb_derivs(self, mol, cache, qvec, dadr, dadL, atrace)
-            import :: mchrg_model_type, structure_type, cache_container, wp
-            class(mchrg_model_type), intent(in) :: self
-            type(structure_type), intent(in) :: mol
-            type(cache_container), intent(inout) :: cache
-            real(wp), intent(in) :: qvec(:)
-            real(wp), intent(out) :: dadr(:, :, :), dadL(:, :, :), atrace(:, :)
-         end subroutine get_coulomb_derivs
-   
-         subroutine get_xvec(self, mol, cache, xvec)
-            import :: mchrg_model_type, cache_container, structure_type, wp
-            class(mchrg_model_type), intent(in) :: self
-            type(structure_type), intent(in) :: mol
-            type(cache_container), intent(inout) :: cache
-            real(wp), intent(out) :: xvec(:)
-         end subroutine get_xvec
-   
-         subroutine get_xvec_derivs(self, mol, cache, dxdr, dxdL)
-            import :: mchrg_model_type, structure_type, cache_container, wp
-            class(mchrg_model_type), intent(in) :: self
-            type(structure_type), intent(in) :: mol
-            type(cache_container), intent(inout) :: cache
-            real(wp), intent(out), contiguous :: dxdr(:, :, :)
-            real(wp), intent(out), contiguous :: dxdL(:, :, :)
-         end subroutine get_xvec_derivs
     end interface
 
-    real(wp), parameter :: twopi = 2 * pi
+contains
 
+    ! direct solver concrete type (was referenced but missing)
+    type, extends(mchrg_solver_type) :: direct_solver_type
     contains
+       procedure :: solve => solve_direct
+       procedure :: update   ! note: concrete update must be provided elsewhere
+    end type direct_solver_type
 
-    subroutine lapack(self, mol, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
-        & energy, gradient, sigma, qvec, dqdr, dqdL)
-        !> Electronegativity equilibration model
-        class(solver_type), intent(in) :: self
-        !> Molecular structure data
-        type(structure_type), intent(in) :: mol
-        !> Error handling
-        type(error_type), allocatable, intent(out) :: error
-        !> Coordination number
-        real(wp), intent(in), contiguous :: cn(:)
-        !> Local atomic partial charges
-        real(wp), intent(in), contiguous :: qloc(:)
-        !> Optional derivative of the coordination number w.r.t. atomic positions
-        real(wp), intent(in), contiguous, optional :: dcndr(:, :, :)
-        !> Optional derivative of the coordination number w.r.t. lattice vectors
-        real(wp), intent(in), contiguous, optional :: dcndL(:, :, :)
-        !> Optional derivative of the local atomic partial charges w.r.t. atomic positions
-        real(wp), intent(in), contiguous, optional :: dqlocdr(:, :, :)
-        !> Optional derivative of the local atomic partial charges w.r.t. lattice vectors
-        real(wp), intent(in), contiguous, optional :: dqlocdL(:, :, :)
-        !> Optional atomic partial charges result
-        real(wp), intent(out), contiguous, optional :: qvec(:)
-        !> Optional electrostatic energy result
-        real(wp), intent(inout), contiguous, optional :: energy(:)
-        !> Optional gradient for electrostatic energy
-        real(wp), intent(inout), contiguous, optional :: gradient(:, :)
-        !> Optional stress tensor for electrostatic energy
-        real(wp), intent(inout), contiguous, optional :: sigma(:, :)
-        !> Optional derivative of the atomic partial charges w.r.t. atomic positions
-        real(wp), intent(out), contiguous, optional :: dqdr(:, :, :)
-        !> Optional derivative of the atomic partial charges w.r.t. lattice vectors
-        real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
+subroutine solve_direct(self, amat, xvec, vrhs, ainv, cpq, error, info)
+       class(mchrg_solver_type), intent(in) :: self
+       type(error_type), allocatable, intent(out) :: error
+       real(wp), intent(in)  :: amat(:, :)
+       real(wp), intent(in)  :: xvec(:)
+       real(wp), intent(out) :: vrhs(:)
+       real(wp), intent(out) :: ainv(:, :)
+       logical, intent(in), optional :: cpq
+       integer(ik), intent(out), optional :: info
 
-        integer :: ic, jc, iat, ndim
-        logical :: grad, cpq, dcn
-        integer(ik) :: info
-        integer(ik), allocatable :: ipiv(:)
+       integer(ik) :: local_info
+       integer :: ndim, ic, jc
+       integer(ik), allocatable :: ipiv(:)
+       logical :: want_cpq
+       type(cache_container), allocatable :: cache
 
-        ! Variables for solving ES equation
-        real(wp), allocatable :: xvec(:), vrhs(:), amat(:, :)
-        real(wp), allocatable :: ainv(:, :), jmat(:, :)
-        ! Gradients
-        real(wp), allocatable :: dadr(:, :, :), dadL(:, :, :), atrace(:, :)
-        real(wp), allocatable :: dxdr(:, :, :), dxdL(:, :, :)
-        type(cache_container), allocatable :: cache
-        real(wp), allocatable :: trans(:, :)
+       ! Dimensions match check (do this before calling update)
+       ndim = size(xvec)
+       if (size(amat,1) /= ndim .or. size(amat,2) /= ndim .or. size(vrhs) /= ndim) then
+          call fatal_error(local_info, "solve_direct: dimension mismatch.")
+          if (present(info)) info = -1_ik
+          return
+       end if
 
-        ! Calculate gradient if the respective arrays are present
-        dcn = present(dcndr) .and. present(dcndL)
-        grad = present(gradient) .and. present(sigma) .and. dcn
-        cpq = present(dqdr) .and. present(dqdL) .and. dcn
+       vrhs = xvec
+       ainv = amat
 
-        ! Update cache
-        allocate(cache)
-        call self%update(mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
+       ! Update cache
+       allocate(cache)
+       call self%update(cache, amat, xvec, vrhs, ainv, cpq, info)    ! <-- call bound procedure without explicit self
 
-        ! Setup the Coulomb matrix
-        ndim = mol%nat + 1
-        allocate(amat(ndim, ndim))
-        call self%get_coulomb_matrix(mol, cache, amat)
+       ! Logical: compute inverse flag
+       want_cpq = .false.
+       if (present(cpq)) want_cpq = cpq
 
-        ! Get RHS of ES equation
-        allocate(xvec(ndim))
-        call self%get_xvec(mol, cache, xvec)
+       call sytrf(ainv, ipiv, info=local_info, uplo='l')
+       if (local_info /= 0) then
+          call fatal_error(error, "solve_direct: Bunch-Kaufman factorization failed.")
+          if (present(info)) info = local_info
+          return
+       end if
 
-        vrhs = xvec
-        ainv = amat
+       if (want_cpq) then
+          call sytri(ainv, ipiv, info=local_info, uplo='l')
+          if (local_info /= 0) then
+             call fatal_error(error, "solve_direct: Inversion of factorized matrix failed.")
+             if (present(info)) info = local_info
+             return
+          end if
+          call symv(ainv, xvec, vrhs, uplo='l')
+          do ic = 1, ndim
+             do jc = ic + 1, ndim
+                ainv(ic, jc) = ainv(jc, ic)
+             end do
+          end do
+       else
+          call sytrs(ainv, vrhs, ipiv, info=local_info, uplo='l')
+          if (local_info /= 0) then
+             call fatal_error(error, "solve_direct: Solving factorized system failed.")
+             if (present(info)) info = local_info
+             return
+          end if
+       end if
 
-        ! Factorize the Coulomb matrix
-        allocate(ipiv(ndim))
-        call sytrf(ainv, ipiv, info=info, uplo='l')
-        if (info /= 0) then
-            call fatal_error(error, "Bunch-Kaufman factorization failed.")
+       if (present(info)) info = local_info
+end subroutine solve_direct
+
+    ! CG solver with Jacobi preconditioner
+    type, extends(mchrg_solver_type) :: cg_solver_type
+    contains
+       procedure :: solve => solve_cg
+    end type cg_solver_type
+
+subroutine solve_cg(self, amat, xvec, vrhs, ainv, cpq, error, info)
+       class(mchrg_solver_type), intent(in) :: self
+       type(error_type), allocatable, intent(out) :: error
+       real(wp), intent(in)  :: amat(:, :)
+       real(wp), intent(in)  :: xvec(:)
+       real(wp), intent(out) :: vrhs(:)
+       real(wp), intent(out), optional :: ainv(:, :)
+       logical, intent(in), optional :: cpq
+       integer(ik), intent(out), optional :: info
+       
+       integer :: ndim, it, maxit
+       real(wp) :: tol, bnorm, rnorm, alpha, beta, denom
+       real(wp), allocatable :: r(:), p(:), z(:), Ap(:), Mdiag(:)
+       integer(ik) :: local_info
+       real(wp) :: rz_old, rz_new
+       type(cache_container), allocatable :: cache
+       
+       ! Dimensions match check (do this before calling update)
+       ndim = size(xvec)
+       if (size(amat,1) /= ndim .or. size(amat,2) /= ndim .or. size(vrhs) /= ndim) then
+          call fatal_error(local_info, "solve_direct: dimension mismatch.")
+          if (present(info)) info = -1_ik
+          return
+       end if
+
+       ! Prepare/cache and allow update to modify vrhs/ainv
+       allocate(cache)
+       call self%update(cache, amat, xvec, vrhs, ainv, cpq, info)   ! <-- no explicit self
+ 
+       ! Global thresholds
+       tol = 1.0e-8_wp
+       maxit = max(10, ndim*10)
+
+       allocate(r(ndim), p(ndim), z(ndim), Ap(ndim), Mdiag(ndim))
+
+
+         ! Jacobi preconditioner (inverse of diagonal)
+       do it = 1, ndim
+           Mdiag(it)=amat(it,it)
+           if (abs(Mdiag(it)) < tol**3) Mdiag(it) = tol**3
+           Mdiag(it) = 1.0_wp / Mdiag(it)
+       end do
+
+       vrhs = 0.0_wp  ! initial guess zero, later the local charge vector will be added
+
+         ! Initial residual r = b - A*x (x=0)
+       call gemv(amat, vrhs, Ap, alpha=1.0_wp, beta=0.0_wp, trans='n')
+       ! Residual compute
+       r = xvec - Ap
+       ! Apply preconditioner z = M * r
+       z = r * Mdiag
+       ! Initial search direction
+       p = z
+       ! Initial direction udate factor
+       bnorm = sqrt(sum(xvec*xvec))
+         if (bnorm < tol**3) bnorm = 1.0_wp
+         rnorm = sqrt(sum(r*r))
+         if (rnorm / bnorm <= tol) then
+            if (present(info)) info = 0_ik
             return
-        end if
+         end if
 
-        if (cpq) then
-            ! Inverted matrix is needed for coupled-perturbed equations
-            call sytri(ainv, ipiv, info=info, uplo='l')
-            if (info /= 0) then
-                call fatal_error(error, "Inversion of factorized matrix failed.")
-                return
-            end if
-            ! Solve the linear system
-            call symv(ainv, xvec, vrhs, uplo='l')
-            do ic = 1, ndim
-                do jc = ic + 1, ndim
-                    ainv(ic, jc) = ainv(jc, ic)
-                end do
-            end do
-        else
-            ! Solve the linear system
-            call sytrs(ainv, vrhs, ipiv, info=info, uplo='l')
-            if (info /= 0) then
-                call fatal_error(error, "Solution of linear system failed.")
-                return
-            end if
+       ! Dynamical residual
+       rz_old = sum(r*z)
+       local_info = -1_ik
 
-        end if
+       ! Conjugate Gradient iterations
+       do it = 1, maxit
+           call gemv(amat, p, Ap, alpha=1.0_wp, beta=0.0_wp, trans='n')
+           ! Compute step size alpha
+           denom = sum(p * Ap)
+              if (abs(denom) < tol**4) then
+                 local_info = 0_ik
+                 exit
+              end if
+           alpha = rz_old / denom
+           ! Update solution and residual
+           vrhs = vrhs + alpha * p
+           r = r - alpha * Ap
+           ! Check convergence
+           rnorm = sqrt(sum(r*r))
+              if (rnorm / bnorm <= tol) then
+                 local_info = 0_ik
+                 exit
+              end if
+           ! Apply preconditioner z = M * r
+           z = r * Mdiag
+           rz_new = sum(r * z)
+           beta = rz_new / rz_old
+           p = z + beta * p
+           rz_old = rz_new
+           if (it == maxit) then
+              local_info = 1_ik  ! did not converge
+              call fatal_error(error, "solve_cg: CG did not converge within max iterations.")
+           end if
+       end do
 
-        if (present(qvec)) then
-            qvec(:) = vrhs(:mol%nat)
-        end if
+       if (present(info)) info = local_info
+end subroutine solve_cg
 
-        if (present(energy)) then
-            ! Extract only the Coulomb matrix without the constraints
-            allocate(jmat(mol%nat, mol%nat))
-            jmat = amat(:mol%nat, :mol%nat)
-            call symv(jmat, vrhs(:mol%nat), xvec(:mol%nat), &
-                & alpha=0.5_wp, beta=-1.0_wp, uplo='l')
-            energy(:) = energy(:) + vrhs(:mol%nat) * xvec(:mol%nat)
-        end if
+function new_mchrg_solver(use_cg) result(solver)
+    logical, intent(in), optional :: use_cg
+    class(mchrg_solver_type), allocatable :: solver
+    logical :: cg
+    character(len=32) :: env
 
-        ! Allocate and get amat derivatives
-        if (grad .or. cpq) then
-            allocate(dadr(3, mol%nat, ndim), dadL(3, 3, ndim), atrace(3, mol%nat))
-            allocate(dxdr(3, mol%nat, ndim), dxdL(3, 3, ndim))
-            call self%get_xvec_derivs(mol, cache, dxdr, dxdL)
-            call self%get_coulomb_derivs(mol, cache, vrhs, dadr, dadL, atrace)
-            do iat = 1, mol%nat
-                dadr(:, iat, iat) = atrace(:, iat) + dadr(:, iat, iat)
-            end do
-        end if
+    cg = .false.
+    if (present(use_cg)) then
+       cg = use_cg
+    else
+       call get_environment_variable("MCHARGE_SOLVER", env)
+       if (trim(env) == "CG") cg = .true.
+    end if
 
-        if (grad) then
-            gradient = 0.0_wp
-            call gemv(dadr(:, :, :mol%nat), vrhs(:mol%nat), gradient, beta=1.0_wp, alpha=0.5_wp)
-            call gemv(dxdr(:, :, :mol%nat), vrhs(:mol%nat), gradient, beta=1.0_wp, alpha=-1.0_wp)
-            call gemv(dadL, vrhs, sigma, beta=1.0_wp, alpha=0.5_wp)
-            call gemv(dxdL, vrhs, sigma, beta=1.0_wp, alpha=-1.0_wp)
-        end if
+    if (cg) then
+       allocate(cg_solver_type :: solver)
+    else
+       allocate(direct_solver_type :: solver)
+    end if
+ end function new_mchrg_solver
 
-        if (cpq) then
-            do iat = 1, mol%nat
-                dadr(:, :, iat) = -dxdr(:, :, iat) + dadr(:, :, iat)
-                dadL(:, :, iat) = -dxdL(:, :, iat) + dadL(:, :, iat)
-            end do
-
-            call gemm(dadr, ainv(:, :mol%nat), dqdr, alpha=-1.0_wp)
-            call gemm(dadL, ainv(:, :mol%nat), dqdL, alpha=-1.0_wp)
-        end if
-    end subroutine lapack_solver
-
-    subroutine iterative(self, mol, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
-        & energy, gradient, sigma, qvec, dqdr, dqdL)
-        !> Electronegativity equilibration model
-        class(mchrg_model_type), intent(in) :: self
-        !> Molecular structure data
-        type(structure_type), intent(in) :: mol
-        !> Error handling
-        type(error_type), allocatable, intent(out) :: error
-        !> Coordination number
-        real(wp), intent(in), contiguous :: cn(:)
-        !> Local atomic partial charges
-        real(wp), intent(in), contiguous :: qloc(:)
-        !> Optional derivative of the coordination number w.r.t. atomic positions
-        real(wp), intent(in), contiguous, optional :: dcndr(:, :, :)
-        !> Optional derivative of the coordination number w.r.t. lattice vectors
-        real(wp), intent(in), contiguous, optional :: dcndL(:, :, :)
-        !> Optional derivative of the local atomic partial charges w.r.t. atomic positions
-        real(wp), intent(in), contiguous, optional :: dqlocdr(:, :, :)
-        !> Optional derivative of the local atomic partial charges w.r.t. lattice vectors
-        real(wp), intent(in), contiguous, optional :: dqlocdL(:, :, :)
-        !> Optional atomic partial charges result
-        real(wp), intent(out), contiguous, optional :: qvec(:)
-        !> Optional electrostatic energy result
-        real(wp), intent(inout), contiguous, optional :: energy(:)
-        !> Optional gradient for electrostatic energy
-        real(wp), intent(inout), contiguous, optional :: gradient(:, :)
-        !> Optional stress tensor for electrostatic energy
-        real(wp), intent(inout), contiguous, optional :: sigma(:, :)
-        !> Optional derivative of the atomic partial charges w.r.t. atomic positions
-        real(wp), intent(out), contiguous, optional :: dqdr(:, :, :)
-        !> Optional derivative of the atomic partial charges w.r.t. lattice vectors
-        real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
-
-        call fatal_error(error, "Iterative solver not implemented yet.")
-
-    end subroutine iterative
 end module solver
