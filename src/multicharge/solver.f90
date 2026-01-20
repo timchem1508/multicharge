@@ -3,6 +3,7 @@ module solver
     use multicharge_blas, only: symv, gemv
     use multicharge_lapack, only: sytrf, sytrs, sytri
     use multicharge_model_cache, only: model_cache, cache_container
+    use print_matrix, only: write_matrix, write_vector
     implicit none
     private
 
@@ -50,6 +51,8 @@ module solver
 
     ! CG solver with Jacobi preconditioner
     type, extends(mchrg_solver_type) :: cg_solver_type
+!     integer :: max_iter = 1000
+ !    real(wp) :: tol = 1.0e-8_wp
     contains
        procedure :: solve => solve_cg
        procedure :: update => update_cg
@@ -154,7 +157,7 @@ subroutine solve_direct(self, amat, xvec, vrhs, ainv, cpq, error, info)
     end if
 
     if (want_cpq) then
-        call sytri(ainv, ipiv, info=local_info, uplo='l')
+        call sytri(ainv, ipiv, info=local_info, uplo='l') !ipiv into a cache?
         if (local_info /= 0) then
             call fatal_error(error, "solve_direct: Inversion of factorized matrix failed.")
             if (present(info)) info = local_info
@@ -208,20 +211,20 @@ subroutine solve_cg(self, amat, xvec, vrhs, ainv, cpq, error, info)
     call self%update(cache, amat, xvec, vrhs, ainv, cpq, info)
  
     ! Global thresholds
-    tol = 1.0e-8_wp
-    maxit = max(10, ndim*10)
+    tol = 1.0e-11_wp
+    maxit = max(10, ndim*20)
 
     allocate(r(ndim), p(ndim), z(ndim), Ap(ndim), Mdiag(ndim))
 
     ! Jacobi preconditioner (inverse of diagonal)
     do it = 1, ndim
         Mdiag(it)=amat(it,it)
-        if (abs(Mdiag(it)) < tol**3) Mdiag(it) = tol**3
+        if (abs(Mdiag(it)) < tol**2) Mdiag(it) = tol**2
         Mdiag(it) = 1.0_wp / Mdiag(it)
     end do
 
     ! Initial residual r = b - A*x (x=vrhs, which is 0.0_wp from update_cg)
-    call gemv(amat, vrhs, Ap, alpha=1.0_wp, beta=0.0_wp, trans='n')
+    call symv(amat, vrhs, Ap, alpha=1.0_wp, beta=0.0_wp)
     ! Residual compute
     r = xvec - Ap
     ! Apply preconditioner z = M * r
@@ -229,10 +232,10 @@ subroutine solve_cg(self, amat, xvec, vrhs, ainv, cpq, error, info)
     ! Initial search direction
     p = z
     ! Initial direction update factor
-    bnorm = sqrt(sum(xvec*xvec))
-    if (bnorm < tol**3) bnorm = 1.0_wp
-    rnorm = sqrt(sum(r*r))
-    if (rnorm / bnorm <= tol) then
+    bnorm = sum(xvec*xvec)
+    if (bnorm < tol**2) bnorm = 1.0_wp
+    rnorm = sum(r*r)
+    if (rnorm / bnorm <= tol**2) then
         if (present(info)) info = 0 
         return
     end if
@@ -245,18 +248,24 @@ subroutine solve_cg(self, amat, xvec, vrhs, ainv, cpq, error, info)
     do it = 1, maxit
         call gemv(amat, p, Ap, alpha=1.0_wp, beta=0.0_wp, trans='n')
         ! Compute step size alpha
-        denom = sum(p * Ap)
-        if (abs(denom) < tol**4) then
+        denom = sum(p * Ap) + tiny(1.0_wp)
+        write(*,*) "Iteration ", it, " Residual norm: ", sqrt(rnorm / bnorm)
+        if (abs(denom) < tol**2) then
             local_info = 0 
             exit
         end if
         alpha = rz_old / denom
+        write(*,*) " Alpha: ", alpha
         ! Update solution and residual
         vrhs = vrhs + alpha * p
+        write(*,*) " Max abs(vrhs): ", maxval(abs(vrhs))
         r = r - alpha * Ap
+        write(*,*) " Max abs(residual): ", maxval(abs(r))
         ! Check convergence
         rnorm = sqrt(sum(r*r))
         if (rnorm / bnorm <= tol) then
+            write(*,*) "CG converged in ", it, " iterations."
+            call write_vector(vrhs, "CG Solution Vector")
             local_info = 0 
             exit
         end if
@@ -282,12 +291,12 @@ function new_mchrg_solver(use_cg) result(solver)
     logical :: cg
     character(len=32) :: env
 
-    cg = .false.
+    cg = .true.
     if (present(use_cg)) then
        cg = use_cg
     else
        call get_environment_variable("MCHARGE_SOLVER", env)
-       if (trim(env) == "CG") cg = .true.
+       if (trim(env) == "DIRECT") cg = .false.
     end if
 
     if (cg) then
