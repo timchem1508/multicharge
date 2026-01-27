@@ -22,6 +22,9 @@ program main
       & new_eeqbc2025_model, get_multicharge_version, &
       & write_ascii_model, write_ascii_properties, write_ascii_results
    use multicharge_output, only: json_results
+   use solver, only: mchrg_solver_type
+   use solver_factory, only: new_mchrg_solver
+
    implicit none
    character(len=*), parameter :: prog_name = "multicharge"
    character(len=*), parameter :: json_output = "multicharge.json"
@@ -32,6 +35,7 @@ program main
    type(error_type), allocatable :: error
    type(structure_type) :: mol
    class(mchrg_model_type), allocatable :: model
+   class(mchrg_solver_type), allocatable :: solver
    logical :: grad, json, exist
    real(wp), parameter :: cn_max = 8.0_wp, cutoff = 25.0_wp
    real(wp), allocatable :: cn(:), rcov(:), trans(:, :)
@@ -41,6 +45,10 @@ program main
    real(wp), allocatable :: qvec(:)
    real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: charge
+
+   solver = new_mchrg_solver()
+
+   
 
    call get_arguments(input, model_id, input_format, grad, charge, json, error)
    if (allocated(error)) then
@@ -114,7 +122,7 @@ program main
    call get_lattice_points(mol%periodic, mol%lattice, model%ncoord%cutoff, trans)
    call model%ncoord%get_coordination_number(mol, trans, cn, dcndr, dcndL)
    call model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
-   call model%solve(mol, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
+   call model%solve(mol, solver, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
       & energy, gradient, sigma, qvec, dqdr, dqdL)
 
    if (allocated(error)) then

@@ -33,7 +33,8 @@ module multicharge_model_type
    use multicharge_lapack, only: sytrf, sytrs, sytri
    use multicharge_wignerseitz, only: wignerseitz_cell_type, new_wignerseitz_cell
    use multicharge_model_cache, only: model_cache, cache_container
-   use solver, only: new_mchrg_solver, mchrg_solver_type
+   use solver, only: mchrg_solver_type
+   
    implicit none
    private
 
@@ -59,6 +60,8 @@ module multicharge_model_type
       class(ncoord_type), allocatable :: ncoord
       !> Electronegativity weighted CN for local charge
       class(ncoord_type), allocatable :: ncoord_en
+      !> Solver for the linear equations
+      class(mchrg_solver_type), allocatable :: solver
    contains
       !> Solve linear equations for the charge model
       procedure :: solve
@@ -149,12 +152,14 @@ subroutine get_rec_trans(lattice, trans)
 
 end subroutine get_rec_trans
 
-subroutine solve(self, mol, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
+subroutine solve(self, mol, solver, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
    & energy, gradient, sigma, qvec, dqdr, dqdL)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: self
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
+   !> The solver instance (Renamed to 'slv' to avoid conflict with module 'solver')
+   class(mchrg_solver_type), allocatable :: solver
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
    !> Coordination number
@@ -184,9 +189,9 @@ subroutine solve(self, mol, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
 
    integer :: ic, jc, iat, ndim
    logical :: grad, cpq, dcn
-   integer(ik) :: info
+   integer :: info
    integer(ik), allocatable :: ipiv(:)
-   class(mchrg_solver_type), allocatable :: solver
+   
 
    ! Variables for solving ES equation
    real(wp), allocatable :: xvec(:), vrhs(:), amat(:, :)
@@ -219,11 +224,9 @@ subroutine solve(self, mol, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
    ainv = amat
 
    ! Solve linear system (or produce inverse) via pluggable solver
-   solver = new_mchrg_solver()            ! allocates a concrete solver (CG or direct)
    call solver%solve(amat, xvec, vrhs, ainv, cpq, error, info)
-   if (info /= 0) then
-      return
-   end if
+   
+   if (info /= 0) return
 
    if (present(qvec)) then
       qvec(:) = vrhs(:mol%nat)

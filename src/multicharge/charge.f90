@@ -24,6 +24,10 @@ module multicharge_charge
    use mctc_cutoff, only : get_lattice_points
    use multicharge_model, only : mchrg_model_type
    use multicharge_param, only : new_eeq2019_model, new_eeqbc2025_model
+
+   use solver, only : mchrg_solver_type
+   use solver_factory, only : new_mchrg_solver
+
    implicit none
    private
 
@@ -34,13 +38,14 @@ contains
 
 
 !> Classical electronegativity equilibration charges
-subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL)
-
-   !> Multicharge model
+subroutine get_charges(mchrg_model, mol, slv, error, qvec, dqdr, dqdL)
+   !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: mchrg_model
-
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
+   !> The solver instance
+   class(mchrg_solver_type), intent(in), allocatable :: slv
+
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -71,7 +76,7 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL)
    call mchrg_model%ncoord%get_coordination_number(mol, trans, cn, dcndr, dcndL)
    call mchrg_model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
 
-   call mchrg_model%solve(mol, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
+   call mchrg_model%solve(mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
       & qvec=qvec, dqdr=dqdr, dqdL=dqdL)
 
 end subroutine get_charges
@@ -79,6 +84,8 @@ end subroutine get_charges
 
 !> Obtain charges from electronegativity equilibration model
 subroutine get_eeq_charges(mol, error, qvec, dqdr, dqdL)
+
+   class(mchrg_solver_type), allocatable :: slv
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
@@ -99,7 +106,10 @@ subroutine get_eeq_charges(mol, error, qvec, dqdr, dqdL)
 
    call new_eeq2019_model(mol, eeq_model, error)
 
-   call get_charges(eeq_model, mol, error, qvec, dqdr, dqdL)
+   slv = new_mchrg_solver()
+
+   ! Pass the solver to get_charges
+   call get_charges(eeq_model, mol, slv, error, qvec, dqdr, dqdL)
 
 end subroutine get_eeq_charges
 
@@ -124,10 +134,14 @@ subroutine get_eeqbc_charges(mol, error, qvec, dqdr, dqdL)
 
    class(mchrg_model_type), allocatable :: eeqbc_model
 
+   class(mchrg_solver_type), allocatable :: slv
+
    call new_eeqbc2025_model(mol, eeqbc_model, error)
+   
+   slv = new_mchrg_solver()
 
-   call get_charges(eeqbc_model, mol, error, qvec, dqdr, dqdL)
-
+   ! Pass the solver to get_charges
+   call get_charges(eeqbc_model, mol, slv, error, qvec, dqdr, dqdL)
 end subroutine get_eeqbc_charges
 
 
