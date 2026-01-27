@@ -133,7 +133,6 @@ subroutine get_eeqbc_charges(mol, error, qvec, dqdr, dqdL)
    real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
 
    class(mchrg_model_type), allocatable :: eeqbc_model
-
    class(mchrg_solver_type), allocatable :: slv
 
    call new_eeqbc2025_model(mol, eeqbc_model, error)

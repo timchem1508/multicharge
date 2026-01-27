@@ -79,7 +79,7 @@ contains
         tol = 1.0e-11_wp
         tol_square = tol**2
         maxit = max(10, ndim*20)
-        ! write(*,*) "CG Solver: max iterations = ", maxit
+        write(*,*) "CG Solver: max iterations = ", maxit
     
         allocate(r(ndim), p(ndim), z(ndim), Ap(ndim), Mdiag(ndim))
     
@@ -135,8 +135,8 @@ contains
             ! Check convergence
             rnorm = dot_product(r,r)
             if (rnorm / bnorm <= tol_square) then
-                ! write(*,*) "CG converged in ", it, " iterations."
-                ! call write_vector(vrhs, "CG Solution Vector")
+                write(*,*) "CG converged in ", it, " iterations."
+                call write_vector(vrhs, "CG Solution Vector")
                 local_info = 0 
                 exit
             end if

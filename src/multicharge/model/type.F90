@@ -34,6 +34,8 @@ module multicharge_model_type
    use multicharge_wignerseitz, only: wignerseitz_cell_type, new_wignerseitz_cell
    use multicharge_model_cache, only: model_cache, cache_container
    use solver, only: mchrg_solver_type
+   use solver_factory, only: new_mchrg_solver
+   use print_matrix, only: write_matrix, write_vector
    
    implicit none
    private
@@ -77,6 +79,7 @@ module multicharge_model_type
       procedure(get_coulomb_matrix), deferred :: get_coulomb_matrix
       !> Calculate Coulomb matrix derivatives
       procedure(get_coulomb_derivs), deferred :: get_coulomb_derivs
+      procedure :: set_solver
    end type mchrg_model_type
 
    abstract interface
@@ -125,7 +128,8 @@ module multicharge_model_type
          type(cache_container), intent(inout) :: cache
          real(wp), intent(out), contiguous :: dxdr(:, :, :)
          real(wp), intent(out), contiguous :: dxdL(:, :, :)
-      end subroutine get_xvec_derivs
+      end subroutine get_xvec_derivs    
+
    end interface
 
    real(wp), parameter :: twopi = 2 * pi
@@ -152,14 +156,22 @@ subroutine get_rec_trans(lattice, trans)
 
 end subroutine get_rec_trans
 
-subroutine solve(self, mol, solver, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
+subroutine set_solver(self, use_cg)
+   class(mchrg_model_type), intent(inout) :: self
+   logical, intent(in), optional :: use_cg
+   
+   ! Use the factory function from your solver_factory module
+   self%solver = new_mchrg_solver(use_cg)
+end subroutine set_solver
+
+subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
    & energy, gradient, sigma, qvec, dqdr, dqdL)
    !> Electronegativity equilibration model
-   class(mchrg_model_type), intent(in) :: self
+   class(mchrg_model_type), intent(in), target :: self
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
-   !> The solver instance (Renamed to 'slv' to avoid conflict with module 'solver')
-   class(mchrg_solver_type), allocatable :: solver
+   !> The solver instance
+   class(mchrg_solver_type), intent(in), allocatable, target :: slv
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
    !> Coordination number
@@ -202,6 +214,18 @@ subroutine solve(self, mol, solver, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlo
    type(cache_container), allocatable :: cache
    real(wp), allocatable :: trans(:, :)
 
+   ! Unconstrained solution
+
+   logical :: duncons
+   real(wp), allocatable :: chivec(:), vvec(:), uvec(:), jinv(:, :), unitvec(:)
+   real(wp) :: lambda ! Lagrangian factor for constraint
+   real(wp) :: uvecsum, vvecsum
+   
+
+   ! Unconstrained solution flag
+   duncons = .true.
+
+
    ! Calculate gradient if the respective arrays are present
    dcn = present(dcndr) .and. present(dcndL)
    grad = present(gradient) .and. present(sigma) .and. dcn
@@ -223,52 +247,112 @@ subroutine solve(self, mol, solver, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlo
    vrhs = xvec
    ainv = amat
 
-   ! Solve linear system (or produce inverse) via pluggable solver
-   call solver%solve(amat, xvec, vrhs, ainv, cpq, error, info)
-   
+   if (allocated(slv)) then
+      call slv%solve(amat, xvec, vrhs, ainv, cpq, error, info)
+   else
+      call self%solver%solve(amat, xvec, vrhs, ainv, cpq, error, info)
+   end if
+
+   allocate(jmat(mol%nat, mol%nat))
+
    if (info /= 0) return
 
-   if (present(qvec)) then
-      qvec(:) = vrhs(:mol%nat)
+   if (duncons .eqv. .false.) then
+      ! Unconstrained solution: extract only the charges
+      if (present(qvec)) then
+         qvec(:) = vrhs(:mol%nat)
+      end if
+
+      if (present(energy)) then
+         jmat = amat(:mol%nat, :mol%nat)
+         call symv(jmat, vrhs(:mol%nat), xvec(:mol%nat), &
+            & alpha=0.5_wp, beta=-1.0_wp, uplo='l')
+         energy(:) = energy(:) + vrhs(:mol%nat) * xvec(:mol%nat)
+      end if
+   else
+      ! Constrained system
+      allocate(vvec(ndim-1))  
+      allocate(uvec(ndim-1))
+      allocate(jinv(mol%nat, mol%nat))
+      allocate(chivec(mol%nat))
+      allocate(unitvec(mol%nat))
+      ! Constrained response: J*u = 1
+      jmat = amat(:mol%nat, :mol%nat) 
+      
+      block
+         class(mchrg_solver_type), pointer :: active_solver
+         
+         if (allocated(slv)) then
+            active_solver => slv
+         else if (allocated(self%solver)) then
+            active_solver => self%solver
+         else
+            allocate(error)
+            error%message = "No solver provided to eeq_solve"
+            info = -1
+            return
+         end if
+
+
+         ! Now active_solver will work correctly
+         unitvec = 1.0_wp
+         call active_solver%solve(jmat, unitvec, uvec, jinv, cpq, error, info)
+         if (info /= 0) return
+         
+         chivec = -xvec(:mol%nat)
+         call active_solver%solve(jmat, chivec, vvec, jinv, cpq, error, info)
+         if (info /= 0) return
+      end block
+
+
+      uvecsum = sum(uvec)
+      vvecsum = sum(vvec)
+      write(*,*) "Sum v vector:", vvecsum
+      ! Lagrangian multiplier
+      lambda = - (mol%charge + vvecsum) / uvecsum
+      write(*,*) "Lagrangian multiplier:", lambda
+      ! Final charges
+      if (present(qvec)) then
+         qvec(:) = -vvec - lambda * uvec
+         call write_vector(qvec, "Constrained charges")
+      end if
+
+      if (present(energy)) then
+         ! Extract only the Coulomb matrix without the constraints
+         call symv(jmat, vrhs(:mol%nat), xvec(:mol%nat), &
+            & alpha=0.5_wp, beta=-1.0_wp, uplo='l')
+         energy(:) = energy(:) + vrhs(:mol%nat) * xvec(:mol%nat)
+      end if
    end if
 
-   if (present(energy)) then
-      ! Extract only the Coulomb matrix without the constraints
-      allocate(jmat(mol%nat, mol%nat))
-      jmat = amat(:mol%nat, :mol%nat)
-      call symv(jmat, vrhs(:mol%nat), xvec(:mol%nat), &
-         & alpha=0.5_wp, beta=-1.0_wp, uplo='l')
-      energy(:) = energy(:) + vrhs(:mol%nat) * xvec(:mol%nat)
-   end if
+      ! Allocate and get amat derivatives
+      if (grad .or. cpq) then
+         allocate(dadr(3, mol%nat, ndim), dadL(3, 3, ndim), atrace(3, mol%nat))
+         allocate(dxdr(3, mol%nat, ndim), dxdL(3, 3, ndim))
+         call self%get_xvec_derivs(mol, cache, dxdr, dxdL)
+         call self%get_coulomb_derivs(mol, cache, vrhs, dadr, dadL, atrace)
+         do iat = 1, mol%nat
+            dadr(:, iat, iat) = atrace(:, iat) + dadr(:, iat, iat)
+         end do
+      end if
 
-   ! Allocate and get amat derivatives
-   if (grad .or. cpq) then
-      allocate(dadr(3, mol%nat, ndim), dadL(3, 3, ndim), atrace(3, mol%nat))
-      allocate(dxdr(3, mol%nat, ndim), dxdL(3, 3, ndim))
-      call self%get_xvec_derivs(mol, cache, dxdr, dxdL)
-      call self%get_coulomb_derivs(mol, cache, vrhs, dadr, dadL, atrace)
-      do iat = 1, mol%nat
-         dadr(:, iat, iat) = atrace(:, iat) + dadr(:, iat, iat)
-      end do
-   end if
+      if (grad) then
+         gradient = 0.0_wp
+         call gemv(dadr(:, :, :mol%nat), vrhs(:mol%nat), gradient, beta=1.0_wp, alpha=0.5_wp)
+         call gemv(dxdr(:, :, :mol%nat), vrhs(:mol%nat), gradient, beta=1.0_wp, alpha=-1.0_wp)
+         call gemv(dadL, vrhs, sigma, beta=1.0_wp, alpha=0.5_wp)
+         call gemv(dxdL, vrhs, sigma, beta=1.0_wp, alpha=-1.0_wp)
+      end if
 
-   if (grad) then
-      gradient = 0.0_wp
-      call gemv(dadr(:, :, :mol%nat), vrhs(:mol%nat), gradient, beta=1.0_wp, alpha=0.5_wp)
-      call gemv(dxdr(:, :, :mol%nat), vrhs(:mol%nat), gradient, beta=1.0_wp, alpha=-1.0_wp)
-      call gemv(dadL, vrhs, sigma, beta=1.0_wp, alpha=0.5_wp)
-      call gemv(dxdL, vrhs, sigma, beta=1.0_wp, alpha=-1.0_wp)
-   end if
+      if (cpq) then
+         do iat = 1, mol%nat
+            dadr(:, :, iat) = -dxdr(:, :, iat) + dadr(:, :, iat)
+            dadL(:, :, iat) = -dxdL(:, :, iat) + dadL(:, :, iat)
+         end do
 
-   if (cpq) then
-      do iat = 1, mol%nat
-         dadr(:, :, iat) = -dxdr(:, :, iat) + dadr(:, :, iat)
-         dadL(:, :, iat) = -dxdL(:, :, iat) + dadL(:, :, iat)
-      end do
-
-      call gemm(dadr, ainv(:, :mol%nat), dqdr, alpha=-1.0_wp)
-      call gemm(dadL, ainv(:, :mol%nat), dqdL, alpha=-1.0_wp)
-   end if
+         call gemm(dadr, ainv(:, :mol%nat), dqdr, alpha=-1.0_wp)
+         call gemm(dadL, ainv(:, :mol%nat), dqdL, alpha=-1.0_wp)
+      end if         
 end subroutine solve
 
 subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL)

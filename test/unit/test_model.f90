@@ -23,6 +23,8 @@ module test_model
    use multicharge_param, only: new_eeq2019_model, new_eeqbc2025_model
    use multicharge_model_cache, only: cache_container
    use multicharge_charge, only: get_charges, get_eeq_charges, get_eeqbc_charges
+   use solver, only : mchrg_solver_type
+   use solver_factory, only : new_mchrg_solver
    implicit none
    private
 
@@ -88,6 +90,9 @@ end subroutine collect_model
 
 subroutine test_dadr(error, mol, model)
 
+   use solver, only : mchrg_solver_type
+   use solver_factory, only : new_mchrg_solver
+
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
@@ -107,7 +112,12 @@ subroutine test_dadr(error, mol, model)
    real(wp), allocatable :: dadr(:, :, :), dadL(:, :, :), atrace(:, :)
    real(wp), allocatable :: qvec(:), numgrad(:, :, :), amatr1(:, :), amatr2(:, :), amatl1(:, :), amatl2(:, :), numtrace(:, :)
    type(cache_container), allocatable :: cache
+   
+
+   class(mchrg_solver_type), allocatable :: slv
+
    allocate (cache)
+   slv = new_mchrg_solver()
 
    allocate (cn(mol%nat), qloc(mol%nat), amatr1(mol%nat + 1, mol%nat + 1), amatl1(mol%nat + 1, mol%nat + 1), &
       & amatr2(mol%nat + 1, mol%nat + 1), amatl2(mol%nat + 1, mol%nat + 1), &
@@ -126,7 +136,7 @@ subroutine test_dadr(error, mol, model)
    ! Obtain the vector of charges
    call model%ncoord%get_coordination_number(mol, trans, cn)
    call model%local_charge(mol, trans, qloc)
-   call model%solve(mol, error, cn, qloc, qvec=qvec)
+   call model%solve(mol, slv,  error, cn, qloc, qvec=qvec)
    if (allocated(error)) return
 
    numgrad = 0.0_wp
@@ -209,6 +219,9 @@ end subroutine test_dadr
 
 subroutine test_dadL(error, mol, model)
 
+   use solver, only : mchrg_solver_type
+   use solver_factory, only : new_mchrg_solver
+
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
@@ -229,6 +242,9 @@ subroutine test_dadL(error, mol, model)
    real(wp), allocatable :: qvec(:), numsigma(:, :, :), amatr(:, :), amatl(:, :)
    real(wp) :: eps(3, 3)
    type(cache_container), allocatable :: cache
+
+   class(mchrg_solver_type), allocatable :: slv
+   slv = new_mchrg_solver()
    allocate (cache)
 
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
@@ -239,7 +255,7 @@ subroutine test_dadL(error, mol, model)
 
    call model%ncoord%get_coordination_number(mol, trans, cn)
    call model%local_charge(mol, trans, qloc)
-   call model%solve(mol, error, cn, qloc, qvec=qvec)
+   call model%solve(mol, slv,  error, cn, qloc, qvec=qvec)
    if (allocated(error)) return
 
    numsigma = 0.0_wp
@@ -298,6 +314,8 @@ end subroutine test_dadL
 
 subroutine test_dbdr(error, mol, model)
 
+   use solver, only : mchrg_solver_type
+   use solver_factory, only : new_mchrg_solver
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
@@ -315,7 +333,10 @@ subroutine test_dbdr(error, mol, model)
    real(wp), allocatable :: dbdr(:, :, :), dbdL(:, :, :)
    real(wp), allocatable :: numgrad(:, :, :), xvecr(:), xvecl(:)
    type(cache_container), allocatable :: cache
+   class(mchrg_solver_type), allocatable :: slv
+
    allocate (cache)
+   slv = new_mchrg_solver()
 
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
       & qloc(mol%nat), dqlocdr(3, mol%nat, mol%nat), dqlocdL(3, 3, mol%nat), &
@@ -365,6 +386,8 @@ subroutine test_dbdr(error, mol, model)
 end subroutine test_dbdr
 
 subroutine test_dbdL(error, mol, model)
+   use solver, only : mchrg_solver_type
+   use solver_factory, only : new_mchrg_solver
 
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
@@ -386,6 +409,10 @@ subroutine test_dbdL(error, mol, model)
    real(wp), allocatable :: xyz(:, :)
    real(wp) :: eps(3, 3)
    type(cache_container), allocatable :: cache
+
+   class(mchrg_solver_type), allocatable :: slv
+   slv = new_mchrg_solver()
+
    allocate (cache)
 
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
@@ -445,6 +472,8 @@ subroutine test_dbdL(error, mol, model)
 end subroutine test_dbdL
 
 subroutine gen_test(error, mol, model, qref, eref)
+   use solver, only : mchrg_solver_type
+   use solver_factory, only : new_mchrg_solver
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
@@ -466,6 +495,9 @@ subroutine gen_test(error, mol, model, qref, eref)
    real(wp), allocatable :: energy(:)
    real(wp), allocatable :: qvec(:)
 
+   class(mchrg_solver_type), allocatable :: slv
+   slv = new_mchrg_solver()
+
    allocate (cn(mol%nat), qloc(mol%nat))
 
    call model%ncoord%get_coordination_number(mol, trans, cn)
@@ -481,7 +513,7 @@ subroutine gen_test(error, mol, model, qref, eref)
       allocate (qvec(mol%nat))
    end if
 
-   call model%solve(mol, error, cn, qloc, energy=energy, qvec=qvec)
+   call model%solve(mol, slv,  error, cn, qloc, energy=energy, qvec=qvec)
    if (allocated(error)) return
 
    if (present(qref)) then
@@ -508,6 +540,8 @@ subroutine gen_test(error, mol, model, qref, eref)
 end subroutine gen_test
 
 subroutine test_numgrad(error, mol, model)
+   use solver, only : mchrg_solver_type
+   use solver_factory, only : new_mchrg_solver
 
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
@@ -527,6 +561,9 @@ subroutine test_numgrad(error, mol, model)
    real(wp), allocatable :: numgrad(:, :)
    real(wp) :: er, el
 
+   class(mchrg_solver_type), allocatable :: slv
+   slv = new_mchrg_solver()
+
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
       & qloc(mol%nat), dqlocdr(3, mol%nat, mol%nat), dqlocdL(3, 3, mol%nat), &
       & energy(mol%nat), gradient(3, mol%nat), sigma(3, 3), numgrad(3, mol%nat))
@@ -540,7 +577,7 @@ subroutine test_numgrad(error, mol, model)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
-         call model%solve(mol, error, cn, qloc, energy=energy)
+         call model%solve(mol, slv,  error, cn, qloc, energy=energy)
          if (allocated(error)) exit lp
          er = sum(energy)
 
@@ -548,7 +585,7 @@ subroutine test_numgrad(error, mol, model)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - 2*step
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
-         call model%solve(mol, error, cn, qloc, energy=energy)
+         call model%solve(mol, slv,  error, cn, qloc, energy=energy)
          if (allocated(error)) exit lp
          el = sum(energy)
 
@@ -566,7 +603,7 @@ subroutine test_numgrad(error, mol, model)
    ! dqlocdr(:, :, :) = 0.0_wp
    ! dqlocdL(:, :, :) = 0.0_wp
 
-   call model%solve(mol, error, cn, qloc, dcndr, dcndL, &
+   call model%solve(mol, slv,  error, cn, qloc, dcndr, dcndL, &
       & dqlocdr, dqlocdL, gradient=gradient, sigma=sigma)
    if (allocated(error)) return
 
@@ -583,6 +620,8 @@ subroutine test_numgrad(error, mol, model)
 end subroutine test_numgrad
 
 subroutine test_numsigma(error, mol, model)
+   use solver, only : mchrg_solver_type
+   use solver_factory, only : new_mchrg_solver
 
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
@@ -603,6 +642,9 @@ subroutine test_numsigma(error, mol, model)
    real(wp), allocatable :: xyz(:, :)
    real(wp) :: er, el, eps(3, 3), numsigma(3, 3), sigma(3, 3)
 
+   class(mchrg_solver_type), allocatable :: slv
+   slv = new_mchrg_solver()
+
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
       & qloc(mol%nat), dqlocdr(3, mol%nat, mol%nat), dqlocdL(3, 3, mol%nat), &
       & energy(mol%nat), gradient(3, mol%nat), xyz(3, mol%nat))
@@ -619,7 +661,7 @@ subroutine test_numsigma(error, mol, model)
          mol%xyz(:, :) = matmul(eps, xyz)
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
-         call model%solve(mol, error, cn, qloc, energy=energy)
+         call model%solve(mol, slv,  error, cn, qloc, energy=energy)
          if (allocated(error)) exit lp
          er = sum(energy)
 
@@ -628,7 +670,7 @@ subroutine test_numsigma(error, mol, model)
          mol%xyz(:, :) = matmul(eps, xyz)
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
-         call model%solve(mol, error, cn, qloc, energy=energy)
+         call model%solve(mol, slv,  error, cn, qloc, energy=energy)
          if (allocated(error)) exit lp
          el = sum(energy)
 
@@ -643,7 +685,7 @@ subroutine test_numsigma(error, mol, model)
    call model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
 
    energy(:) = 0.0_wp
-   call model%solve(mol, error, cn, qloc, dcndr, dcndL, &
+   call model%solve(mol, slv,  error, cn, qloc, dcndr, dcndL, &
       & dqlocdr, dqlocdL, energy, gradient, sigma)
    if (allocated(error)) return
 
@@ -660,6 +702,8 @@ subroutine test_numsigma(error, mol, model)
 end subroutine test_numsigma
 
 subroutine test_numdqdr(error, mol, model)
+   use solver, only : mchrg_solver_type
+   use solver_factory, only : new_mchrg_solver
 
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
@@ -677,24 +721,33 @@ subroutine test_numdqdr(error, mol, model)
    real(wp), allocatable :: qloc(:), dqlocdr(:, :, :), dqlocdL(:, :, :)
    real(wp), allocatable :: ql(:), qr(:), dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: numdr(:, :, :)
+   
+   ! Added solver declaration
+   class(mchrg_solver_type), allocatable :: slv
+   slv = new_mchrg_solver()
 
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
       & qloc(mol%nat), dqlocdr(3, mol%nat, mol%nat), dqlocdL(3, 3, mol%nat), &
       & ql(mol%nat), qr(mol%nat), dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat), &
       & numdr(3, mol%nat, mol%nat))
 
+   ! Initialize the solver once
+   
+
    lp: do iat = 1, mol%nat
       do ic = 1, 3
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
-         call model%solve(mol, error, cn, qloc, qvec=qr)
+         ! Inserted slv as 2nd argument
+         call model%solve(mol, slv, error, cn, qloc, qvec=qr)
          if (allocated(error)) exit lp
 
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - 2*step
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
-         call model%solve(mol, error, cn, qloc, qvec=ql)
+         ! Inserted slv as 2nd argument
+         call model%solve(mol, slv, error, cn, qloc, qvec=ql)
          if (allocated(error)) exit lp
 
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
@@ -706,7 +759,8 @@ subroutine test_numdqdr(error, mol, model)
    call model%ncoord%get_coordination_number(mol, trans, cn, dcndr, dcndL)
    call model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
 
-   call model%solve(mol, error, cn, qloc, dcndr, dcndL, &
+   ! Inserted slv as 2nd argument
+   call model%solve(mol, slv, error, cn, qloc, dcndr, dcndL, &
       & dqlocdr, dqlocdL, dqdr=dqdr, dqdL=dqdL)
    if (allocated(error)) return
 
@@ -723,6 +777,8 @@ subroutine test_numdqdr(error, mol, model)
 end subroutine test_numdqdr
 
 subroutine test_numdqdL(error, mol, model)
+   use solver, only : mchrg_solver_type        ! Ensure these are accessible
+   use solver_factory, only : new_mchrg_solver
 
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
@@ -742,11 +798,17 @@ subroutine test_numdqdL(error, mol, model)
    real(wp), allocatable :: qr(:), ql(:), dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: lattr(:, :), xyz(:, :), numdL(:, :, :)
    real(wp) :: eps(3, 3)
+   
+   ! Declare the solver
+   class(mchrg_solver_type), allocatable :: slv
 
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
       & qloc(mol%nat), dqlocdr(3, mol%nat, mol%nat), dqlocdL(3, 3, mol%nat), &
       & qr(mol%nat), ql(mol%nat), dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat), &
       & xyz(3, mol%nat), numdL(3, 3, mol%nat))
+
+   ! Initialize the solver
+   slv = new_mchrg_solver()
 
    eps(:, :) = unity
    xyz(:, :) = mol%xyz
@@ -758,7 +820,8 @@ subroutine test_numdqdL(error, mol, model)
          lattr(:, :) = matmul(eps, trans)
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
-         call model%solve(mol, error, cn, qloc, qvec=qr)
+         ! Fix 1: Pass 'slv' as 2nd argument
+         call model%solve(mol, slv, error, cn, qloc, qvec=qr)
          if (allocated(error)) exit lp
 
          eps(jc, ic) = eps(jc, ic) - 2*step
@@ -766,7 +829,8 @@ subroutine test_numdqdL(error, mol, model)
          lattr(:, :) = matmul(eps, trans)
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
-         call model%solve(mol, error, cn, qloc, qvec=ql)
+         ! Fix 2: Pass 'slv' as 2nd argument
+         call model%solve(mol, slv, error, cn, qloc, qvec=ql)
          if (allocated(error)) exit lp
 
          eps(jc, ic) = eps(jc, ic) + step
@@ -780,7 +844,8 @@ subroutine test_numdqdL(error, mol, model)
    call model%ncoord%get_coordination_number(mol, trans, cn, dcndr, dcndL)
    call model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
 
-   call model%solve(mol, error, cn, qloc, dcndr, dcndL, &
+   ! Fix 3: Pass 'slv' as 2nd argument
+   call model%solve(mol, slv, error, cn, qloc, dcndr, dcndL, &
       & dqlocdr, dqlocdL, dqdr=dqdr, dqdL=dqdL)
    if (allocated(error)) return
 
@@ -859,6 +924,8 @@ end subroutine test_eeq_dbdL_mb01
 
 subroutine test_eeq_q_mb01(error)
 
+   use solver, only : mchrg_solver_type
+   use solver_factory, only : new_mchrg_solver
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
@@ -874,6 +941,9 @@ subroutine test_eeq_q_mb01(error)
 
    real(wp), allocatable :: qvec(:)
 
+   class(mchrg_solver_type), allocatable :: slv
+   slv = new_mchrg_solver()
+
    call get_structure(mol, "MB16-43", "01")
    call new_eeq2019_model(mol, model, error)
    if (allocated(error)) return
@@ -882,7 +952,7 @@ subroutine test_eeq_q_mb01(error)
 
    ! Check wrapper functions
    allocate (qvec(mol%nat), source=0.0_wp)
-   call get_charges(model, mol, error, qvec)
+   call get_charges(model, mol, slv, error, qvec)
    if (allocated(error)) return
 
    if (any(abs(qvec - ref) > thr)) then
@@ -1383,6 +1453,8 @@ subroutine test_eeqbc_dbdr_mb05(error)
 end subroutine test_eeqbc_dbdr_mb05
 
 subroutine test_eeqbc_q_mb01(error)
+   use solver, only : mchrg_solver_type
+   use solver_factory, only : new_mchrg_solver
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -1398,6 +1470,8 @@ subroutine test_eeqbc_q_mb01(error)
       & 4.83486124588080E-1_wp]
 
    real(wp), allocatable :: qvec(:)
+   class(mchrg_solver_type), allocatable :: slv
+   slv = new_mchrg_solver()
 
    call get_structure(mol, "MB16-43", "01")
    call new_eeqbc2025_model(mol, model, error)
@@ -1406,7 +1480,7 @@ subroutine test_eeqbc_q_mb01(error)
 
    ! Check wrapper functions
    allocate (qvec(mol%nat), source=0.0_wp)
-   call get_charges(model, mol, error, qvec)
+   call get_charges(model, mol, slv, error, qvec)
    if (allocated(error)) return
 
    if (any(abs(qvec - ref) > thr)) then

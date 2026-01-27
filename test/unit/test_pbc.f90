@@ -65,6 +65,9 @@ end subroutine collect_pbc
 
 subroutine gen_test(error, mol, model, qref, eref)
 
+   use solver, only : mchrg_solver_type
+   use solver_factory, only : new_mchrg_solver
+
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
 
@@ -85,6 +88,9 @@ subroutine gen_test(error, mol, model, qref, eref)
    real(wp), allocatable :: energy(:)
    real(wp), allocatable :: qvec(:)
 
+   class(mchrg_solver_type), allocatable :: slv
+   slv = new_mchrg_solver()
+
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
    allocate(cn(mol%nat), qloc(mol%nat))
@@ -100,7 +106,7 @@ subroutine gen_test(error, mol, model, qref, eref)
       allocate(qvec(mol%nat))
    end if
 
-   call model%solve(mol, error, cn, qloc, energy=energy, qvec=qvec)
+   call model%solve(mol, slv, error, cn, qloc, energy=energy, qvec=qvec)
    if (allocated(error)) return
 
    if (present(qref)) then
@@ -132,6 +138,9 @@ end subroutine gen_test
 
 subroutine test_numgrad(error, mol, model)
 
+   use solver, only : mchrg_solver_type
+   use solver_factory, only : new_mchrg_solver
+
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
@@ -150,6 +159,9 @@ subroutine test_numgrad(error, mol, model)
    real(wp), allocatable :: numgrad(:, :)
    real(wp) :: er, el
 
+   class(mchrg_solver_type), allocatable :: slv
+   slv = new_mchrg_solver()
+
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
    allocate(cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
@@ -166,7 +178,7 @@ subroutine test_numgrad(error, mol, model)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
-         call model%solve(mol, error, cn, qloc, energy=energy)
+         call model%solve(mol, slv,  error, cn, qloc, energy=energy)
          if (allocated(error)) exit lp
          er = sum(energy)
 
@@ -175,7 +187,7 @@ subroutine test_numgrad(error, mol, model)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - 2 * step
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
-         call model%solve(mol, error, cn, qloc, energy=energy)
+         call model%solve(mol, slv,  error, cn, qloc, energy=energy)
          if (allocated(error)) exit lp
          el = sum(energy)
 
@@ -189,7 +201,7 @@ subroutine test_numgrad(error, mol, model)
    call model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
 
    energy(:) = 0.0_wp
-   call model%solve(mol, error, cn, qloc, dcndr, dcndL, &
+   call model%solve(mol, slv,  error, cn, qloc, dcndr, dcndL, &
       & dqlocdr, dqlocdL, energy, gradient, sigma)
    if (allocated(error)) return
 
@@ -206,6 +218,9 @@ subroutine test_numgrad(error, mol, model)
 end subroutine test_numgrad
 
 subroutine test_numsigma(error, mol, model)
+
+   use solver, only : mchrg_solver_type
+   use solver_factory, only : new_mchrg_solver
 
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
@@ -225,6 +240,10 @@ subroutine test_numsigma(error, mol, model)
    real(wp), allocatable :: energy(:), gradient(:, :)
    real(wp), allocatable :: lattr(:, :), xyz(:, :)
    real(wp) :: er, el, eps(3, 3), numsigma(3, 3), sigma(3, 3), lattice(3, 3)
+
+
+   class(mchrg_solver_type), allocatable :: slv
+   slv = new_mchrg_solver()
 
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
@@ -248,7 +267,7 @@ subroutine test_numsigma(error, mol, model)
          lattr(:, :) = matmul(eps, trans)
          call model%ncoord%get_coordination_number(mol, lattr, cn)
          call model%local_charge(mol, lattr, qloc)
-         call model%solve(mol, error, cn, qloc, energy=energy)
+         call model%solve(mol, slv,  error, cn, qloc, energy=energy)
          if (allocated(error)) exit lp
          er = sum(energy)
 
@@ -259,7 +278,7 @@ subroutine test_numsigma(error, mol, model)
          lattr(:, :) = matmul(eps, trans)
          call model%ncoord%get_coordination_number(mol, lattr, cn)
          call model%local_charge(mol, lattr, qloc)
-         call model%solve(mol, error, cn, qloc, energy=energy)
+         call model%solve(mol, slv,  error, cn, qloc, energy=energy)
          if (allocated(error)) exit lp
          el = sum(energy)
 
@@ -276,7 +295,7 @@ subroutine test_numsigma(error, mol, model)
    call model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
 
    energy(:) = 0.0_wp
-   call model%solve(mol, error, cn, qloc, dcndr, dcndL, &
+   call model%solve(mol, slv,  error, cn, qloc, dcndr, dcndL, &
       & dqlocdr, dqlocdL, energy, gradient, sigma)
    if (allocated(error)) return
 
@@ -293,6 +312,9 @@ subroutine test_numsigma(error, mol, model)
 end subroutine test_numsigma
 
 subroutine test_dbdr(error, mol, model)
+
+   use solver, only : mchrg_solver_type
+   use solver_factory, only : new_mchrg_solver
 
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
@@ -311,6 +333,9 @@ subroutine test_dbdr(error, mol, model)
    real(wp), allocatable :: dbdr(:, :, :), dbdL(:, :, :)
    real(wp), allocatable :: numgrad(:, :, :), xvecr(:), xvecl(:)
    type(cache_container), allocatable :: cache
+
+   class(mchrg_solver_type), allocatable :: slv
+   slv = new_mchrg_solver()
    allocate(cache)
 
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
@@ -366,6 +391,9 @@ end subroutine test_dbdr
 
 subroutine test_dbdL(error, mol, model)
 
+   use solver, only : mchrg_solver_type
+   use solver_factory, only : new_mchrg_solver
+
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
@@ -387,6 +415,9 @@ subroutine test_dbdL(error, mol, model)
    real(wp) :: lattice(3, 3)
    real(wp) :: eps(3, 3)
    type(cache_container), allocatable :: cache
+
+   class(mchrg_solver_type), allocatable :: slv
+   slv = new_mchrg_solver()
    allocate(cache)
 
    allocate(cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
@@ -456,7 +487,8 @@ subroutine test_dbdL(error, mol, model)
 end subroutine test_dbdL
 
 subroutine test_dadr(error, mol, model)
-
+   use solver, only : mchrg_solver_type
+   use solver_factory, only : new_mchrg_solver
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
@@ -477,6 +509,9 @@ subroutine test_dadr(error, mol, model)
    real(wp), allocatable :: dadr(:, :, :), dadL(:, :, :), atrace(:, :)
    real(wp), allocatable :: qvec(:), numgrad(:, :, :), amatr(:, :), amatl(:, :), numtrace(:, :)
    type(cache_container), allocatable :: cache
+
+   class(mchrg_solver_type), allocatable :: slv
+   slv = new_mchrg_solver()
    allocate(cache)
 
    allocate(cn(mol%nat), qloc(mol%nat), amatr(mol%nat + 1, mol%nat + 1), amatl(mol%nat + 1, mol%nat + 1), &
@@ -497,7 +532,7 @@ subroutine test_dadr(error, mol, model)
    ! Obtain the vector of charges
    call model%ncoord%get_coordination_number(mol, trans, cn)
    call model%local_charge(mol, trans, qloc)
-   call model%solve(mol, error, cn, qloc, qvec=qvec)
+   call model%solve(mol, slv,  error, cn, qloc, qvec=qvec)
    if (allocated(error)) return
 
    numgrad = 0.0_wp
@@ -558,6 +593,9 @@ end subroutine test_dadr
 
 subroutine test_dadL(error, mol, model)
 
+   use solver, only : mchrg_solver_type
+   use solver_factory, only : new_mchrg_solver
+
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
@@ -579,6 +617,9 @@ subroutine test_dadL(error, mol, model)
    real(wp) :: lattice(3, 3)
    real(wp) :: eps(3, 3)
    type(cache_container), allocatable :: cache
+
+   class(mchrg_solver_type), allocatable :: slv
+   slv = new_mchrg_solver()
    allocate(cache)
 
    allocate(cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
@@ -591,7 +632,7 @@ subroutine test_dadL(error, mol, model)
 
    call model%ncoord%get_coordination_number(mol, trans, cn)
    call model%local_charge(mol, trans, qloc)
-   call model%solve(mol, error, cn, qloc, qvec=qvec)
+   call model%solve(mol, slv,  error, cn, qloc, qvec=qvec)
    if (allocated(error)) return
 
    numsigma = 0.0_wp
@@ -657,6 +698,9 @@ end subroutine test_dadL
 
 subroutine test_numdqdr(error, mol, model)
 
+   use solver, only : mchrg_solver_type
+   use solver_factory, only : new_mchrg_solver
+
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
@@ -673,7 +717,8 @@ subroutine test_numdqdr(error, mol, model)
    real(wp), allocatable :: qloc(:), dqlocdr(:, :, :), dqlocdL(:, :, :)
    real(wp), allocatable :: ql(:), qr(:), dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: numdr(:, :, :)
-
+   class(mchrg_solver_type), allocatable :: slv
+   slv = new_mchrg_solver()
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
    allocate(cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
@@ -687,14 +732,14 @@ subroutine test_numdqdr(error, mol, model)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
-         call model%solve(mol, error, cn, qloc, qvec=qr)
+         call model%solve(mol, slv,  error, cn, qloc, qvec=qr)
          if (allocated(error)) exit lp
 
          ql = 0.0_wp
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - 2 * step
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
-         call model%solve(mol, error, cn, qloc, qvec=ql)
+         call model%solve(mol, slv,  error, cn, qloc, qvec=ql)
          if (allocated(error)) exit lp
 
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
@@ -706,7 +751,7 @@ subroutine test_numdqdr(error, mol, model)
    call model%ncoord%get_coordination_number(mol, trans, cn, dcndr, dcndL)
    call model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
 
-   call model%solve(mol, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, dqdr=dqdr, dqdL=dqdL)
+   call model%solve(mol, slv,  error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, dqdr=dqdr, dqdL=dqdL)
    if (allocated(error)) return
 
    if (any(abs(dqdr(:, :, :) - numdr(:, :, :)) > thr2)) then
@@ -722,6 +767,9 @@ subroutine test_numdqdr(error, mol, model)
 end subroutine test_numdqdr
 
 subroutine test_numdqdL(error, mol, model)
+
+   use solver, only : mchrg_solver_type
+   use solver_factory, only : new_mchrg_solver
 
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
@@ -741,7 +789,8 @@ subroutine test_numdqdL(error, mol, model)
    real(wp), allocatable :: qr(:), ql(:), dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: lattr(:, :), xyz(:, :), numdL(:, :, :)
    real(wp) :: eps(3, 3), lattice(3, 3)
-
+   class(mchrg_solver_type), allocatable :: slv
+   slv = new_mchrg_solver()
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
    allocate(cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
@@ -763,7 +812,7 @@ subroutine test_numdqdL(error, mol, model)
          lattr(:, :) = matmul(eps, trans)
          call model%ncoord%get_coordination_number(mol, lattr, cn)
          call model%local_charge(mol, lattr, qloc)
-         call model%solve(mol, error, cn, qloc, qvec=qr)
+         call model%solve(mol, slv,  error, cn, qloc, qvec=qr)
          if (allocated(error)) exit lp
 
          eps(jc, ic) = eps(jc, ic) - 2 * step
@@ -772,7 +821,7 @@ subroutine test_numdqdL(error, mol, model)
          lattr(:, :) = matmul(eps, trans)
          call model%ncoord%get_coordination_number(mol, lattr, cn)
          call model%local_charge(mol, lattr, qloc)
-         call model%solve(mol, error, cn, qloc, qvec=ql)
+         call model%solve(mol, slv,  error, cn, qloc, qvec=ql)
          if (allocated(error)) exit lp
 
          eps(jc, ic) = eps(jc, ic) + step
@@ -787,7 +836,7 @@ subroutine test_numdqdL(error, mol, model)
    call model%ncoord%get_coordination_number(mol, trans, cn, dcndr, dcndL)
    call model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
 
-   call model%solve(mol, error, cn, qloc, dcndr, dcndL, &
+   call model%solve(mol, slv,  error, cn, qloc, dcndr, dcndL, &
       & dqlocdr, dqlocdL, dqdr=dqdr, dqdL=dqdL)
    if (allocated(error)) return
 
