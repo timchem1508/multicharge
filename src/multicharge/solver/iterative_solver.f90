@@ -2,7 +2,7 @@ module iterative_solver
     use mctc_env, only: error_type, fatal_error, wp
     use multicharge_blas, only: symv, gemv
     use solver_type_cache, only: cache_container
-    use print_matrix, only: write_vector
+    use print_matrix, only: write_vector, write_matrix
     use solver, only: mchrg_solver_type
     implicit none
     private
@@ -24,25 +24,11 @@ contains
         type(cache_container), intent(inout) :: cache
         real(wp), intent(in)  :: amat(:, :)
         real(wp), intent(in)  :: xvec(:)
-        real(wp), allocatable, intent(out) :: vrhs(:)
-        real(wp), allocatable, intent(out), optional :: ainv(:, :)
+        real(wp), intent(inout) :: vrhs(:)
+        real(wp), intent(out) :: ainv(:, :)
         logical, intent(in), optional :: cpq
         integer, intent(out), optional :: info
-        
-        integer :: ndim
-        
-        ndim = size(xvec)
-        
-        ! Allocate and initialize vrhs (initial guess for CG is zero)
-        allocate(vrhs(ndim))
-        vrhs = 0.0_wp 
-        
-        ! Allocate ainv if present (though CG doesn't use it)
-        if (present(ainv)) then
-            allocate(ainv(ndim, ndim))
-        end if
-        
-        if (present(info)) info = 0
+
     end subroutine update_cg
 
     !> Solve method for CG solver
@@ -51,8 +37,8 @@ contains
         type(error_type), allocatable, intent(out) :: error
         real(wp), intent(in)  :: amat(:, :)
         real(wp), intent(in)  :: xvec(:)
-        real(wp), allocatable, intent(out) :: vrhs(:)
-        real(wp), intent(out), allocatable, optional :: ainv(:, :)
+        real(wp), intent(inout) :: vrhs(:)
+        real(wp), intent(out) :: ainv(:, :)
         logical, intent(in), optional :: cpq
         integer, intent(out), optional :: info
         
@@ -70,10 +56,12 @@ contains
             if (present(info)) info = -1 
             return
         end if
-    
+
+        ainv = amat
+        !call write_vector(vrhs, "Initial VRHS Vector")
         ! Prepare/cache
-        allocate(cache)
-        call self%update(cache, amat, xvec, vrhs, ainv, cpq, info)
+        !allocate(cache)
+        !call self%update(cache, amat, xvec, vrhs, ainv, cpq, info)
      
         ! Global thresholds
         tol = 1.0e-11_wp
@@ -90,7 +78,7 @@ contains
             Mdiag(it) = 1.0_wp / Mdiag(it)
         end do
     
-        ! Initial residual r = b - A*x (x=vrhs, which is 0.0_wp)
+        ! Initial residual r = b - A*x
         call symv(amat, vrhs, Ap, alpha=1.0_wp, beta=0.0_wp)
         r = xvec - Ap
         
@@ -130,13 +118,15 @@ contains
             
             ! Update solution and residual
             vrhs = vrhs + alpha * p
+            !call write_vector(vrhs, "CG Solution Vector")
+            !write(*,*) " iteration ", it
             r = r - alpha * Ap
             
             ! Check convergence
             rnorm = dot_product(r,r)
             if (rnorm / bnorm <= tol_square) then
                 write(*,*) "CG converged in ", it, " iterations."
-                call write_vector(vrhs, "CG Solution Vector")
+                !call write_vector(vrhs, "CG Solution Vector")
                 local_info = 0 
                 exit
             end if

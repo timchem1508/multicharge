@@ -19,8 +19,8 @@ module solver
             class(mchrg_solver_type), intent(in) :: self
             real(wp), intent(in)  :: amat(:, :)
             real(wp), intent(in)  :: xvec(:)
-            real(wp), allocatable, intent(out) :: vrhs(:)
-            real(wp), allocatable, intent(out), optional :: ainv(:, :)
+            real(wp), intent(inout) :: vrhs(:)
+            real(wp), intent(out) :: ainv(:, :)
             logical, intent(in), optional :: cpq
             type(error_type), allocatable, intent(out) :: error
             integer, intent(out), optional :: info
@@ -32,8 +32,8 @@ module solver
             type(cache_container), intent(inout) :: cache
             real(wp), intent(in)  :: amat(:, :)
             real(wp), intent(in)  :: xvec(:)
-            real(wp), allocatable, intent(out) :: vrhs(:)
-            real(wp), allocatable, intent(out), optional :: ainv(:, :)
+            real(wp), intent(inout) :: vrhs(:)
+            real(wp), intent(out) :: ainv(:, :)
             logical, intent(in), optional :: cpq
             integer, intent(out), optional :: info
         end subroutine update_if  

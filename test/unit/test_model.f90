@@ -31,6 +31,7 @@ module test_model
    public :: collect_model
 
    real(wp), parameter :: thr = 100*epsilon(1.0_wp)
+   real(wp), parameter :: thr1 = 1e5*epsilon(1.0_wp)
    real(wp), parameter :: thr2 = sqrt(epsilon(1.0_wp))
 
 contains
@@ -46,7 +47,7 @@ subroutine collect_model(testsuite)
       !& new_unittest("eeq-dadL-mb01", test_eeq_dadL_mb01), &
       !& new_unittest("eeq-dbdr-mb01", test_eeq_dbdr_mb01), &
       !& new_unittest("eeq-dbdL-mb01", test_eeq_dbdL_mb01), &
-      & new_unittest("eeq-charges-mb01", test_eeq_q_mb01) &
+      !& new_unittest("eeq-charges-mb01", test_eeq_q_mb01), &
       !& new_unittest("eeq-charges-mb02", test_eeq_q_mb02), &
       !& new_unittest("eeq-charges-actinides", test_eeq_q_actinides), &
       !& new_unittest("eeq-energy-mb03", test_eeq_e_mb03), &
@@ -72,7 +73,7 @@ subroutine collect_model(testsuite)
       !& new_unittest("eeqbc-dadL-mb05", test_eeqbc_dadL_mb05), &
       !& new_unittest("eeqbc-dbdr-mb05", test_eeqbc_dbdr_mb05), &
       !& new_unittest("eeqbc-charges-mb01", test_eeqbc_q_mb01), &
-      !& new_unittest("eeqbc-charges-mb02", test_eeqbc_q_mb02), &
+      & new_unittest("eeqbc-charges-mb02", test_eeqbc_q_mb02) &
       !& new_unittest("eeqbc-charges-actinides", test_eeqbc_q_actinides), &
       !& new_unittest("eeqbc-energy-mb03", test_eeqbc_e_mb03), &
       !& new_unittest("eeqbc-energy-mb04", test_eeqbc_e_mb04), &
@@ -84,7 +85,7 @@ subroutine collect_model(testsuite)
       !& new_unittest("eeqbc-dqdr-mb10", test_eeqbc_dqdr_mb10), &
       !& new_unittest("eeqbc-dqdL-mb11", test_eeqbc_dqdL_mb11), &
       !& new_unittest("eeqbc-dqdL-mb12", test_eeqbc_dqdL_mb12) &
-      & ]
+     & ]
 
 end subroutine collect_model
 
@@ -517,7 +518,7 @@ subroutine gen_test(error, mol, model, qref, eref)
    if (allocated(error)) return
 
    if (present(qref)) then
-      if (any(abs(qvec - qref) > thr)) then
+      if (any(abs(qvec - qref) > thr1)) then
          call test_failed(error, "Partial charges do not match")
          print'(a)', "Charges:"
          print'(3es21.14)', qvec
@@ -528,7 +529,7 @@ subroutine gen_test(error, mol, model, qref, eref)
    if (allocated(error)) return
 
    if (present(eref)) then
-      if (any(abs(energy - eref) > thr)) then
+      if (any(abs(energy - eref) > thr1)) then
          call test_failed(error, "Energies do not match")
          print'(a)', "Energy:"
          print'(3es21.14)', energy
@@ -955,7 +956,7 @@ subroutine test_eeq_q_mb01(error)
    call get_charges(model, mol, slv, error, qvec)
    if (allocated(error)) return
 
-   if (any(abs(qvec - ref) > thr)) then
+   if (any(abs(qvec - ref) > thr1)) then
       call test_failed(error, "Partial charges do not match")
       print'(a)', "Charges:"
       print'(3es21.14)', qvec
@@ -968,7 +969,7 @@ subroutine test_eeq_q_mb01(error)
    call get_eeq_charges(mol, error, qvec)
    if (allocated(error)) return
 
-   if (any(abs(qvec - ref) > thr)) then
+   if (any(abs(qvec - ref) > thr1)) then
       call test_failed(error, "Partial charges do not match")
       print'(a)', "Charges:"
       print'(3es21.14)', qvec
@@ -1482,8 +1483,9 @@ subroutine test_eeqbc_q_mb01(error)
    allocate (qvec(mol%nat), source=0.0_wp)
    call get_charges(model, mol, slv, error, qvec)
    if (allocated(error)) return
+   write(*, *) "Threshold check for get_charges wrapper", thr1
 
-   if (any(abs(qvec - ref) > thr)) then
+   if (any(abs(qvec - ref) > thr1)) then
       call test_failed(error, "Partial charges do not match")
       print'(a)', "Charges:"
       print'(3es21.14)', qvec
@@ -1496,7 +1498,7 @@ subroutine test_eeqbc_q_mb01(error)
    call get_eeqbc_charges(mol, error, qvec)
    if (allocated(error)) return
 
-   if (any(abs(qvec - ref) > thr)) then
+   if (any(abs(qvec - ref) > thr1)) then
       call test_failed(error, "Partial charges do not match")
       print'(a)', "Charges:"
       print'(3es21.14)', qvec

@@ -29,9 +29,7 @@ module solver_type_cache
 
    !> Cache for the solvers
    type, abstract, public :: solver_cache
-    real(wp), allocatable :: amat(:, :)
-    real(wp), allocatable :: xvec(:)
-    real(wp), allocatable :: vrhs(:)
+
     logical :: cpq
    end type solver_cache
 

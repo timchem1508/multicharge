@@ -3,6 +3,7 @@ module direct_solver
     use multicharge_blas, only: symv
     use multicharge_lapack, only: sytrf, sytrs, sytri
     use solver_type_cache, only: cache_container
+    use print_matrix, only: write_vector, write_matrix
     use solver, only: mchrg_solver_type
     implicit none
     private
@@ -24,26 +25,11 @@ contains
         type(cache_container), intent(inout) :: cache
         real(wp), intent(in)  :: amat(:, :)
         real(wp), intent(in)  :: xvec(:)
-        real(wp), allocatable, intent(out) :: vrhs(:)
-        real(wp), allocatable, intent(out), optional :: ainv(:, :)
+        real(wp), intent(inout) :: vrhs(:)
+        real(wp), intent(out) :: ainv(:, :)
         logical, intent(in), optional :: cpq
         integer, intent(out), optional :: info
         
-        integer :: ndim
-        
-        ndim = size(xvec)
-        
-        ! Allocate and initialize vrhs
-        allocate(vrhs(ndim))
-        vrhs = xvec
-        
-        ! Allocate and initialize ainv if present
-        if (present(ainv)) then
-            allocate(ainv(ndim, ndim))
-            ainv = amat
-        end if
-        
-        if (present(info)) info = 0
     end subroutine update_direct
 
     !> Solve method for direct solver
@@ -52,8 +38,8 @@ contains
         type(error_type), allocatable, intent(out) :: error
         real(wp), intent(in)  :: amat(:, :)
         real(wp), intent(in)  :: xvec(:)
-        real(wp), allocatable, intent(out) :: vrhs(:)
-        real(wp), allocatable, intent(out), optional :: ainv(:, :)
+        real(wp), intent(inout) :: vrhs(:)
+        real(wp), intent(out) :: ainv(:, :)
         logical, intent(in), optional :: cpq
         integer, intent(out), optional :: info
     
@@ -70,6 +56,9 @@ contains
             if (present(info)) info = -1 
             return
         end if
+
+        ainv = amat
+        vrhs = xvec
         
         ! Update cache and prepare vrhs and ainv
         allocate(cache)
