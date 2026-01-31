@@ -48,8 +48,6 @@ program main
 
    solver = new_mchrg_solver()
 
-   
-
    call get_arguments(input, model_id, input_format, grad, charge, json, error)
    if (allocated(error)) then
       write(error_unit, '(a)') error%message

@@ -20,7 +20,7 @@ module direct_solver
 contains
 
     !> Update method for direct solver
-    subroutine update_direct(self, cache, amat, xvec, vrhs, ainv, cpq, info)
+    subroutine update_direct(self, cache, amat, xvec, vrhs, ainv, cpq)
         class(direct_solver_type), intent(in) :: self
         type(cache_container), intent(inout) :: cache
         real(wp), intent(in)  :: amat(:, :)
@@ -28,12 +28,11 @@ contains
         real(wp), intent(inout) :: vrhs(:)
         real(wp), intent(out) :: ainv(:, :)
         logical, intent(in), optional :: cpq
-        integer, intent(out), optional :: info
         
     end subroutine update_direct
 
     !> Solve method for direct solver
-    subroutine solve_direct(self, amat, xvec, vrhs, ainv, cpq, error, info)
+    subroutine solve_direct(self, amat, xvec, vrhs, ainv, cpq, error)
         class(direct_solver_type), intent(in) :: self
         type(error_type), allocatable, intent(out) :: error
         real(wp), intent(in)  :: amat(:, :)
@@ -41,7 +40,6 @@ contains
         real(wp), intent(inout) :: vrhs(:)
         real(wp), intent(out) :: ainv(:, :)
         logical, intent(in), optional :: cpq
-        integer, intent(out), optional :: info
     
         integer  :: local_info
         integer :: ndim, ic, jc
@@ -53,7 +51,6 @@ contains
         ndim = size(xvec)
         if (size(amat,1) /= ndim .or. size(amat,2) /= ndim) then
             call fatal_error(error, "solve_direct: dimension mismatch.")
-            if (present(info)) info = -1 
             return
         end if
 
@@ -62,7 +59,7 @@ contains
         
         ! Update cache and prepare vrhs and ainv
         allocate(cache)
-        call self%update(cache, amat, xvec, vrhs, ainv, cpq, info)
+        call self%update(cache, amat, xvec, vrhs, ainv, cpq)
     
         ! Logical: solve coupled-perturbed equations flag
         want_cpq = .false.
@@ -72,7 +69,6 @@ contains
         call sytrf(ainv, ipiv, info=local_info, uplo='l')
         if (local_info /= 0) then
             call fatal_error(error, "solve_direct: Bunch-Kaufman factorization failed.")
-            if (present(info)) info = local_info
             return
         end if
     
@@ -80,7 +76,6 @@ contains
             call sytri(ainv, ipiv, info=local_info, uplo='l')
             if (local_info /= 0) then
                 call fatal_error(error, "solve_direct: Inversion of factorized matrix failed.")
-                if (present(info)) info = local_info
                 return
             end if
             call symv(ainv, xvec, vrhs, uplo='l')
@@ -93,12 +88,10 @@ contains
             call sytrs(ainv, vrhs, ipiv, info=local_info, uplo='l')
             if (local_info /= 0) then
                 call fatal_error(error, "solve_direct: Solving factorized system failed.")
-                if (present(info)) info = local_info
                 return
             end if
         end if
     
-        if (present(info)) info = local_info
     end subroutine solve_direct
 
 end module direct_solver

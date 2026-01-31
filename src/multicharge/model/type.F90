@@ -79,7 +79,6 @@ module multicharge_model_type
       procedure(get_coulomb_matrix), deferred :: get_coulomb_matrix
       !> Calculate Coulomb matrix derivatives
       procedure(get_coulomb_derivs), deferred :: get_coulomb_derivs
-      procedure :: set_solver
    end type mchrg_model_type
 
    abstract interface
@@ -156,14 +155,6 @@ subroutine get_rec_trans(lattice, trans)
 
 end subroutine get_rec_trans
 
-subroutine set_solver(self, use_cg)
-   class(mchrg_model_type), intent(inout) :: self
-   logical, intent(in), optional :: use_cg
-   
-   ! Use the factory function from your solver_factory module
-   self%solver = new_mchrg_solver(use_cg)
-end subroutine set_solver
-
 subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
    & energy, gradient, sigma, qvec, dqdr, dqdL)
    !> Electronegativity equilibration model
@@ -201,7 +192,6 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
 
    integer :: ic, jc, iat, ndim
    logical :: grad, cpq, dcn
-   integer :: info
    integer(ik), allocatable :: ipiv(:)
    
 
@@ -221,10 +211,8 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    real(wp) :: lambda ! Lagrangian factor for constraint
    real(wp) :: uvecsum, vvecsum
    
-
    ! Unconstrained solution flag
    duncons = .true.
-
 
    ! Calculate gradient if the respective arrays are present
    dcn = present(dcndr) .and. present(dcndL)
@@ -242,22 +230,22 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    allocate(amat(ndim, ndim))
    call self%get_coulomb_matrix(mol, cache, amat)
 
-   ! Get RHS of ES equation
+   ! Setup X-vector
    allocate(xvec(ndim))
-   allocate(vrhs(ndim))
    call self%get_xvec(mol, cache, xvec)
+
+   ! Get RHS of ES equation
+   allocate(vrhs(ndim))
+   allocate(ainv(ndim, ndim))
 
    vrhs = xvec
    ainv = amat
 
-   call slv%solve(amat, xvec, vrhs, ainv, cpq, error, info)
-
    allocate(jmat(mol%nat, mol%nat))
-
-   if (info /= 0) return
 
    if (duncons .eqv. .false.) then
       ! Unconstrained solution: extract only the charges
+      call slv%solve(amat, xvec, vrhs, ainv, cpq, error)
 
       if (present(qvec)) then
          qvec(:) = vrhs(:mol%nat)
@@ -285,9 +273,9 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       end do
 
       unitvec = 1.0_wp
-      call slv%solve(jmat, unitvec, uvec, jinv, cpq, error, info)
+      call slv%solve(jmat, unitvec, uvec, jinv, cpq, error)
       !call write_vector(uvec, "u vector")
-      call slv%solve(jmat, chivec, vvec, jinv, cpq, error, info)
+      call slv%solve(jmat, chivec, vvec, jinv, cpq, error)
       !call write_vector(vvec, "v vector")
 
       uvecsum = sum(uvec)
@@ -299,8 +287,11 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       ! Final charges
       if (present(qvec)) then
          qvec(:) = -vvec - lambda * uvec
-         call write_vector(qvec, "Constrained charges")
+         !call write_vector(qvec, "Constrained charges")
       end if
+
+      vrhs(:mol%nat) = qvec(:)
+      vrhs(ndim) = lambda
 
       !call write_vector(vrhs, "Solved VRHS Vector")
 

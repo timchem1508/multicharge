@@ -19,7 +19,7 @@ module iterative_solver
 contains
 
     !> Update method for CG solver
-    subroutine update_cg(self, cache, amat, xvec, vrhs, ainv, cpq, info)
+    subroutine update_cg(self, cache, amat, xvec, vrhs, ainv, cpq)
         class(cg_solver_type), intent(in) :: self
         type(cache_container), intent(inout) :: cache
         real(wp), intent(in)  :: amat(:, :)
@@ -27,12 +27,11 @@ contains
         real(wp), intent(inout) :: vrhs(:)
         real(wp), intent(out) :: ainv(:, :)
         logical, intent(in), optional :: cpq
-        integer, intent(out), optional :: info
 
     end subroutine update_cg
 
     !> Solve method for CG solver
-    subroutine solve_cg(self, amat, xvec, vrhs, ainv, cpq, error, info)
+    subroutine solve_cg(self, amat, xvec, vrhs, ainv, cpq, error)
         class(cg_solver_type), intent(in) :: self
         type(error_type), allocatable, intent(out) :: error
         real(wp), intent(in)  :: amat(:, :)
@@ -40,20 +39,22 @@ contains
         real(wp), intent(inout) :: vrhs(:)
         real(wp), intent(out) :: ainv(:, :)
         logical, intent(in), optional :: cpq
-        integer, intent(out), optional :: info
         
         integer :: ndim, it, maxit
         real(wp) :: tol, tol_square, bnorm, rnorm, alpha, beta, denom
         real(wp), allocatable :: r(:), p(:), z(:), Ap(:), Mdiag(:)
-        integer  :: local_info
         real(wp) :: rz_old, rz_new
         type(cache_container), allocatable :: cache
         
+        if (present(cpq) .and. cpq .eqv. .true.) then
+            call fatal_error(error, "solve_cg: The inverse matrix cannot be calculated using an iterative solver.")
+            return
+        end if 
+
         ! Dimensions match check
         ndim = size(xvec)
         if (size(amat,1) /= ndim .or. size(amat,2) /= ndim) then
             call fatal_error(error, "solve_cg: dimension mismatch.")
-            if (present(info)) info = -1 
             return
         end if
 
@@ -61,7 +62,7 @@ contains
         !call write_vector(vrhs, "Initial VRHS Vector")
         ! Prepare/cache
         !allocate(cache)
-        !call self%update(cache, amat, xvec, vrhs, ainv, cpq, info)
+        !call self%update(cache, amat, xvec, vrhs, ainv, cpq)
      
         ! Global thresholds
         tol = 1.0e-11_wp
@@ -93,14 +94,8 @@ contains
         if (bnorm < tol_square) bnorm = 1.0_wp
         rnorm = dot_product(r,r)
         
-        if (rnorm / bnorm <= tol_square) then
-            if (present(info)) info = 0 
-            return
-        end if
-    
         ! Dynamical residual
         rz_old = dot_product(r,z)
-        local_info = -1 
     
         ! Conjugate Gradient iterations
         do it = 1, maxit
@@ -110,7 +105,6 @@ contains
             denom = dot_product(p,Ap) + tiny(1.0_wp)
             
             if (abs(denom) < tol_square) then
-                local_info = 0 
                 exit
             end if
             
@@ -127,7 +121,6 @@ contains
             if (rnorm / bnorm <= tol_square) then
                 write(*,*) "CG converged in ", it, " iterations."
                 !call write_vector(vrhs, "CG Solution Vector")
-                local_info = 0 
                 exit
             end if
             
@@ -139,12 +132,10 @@ contains
             rz_old = rz_new
             
             if (it == maxit) then
-                local_info = 1   ! did not converge
                 call fatal_error(error, "solve_cg: CG did not converge within max iterations.")
             end if
         end do
     
-        if (present(info)) info = local_info
     end subroutine solve_cg
 
 end module iterative_solver
