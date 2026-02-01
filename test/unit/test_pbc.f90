@@ -89,7 +89,21 @@ subroutine gen_test(error, mol, model, qref, eref)
    real(wp), allocatable :: qvec(:)
 
    class(mchrg_solver_type), allocatable :: slv
-   slv = new_mchrg_solver()
+   character(len=:), allocatable :: solver_choice
+   integer, allocatable :: cgmiter
+   real(wp), allocatable :: cgtol
+   character(len=32), allocatable :: cgmode
+
+   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
+   write(*,*) "Solver type:    ", solver_choice
+   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
+   write(*,*) "CG max iterations:", cgmiter
+   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   write(*,*) "CG tolerance", cgtol
+   if (.not. allocated(cgmode)) cgmode = "default" ! Default
+   write(*,*) "CG mode:  ", cgmode
+   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   
 
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
@@ -160,7 +174,21 @@ subroutine test_numgrad(error, mol, model)
    real(wp) :: er, el
 
    class(mchrg_solver_type), allocatable :: slv
-   slv = new_mchrg_solver()
+   character(len=:), allocatable :: solver_choice
+   integer, allocatable :: cgmiter
+   real(wp), allocatable :: cgtol
+   character(len=32), allocatable :: cgmode
+
+   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
+   write(*,*) "Solver type:    ", solver_choice
+   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
+   write(*,*) "CG max iterations:", cgmiter
+   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   write(*,*) "CG tolerance", cgtol
+   if (.not. allocated(cgmode)) cgmode = "default" ! Default
+   write(*,*) "CG mode:  ", cgmode
+   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   
 
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
@@ -243,7 +271,21 @@ subroutine test_numsigma(error, mol, model)
 
 
    class(mchrg_solver_type), allocatable :: slv
-   slv = new_mchrg_solver()
+   character(len=:), allocatable :: solver_choice
+   integer, allocatable :: cgmiter
+   real(wp), allocatable :: cgtol
+   character(len=32), allocatable :: cgmode
+
+   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
+   write(*,*) "Solver type:    ", solver_choice
+   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
+   write(*,*) "CG max iterations:", cgmiter
+   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   write(*,*) "CG tolerance", cgtol
+   if (.not. allocated(cgmode)) cgmode = "default" ! Default
+   write(*,*) "CG mode:  ", cgmode
+   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   
 
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
@@ -335,7 +377,21 @@ subroutine test_dbdr(error, mol, model)
    type(cache_container), allocatable :: cache
 
    class(mchrg_solver_type), allocatable :: slv
-   slv = new_mchrg_solver()
+   character(len=:), allocatable :: solver_choice
+   integer, allocatable :: cgmiter
+   real(wp), allocatable :: cgtol
+   character(len=32), allocatable :: cgmode
+
+   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
+   write(*,*) "Solver type:    ", solver_choice
+   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
+   write(*,*) "CG max iterations:", cgmiter
+   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   write(*,*) "CG tolerance", cgtol
+   if (.not. allocated(cgmode)) cgmode = "default" ! Default
+   write(*,*) "CG mode:  ", cgmode
+   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   
    allocate(cache)
 
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
@@ -417,7 +473,21 @@ subroutine test_dbdL(error, mol, model)
    type(cache_container), allocatable :: cache
 
    class(mchrg_solver_type), allocatable :: slv
-   slv = new_mchrg_solver()
+   character(len=:), allocatable :: solver_choice
+   integer, allocatable :: cgmiter
+   real(wp), allocatable :: cgtol
+   character(len=32), allocatable :: cgmode
+
+   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
+   write(*,*) "Solver type:    ", solver_choice
+   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
+   write(*,*) "CG max iterations:", cgmiter
+   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   write(*,*) "CG tolerance", cgtol
+   if (.not. allocated(cgmode)) cgmode = "default" ! Default
+   write(*,*) "CG mode:  ", cgmode
+   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   
    allocate(cache)
 
    allocate(cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
@@ -511,7 +581,21 @@ subroutine test_dadr(error, mol, model)
    type(cache_container), allocatable :: cache
 
    class(mchrg_solver_type), allocatable :: slv
-   slv = new_mchrg_solver()
+   character(len=:), allocatable :: solver_choice
+   integer, allocatable :: cgmiter
+   real(wp), allocatable :: cgtol
+   character(len=32), allocatable :: cgmode
+
+   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
+   write(*,*) "Solver type:    ", solver_choice
+   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
+   write(*,*) "CG max iterations:", cgmiter
+   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   write(*,*) "CG tolerance", cgtol
+   if (.not. allocated(cgmode)) cgmode = "default" ! Default
+   write(*,*) "CG mode:  ", cgmode
+   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   
    allocate(cache)
 
    allocate(cn(mol%nat), qloc(mol%nat), amatr(mol%nat + 1, mol%nat + 1), amatl(mol%nat + 1, mol%nat + 1), &
@@ -619,7 +703,21 @@ subroutine test_dadL(error, mol, model)
    type(cache_container), allocatable :: cache
 
    class(mchrg_solver_type), allocatable :: slv
-   slv = new_mchrg_solver()
+   character(len=:), allocatable :: solver_choice
+   integer, allocatable :: cgmiter
+   real(wp), allocatable :: cgtol
+   character(len=32), allocatable :: cgmode
+
+   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
+   write(*,*) "Solver type:    ", solver_choice
+   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
+   write(*,*) "CG max iterations:", cgmiter
+   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   write(*,*) "CG tolerance", cgtol
+   if (.not. allocated(cgmode)) cgmode = "default" ! Default
+   write(*,*) "CG mode:  ", cgmode
+   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   
    allocate(cache)
 
    allocate(cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
@@ -717,8 +815,23 @@ subroutine test_numdqdr(error, mol, model)
    real(wp), allocatable :: qloc(:), dqlocdr(:, :, :), dqlocdL(:, :, :)
    real(wp), allocatable :: ql(:), qr(:), dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: numdr(:, :, :)
+
    class(mchrg_solver_type), allocatable :: slv
-   slv = new_mchrg_solver()
+   character(len=:), allocatable :: solver_choice
+   integer, allocatable :: cgmiter
+   real(wp), allocatable :: cgtol
+   character(len=32), allocatable :: cgmode
+
+   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
+   write(*,*) "Solver type:    ", solver_choice
+   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
+   write(*,*) "CG max iterations:", cgmiter
+   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   write(*,*) "CG tolerance", cgtol
+   if (.not. allocated(cgmode)) cgmode = "default" ! Default
+   write(*,*) "CG mode:  ", cgmode
+   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
    allocate(cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
@@ -789,8 +902,23 @@ subroutine test_numdqdL(error, mol, model)
    real(wp), allocatable :: qr(:), ql(:), dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: lattr(:, :), xyz(:, :), numdL(:, :, :)
    real(wp) :: eps(3, 3), lattice(3, 3)
+   
    class(mchrg_solver_type), allocatable :: slv
-   slv = new_mchrg_solver()
+   character(len=:), allocatable :: solver_choice
+   integer, allocatable :: cgmiter
+   real(wp), allocatable :: cgtol
+   character(len=32), allocatable :: cgmode
+
+   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
+   write(*,*) "Solver type:    ", solver_choice
+   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
+   write(*,*) "CG max iterations:", cgmiter
+   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   write(*,*) "CG tolerance", cgtol
+   if (.not. allocated(cgmode)) cgmode = "default" ! Default
+   write(*,*) "CG mode:  ", cgmode
+   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
    allocate(cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &

@@ -34,12 +34,12 @@ contains
     !> Solve method for direct solver
     subroutine solve_direct(self, amat, xvec, vrhs, ainv, cpq, error)
         class(direct_solver_type), intent(in) :: self
-        type(error_type), allocatable, intent(out) :: error
         real(wp), intent(in)  :: amat(:, :)
         real(wp), intent(in)  :: xvec(:)
         real(wp), intent(inout) :: vrhs(:)
         real(wp), intent(out) :: ainv(:, :)
         logical, intent(in), optional :: cpq
+        type(error_type), allocatable, intent(out) :: error
     
         integer  :: local_info
         integer :: ndim, ic, jc

@@ -11,6 +11,9 @@ module iterative_solver
 
     !> CG solver with Jacobi preconditioner
     type, extends(mchrg_solver_type) :: cg_solver_type
+        integer :: cgmiter
+        real(wp) :: cgtol
+        character(len=32) :: cgmode
     contains
        procedure :: solve => solve_cg
        procedure :: update => update_cg
@@ -33,12 +36,12 @@ contains
     !> Solve method for CG solver
     subroutine solve_cg(self, amat, xvec, vrhs, ainv, cpq, error)
         class(cg_solver_type), intent(in) :: self
-        type(error_type), allocatable, intent(out) :: error
         real(wp), intent(in)  :: amat(:, :)
         real(wp), intent(in)  :: xvec(:)
         real(wp), intent(inout) :: vrhs(:)
         real(wp), intent(out) :: ainv(:, :)
         logical, intent(in), optional :: cpq
+        type(error_type), allocatable, intent(out) :: error
         
         integer :: ndim, it, maxit
         real(wp) :: tol, tol_square, bnorm, rnorm, alpha, beta, denom
@@ -61,14 +64,15 @@ contains
         ainv = amat
         !call write_vector(vrhs, "Initial VRHS Vector")
         ! Prepare/cache
-        !allocate(cache)
-        !call self%update(cache, amat, xvec, vrhs, ainv, cpq)
+        allocate(cache)
+        call self%update(cache, amat, xvec, vrhs, ainv, cpq)
      
         ! Global thresholds
-        tol = 1.0e-11_wp
+        tol = min(self%cgtol, 1.0e-11_wp)
         tol_square = tol**2
-        maxit = max(10, ndim*20)
-        write(*,*) "CG Solver: max iterations = ", maxit
+        maxit = max(self%cgmiter, ndim*10)
+
+        !write(*,*) "CG Solver: max iterations = ", maxit
     
         allocate(r(ndim), p(ndim), z(ndim), Ap(ndim), Mdiag(ndim))
     

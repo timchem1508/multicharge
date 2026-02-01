@@ -162,7 +162,7 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
    !> The solver instance
-   class(mchrg_solver_type), intent(in), allocatable, target :: slv
+   class(mchrg_solver_type), intent(in) :: slv
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
    !> Coordination number
@@ -255,7 +255,7 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
          jmat = amat(:mol%nat, :mol%nat)
          call symv(jmat, vrhs(:mol%nat), xvec(:mol%nat), &
             & alpha=0.5_wp, beta=-1.0_wp, uplo='l')
-         energy(:) = energy(:) + qvec(:) * xvec(:mol%nat)
+         energy(:) = energy(:) + vrhs(:mol%nat) * xvec(:mol%nat)
       end if
    else
       ! Constrained system
@@ -290,16 +290,19 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
          !call write_vector(qvec, "Constrained charges")
       end if
 
-      vrhs(:mol%nat) = qvec(:)
+      deallocate(vrhs)
+      allocate(vrhs(ndim))
+
+      vrhs(:mol%nat) = -vvec - lambda * uvec
       vrhs(ndim) = lambda
 
       !call write_vector(vrhs, "Solved VRHS Vector")
 
       if (present(energy)) then
          ! Extract only the Coulomb matrix without the constraints
-         call symv(jmat, qvec(:), xvec(:mol%nat), &
+         call symv(jmat, vrhs(:mol%nat), xvec(:mol%nat), &
             & alpha=0.5_wp, beta=-1.0_wp, uplo='l')
-         energy(:) = energy(:) + qvec(:)* xvec(:mol%nat)
+         energy(:) = energy(:) + vrhs(:mol%nat) * xvec(:mol%nat)
       end if
    end if
 
@@ -316,8 +319,8 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
 
       if (grad) then
          gradient = 0.0_wp
-         call gemv(dadr(:, :, :mol%nat), qvec(:), gradient, beta=1.0_wp, alpha=0.5_wp)
-         call gemv(dxdr(:, :, :mol%nat), qvec(:), gradient, beta=1.0_wp, alpha=-1.0_wp)
+         call gemv(dadr(:, :, :mol%nat), vrhs(:mol%nat), gradient, beta=1.0_wp, alpha=0.5_wp)
+         call gemv(dxdr(:, :, :mol%nat), vrhs(:mol%nat), gradient, beta=1.0_wp, alpha=-1.0_wp)
          call gemv(dadL, vrhs, sigma, beta=1.0_wp, alpha=0.5_wp)
          call gemv(dxdL, vrhs, sigma, beta=1.0_wp, alpha=-1.0_wp)
       end if

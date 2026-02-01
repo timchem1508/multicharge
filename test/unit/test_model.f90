@@ -43,48 +43,48 @@ subroutine collect_model(testsuite)
    type(unittest_type), allocatable, intent(out) :: testsuite(:)
 
    testsuite = [ &
-      !& new_unittest("eeq-dadr-mb01", test_eeq_dadr_mb01), &
-      !& new_unittest("eeq-dadL-mb01", test_eeq_dadL_mb01), &
-      !& new_unittest("eeq-dbdr-mb01", test_eeq_dbdr_mb01), &
-      !& new_unittest("eeq-dbdL-mb01", test_eeq_dbdL_mb01), &
-      !& new_unittest("eeq-charges-mb01", test_eeq_q_mb01), &
-      !& new_unittest("eeq-charges-mb02", test_eeq_q_mb02), &
-      !& new_unittest("eeq-charges-actinides", test_eeq_q_actinides), &
-      !& new_unittest("eeq-energy-mb03", test_eeq_e_mb03), &
-      !& new_unittest("eeq-energy-mb04", test_eeq_e_mb04), &
-      !& new_unittest("eeq-gradient-mb05", test_eeq_g_mb05), &
-      !& new_unittest("eeq-gradient-mb06", test_eeq_g_mb06), &
-      !& new_unittest("eeq-sigma-mb07", test_eeq_s_mb07), &
-      !& new_unittest("eeq-sigma-mb08", test_eeq_s_mb08), &
-      !& new_unittest("eeq-dqdr-mb09", test_eeq_dqdr_mb09), &
-      !& new_unittest("eeq-dqdr-mb10", test_eeq_dqdr_mb10), &
-      !& new_unittest("eeq-dqdL-mb11", test_eeq_dqdL_mb11), &
-      !& new_unittest("eeq-dqdL-mb12", test_eeq_dqdL_mb12), &
-      !& new_unittest("gradient-h2plus", test_g_h2plus), &
-      !& new_unittest("eeq-dadr-znooh", test_eeq_dadr_znooh), &
-      !& new_unittest("eeq-dbdr-znooh", test_eeq_dbdr_znooh), &
-      !& new_unittest("gradient-znooh", test_g_znooh), &
-      !& new_unittest("dqdr-znooh", test_dqdr_znooh), &
-      !& new_unittest("eeqbc-dadr-mb01", test_eeqbc_dadr_mb01), &
-      !& new_unittest("eeqbc-dadL-mb01", test_eeqbc_dadL_mb01), &
-      !& new_unittest("eeqbc-dbdr-mb01", test_eeqbc_dbdr_mb01), &
-      !& new_unittest("eeqbc-dbdL-mb01", test_eeqbc_dbdL_mb01), &
-      !& new_unittest("eeqbc-dadr-mb05", test_eeqbc_dadr_mb05), &
-      !& new_unittest("eeqbc-dadL-mb05", test_eeqbc_dadL_mb05), &
-      !& new_unittest("eeqbc-dbdr-mb05", test_eeqbc_dbdr_mb05), &
-      !& new_unittest("eeqbc-charges-mb01", test_eeqbc_q_mb01), &
-      & new_unittest("eeqbc-charges-mb02", test_eeqbc_q_mb02) &
-      !& new_unittest("eeqbc-charges-actinides", test_eeqbc_q_actinides), &
-      !& new_unittest("eeqbc-energy-mb03", test_eeqbc_e_mb03), &
-      !& new_unittest("eeqbc-energy-mb04", test_eeqbc_e_mb04), &
-      !& new_unittest("eeqbc-gradient-mb05", test_eeqbc_g_mb05), &
-      !& new_unittest("eeqbc-gradient-mb06", test_eeqbc_g_mb06), &
-      !& new_unittest("eeqbc-sigma-mb07", test_eeqbc_s_mb07), &
-      !& new_unittest("eeqbc-sigma-mb08", test_eeqbc_s_mb08), &
-      !& new_unittest("eeqbc-dqdr-mb09", test_eeqbc_dqdr_mb09), &
-      !& new_unittest("eeqbc-dqdr-mb10", test_eeqbc_dqdr_mb10), &
-      !& new_unittest("eeqbc-dqdL-mb11", test_eeqbc_dqdL_mb11), &
-      !& new_unittest("eeqbc-dqdL-mb12", test_eeqbc_dqdL_mb12) &
+      & new_unittest("eeq-dadr-mb01", test_eeq_dadr_mb01), &
+      & new_unittest("eeq-dadL-mb01", test_eeq_dadL_mb01), &
+      & new_unittest("eeq-dbdr-mb01", test_eeq_dbdr_mb01), &
+      & new_unittest("eeq-dbdL-mb01", test_eeq_dbdL_mb01), &
+      & new_unittest("eeq-charges-mb01", test_eeq_q_mb01), &
+      & new_unittest("eeq-charges-mb02", test_eeq_q_mb02), &
+      & new_unittest("eeq-charges-actinides", test_eeq_q_actinides), &
+      & new_unittest("eeq-energy-mb03", test_eeq_e_mb03), &
+      & new_unittest("eeq-energy-mb04", test_eeq_e_mb04), &
+      & new_unittest("eeq-gradient-mb05", test_eeq_g_mb05), &
+      & new_unittest("eeq-gradient-mb06", test_eeq_g_mb06), &
+      & new_unittest("eeq-sigma-mb07", test_eeq_s_mb07), &
+      & new_unittest("eeq-sigma-mb08", test_eeq_s_mb08), &
+      & new_unittest("eeq-dqdr-mb09", test_eeq_dqdr_mb09), &
+      & new_unittest("eeq-dqdr-mb10", test_eeq_dqdr_mb10), &
+      & new_unittest("eeq-dqdL-mb11", test_eeq_dqdL_mb11), &
+      & new_unittest("eeq-dqdL-mb12", test_eeq_dqdL_mb12), &
+      & new_unittest("gradient-h2plus", test_g_h2plus), &
+      & new_unittest("eeq-dadr-znooh", test_eeq_dadr_znooh), &
+      & new_unittest("eeq-dbdr-znooh", test_eeq_dbdr_znooh), &
+      & new_unittest("gradient-znooh", test_g_znooh), &
+      & new_unittest("dqdr-znooh", test_dqdr_znooh), &
+      & new_unittest("eeqbc-dadr-mb01", test_eeqbc_dadr_mb01), &
+      & new_unittest("eeqbc-dadL-mb01", test_eeqbc_dadL_mb01), &
+      & new_unittest("eeqbc-dbdr-mb01", test_eeqbc_dbdr_mb01), &
+      & new_unittest("eeqbc-dbdL-mb01", test_eeqbc_dbdL_mb01), &
+      & new_unittest("eeqbc-dadr-mb05", test_eeqbc_dadr_mb05), &
+      & new_unittest("eeqbc-dadL-mb05", test_eeqbc_dadL_mb05), &
+      & new_unittest("eeqbc-dbdr-mb05", test_eeqbc_dbdr_mb05), &
+      & new_unittest("eeqbc-charges-mb01", test_eeqbc_q_mb01), &
+      & new_unittest("eeqbc-charges-mb02", test_eeqbc_q_mb02), &
+      & new_unittest("eeqbc-charges-actinides", test_eeqbc_q_actinides), &
+      & new_unittest("eeqbc-energy-mb03", test_eeqbc_e_mb03), &
+      & new_unittest("eeqbc-energy-mb04", test_eeqbc_e_mb04), &
+      & new_unittest("eeqbc-gradient-mb05", test_eeqbc_g_mb05), &
+      & new_unittest("eeqbc-gradient-mb06", test_eeqbc_g_mb06), &
+      & new_unittest("eeqbc-sigma-mb07", test_eeqbc_s_mb07), &
+      & new_unittest("eeqbc-sigma-mb08", test_eeqbc_s_mb08), &
+      & new_unittest("eeqbc-dqdr-mb09", test_eeqbc_dqdr_mb09), &
+      & new_unittest("eeqbc-dqdr-mb10", test_eeqbc_dqdr_mb10), &
+      & new_unittest("eeqbc-dqdL-mb11", test_eeqbc_dqdL_mb11), &
+      & new_unittest("eeqbc-dqdL-mb12", test_eeqbc_dqdL_mb12) &
      & ]
 
 end subroutine collect_model
@@ -116,9 +116,23 @@ subroutine test_dadr(error, mol, model)
    
 
    class(mchrg_solver_type), allocatable :: slv
+   character(len=:), allocatable :: solver_choice
+   integer, allocatable :: cgmiter
+   real(wp), allocatable :: cgtol
+   character(len=32), allocatable :: cgmode
+
+   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
+   write(*,*) "Solver type:   ", solver_choice
+   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
+   write(*,*) "CG max iterations:", cgmiter
+   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   write(*,*) "CG tolerance", cgtol
+   if (.not. allocated(cgmode)) cgmode = "default" ! Default
+   write(*,*) "CG mode:  ", cgmode
+   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
 
    allocate (cache)
-   slv = new_mchrg_solver()
+   
 
    allocate (cn(mol%nat), qloc(mol%nat), amatr1(mol%nat + 1, mol%nat + 1), amatl1(mol%nat + 1, mol%nat + 1), &
       & amatr2(mol%nat + 1, mol%nat + 1), amatl2(mol%nat + 1, mol%nat + 1), &
@@ -245,7 +259,22 @@ subroutine test_dadL(error, mol, model)
    type(cache_container), allocatable :: cache
 
    class(mchrg_solver_type), allocatable :: slv
-   slv = new_mchrg_solver()
+   character(len=:), allocatable :: solver_choice
+   integer, allocatable :: cgmiter
+   real(wp), allocatable :: cgtol
+   character(len=32), allocatable :: cgmode
+
+   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
+   write(*,*) "Solver type:    ", solver_choice
+   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
+   write(*,*) "CG max iterations:", cgmiter
+   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   write(*,*) "CG tolerance", cgtol
+   if (.not. allocated(cgmode)) cgmode = "default" ! Default
+   write(*,*) "CG mode:  ", cgmode
+   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+
+   
    allocate (cache)
 
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
@@ -334,10 +363,25 @@ subroutine test_dbdr(error, mol, model)
    real(wp), allocatable :: dbdr(:, :, :), dbdL(:, :, :)
    real(wp), allocatable :: numgrad(:, :, :), xvecr(:), xvecl(:)
    type(cache_container), allocatable :: cache
+
    class(mchrg_solver_type), allocatable :: slv
+   character(len=:), allocatable :: solver_choice
+   integer, allocatable :: cgmiter
+   real(wp), allocatable :: cgtol
+   character(len=32), allocatable :: cgmode
+
+   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
+   write(*,*) "Solver type:    ", solver_choice
+   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
+   write(*,*) "CG max iterations:", cgmiter
+   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   write(*,*) "CG tolerance", cgtol
+   if (.not. allocated(cgmode)) cgmode = "default" ! Default
+   write(*,*) "CG mode:  ", cgmode
+   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
 
    allocate (cache)
-   slv = new_mchrg_solver()
+   
 
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
       & qloc(mol%nat), dqlocdr(3, mol%nat, mol%nat), dqlocdL(3, 3, mol%nat), &
@@ -412,7 +456,21 @@ subroutine test_dbdL(error, mol, model)
    type(cache_container), allocatable :: cache
 
    class(mchrg_solver_type), allocatable :: slv
-   slv = new_mchrg_solver()
+   character(len=:), allocatable :: solver_choice
+   integer, allocatable :: cgmiter
+   real(wp), allocatable :: cgtol
+   character(len=32), allocatable :: cgmode
+
+   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
+   write(*,*) "Solver type:    ", solver_choice
+   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
+   write(*,*) "CG max iterations:", cgmiter
+   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   write(*,*) "CG tolerance", cgtol
+   if (.not. allocated(cgmode)) cgmode = "default" ! Default
+   write(*,*) "CG mode:  ", cgmode
+   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   
 
    allocate (cache)
 
@@ -497,7 +555,21 @@ subroutine gen_test(error, mol, model, qref, eref)
    real(wp), allocatable :: qvec(:)
 
    class(mchrg_solver_type), allocatable :: slv
-   slv = new_mchrg_solver()
+   character(len=:), allocatable :: solver_choice
+   integer, allocatable :: cgmiter
+   real(wp), allocatable :: cgtol
+   character(len=32), allocatable :: cgmode
+
+   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
+   write(*,*) "Solver type:    ", solver_choice
+   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
+   write(*,*) "CG max iterations:", cgmiter
+   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   write(*,*) "CG tolerance", cgtol
+   if (.not. allocated(cgmode)) cgmode = "default" ! Default
+   write(*,*) "CG mode:  ", cgmode
+   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   
 
    allocate (cn(mol%nat), qloc(mol%nat))
 
@@ -563,7 +635,21 @@ subroutine test_numgrad(error, mol, model)
    real(wp) :: er, el
 
    class(mchrg_solver_type), allocatable :: slv
-   slv = new_mchrg_solver()
+   character(len=:), allocatable :: solver_choice
+   integer, allocatable :: cgmiter
+   real(wp), allocatable :: cgtol
+   character(len=32), allocatable :: cgmode
+
+   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
+   write(*,*) "Solver type:    ", solver_choice
+   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
+   write(*,*) "CG max iterations:", cgmiter
+   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   write(*,*) "CG tolerance", cgtol
+   if (.not. allocated(cgmode)) cgmode = "default" ! Default
+   write(*,*) "CG mode:  ", cgmode
+   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   
 
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
       & qloc(mol%nat), dqlocdr(3, mol%nat, mol%nat), dqlocdL(3, 3, mol%nat), &
@@ -644,7 +730,21 @@ subroutine test_numsigma(error, mol, model)
    real(wp) :: er, el, eps(3, 3), numsigma(3, 3), sigma(3, 3)
 
    class(mchrg_solver_type), allocatable :: slv
-   slv = new_mchrg_solver()
+   character(len=:), allocatable :: solver_choice
+   integer, allocatable :: cgmiter
+   real(wp), allocatable :: cgtol
+   character(len=32), allocatable :: cgmode
+
+   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
+   write(*,*) "Solver type:    ", solver_choice
+   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
+   write(*,*) "CG max iterations:", cgmiter
+   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   write(*,*) "CG tolerance", cgtol
+   if (.not. allocated(cgmode)) cgmode = "default" ! Default
+   write(*,*) "CG mode:  ", cgmode
+   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   
 
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
       & qloc(mol%nat), dqlocdr(3, mol%nat, mol%nat), dqlocdL(3, 3, mol%nat), &
@@ -725,7 +825,21 @@ subroutine test_numdqdr(error, mol, model)
    
    ! Added solver declaration
    class(mchrg_solver_type), allocatable :: slv
-   slv = new_mchrg_solver()
+   character(len=:), allocatable :: solver_choice
+   integer, allocatable :: cgmiter
+   real(wp), allocatable :: cgtol
+   character(len=32), allocatable :: cgmode
+
+   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
+   write(*,*) "Solver type:    ", solver_choice
+   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
+   write(*,*) "CG max iterations:", cgmiter
+   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   write(*,*) "CG tolerance", cgtol
+   if (.not. allocated(cgmode)) cgmode = "default" ! Default
+   write(*,*) "CG mode:  ", cgmode
+   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   
 
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
       & qloc(mol%nat), dqlocdr(3, mol%nat, mol%nat), dqlocdL(3, 3, mol%nat), &
@@ -802,6 +916,20 @@ subroutine test_numdqdL(error, mol, model)
    
    ! Declare the solver
    class(mchrg_solver_type), allocatable :: slv
+   character(len=:), allocatable :: solver_choice
+   integer, allocatable :: cgmiter
+   real(wp), allocatable :: cgtol
+   character(len=32), allocatable :: cgmode
+
+   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
+   write(*,*) "Solver type:    ", solver_choice
+   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
+   write(*,*) "CG max iterations:", cgmiter
+   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   write(*,*) "CG tolerance", cgtol
+   if (.not. allocated(cgmode)) cgmode = "default" ! Default
+   write(*,*) "CG mode:  ", cgmode
+   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
 
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
       & qloc(mol%nat), dqlocdr(3, mol%nat, mol%nat), dqlocdL(3, 3, mol%nat), &
@@ -809,7 +937,7 @@ subroutine test_numdqdL(error, mol, model)
       & xyz(3, mol%nat), numdL(3, 3, mol%nat))
 
    ! Initialize the solver
-   slv = new_mchrg_solver()
+   
 
    eps(:, :) = unity
    xyz(:, :) = mol%xyz
@@ -943,7 +1071,21 @@ subroutine test_eeq_q_mb01(error)
    real(wp), allocatable :: qvec(:)
 
    class(mchrg_solver_type), allocatable :: slv
-   slv = new_mchrg_solver()
+   character(len=:), allocatable :: solver_choice
+   integer, allocatable :: cgmiter
+   real(wp), allocatable :: cgtol
+   character(len=32), allocatable :: cgmode
+
+   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
+   write(*,*) "Solver type:    ", solver_choice
+   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
+   write(*,*) "CG max iterations:", cgmiter
+   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   write(*,*) "CG tolerance", cgtol
+   if (.not. allocated(cgmode)) cgmode = "default" ! Default
+   write(*,*) "CG mode:  ", cgmode
+   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   
 
    call get_structure(mol, "MB16-43", "01")
    call new_eeq2019_model(mol, model, error)
@@ -966,7 +1108,7 @@ subroutine test_eeq_q_mb01(error)
    if (allocated(error)) return
 
    qvec = 0.0_wp
-   call get_eeq_charges(mol, error, qvec)
+   call get_eeq_charges(mol, slv, error, qvec)
    if (allocated(error)) return
 
    if (any(abs(qvec - ref) > thr1)) then
@@ -1472,7 +1614,21 @@ subroutine test_eeqbc_q_mb01(error)
 
    real(wp), allocatable :: qvec(:)
    class(mchrg_solver_type), allocatable :: slv
-   slv = new_mchrg_solver()
+   character(len=:), allocatable :: solver_choice
+   integer, allocatable :: cgmiter
+   real(wp), allocatable :: cgtol
+   character(len=32), allocatable :: cgmode
+
+   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
+   write(*,*) "Solver type:    ", solver_choice
+   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
+   write(*,*) "CG max iterations:", cgmiter
+   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   write(*,*) "CG tolerance", cgtol
+   if (.not. allocated(cgmode)) cgmode = "default" ! Default
+   write(*,*) "CG mode:  ", cgmode
+   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   
 
    call get_structure(mol, "MB16-43", "01")
    call new_eeqbc2025_model(mol, model, error)
@@ -1495,7 +1651,7 @@ subroutine test_eeqbc_q_mb01(error)
    if (allocated(error)) return
 
    qvec = 0.0_wp
-   call get_eeqbc_charges(mol, error, qvec)
+   call get_eeqbc_charges(mol, slv, error, qvec)
    if (allocated(error)) return
 
    if (any(abs(qvec - ref) > thr1)) then
