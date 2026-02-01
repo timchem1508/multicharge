@@ -210,14 +210,14 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    real(wp), allocatable :: chivec(:), vvec(:), uvec(:), jinv(:, :), unitvec(:)
    real(wp) :: lambda ! Lagrangian factor for constraint
    real(wp) :: uvecsum, vvecsum
-   
-   ! Unconstrained solution flag
-   duncons = .true.
 
    ! Calculate gradient if the respective arrays are present
    dcn = present(dcndr) .and. present(dcndL)
    grad = present(gradient) .and. present(sigma) .and. dcn
    cpq = present(dqdr) .and. present(dqdL) .and. dcn
+
+   ! Unconstrained solution flag
+   duncons = .not. cpq
 
    ! Update cache
    allocate(cache)

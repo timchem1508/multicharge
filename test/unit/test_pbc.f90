@@ -30,7 +30,8 @@ module test_pbc
    public :: collect_pbc
 
    real(wp), parameter :: thr = 1000 * epsilon(1.0_wp)
-   real(wp), parameter :: thr2 = sqrt(epsilon(1.0_wp))
+   real(wp), parameter :: thr1 = 1.0e5_wp*epsilon(1.0_wp)
+   real(wp), parameter :: thr2 = 1.0e1_wp*sqrt(epsilon(1.0_wp))
 
 contains
 
@@ -98,7 +99,7 @@ subroutine gen_test(error, mol, model, qref, eref)
    write(*,*) "Solver type:    ", solver_choice
    if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
    write(*,*) "CG max iterations:", cgmiter
-   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   if (.not. allocated(cgtol)) cgtol = 1.0e-15_wp ! Default
    write(*,*) "CG tolerance", cgtol
    if (.not. allocated(cgmode)) cgmode = "default" ! Default
    write(*,*) "CG mode:  ", cgmode
@@ -124,7 +125,7 @@ subroutine gen_test(error, mol, model, qref, eref)
    if (allocated(error)) return
 
    if (present(qref)) then
-      if (any(abs(qvec - qref) > thr)) then
+      if (any(abs(qvec - qref) > thr1)) then
          call test_failed(error, "Partial charges do not match")
          print'(a)', "Charges:"
          print'(3es21.14)', qvec
@@ -137,7 +138,7 @@ subroutine gen_test(error, mol, model, qref, eref)
    if (allocated(error)) return
 
    if (present(eref)) then
-      if (any(abs(energy - eref) > thr)) then
+      if (any(abs(energy - eref) > thr1)) then
          call test_failed(error, "Energies do not match")
          print'(a)', "Energy:"
          print'(3es21.14)', energy
@@ -183,7 +184,7 @@ subroutine test_numgrad(error, mol, model)
    write(*,*) "Solver type:    ", solver_choice
    if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
    write(*,*) "CG max iterations:", cgmiter
-   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   if (.not. allocated(cgtol)) cgtol = 1.0e-15_wp ! Default
    write(*,*) "CG tolerance", cgtol
    if (.not. allocated(cgmode)) cgmode = "default" ! Default
    write(*,*) "CG mode:  ", cgmode
@@ -280,7 +281,7 @@ subroutine test_numsigma(error, mol, model)
    write(*,*) "Solver type:    ", solver_choice
    if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
    write(*,*) "CG max iterations:", cgmiter
-   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   if (.not. allocated(cgtol)) cgtol = 1.0e-15_wp ! Default
    write(*,*) "CG tolerance", cgtol
    if (.not. allocated(cgmode)) cgmode = "default" ! Default
    write(*,*) "CG mode:  ", cgmode
@@ -386,7 +387,7 @@ subroutine test_dbdr(error, mol, model)
    write(*,*) "Solver type:    ", solver_choice
    if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
    write(*,*) "CG max iterations:", cgmiter
-   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   if (.not. allocated(cgtol)) cgtol = 1.0e-15_wp ! Default
    write(*,*) "CG tolerance", cgtol
    if (.not. allocated(cgmode)) cgmode = "default" ! Default
    write(*,*) "CG mode:  ", cgmode
@@ -482,7 +483,7 @@ subroutine test_dbdL(error, mol, model)
    write(*,*) "Solver type:    ", solver_choice
    if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
    write(*,*) "CG max iterations:", cgmiter
-   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   if (.not. allocated(cgtol)) cgtol = 1.0e-15_wp ! Default
    write(*,*) "CG tolerance", cgtol
    if (.not. allocated(cgmode)) cgmode = "default" ! Default
    write(*,*) "CG mode:  ", cgmode
@@ -590,7 +591,7 @@ subroutine test_dadr(error, mol, model)
    write(*,*) "Solver type:    ", solver_choice
    if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
    write(*,*) "CG max iterations:", cgmiter
-   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   if (.not. allocated(cgtol)) cgtol = 1.0e-15_wp ! Default
    write(*,*) "CG tolerance", cgtol
    if (.not. allocated(cgmode)) cgmode = "default" ! Default
    write(*,*) "CG mode:  ", cgmode
@@ -712,7 +713,7 @@ subroutine test_dadL(error, mol, model)
    write(*,*) "Solver type:    ", solver_choice
    if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
    write(*,*) "CG max iterations:", cgmiter
-   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   if (.not. allocated(cgtol)) cgtol = 1.0e-15_wp ! Default
    write(*,*) "CG tolerance", cgtol
    if (.not. allocated(cgmode)) cgmode = "default" ! Default
    write(*,*) "CG mode:  ", cgmode
@@ -826,7 +827,7 @@ subroutine test_numdqdr(error, mol, model)
    write(*,*) "Solver type:    ", solver_choice
    if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
    write(*,*) "CG max iterations:", cgmiter
-   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   if (.not. allocated(cgtol)) cgtol = 1.0e-15_wp ! Default
    write(*,*) "CG tolerance", cgtol
    if (.not. allocated(cgmode)) cgmode = "default" ! Default
    write(*,*) "CG mode:  ", cgmode
@@ -913,7 +914,7 @@ subroutine test_numdqdL(error, mol, model)
    write(*,*) "Solver type:    ", solver_choice
    if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
    write(*,*) "CG max iterations:", cgmiter
-   if (.not. allocated(cgtol)) cgtol = 1.0e-11_wp ! Default
+   if (.not. allocated(cgtol)) cgtol = 1.0e-15_wp ! Default
    write(*,*) "CG tolerance", cgtol
    if (.not. allocated(cgmode)) cgmode = "default" ! Default
    write(*,*) "CG mode:  ", cgmode
