@@ -68,24 +68,30 @@ contains
         call self%update(cache, amat, xvec, vrhs, ainv, cpq)
      
         ! Global thresholds
-        tol = min(self%cgtol, 1.0e-11_wp)
+        tol = self%cgtol
         tol_square = tol**2
-        maxit = max(self%cgmiter, ndim*10)
+        maxit = self%cgmiter
 
         !write(*,*) "CG Solver: max iterations = ", maxit
     
         allocate(r(ndim), p(ndim), z(ndim), Ap(ndim), Mdiag(ndim))
     
         ! Jacobi preconditioner (inverse of diagonal)
+        !$omp parallel default(none) &
+        !$omp shared(Mdiag, amat, ndim, tol_square) private(it) 
+        !$omp do schedule(runtime)
         do it = 1, ndim
             Mdiag(it) = amat(it,it)
             if (abs(Mdiag(it)) < tol_square) Mdiag(it) = tol_square
             Mdiag(it) = 1.0_wp / Mdiag(it)
         end do
+        !$omp end do
+        !$omp critical (solve_cg_)
     
         ! Initial residual r = b - A*x
         call symv(amat, vrhs, Ap, alpha=1.0_wp, beta=0.0_wp)
         r = xvec - Ap
+        
         
         ! Apply preconditioner z = M * r
         z = r * Mdiag
@@ -93,15 +99,20 @@ contains
         ! Initial search direction
         p = z
         
+        
         ! Initial direction update factor
         bnorm = dot_product(xvec,xvec)
         if (bnorm < tol_square) bnorm = 1.0_wp
         rnorm = dot_product(r,r)
         
+        
         ! Dynamical residual
         rz_old = dot_product(r,z)
+        !$omp end critical (solve_cg_)
     
         ! Conjugate Gradient iterations
+        !$omp shared(Mdiag, amat, ndim, tol_square, vrhs, maxit) private(it) 
+        !$omp do schedule(runtime)
         do it = 1, maxit
             call symv(amat, p, Ap, alpha=1.0_wp, beta=0.0_wp)
             
@@ -139,6 +150,8 @@ contains
                 call fatal_error(error, "solve_cg: CG did not converge within max iterations.")
             end if
         end do
+        !$omp end do
+        !$omp end parallel
     
     end subroutine solve_cg
 

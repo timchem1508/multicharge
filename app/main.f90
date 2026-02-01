@@ -153,8 +153,9 @@ subroutine help(unit)
    write(unit, '(2x, a, t35, a)') &
       "-m, --model <model>", "Choose charge model", &
       "-s, --solver <type>", "Solver: 'CG' (Iterative) or 'DIRECT'", &
-      "--max-iter <int>", "Max iterations (for CG)", &
-      "--tol <real>", "Tolerance (for CG)", &
+      "-cgit <int>", "Max iterations (for CG)", &
+      "-cgtol <real>", "Tolerance (for CG)", &
+      "-cgmode <type>", "Mode of the CG solver", &
       "-i, --input <format>", "Input format hint", &
       "-c, --charge <value>", "Molecular charge", &
       "-g, --grad", "Evaluate gradient", &
@@ -215,17 +216,17 @@ subroutine get_arguments(input, model_id, input_format, grad, charge, &
             call fatal_error(error, "Missing solver type")
             exit
          end if
-      case("--max-iter")
+      case("-cgit")
          iarg = iarg + 1; call get_argument(iarg, arg)
          allocate(cgmiter)
          read(arg, *, iostat=iostat) cgmiter
          if (iostat /= 0) call fatal_error(error, "Invalid max-iter")
-      case("--cgtol")
+      case("-cgtol")
          iarg = iarg + 1; call get_argument(iarg, arg)
          allocate(cgtol)
          read(arg, *, iostat=iostat) cgtol
          if (iostat /= 0) call fatal_error(error, "Invalid tolerance")
-      case("--cgmode")
+      case("-cgmode")
          iarg = iarg + 1; call get_argument(iarg, arg)
          allocate(cgmode)
          read(arg, *, iostat=iostat) cgmode

@@ -23,8 +23,6 @@ contains
         class(mchrg_solver_type), allocatable :: solver
         
         character(len=10) :: type_upper
-
-        write(*,*) "Solver type:", solver_type
         
         type_upper = trim(solver_type)
         ! Simple uppercase conversion (assuming ASCII)
@@ -40,11 +38,8 @@ contains
            select type(slv => solver)
            type is (cg_solver_type)
                slv%cgmiter = cgmiter
-               !write(*,*) "CG max iterations:", cgmiter
                slv%cgtol = cgtol
-               !write(*,*) "CG tolerance", cgtol
                slv%cgmode = cgmode
-               !write(*,*) "CG mode", cgmode
            end select
         end if
      end function new_mchrg_solver
