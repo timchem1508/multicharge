@@ -204,12 +204,15 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    type(cache_container), allocatable :: cache
    real(wp), allocatable :: trans(:, :)
 
-   ! Unconstrained solution
-
+   !> Unconstrained solution
    logical :: duncons
-   real(wp), allocatable :: chivec(:), vvec(:), uvec(:), jinv(:, :), unitvec(:)
-   real(wp) :: lambda ! Lagrangian factor for constraint
+   !> Resonse vectors: vvec = electronegativity response (Jv=chi)
+   !> uvec = constraint response (Ju=1)
+   real(wp), allocatable :: vvec(:), uvec(:)
+   !> Sums of the v and u vector elements
    real(wp) :: uvecsum, vvecsum
+   real(wp), allocatable :: chivec(:), jinv(:, :), unitvec(:)
+   real(wp) :: lambda ! Lagrangian factor for constraint
 
    ! Calculate gradient if the respective arrays are present
    dcn = present(dcndr) .and. present(dcndL)

@@ -9,12 +9,12 @@ module solver
     !> Abstract base type for Multi-charge solvers
     type, abstract :: mchrg_solver_type
     contains
-       procedure(solve_if), deferred :: solve
-       procedure(update_if), deferred :: update
+       procedure(solve), deferred :: solve
+       procedure(update), deferred :: update
     end type mchrg_solver_type
 
     abstract interface
-        subroutine solve_if(self, amat, xvec, vrhs, ainv, cpq, error)
+        subroutine solve(self, amat, xvec, vrhs, ainv, cpq, error)
             import :: mchrg_solver_type, error_type, wp
             class(mchrg_solver_type), intent(in) :: self
             real(wp), intent(in)  :: amat(:, :)
@@ -23,18 +23,16 @@ module solver
             real(wp), intent(out) :: ainv(:, :)
             logical, intent(in), optional :: cpq
             type(error_type), allocatable, intent(out) :: error
-        end subroutine solve_if
+        end subroutine solve
 
-        subroutine update_if(self, cache, amat, xvec, vrhs, ainv, cpq)
+        subroutine update(self, cache, vrhs, ainv, cpq)
             import :: mchrg_solver_type, cache_container, wp
             class(mchrg_solver_type), intent(in) :: self
             type(cache_container), intent(inout) :: cache
-            real(wp), intent(in)  :: amat(:, :)
-            real(wp), intent(in)  :: xvec(:)
             real(wp), intent(inout) :: vrhs(:)
             real(wp), intent(out) :: ainv(:, :)
             logical, intent(in), optional :: cpq
-        end subroutine update_if  
+        end subroutine update
     end interface
 
 end module solver

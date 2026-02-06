@@ -9,43 +9,127 @@ module iterative_solver
 
     public :: cg_solver_type
 
+    !> Input for CG solver
+    type, public :: cg_input
+        !> Maximal number of iterations
+        integer :: cgmiter
+        !> Convergence tolerance
+        real(wp) :: cgtol 
+        !> Preconditioner's mode 
+        character(len=32) :: cgmode 
+        !> Use iterative CG solver
+        logical :: cg = .true.
+   end type cg_input
+
+   interface cg_input
+      module procedure :: create_cg_input
+   end interface cg_input
+
     !> CG solver with Jacobi preconditioner
     type, extends(mchrg_solver_type) :: cg_solver_type
         integer :: cgmiter
         real(wp) :: cgtol
         character(len=32) :: cgmode
     contains
-       procedure :: solve => solve_cg
-       procedure :: update => update_cg
+        procedure :: solve
+        procedure :: update
     end type cg_solver_type
 
 contains
 
+    function create_cg_input(cgmiter, cgtol, cgmode) result(self)
+        !> Maximal number of iterations
+        integer, intent(in), optional :: cgmiter
+        !> Convergence tolerance
+        real(wp), intent(in), optional :: cgtol 
+        !> Preconditioner's mode 
+        character(len=32), intent(in), optional :: cgmode 
+
+        type(cg_input) :: self
+
+                
+        !> Default iterative solver parameters
+        real(wp), parameter :: cgmiter_def = 1000
+        real(wp), parameter :: cgtol_def = 1.0e-15_wp
+        character(len=32), parameter :: cgmode_def = 'default'
+
+        if (present(cgmiter)) then
+            self%cgmiter = cgmiter
+        else
+            write(*,*) "Default maximum number of iterations is used: 1000 it."
+            self%cgmiter = cgmiter_def
+        end if
+        if (present(cgtol)) then
+            self%cgtol = cgtol
+        else 
+            write(*,*) "Default tolerance is used: 1.0e-15"
+            self%cgtol = cgtol_def
+        end if
+        if (present(cgmode)) then
+            self%cgmode = cgmode
+        else 
+            write(*,*) "Default iterative solver mode is chosen"
+            self%cgmode = cgmode_def
+        end if
+
+    end function create_cg_input
+
     !> Update method for CG solver
-    subroutine update_cg(self, cache, amat, xvec, vrhs, ainv, cpq)
+    subroutine update(self, cache, vrhs, ainv, cpq)
         class(cg_solver_type), intent(in) :: self
         type(cache_container), intent(inout) :: cache
-        real(wp), intent(in)  :: amat(:, :)
-        real(wp), intent(in)  :: xvec(:)
         real(wp), intent(inout) :: vrhs(:)
         real(wp), intent(out) :: ainv(:, :)
         logical, intent(in), optional :: cpq
 
-    end subroutine update_cg
+    end subroutine update
 
     !> Solve method for CG solver
-    subroutine solve_cg(self, amat, xvec, vrhs, ainv, cpq, error)
+    subroutine solve(self, amat, xvec, vrhs, ainv, cpq, error)
         class(cg_solver_type), intent(in) :: self
+        !> A matrix of Ax=b system
         real(wp), intent(in)  :: amat(:, :)
+        !> Initial search direction (b)
         real(wp), intent(in)  :: xvec(:)
+        !> Initial guess and solution
         real(wp), intent(inout) :: vrhs(:)
         real(wp), intent(out) :: ainv(:, :)
         logical, intent(in), optional :: cpq
         type(error_type), allocatable, intent(out) :: error
         
-        integer :: ndim, it, maxit
-        real(wp) :: tol, tol_square, bnorm, rnorm, alpha, beta, denom
-        real(wp), allocatable :: r(:), p(:), z(:), Ap(:), Mdiag(:)
+        !> Maximal number of iterations
+        integer :: maxit
+        !> Tolerance of the solver
+        real(wp) :: tol, tol_square
+        
+        !> Iterations counter
+        integer :: it
+        !> Size of the xvec
+        integer :: ndim
+
+        !> Search direction (p)
+        real(wp), allocatable :: direction(:)
+        !> Initial direction norm 
+        real(wp) :: bnorm
+        !> Residual r = b - A*p
+        real(wp), allocatable :: residual(:)
+        !> Residual norm 
+        real(wp) :: rnorm
+        !> Diagonal preconditioner M^-1
+        real(wp), allocatable :: Mdiag(:)
+        !> Preconditioned residual z=M^-1*r
+        real(wp), allocatable ::  zres(:)
+
+        !> Matrix-vector product A*p
+        real(wp), allocatable :: Ap(:)
+        !> Denominator of the step p^T*Ap
+        real(wp) :: denom
+        !> Step length
+        real(wp) :: alpha
+
+        !> Direction update factor p_new/p
+        real(wp) :: beta
+        !> Dynamical residuals
         real(wp) :: rz_old, rz_new
         type(cache_container), allocatable :: cache
         
@@ -65,7 +149,7 @@ contains
         !call write_vector(vrhs, "Initial VRHS Vector")
         ! Prepare/cache
         allocate(cache)
-        call self%update(cache, amat, xvec, vrhs, ainv, cpq)
+        call self%update(cache, vrhs, ainv, cpq)
      
         ! Global thresholds
         tol = self%cgtol
@@ -74,7 +158,7 @@ contains
 
         !write(*,*) "CG Solver: max iterations = ", maxit
     
-        allocate(r(ndim), p(ndim), z(ndim), Ap(ndim), Mdiag(ndim))
+        allocate(residual(ndim), direction(ndim), zres(ndim), Ap(ndim), Mdiag(ndim))
     
         ! Jacobi preconditioner (inverse of diagonal)
         !$omp parallel default(none) &
@@ -90,49 +174,48 @@ contains
     
         ! Initial residual r = b - A*x
         call symv(amat, vrhs, Ap, alpha=1.0_wp, beta=0.0_wp)
-        r = xvec - Ap
-        
+        residual = xvec - Ap
         
         ! Apply preconditioner z = M * r
-        z = r * Mdiag
+        zres = residual * Mdiag
         
         ! Initial search direction
-        p = z
-        
+        direction = zres
         
         ! Initial direction update factor
         bnorm = dot_product(xvec,xvec)
         if (bnorm < tol_square) bnorm = 1.0_wp
-        rnorm = dot_product(r,r)
+        rnorm = dot_product(residual,residual)
         
         
         ! Dynamical residual
-        rz_old = dot_product(r,z)
+        rz_old = dot_product(residual,zres)
         !$omp end critical (solve_cg_)
     
         ! Conjugate Gradient iterations
         !$omp shared(Mdiag, amat, ndim, tol_square, vrhs, maxit) private(it) 
         !$omp do schedule(runtime)
         do it = 1, maxit
-            call symv(amat, p, Ap, alpha=1.0_wp, beta=0.0_wp)
+            call symv(amat, direction, Ap, alpha=1.0_wp, beta=0.0_wp)
             
             ! Compute step size alpha
-            denom = dot_product(p,Ap) + tiny(1.0_wp)
+            denom = dot_product(direction,Ap) + tiny(1.0_wp)
             
             if (abs(denom) < tol_square) then
                 exit
             end if
             
+            ! Step update
             alpha = rz_old / denom
             
             ! Update solution and residual
-            vrhs = vrhs + alpha * p
+            vrhs = vrhs + alpha * direction
             !call write_vector(vrhs, "CG Solution Vector")
             !write(*,*) " iteration ", it
-            r = r - alpha * Ap
+            residual = residual - alpha * Ap
             
             ! Check convergence
-            rnorm = dot_product(r,r)
+            rnorm = dot_product(residual,residual)
             if (rnorm / bnorm <= tol_square) then
                 write(*,*) "CG converged in ", it, " iterations."
                 !call write_vector(vrhs, "CG Solution Vector")
@@ -140,10 +223,10 @@ contains
             end if
             
             ! Apply preconditioner z = M * r
-            z = r * Mdiag
-            rz_new = dot_product(r, z)
+            zres = residual * Mdiag
+            rz_new = dot_product(residual, zres)
             beta = rz_new / rz_old
-            p = z + beta * p
+            direction = zres + beta * direction
             rz_old = rz_new
             
             if (it == maxit) then
@@ -153,6 +236,6 @@ contains
         !$omp end do
         !$omp end parallel
     
-    end subroutine solve_cg
+    end subroutine solve
 
 end module iterative_solver

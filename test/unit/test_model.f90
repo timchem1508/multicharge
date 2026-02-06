@@ -30,9 +30,9 @@ module test_model
 
    public :: collect_model
 
-   real(wp), parameter :: thr = 100*epsilon(1.0_wp)
+   real(wp), parameter :: thr = 100 * epsilon(1.0_wp)
    real(wp), parameter :: thr1 = 1.0e5_wp*epsilon(1.0_wp)
-   real(wp), parameter :: thr2 = 1.0e1_wp*sqrt(epsilon(1.0_wp))
+   real(wp), parameter :: thr2 = sqrt(epsilon(1.0_wp))
 
 contains
 
@@ -121,15 +121,9 @@ subroutine test_dadr(error, mol, model)
    real(wp), allocatable :: cgtol
    character(len=32), allocatable :: cgmode
 
-   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
-   write(*,*) "Solver type:   ", solver_choice
-   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
-   write(*,*) "CG max iterations:", cgmiter
-   if (.not. allocated(cgtol)) cgtol = 1.0e-15_wp ! Default
-   write(*,*) "CG tolerance", cgtol
-   if (.not. allocated(cgmode)) cgmode = "default" ! Default
-   write(*,*) "CG mode:  ", cgmode
-   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   !> Setup of the solver
+   solver_choice = 'CG'
+   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, slv)
 
    allocate (cache)
    
@@ -264,15 +258,9 @@ subroutine test_dadL(error, mol, model)
    real(wp), allocatable :: cgtol
    character(len=32), allocatable :: cgmode
 
-   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
-   write(*,*) "Solver type:    ", solver_choice
-   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
-   write(*,*) "CG max iterations:", cgmiter
-   if (.not. allocated(cgtol)) cgtol = 1.0e-15_wp ! Default
-   write(*,*) "CG tolerance", cgtol
-   if (.not. allocated(cgmode)) cgmode = "default" ! Default
-   write(*,*) "CG mode:  ", cgmode
-   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   !> Setup of the solver
+   solver_choice = 'CG'
+   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, slv)
 
    
    allocate (cache)
@@ -370,15 +358,9 @@ subroutine test_dbdr(error, mol, model)
    real(wp), allocatable :: cgtol
    character(len=32), allocatable :: cgmode
 
-   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
-   write(*,*) "Solver type:    ", solver_choice
-   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
-   write(*,*) "CG max iterations:", cgmiter
-   if (.not. allocated(cgtol)) cgtol = 1.0e-15_wp ! Default
-   write(*,*) "CG tolerance", cgtol
-   if (.not. allocated(cgmode)) cgmode = "default" ! Default
-   write(*,*) "CG mode:  ", cgmode
-   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   !> Setup of the solver
+   solver_choice = 'CG'
+   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, slv)
 
    allocate (cache)
    
@@ -461,15 +443,9 @@ subroutine test_dbdL(error, mol, model)
    real(wp), allocatable :: cgtol
    character(len=32), allocatable :: cgmode
 
-   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
-   write(*,*) "Solver type:    ", solver_choice
-   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
-   write(*,*) "CG max iterations:", cgmiter
-   if (.not. allocated(cgtol)) cgtol = 1.0e-15_wp ! Default
-   write(*,*) "CG tolerance", cgtol
-   if (.not. allocated(cgmode)) cgmode = "default" ! Default
-   write(*,*) "CG mode:  ", cgmode
-   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   !> Setup of the solver
+   solver_choice = 'CG'
+   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, slv)
    
 
    allocate (cache)
@@ -560,17 +536,10 @@ subroutine gen_test(error, mol, model, qref, eref)
    real(wp), allocatable :: cgtol
    character(len=32), allocatable :: cgmode
 
-   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
-   write(*,*) "Solver type:    ", solver_choice
-   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
-   write(*,*) "CG max iterations:", cgmiter
-   if (.not. allocated(cgtol)) cgtol = 1.0e-15_wp ! Default
-   write(*,*) "CG tolerance", cgtol
-   if (.not. allocated(cgmode)) cgmode = "default" ! Default
-   write(*,*) "CG mode:  ", cgmode
-   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   !> Setup of the solver
+   solver_choice = 'CG'
+   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, slv)
    
-
    allocate (cn(mol%nat), qloc(mol%nat))
 
    call model%ncoord%get_coordination_number(mol, trans, cn)
@@ -640,15 +609,9 @@ subroutine test_numgrad(error, mol, model)
    real(wp), allocatable :: cgtol
    character(len=32), allocatable :: cgmode
 
-   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
-   write(*,*) "Solver type:    ", solver_choice
-   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
-   write(*,*) "CG max iterations:", cgmiter
-   if (.not. allocated(cgtol)) cgtol = 1.0e-15_wp ! Default
-   write(*,*) "CG tolerance", cgtol
-   if (.not. allocated(cgmode)) cgmode = "default" ! Default
-   write(*,*) "CG mode:  ", cgmode
-   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   !> Setup of the solver
+   solver_choice = 'CG'
+   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, slv)
    
 
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
@@ -735,15 +698,9 @@ subroutine test_numsigma(error, mol, model)
    real(wp), allocatable :: cgtol
    character(len=32), allocatable :: cgmode
 
-   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
-   write(*,*) "Solver type:    ", solver_choice
-   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
-   write(*,*) "CG max iterations:", cgmiter
-   if (.not. allocated(cgtol)) cgtol = 1.0e-15_wp ! Default
-   write(*,*) "CG tolerance", cgtol
-   if (.not. allocated(cgmode)) cgmode = "default" ! Default
-   write(*,*) "CG mode:  ", cgmode
-   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   !> Setup of the solver
+   solver_choice = 'CG'
+   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, slv)
    
 
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
@@ -830,15 +787,9 @@ subroutine test_numdqdr(error, mol, model)
    real(wp), allocatable :: cgtol
    character(len=32), allocatable :: cgmode
 
-   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
-   write(*,*) "Solver type:    ", solver_choice
-   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
-   write(*,*) "CG max iterations:", cgmiter
-   if (.not. allocated(cgtol)) cgtol = 1.0e-15_wp ! Default
-   write(*,*) "CG tolerance", cgtol
-   if (.not. allocated(cgmode)) cgmode = "default" ! Default
-   write(*,*) "CG mode:  ", cgmode
-   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   !> Setup of the solver
+   solver_choice = 'CG'
+   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, slv)
    
 
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
@@ -921,15 +872,9 @@ subroutine test_numdqdL(error, mol, model)
    real(wp), allocatable :: cgtol
    character(len=32), allocatable :: cgmode
 
-   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
-   write(*,*) "Solver type:    ", solver_choice
-   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
-   write(*,*) "CG max iterations:", cgmiter
-   if (.not. allocated(cgtol)) cgtol = 1.0e-15_wp ! Default
-   write(*,*) "CG tolerance", cgtol
-   if (.not. allocated(cgmode)) cgmode = "default" ! Default
-   write(*,*) "CG mode:  ", cgmode
-   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   !> Setup of the solver
+   solver_choice = 'CG'
+   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, slv)
 
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
       & qloc(mol%nat), dqlocdr(3, mol%nat, mol%nat), dqlocdL(3, 3, mol%nat), &
@@ -1076,15 +1021,9 @@ subroutine test_eeq_q_mb01(error)
    real(wp), allocatable :: cgtol
    character(len=32), allocatable :: cgmode
 
-   if (.not. allocated(solver_choice)) solver_choice = "DIRECT" ! Default
-   write(*,*) "Solver type:    ", solver_choice
-   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
-   write(*,*) "CG max iterations:", cgmiter
-   if (.not. allocated(cgtol)) cgtol = 1.0e-15_wp ! Default
-   write(*,*) "CG tolerance", cgtol
-   if (.not. allocated(cgmode)) cgmode = "default" ! Default
-   write(*,*) "CG mode:  ", cgmode
-   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   !> Setup of the solver
+   solver_choice = 'CG'
+   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, slv)
    
 
    call get_structure(mol, "MB16-43", "01")
@@ -1095,7 +1034,7 @@ subroutine test_eeq_q_mb01(error)
 
    ! Check wrapper functions
    allocate (qvec(mol%nat), source=0.0_wp)
-   call get_charges(model, mol, slv, error, qvec)
+   call get_charges(model, mol, error, qvec)
    if (allocated(error)) return
 
    if (any(abs(qvec - ref) > thr1)) then
@@ -1108,7 +1047,7 @@ subroutine test_eeq_q_mb01(error)
    if (allocated(error)) return
 
    qvec = 0.0_wp
-   call get_eeq_charges(mol, slv, error, qvec)
+   call get_eeq_charges(mol, error, qvec)
    if (allocated(error)) return
 
    if (any(abs(qvec - ref) > thr1)) then
@@ -1614,20 +1553,15 @@ subroutine test_eeqbc_q_mb01(error)
 
    real(wp), allocatable :: qvec(:)
    class(mchrg_solver_type), allocatable :: slv
-   character(len=:), allocatable :: solver_choice
-   integer, allocatable :: cgmiter
-   real(wp), allocatable :: cgtol
-   character(len=32), allocatable :: cgmode
+   character(len=32) :: solver_choice
+   integer :: cgmiter
+   real(wp) :: cgtol
+   character(len=32) :: cgmode
 
-   if (.not. allocated(solver_choice)) solver_choice = "CG" ! Default
-   write(*,*) "Solver type:    ", solver_choice
-   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
-   write(*,*) "CG max iterations:", cgmiter
-   if (.not. allocated(cgtol)) cgtol = 1.0e-15_wp ! Default
-   write(*,*) "CG tolerance", cgtol
-   if (.not. allocated(cgmode)) cgmode = "default" ! Default
-   write(*,*) "CG mode:  ", cgmode
-   slv = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   !> Setup of the solver
+   solver_choice = 'CG'
+
+   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, slv)
    
 
    call get_structure(mol, "MB16-43", "01")
@@ -1637,7 +1571,7 @@ subroutine test_eeqbc_q_mb01(error)
 
    ! Check wrapper functions
    allocate (qvec(mol%nat), source=0.0_wp)
-   call get_charges(model, mol, slv, error, qvec)
+   call get_charges(model, mol, error, qvec)
    if (allocated(error)) return
    write(*, *) "Threshold check for get_charges wrapper", thr1
 
@@ -1651,7 +1585,7 @@ subroutine test_eeqbc_q_mb01(error)
    if (allocated(error)) return
 
    qvec = 0.0_wp
-   call get_eeqbc_charges(mol, slv, error, qvec)
+   call get_eeqbc_charges(mol, error, qvec)
    if (allocated(error)) return
 
    if (any(abs(qvec - ref) > thr1)) then

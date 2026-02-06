@@ -13,26 +13,24 @@ module direct_solver
     !> Direct solver using LAPACK
     type, extends(mchrg_solver_type) :: direct_solver_type
     contains
-       procedure :: solve => solve_direct
-       procedure :: update => update_direct
+       procedure :: solve
+       procedure :: update 
     end type direct_solver_type
 
 contains
 
     !> Update method for direct solver
-    subroutine update_direct(self, cache, amat, xvec, vrhs, ainv, cpq)
+    subroutine update(self, cache, vrhs, ainv, cpq)
         class(direct_solver_type), intent(in) :: self
         type(cache_container), intent(inout) :: cache
-        real(wp), intent(in)  :: amat(:, :)
-        real(wp), intent(in)  :: xvec(:)
         real(wp), intent(inout) :: vrhs(:)
         real(wp), intent(out) :: ainv(:, :)
         logical, intent(in), optional :: cpq
         
-    end subroutine update_direct
+    end subroutine update
 
     !> Solve method for direct solver
-    subroutine solve_direct(self, amat, xvec, vrhs, ainv, cpq, error)
+    subroutine solve(self, amat, xvec, vrhs, ainv, cpq, error)
         class(direct_solver_type), intent(in) :: self
         real(wp), intent(in)  :: amat(:, :)
         real(wp), intent(in)  :: xvec(:)
@@ -59,7 +57,7 @@ contains
         
         ! Update cache and prepare vrhs and ainv
         allocate(cache)
-        call self%update(cache, amat, xvec, vrhs, ainv, cpq)
+        call self%update(cache, vrhs, ainv, cpq)
     
         ! Logical: solve coupled-perturbed equations flag
         want_cpq = .false.
@@ -92,6 +90,6 @@ contains
             end if
         end if
     
-    end subroutine solve_direct
+    end subroutine solve
 
 end module direct_solver

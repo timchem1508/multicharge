@@ -25,8 +25,9 @@ module multicharge_charge
    use multicharge_model, only : mchrg_model_type
    use multicharge_param, only : new_eeq2019_model, new_eeqbc2025_model
 
-   use solver, only : mchrg_solver_type
-   use solver_factory, only : new_mchrg_solver
+   use multicharge_output, only: json_results
+   use solver, only: mchrg_solver_type
+   use solver_factory, only: new_mchrg_solver
 
    implicit none
    private
@@ -38,14 +39,11 @@ contains
 
 
 !> Classical electronegativity equilibration charges
-subroutine get_charges(mchrg_model, mol, slv, error, qvec, dqdr, dqdL)
+subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: mchrg_model
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
-   !> The solver instance
-   class(mchrg_solver_type), intent(in) :: slv
-
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -64,6 +62,24 @@ subroutine get_charges(mchrg_model, mol, slv, error, qvec, dqdr, dqdL)
    real(wp), allocatable :: qloc(:), dqlocdr(:, :, :), dqlocdL(:, :, :)
    real(wp), allocatable :: trans(:, :)
 
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: solver
+   character(len=:), allocatable :: solver_choice
+   integer, allocatable :: cgmiter
+   real(wp), allocatable :: cgtol
+   character(len=32), allocatable :: cgmode
+
+   if (.not. allocated(solver_choice)) solver_choice = "DIRECT" ! Default
+   write(*,*) "Solver type:    ", solver_choice
+   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
+   write(*,*) "CG max iterations:", cgmiter
+   if (.not. allocated(cgtol)) cgtol = 1.0e-15_wp ! Default
+   write(*,*) "CG tolerance", cgtol
+   if (.not. allocated(cgmode)) cgmode = "default" ! Default
+   write(*,*) "CG mode:  ", cgmode
+
+   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, solver)
+
    grad = present(dqdr) .and. present(dqdL)
 
    allocate(cn(mol%nat), qloc(mol%nat))
@@ -76,20 +92,17 @@ subroutine get_charges(mchrg_model, mol, slv, error, qvec, dqdr, dqdL)
    call mchrg_model%ncoord%get_coordination_number(mol, trans, cn, dcndr, dcndL)
    call mchrg_model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
 
-   call mchrg_model%solve(mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
+   call mchrg_model%solve(mol, solver, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
       & qvec=qvec, dqdr=dqdr, dqdL=dqdL)
 
 end subroutine get_charges
 
 
 !> Obtain charges from electronegativity equilibration model
-subroutine get_eeq_charges(mol, slv, error, qvec, dqdr, dqdL)
+subroutine get_eeq_charges(mol, error, qvec, dqdr, dqdL)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
-
-   class(mchrg_solver_type), intent(in) :: slv
-
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
@@ -108,18 +121,16 @@ subroutine get_eeq_charges(mol, slv, error, qvec, dqdr, dqdL)
 
 
    ! Pass the solver to get_charges
-   call get_charges(eeq_model, mol, slv, error, qvec, dqdr, dqdL)
+   call get_charges(eeq_model, mol, error, qvec, dqdr, dqdL)
 
 end subroutine get_eeq_charges
 
 
 !> Obtain charges from bond capacity electronegativity equilibration model
-subroutine get_eeqbc_charges(mol, slv, error, qvec, dqdr, dqdL)
+subroutine get_eeqbc_charges(mol, error, qvec, dqdr, dqdL)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
-
-   class(mchrg_solver_type), allocatable :: slv
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -138,7 +149,7 @@ subroutine get_eeqbc_charges(mol, slv, error, qvec, dqdr, dqdL)
    call new_eeqbc2025_model(mol, eeqbc_model, error)
 
    ! Pass the solver to get_charges
-   call get_charges(eeqbc_model, mol, slv, error, qvec, dqdr, dqdL)
+   call get_charges(eeqbc_model, mol, error, qvec, dqdr, dqdL)
 end subroutine get_eeqbc_charges
 
 

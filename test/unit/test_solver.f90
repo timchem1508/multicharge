@@ -15,7 +15,9 @@ module test_solver
 
    public :: collect_solver
 
-   real(wp), parameter :: thr = 1.0e-10_wp
+   real(wp), parameter :: thr = 100 * epsilon(1.0_wp)
+   real(wp), parameter :: thr1 = 1.0e5_wp*epsilon(1.0_wp)
+   real(wp), parameter :: thr2 = sqrt(epsilon(1.0_wp))
    real(wp), parameter :: thr_rel = 1.0e-6_wp
 
 contains
@@ -62,7 +64,7 @@ subroutine test_cg_identity_2x2(error)
    cgtol = 1.0e-12_wp
    cgmode = "default"
    
-   solver = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, solver)
 
    ! Identity matrix
    amat = 0.0_wp
@@ -82,7 +84,7 @@ subroutine test_cg_identity_2x2(error)
    ! Reference solution
    solver_choice = "DIRECT"
    expected = [0.0_wp, 0.0_wp]
-   solver = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, solver)
    call solver%solve(amat, xvec, expected, ainv, cpq, error=error)
    
    ! Check solution
@@ -119,7 +121,7 @@ subroutine test_cg_diagonal_5x5(error)
    cgtol = 1.0e-12_wp
    cgmode = "default"
    
-   solver = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, solver)
 
    ! Diagonal matrix with increasing values
    amat = 0.0_wp
@@ -144,7 +146,7 @@ subroutine test_cg_diagonal_5x5(error)
    ! Reference solution
    solver_choice = "DIRECT"
    expected = [0.0_wp, 0.0_wp, 0.0_wp, 0.0_wp, 0.0_wp]
-   solver = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, solver)
    call solver%solve(amat, xvec, expected, ainv, cpq, error=error)
    
    ! Check solution
@@ -180,7 +182,7 @@ subroutine test_cg_spd_small(error)
    cgtol = 1.0e-12_wp
    cgmode = "default"
    
-   solver = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, solver)
 
    ! SPD matrix: A = [4 1 1; 1 3 2; 1 2 4]
    amat = reshape([4.0_wp, 1.0_wp, 1.0_wp, &
@@ -234,7 +236,7 @@ subroutine test_cg_spd_medium(error)
    cgtol = 1.0e-10_wp
    cgmode = "default"
    
-   solver = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, solver)
 
    ! Create a simple SPD matrix: A = I + 0.1*E where E is matrix of ones
    amat = 0.0_wp
@@ -298,7 +300,7 @@ subroutine test_cg_spd_large(error)
    cgtol = 1.0e-8_wp
    cgmode = "default"
    
-   solver = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, solver)
 
    allocate(amat(n,n), xvec(n), vrhs(n), ainv(n,n), expected(n), b(n))
 
@@ -364,7 +366,7 @@ subroutine test_cg_ill_conditioned(error)
    cgtol = 1.0e-10_wp
    cgmode = "default"
    
-   solver = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, solver)
 
    ! Create an ill-conditioned diagonal matrix
    amat = 0.0_wp
@@ -422,7 +424,7 @@ subroutine test_cg_zero_rhs(error)
    cgtol = 1.0e-12_wp
    cgmode = "default"
    
-   solver = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, solver)
 
    ! Create a simple SPD matrix
    amat = 0.0_wp
@@ -479,7 +481,7 @@ subroutine test_cg_random_spd(error)
    cgtol = 1.0e-8_wp
    cgmode = "default"
    
-   solver = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, solver)
 
    allocate(amat(n,n), xvec(n), vrhs(n), ainv(n,n), expected(n), b(n), temp(n,n))
 
@@ -591,7 +593,7 @@ subroutine test_cg_preconditioned(error)
    cgtol = 1.0e-10_wp
    cgmode = "default"
    
-   solver = new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode)
+   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, solver)
    
    vrhs = 0.0_wp
    xvec = b
