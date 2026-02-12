@@ -33,8 +33,7 @@ module multicharge_model_type
    use multicharge_lapack, only: sytrf, sytrs, sytri
    use multicharge_wignerseitz, only: wignerseitz_cell_type, new_wignerseitz_cell
    use multicharge_model_cache, only: model_cache, cache_container
-   use solver, only: mchrg_solver_type
-   use solver_factory, only: new_mchrg_solver
+   use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
    use print_matrix, only: write_matrix, write_vector
    
    implicit none
@@ -204,8 +203,8 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    type(cache_container), allocatable :: cache
    real(wp), allocatable :: trans(:, :)
 
-   !> Unconstrained solution
-   logical :: duncons
+   !> Add Lagrangian constraint
+   logical :: add_lagr
    !> Resonse vectors: vvec = electronegativity response (Jv=chi)
    !> uvec = constraint response (Ju=1)
    real(wp), allocatable :: vvec(:), uvec(:)
@@ -220,7 +219,7 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    cpq = present(dqdr) .and. present(dqdL) .and. dcn
 
    ! Unconstrained solution flag
-   duncons = .not. cpq
+   add_lagr = .false.
 
    ! Update cache
    allocate(cache)
@@ -246,7 +245,7 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
 
    allocate(jmat(mol%nat, mol%nat))
 
-   if (duncons .eqv. .false.) then
+   if (add_lagr .eqv. .true.) then
       ! Unconstrained solution: extract only the charges
       call slv%solve(amat, xvec, vrhs, ainv, cpq, error)
 

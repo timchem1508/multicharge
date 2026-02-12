@@ -1,27 +1,48 @@
-module direct_solver
+module multicharge_solver_direct
     use mctc_env, only: error_type, fatal_error, wp
+    use print_matrix, only: write_vector, write_matrix
     use multicharge_blas, only: symv
     use multicharge_lapack, only: sytrf, sytrs, sytri
-    use solver_type_cache, only: cache_container
-    use print_matrix, only: write_vector, write_matrix
-    use solver, only: mchrg_solver_type
+    use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
+    use multicharge_solver_cache, only: cache_container, mchrg_solver_cache
+
     implicit none
     private
 
-    public :: direct_solver_type
+    public :: mchrg_solver_direct, direct_input, new_direct_solver
+    type, extends(mchrg_solver_cache), public :: direct_cache
+    end type direct_cache
+
+    !> Input for Direct solver
+    type, extends(mchrg_solver_input) :: direct_input
+        !> Use Direct solver
+        logical :: direct = .true.
+    end type direct_input
 
     !> Direct solver using LAPACK
-    type, extends(mchrg_solver_type) :: direct_solver_type
+    type, extends(mchrg_solver_type) :: mchrg_solver_direct
     contains
        procedure :: solve
        procedure :: update 
-    end type direct_solver_type
+    end type mchrg_solver_direct
 
 contains
 
+    subroutine new_direct_solver(self, input)
+        class(mchrg_solver_type), allocatable, intent(out) :: self
+        type(direct_input), intent(in) :: input 
+        
+        !type(mchrg_solver_direct), allocatable :: self
+
+        allocate(mchrg_solver_direct :: self)
+
+        self%need_pos_def = .false.
+
+    end subroutine new_direct_solver
+
     !> Update method for direct solver
     subroutine update(self, cache, vrhs, ainv, cpq)
-        class(direct_solver_type), intent(in) :: self
+        class(mchrg_solver_direct), intent(in) :: self
         type(cache_container), intent(inout) :: cache
         real(wp), intent(inout) :: vrhs(:)
         real(wp), intent(out) :: ainv(:, :)
@@ -31,7 +52,7 @@ contains
 
     !> Solve method for direct solver
     subroutine solve(self, amat, xvec, vrhs, ainv, cpq, error)
-        class(direct_solver_type), intent(in) :: self
+        class(mchrg_solver_direct), intent(in) :: self
         real(wp), intent(in)  :: amat(:, :)
         real(wp), intent(in)  :: xvec(:)
         real(wp), intent(inout) :: vrhs(:)
@@ -92,4 +113,4 @@ contains
     
     end subroutine solve
 
-end module direct_solver
+end module multicharge_solver_direct

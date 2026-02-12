@@ -18,13 +18,14 @@ module test_model
    use mctc_env_testing, only: new_unittest, unittest_type, error_type, test_failed
    use mctc_io_structure, only: structure_type, new
    use mstore, only: get_structure
-   use multicharge_model, only: mchrg_model_type
+   use multicharge_model_type, only: mchrg_model_type
    use multicharge_model_eeqbc, only: eeqbc_model
    use multicharge_param, only: new_eeq2019_model, new_eeqbc2025_model
    use multicharge_model_cache, only: cache_container
    use multicharge_charge, only: get_charges, get_eeq_charges, get_eeqbc_charges
-   use solver, only : mchrg_solver_type
-   use solver_factory, only : new_mchrg_solver
+   use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
+   use multicharge_solver_direct, only : mchrg_solver_direct, new_direct_solver, direct_input
+   use multicharge_solver_cg, only : mchrg_solver_cg, new_cg_solver, cg_input
    implicit none
    private
 
@@ -91,8 +92,6 @@ end subroutine collect_model
 
 subroutine test_dadr(error, mol, model)
 
-   use solver, only : mchrg_solver_type
-   use solver_factory, only : new_mchrg_solver
 
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
@@ -116,14 +115,13 @@ subroutine test_dadr(error, mol, model)
    
 
    class(mchrg_solver_type), allocatable :: slv
-   character(len=:), allocatable :: solver_choice
-   integer, allocatable :: cgmiter
-   real(wp), allocatable :: cgtol
-   character(len=32), allocatable :: cgmode
+   class(mchrg_solver_input), allocatable :: solver_input
 
-   !> Setup of the solver
-   solver_choice = 'CG'
-   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, slv)
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      call new_cg_solver(slv, solver_input)
+   end select
 
    allocate (cache)
    
@@ -228,9 +226,6 @@ end subroutine test_dadr
 
 subroutine test_dadL(error, mol, model)
 
-   use solver, only : mchrg_solver_type
-   use solver_factory, only : new_mchrg_solver
-
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
@@ -253,14 +248,13 @@ subroutine test_dadL(error, mol, model)
    type(cache_container), allocatable :: cache
 
    class(mchrg_solver_type), allocatable :: slv
-   character(len=:), allocatable :: solver_choice
-   integer, allocatable :: cgmiter
-   real(wp), allocatable :: cgtol
-   character(len=32), allocatable :: cgmode
+   class(mchrg_solver_input), allocatable :: solver_input
 
-   !> Setup of the solver
-   solver_choice = 'CG'
-   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, slv)
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      call new_cg_solver(slv, solver_input)
+   end select
 
    
    allocate (cache)
@@ -331,9 +325,6 @@ subroutine test_dadL(error, mol, model)
 end subroutine test_dadL
 
 subroutine test_dbdr(error, mol, model)
-
-   use solver, only : mchrg_solver_type
-   use solver_factory, only : new_mchrg_solver
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
@@ -353,18 +344,16 @@ subroutine test_dbdr(error, mol, model)
    type(cache_container), allocatable :: cache
 
    class(mchrg_solver_type), allocatable :: slv
-   character(len=:), allocatable :: solver_choice
-   integer, allocatable :: cgmiter
-   real(wp), allocatable :: cgtol
-   character(len=32), allocatable :: cgmode
+   class(mchrg_solver_input), allocatable :: solver_input
 
-   !> Setup of the solver
-   solver_choice = 'CG'
-   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, slv)
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      call new_cg_solver(slv, solver_input)
+   end select
 
    allocate (cache)
    
-
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
       & qloc(mol%nat), dqlocdr(3, mol%nat, mol%nat), dqlocdL(3, 3, mol%nat), &
       & xvecr(mol%nat + 1), xvecl(mol%nat + 1), numgrad(3, mol%nat, mol%nat + 1), &
@@ -413,9 +402,6 @@ subroutine test_dbdr(error, mol, model)
 end subroutine test_dbdr
 
 subroutine test_dbdL(error, mol, model)
-   use solver, only : mchrg_solver_type
-   use solver_factory, only : new_mchrg_solver
-
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
@@ -438,15 +424,13 @@ subroutine test_dbdL(error, mol, model)
    type(cache_container), allocatable :: cache
 
    class(mchrg_solver_type), allocatable :: slv
-   character(len=:), allocatable :: solver_choice
-   integer, allocatable :: cgmiter
-   real(wp), allocatable :: cgtol
-   character(len=32), allocatable :: cgmode
+   class(mchrg_solver_input), allocatable :: solver_input
 
-   !> Setup of the solver
-   solver_choice = 'CG'
-   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, slv)
-   
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      call new_cg_solver(slv, solver_input)
+   end select
 
    allocate (cache)
 
@@ -507,8 +491,7 @@ subroutine test_dbdL(error, mol, model)
 end subroutine test_dbdL
 
 subroutine gen_test(error, mol, model, qref, eref)
-   use solver, only : mchrg_solver_type
-   use solver_factory, only : new_mchrg_solver
+
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
@@ -531,14 +514,13 @@ subroutine gen_test(error, mol, model, qref, eref)
    real(wp), allocatable :: qvec(:)
 
    class(mchrg_solver_type), allocatable :: slv
-   character(len=:), allocatable :: solver_choice
-   integer, allocatable :: cgmiter
-   real(wp), allocatable :: cgtol
-   character(len=32), allocatable :: cgmode
+   class(mchrg_solver_input), allocatable :: solver_input
 
-   !> Setup of the solver
-   solver_choice = 'CG'
-   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, slv)
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      call new_cg_solver(slv, solver_input)
+   end select
    
    allocate (cn(mol%nat), qloc(mol%nat))
 
@@ -582,8 +564,7 @@ subroutine gen_test(error, mol, model, qref, eref)
 end subroutine gen_test
 
 subroutine test_numgrad(error, mol, model)
-   use solver, only : mchrg_solver_type
-   use solver_factory, only : new_mchrg_solver
+
 
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
@@ -604,14 +585,13 @@ subroutine test_numgrad(error, mol, model)
    real(wp) :: er, el
 
    class(mchrg_solver_type), allocatable :: slv
-   character(len=:), allocatable :: solver_choice
-   integer, allocatable :: cgmiter
-   real(wp), allocatable :: cgtol
-   character(len=32), allocatable :: cgmode
+   class(mchrg_solver_input), allocatable :: solver_input
 
-   !> Setup of the solver
-   solver_choice = 'CG'
-   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, slv)
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      call new_cg_solver(slv, solver_input)
+   end select
    
 
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
@@ -670,8 +650,7 @@ subroutine test_numgrad(error, mol, model)
 end subroutine test_numgrad
 
 subroutine test_numsigma(error, mol, model)
-   use solver, only : mchrg_solver_type
-   use solver_factory, only : new_mchrg_solver
+
 
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
@@ -693,14 +672,13 @@ subroutine test_numsigma(error, mol, model)
    real(wp) :: er, el, eps(3, 3), numsigma(3, 3), sigma(3, 3)
 
    class(mchrg_solver_type), allocatable :: slv
-   character(len=:), allocatable :: solver_choice
-   integer, allocatable :: cgmiter
-   real(wp), allocatable :: cgtol
-   character(len=32), allocatable :: cgmode
+   class(mchrg_solver_input), allocatable :: solver_input
 
-   !> Setup of the solver
-   solver_choice = 'CG'
-   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, slv)
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      call new_cg_solver(slv, solver_input)
+   end select
    
 
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
@@ -760,8 +738,7 @@ subroutine test_numsigma(error, mol, model)
 end subroutine test_numsigma
 
 subroutine test_numdqdr(error, mol, model)
-   use solver, only : mchrg_solver_type
-   use solver_factory, only : new_mchrg_solver
+
 
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
@@ -780,16 +757,14 @@ subroutine test_numdqdr(error, mol, model)
    real(wp), allocatable :: ql(:), qr(:), dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: numdr(:, :, :)
    
-   ! Added solver declaration
    class(mchrg_solver_type), allocatable :: slv
-   character(len=:), allocatable :: solver_choice
-   integer, allocatable :: cgmiter
-   real(wp), allocatable :: cgtol
-   character(len=32), allocatable :: cgmode
+   class(mchrg_solver_input), allocatable :: solver_input
 
-   !> Setup of the solver
-   solver_choice = 'CG'
-   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, slv)
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      call new_cg_solver(slv, solver_input)
+   end select
    
 
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
@@ -843,8 +818,6 @@ subroutine test_numdqdr(error, mol, model)
 end subroutine test_numdqdr
 
 subroutine test_numdqdL(error, mol, model)
-   use solver, only : mchrg_solver_type        ! Ensure these are accessible
-   use solver_factory, only : new_mchrg_solver
 
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
@@ -865,16 +838,14 @@ subroutine test_numdqdL(error, mol, model)
    real(wp), allocatable :: lattr(:, :), xyz(:, :), numdL(:, :, :)
    real(wp) :: eps(3, 3)
    
-   ! Declare the solver
    class(mchrg_solver_type), allocatable :: slv
-   character(len=:), allocatable :: solver_choice
-   integer, allocatable :: cgmiter
-   real(wp), allocatable :: cgtol
-   character(len=32), allocatable :: cgmode
+   class(mchrg_solver_input), allocatable :: solver_input
 
-   !> Setup of the solver
-   solver_choice = 'CG'
-   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, slv)
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      call new_cg_solver(slv, solver_input)
+   end select
 
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
       & qloc(mol%nat), dqlocdr(3, mol%nat, mol%nat), dqlocdL(3, 3, mol%nat), &
@@ -998,8 +969,7 @@ end subroutine test_eeq_dbdL_mb01
 
 subroutine test_eeq_q_mb01(error)
 
-   use solver, only : mchrg_solver_type
-   use solver_factory, only : new_mchrg_solver
+
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
@@ -1016,14 +986,13 @@ subroutine test_eeq_q_mb01(error)
    real(wp), allocatable :: qvec(:)
 
    class(mchrg_solver_type), allocatable :: slv
-   character(len=:), allocatable :: solver_choice
-   integer, allocatable :: cgmiter
-   real(wp), allocatable :: cgtol
-   character(len=32), allocatable :: cgmode
+   class(mchrg_solver_input), allocatable :: solver_input
 
-   !> Setup of the solver
-   solver_choice = 'CG'
-   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, slv)
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      call new_cg_solver(slv, solver_input)
+   end select
    
 
    call get_structure(mol, "MB16-43", "01")
@@ -1535,8 +1504,7 @@ subroutine test_eeqbc_dbdr_mb05(error)
 end subroutine test_eeqbc_dbdr_mb05
 
 subroutine test_eeqbc_q_mb01(error)
-   use solver, only : mchrg_solver_type
-   use solver_factory, only : new_mchrg_solver
+
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -1553,16 +1521,13 @@ subroutine test_eeqbc_q_mb01(error)
 
    real(wp), allocatable :: qvec(:)
    class(mchrg_solver_type), allocatable :: slv
-   character(len=32) :: solver_choice
-   integer :: cgmiter
-   real(wp) :: cgtol
-   character(len=32) :: cgmode
+   class(mchrg_solver_input), allocatable :: solver_input
 
-   !> Setup of the solver
-   solver_choice = 'CG'
-
-   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, slv)
-   
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      call new_cg_solver(slv, solver_input)
+   end select   
 
    call get_structure(mol, "MB16-43", "01")
    call new_eeqbc2025_model(mol, model, error)

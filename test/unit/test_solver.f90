@@ -3,13 +3,14 @@ module test_solver
    use mctc_env_testing, only: new_unittest, unittest_type, error_type, test_failed
    use mctc_io_structure, only: structure_type, new
    use mstore, only: get_structure
-   use multicharge_model, only: mchrg_model_type
+   use multicharge_model_type, only: mchrg_model_type
    use multicharge_model_eeqbc, only: eeqbc_model
    use multicharge_param, only: new_eeq2019_model, new_eeqbc2025_model
    use multicharge_model_cache, only: cache_container
    use multicharge_charge, only: get_charges, get_eeq_charges, get_eeqbc_charges
-   use solver, only : mchrg_solver_type
-   use solver_factory, only : new_mchrg_solver
+   use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
+   use multicharge_solver_direct, only : mchrg_solver_direct, new_direct_solver, direct_input
+   use multicharge_solver_cg, only : mchrg_solver_cg, new_cg_solver, cg_input
    implicit none
    private
 
@@ -52,19 +53,15 @@ subroutine test_cg_identity_2x2(error)
    logical, parameter :: cpq = .false.
    real(wp) :: amat(n, n), xvec(n), vrhs(n), ainv(n, n)
    real(wp) :: expected(n), residual
+   !> Solver variables
    class(mchrg_solver_type), allocatable :: solver
-   character(len=:), allocatable :: solver_choice
-   integer, allocatable :: cgmiter
-   real(wp), allocatable :: cgtol
-   character(len=32), allocatable :: cgmode
+   class(mchrg_solver_input), allocatable :: solver_input
 
-   ! Setup solver
-   solver_choice = "CG"
-   cgmiter = 1000
-   cgtol = 1.0e-12_wp
-   cgmode = "default"
-   
-   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, solver)
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      call new_cg_solver(solver, solver_input)
+   end select
 
    ! Identity matrix
    amat = 0.0_wp
@@ -82,9 +79,13 @@ subroutine test_cg_identity_2x2(error)
    if (allocated(error)) return
 
    ! Reference solution
-   solver_choice = "DIRECT"
+   deallocate(solver_input)
+   allocate(direct_input :: solver_input)
+   select type (solver_input)
+   type is (direct_input)
+      call new_direct_solver(solver, solver_input)
+   end select
    expected = [0.0_wp, 0.0_wp]
-   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, solver)
    call solver%solve(amat, xvec, expected, ainv, cpq, error=error)
    
    ! Check solution
@@ -108,20 +109,17 @@ subroutine test_cg_diagonal_5x5(error)
    logical, parameter :: cpq = .false.
    real(wp) :: amat(n, n), xvec(n), vrhs(n), ainv(n, n)
    real(wp) :: expected(n), diag(n)
-   class(mchrg_solver_type), allocatable :: solver
-   character(len=:), allocatable :: solver_choice
-   integer, allocatable :: cgmiter
-   real(wp), allocatable :: cgtol
-   character(len=32), allocatable :: cgmode
    integer :: i
 
-   ! Setup solver
-   solver_choice = "CG"
-   cgmiter = 1000
-   cgtol = 1.0e-12_wp
-   cgmode = "default"
-   
-   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, solver)
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: solver
+   class(mchrg_solver_input), allocatable :: solver_input
+
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      call new_cg_solver(solver, solver_input)
+   end select
 
    ! Diagonal matrix with increasing values
    amat = 0.0_wp
@@ -144,9 +142,13 @@ subroutine test_cg_diagonal_5x5(error)
    if (allocated(error)) return
 
    ! Reference solution
-   solver_choice = "DIRECT"
+   deallocate(solver_input)
+   allocate(direct_input :: solver_input)
+   select type (solver_input)
+   type is (direct_input)
+      call new_direct_solver(solver, solver_input)
+   end select
    expected = [0.0_wp, 0.0_wp, 0.0_wp, 0.0_wp, 0.0_wp]
-   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, solver)
    call solver%solve(amat, xvec, expected, ainv, cpq, error=error)
    
    ! Check solution
@@ -170,19 +172,16 @@ subroutine test_cg_spd_small(error)
    logical, parameter :: cpq = .false.
    real(wp) :: amat(n, n), xvec(n), vrhs(n), ainv(n, n)
    real(wp) :: expected(n), residual
-   class(mchrg_solver_type), allocatable :: solver
-   character(len=:), allocatable :: solver_choice
-   integer, allocatable :: cgmiter
-   real(wp), allocatable :: cgtol
-   character(len=32), allocatable :: cgmode
 
-   ! Setup solver
-   solver_choice = "CG"
-   cgmiter = 1000
-   cgtol = 1.0e-12_wp
-   cgmode = "default"
-   
-   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, solver)
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: solver
+   class(mchrg_solver_input), allocatable :: solver_input
+
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      call new_cg_solver(solver, solver_input)
+   end select
 
    ! SPD matrix: A = [4 1 1; 1 3 2; 1 2 4]
    amat = reshape([4.0_wp, 1.0_wp, 1.0_wp, &
@@ -223,20 +222,17 @@ subroutine test_cg_spd_medium(error)
    logical, parameter :: cpq = .false.
    real(wp) :: amat(n, n), xvec(n), vrhs(n), ainv(n, n)
    real(wp) :: expected(n), b(n), residual
-   class(mchrg_solver_type), allocatable :: solver
-   character(len=:), allocatable :: solver_choice
-   integer, allocatable :: cgmiter
-   real(wp), allocatable :: cgtol
-   character(len=32), allocatable :: cgmode
    integer :: i, j
 
-   ! Setup solver
-   solver_choice = "CG"
-   cgmiter = 2000
-   cgtol = 1.0e-10_wp
-   cgmode = "default"
-   
-   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, solver)
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: solver
+   class(mchrg_solver_input), allocatable :: solver_input
+
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      call new_cg_solver(solver, solver_input)
+   end select
 
    ! Create a simple SPD matrix: A = I + 0.1*E where E is matrix of ones
    amat = 0.0_wp
@@ -287,20 +283,17 @@ subroutine test_cg_spd_large(error)
    logical, parameter :: cpq = .false.
    real(wp), allocatable :: amat(:,:), xvec(:), vrhs(:), ainv(:,:)
    real(wp), allocatable :: expected(:), b(:)
-   class(mchrg_solver_type), allocatable :: solver
-   character(len=:), allocatable :: solver_choice
-   integer, allocatable :: cgmiter
-   real(wp), allocatable :: cgtol
-   character(len=32), allocatable :: cgmode
    integer :: i, j
 
-   ! Setup solver
-   solver_choice = "CG"
-   cgmiter = 5000
-   cgtol = 1.0e-8_wp
-   cgmode = "default"
-   
-   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, solver)
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: solver
+   class(mchrg_solver_input), allocatable :: solver_input
+
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      call new_cg_solver(solver, solver_input)
+   end select
 
    allocate(amat(n,n), xvec(n), vrhs(n), ainv(n,n), expected(n), b(n))
 
@@ -353,20 +346,17 @@ subroutine test_cg_ill_conditioned(error)
    logical, parameter :: cpq = .false.
    real(wp) :: amat(n, n), xvec(n), vrhs(n), ainv(n, n)
    real(wp) :: expected(n), b(n), residual
-   class(mchrg_solver_type), allocatable :: solver
-   character(len=:), allocatable :: solver_choice
-   integer, allocatable :: cgmiter
-   real(wp), allocatable :: cgtol
-   character(len=32), allocatable :: cgmode
    integer :: i
 
-   ! Setup solver
-   solver_choice = "CG"
-   cgmiter = 5000
-   cgtol = 1.0e-10_wp
-   cgmode = "default"
-   
-   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, solver)
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: solver
+   class(mchrg_solver_input), allocatable :: solver_input
+
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      call new_cg_solver(solver, solver_input)
+   end select
 
    ! Create an ill-conditioned diagonal matrix
    amat = 0.0_wp
@@ -411,20 +401,17 @@ subroutine test_cg_zero_rhs(error)
    logical, parameter :: cpq = .false.
    real(wp) :: amat(n, n), xvec(n), vrhs(n), ainv(n, n)
    real(wp) :: expected(n)
-   class(mchrg_solver_type), allocatable :: solver
-   character(len=:), allocatable :: solver_choice
-   integer, allocatable :: cgmiter
-   real(wp), allocatable :: cgtol
-   character(len=32), allocatable :: cgmode
    integer :: i
 
-   ! Setup solver
-   solver_choice = "CG"
-   cgmiter = 1000
-   cgtol = 1.0e-12_wp
-   cgmode = "default"
-   
-   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, solver)
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: solver
+   class(mchrg_solver_input), allocatable :: solver_input
+
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      call new_cg_solver(solver, solver_input)
+   end select
 
    ! Create a simple SPD matrix
    amat = 0.0_wp
@@ -466,22 +453,19 @@ subroutine test_cg_random_spd(error)
    logical, parameter :: cpq = .false.
    real(wp), allocatable :: amat(:,:), xvec(:), vrhs(:), ainv(:,:)
    real(wp), allocatable :: expected(:), b(:), temp(:,:)
-   class(mchrg_solver_type), allocatable :: solver
-   character(len=:), allocatable :: solver_choice
-   integer, allocatable :: cgmiter
-   real(wp), allocatable :: cgtol
-   character(len=32), allocatable :: cgmode
    integer :: i, j, k, seed_size
    integer, allocatable :: seed(:)
    real(wp) :: r, max_rel_error
 
-   ! Setup solver
-   solver_choice = "CG"
-   cgmiter = 3000
-   cgtol = 1.0e-8_wp
-   cgmode = "default"
-   
-   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, solver)
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: solver
+   class(mchrg_solver_input), allocatable :: solver_input
+
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      call new_cg_solver(solver, solver_input)
+   end select
 
    allocate(amat(n,n), xvec(n), vrhs(n), ainv(n,n), expected(n), b(n), temp(n,n))
 
@@ -557,13 +541,18 @@ subroutine test_cg_preconditioned(error)
    logical, parameter :: cpq = .false.
    real(wp) :: amat(n, n), xvec(n), vrhs(n), ainv(n, n)
    real(wp) :: expected(n), b(n)
-   class(mchrg_solver_type), allocatable :: solver
-   character(len=:), allocatable :: solver_choice
-   integer, allocatable :: cgmiter
-   real(wp), allocatable :: cgtol
-   character(len=32), allocatable :: cgmode
    integer :: i, j
    real(wp) :: residual_jacobi, residual_no_precond
+
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: solver
+   class(mchrg_solver_input), allocatable :: solver_input
+
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      call new_cg_solver(solver, solver_input)
+   end select
 
    ! Create an SPD matrix with varying diagonal
    amat = 0.0_wp
@@ -586,15 +575,7 @@ subroutine test_cg_preconditioned(error)
          b(i) = b(i) + amat(i,j) * expected(j)
       end do
    end do
-   
-   ! Test 1: With Jacobi preconditioner (default)
-   solver_choice = "CG"
-   cgmiter = 1000
-   cgtol = 1.0e-10_wp
-   cgmode = "default"
-   
-   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, solver)
-   
+      
    vrhs = 0.0_wp
    xvec = b
    

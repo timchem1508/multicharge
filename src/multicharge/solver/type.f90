@@ -1,13 +1,17 @@
-module solver
+module multicharge_solver_type
     use mctc_env, only: error_type, wp
-    use solver_type_cache, only: cache_container
+    use multicharge_solver_cache, only: cache_container
     implicit none
     private
 
-    public :: mchrg_solver_type
+    public :: mchrg_solver_type, mchrg_solver_input
 
     !> Abstract base type for Multi-charge solvers
     type, abstract :: mchrg_solver_type
+        !> Type of matrix availiable for solver
+        !> CG solver can use only positive definite matrices
+        !> Direct solver can use either type of matrix
+        logical, allocatable :: need_pos_def
     contains
        procedure(solve), deferred :: solve
        procedure(update), deferred :: update
@@ -35,4 +39,8 @@ module solver
         end subroutine update
     end interface
 
-end module solver
+    !> Solver input abstract type
+    type, abstract, public :: mchrg_solver_input
+    end type mchrg_solver_input
+
+end module multicharge_solver_type

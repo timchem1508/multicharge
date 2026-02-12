@@ -22,12 +22,14 @@ module multicharge_charge
    use mctc_env, only : error_type, wp
    use mctc_io, only : structure_type
    use mctc_cutoff, only : get_lattice_points
-   use multicharge_model, only : mchrg_model_type
+   use multicharge_model_type, only : mchrg_model_type
+   use multicharge_solver_type, only : mchrg_solver_type, mchrg_solver_input
+   use multicharge_solver_direct, only : mchrg_solver_direct, new_direct_solver, direct_input, direct_cache
+   use multicharge_solver_cg, only : mchrg_solver_cg, new_cg_solver, cg_input, cg_cache
+   use multicharge_solver_cache, only: mchrg_solver_cache
    use multicharge_param, only : new_eeq2019_model, new_eeqbc2025_model
 
    use multicharge_output, only: json_results
-   use solver, only: mchrg_solver_type
-   use solver_factory, only: new_mchrg_solver
 
    implicit none
    private
@@ -64,21 +66,13 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL)
 
    !> Solver variables
    class(mchrg_solver_type), allocatable :: solver
-   character(len=:), allocatable :: solver_choice
-   integer, allocatable :: cgmiter
-   real(wp), allocatable :: cgtol
-   character(len=32), allocatable :: cgmode
+   class(mchrg_solver_input), allocatable :: solver_input
 
-   if (.not. allocated(solver_choice)) solver_choice = "DIRECT" ! Default
-   write(*,*) "Solver type:    ", solver_choice
-   if (.not. allocated(cgmiter)) cgmiter = 1000 ! Default
-   write(*,*) "CG max iterations:", cgmiter
-   if (.not. allocated(cgtol)) cgtol = 1.0e-15_wp ! Default
-   write(*,*) "CG tolerance", cgtol
-   if (.not. allocated(cgmode)) cgmode = "default" ! Default
-   write(*,*) "CG mode:  ", cgmode
-
-   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, solver)
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      call new_cg_solver(solver, solver_input)
+   end select
 
    grad = present(dqdr) .and. present(dqdL)
 

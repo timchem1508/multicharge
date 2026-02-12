@@ -1,82 +1,76 @@
-module iterative_solver
+module multicharge_solver_cg
     use mctc_env, only: error_type, fatal_error, wp
     use multicharge_blas, only: symv, gemv
-    use solver_type_cache, only: cache_container
+    use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
+    use multicharge_solver_cache, only: cache_container, mchrg_solver_cache
     use print_matrix, only: write_vector, write_matrix
-    use solver, only: mchrg_solver_type
     implicit none
     private
 
-    public :: cg_solver_type
+    public :: mchrg_solver_cg, new_cg_solver, cg_input
+
+    type, extends(mchrg_solver_cache), public :: cg_cache
+    end type cg_cache
 
     !> Input for CG solver
-    type, public :: cg_input
+    type, extends(mchrg_solver_input) :: cg_input
         !> Maximal number of iterations
-        integer :: cgmiter
+        integer, allocatable :: cgmiter
         !> Convergence tolerance
-        real(wp) :: cgtol 
-        !> Preconditioner's mode 
-        character(len=32) :: cgmode 
+        real(wp), allocatable :: cgtol 
         !> Use iterative CG solver
         logical :: cg = .true.
    end type cg_input
 
-   interface cg_input
-      module procedure :: create_cg_input
-   end interface cg_input
-
     !> CG solver with Jacobi preconditioner
-    type, extends(mchrg_solver_type) :: cg_solver_type
-        integer :: cgmiter
-        real(wp) :: cgtol
-        character(len=32) :: cgmode
+    type, extends(mchrg_solver_type) :: mchrg_solver_cg
+        integer, allocatable :: cgmiter
+        real(wp), allocatable :: cgtol
     contains
         procedure :: solve
         procedure :: update
-    end type cg_solver_type
+    end type mchrg_solver_cg
 
 contains
 
-    function create_cg_input(cgmiter, cgtol, cgmode) result(self)
-        !> Maximal number of iterations
-        integer, intent(in), optional :: cgmiter
-        !> Convergence tolerance
-        real(wp), intent(in), optional :: cgtol 
-        !> Preconditioner's mode 
-        character(len=32), intent(in), optional :: cgmode 
-
-        type(cg_input) :: self
-
+    subroutine new_cg_solver(self, input)
+        class(mchrg_solver_type), allocatable, intent(out) :: self
+        type(cg_input), intent(in) :: input     
                 
-        !> Default iterative solver parameters
         real(wp), parameter :: cgmiter_def = 1000
         real(wp), parameter :: cgtol_def = 1.0e-15_wp
-        character(len=32), parameter :: cgmode_def = 'default'
 
-        if (present(cgmiter)) then
-            self%cgmiter = cgmiter
-        else
-            write(*,*) "Default maximum number of iterations is used: 1000 it."
-            self%cgmiter = cgmiter_def
-        end if
-        if (present(cgtol)) then
-            self%cgtol = cgtol
-        else 
-            write(*,*) "Default tolerance is used: 1.0e-15"
-            self%cgtol = cgtol_def
-        end if
-        if (present(cgmode)) then
-            self%cgmode = cgmode
-        else 
-            write(*,*) "Default iterative solver mode is chosen"
-            self%cgmode = cgmode_def
-        end if
+        ! 1. Allocate as the specific child type
+        allocate(mchrg_solver_cg :: self)
 
-    end function create_cg_input
+        ! 2. Use select type to access child-specific members
+        select type (self)
+        type is (mchrg_solver_cg)
+            
+            allocate(self%need_pos_def)
+            self%need_pos_def = .true.
+
+            if (allocated(input%cgmiter)) then
+                self%cgmiter = input%cgmiter
+            else
+                write(*,*) "Default maximum number of iterations is used: 1000 it."
+                self%cgmiter = int(cgmiter_def)
+            end if
+            
+            if (allocated(input%cgtol)) then
+                self%cgtol = input%cgtol
+            else 
+                write(*,*) "Default tolerance is used: 1.0e-15"
+                self%cgtol = cgtol_def
+            end if
+            
+        end select
+
+    end subroutine new_cg_solver
 
     !> Update method for CG solver
     subroutine update(self, cache, vrhs, ainv, cpq)
-        class(cg_solver_type), intent(in) :: self
+        class(mchrg_solver_cg), intent(in) :: self
         type(cache_container), intent(inout) :: cache
         real(wp), intent(inout) :: vrhs(:)
         real(wp), intent(out) :: ainv(:, :)
@@ -86,7 +80,7 @@ contains
 
     !> Solve method for CG solver
     subroutine solve(self, amat, xvec, vrhs, ainv, cpq, error)
-        class(cg_solver_type), intent(in) :: self
+        class(mchrg_solver_cg), intent(in) :: self
         !> A matrix of Ax=b system
         real(wp), intent(in)  :: amat(:, :)
         !> Initial search direction (b)
@@ -238,4 +232,4 @@ contains
     
     end subroutine solve
 
-end module iterative_solver
+end module multicharge_solver_cg

@@ -22,8 +22,8 @@ program main
       & new_eeqbc2025_model, get_multicharge_version, &
       & write_ascii_model, write_ascii_properties, write_ascii_results
    use multicharge_output, only: json_results
-   use solver, only: mchrg_solver_type
-   use solver_factory, only: new_mchrg_solver
+   use multicharge_solver, only: new_mchrg_solver, mchrg_solver_type, mchrg_solver_direct, &
+      & mchrg_solver_cg, mchrg_solver_input, cg_input, direct_input
 
    implicit none
    character(len=*), parameter :: prog_name = "multicharge"
@@ -36,6 +36,7 @@ program main
    type(structure_type) :: mol
    class(mchrg_model_type), allocatable :: model
    class(mchrg_solver_type), allocatable :: solver
+   class(mchrg_solver_input), allocatable :: solver_input
    logical :: grad, json, exist
    real(wp), parameter :: cn_max = 8.0_wp, cutoff = 25.0_wp
    real(wp), allocatable :: cn(:), rcov(:), trans(:, :)
@@ -47,14 +48,13 @@ program main
    real(wp), allocatable :: charge
 
    ! Solver configuration
-   character(len=:), allocatable :: solver_choice
-   integer, allocatable :: cgmiter
-   real(wp), allocatable :: cgtol
-   character(len=32), allocatable :: cgmode
+   !> Solver type: CG or DIRECT
+   integer, allocatable :: maxiter
+   real(wp), allocatable :: tol
 
    ! 1. Parse Arguments
    call get_arguments(input, model_id, input_format, grad, charge, json, &
-                      solver_choice, cgmiter, cgtol, cgmode, error)
+                      solver_input, error)
    if (allocated(error)) then
       write(error_unit, '(a)') error%message
       error stop
@@ -62,7 +62,7 @@ program main
 
    ! 2. Initialize Solver using factory with parsed arguments
 
-   call new_mchrg_solver(solver_choice, cgmiter, cgtol, cgmode, solver)
+   call new_mchrg_solver(solver, solver_input,  error)
 
    ! 3. Load Structure
    if (input == "-") then
@@ -173,10 +173,9 @@ subroutine help(unit)
       "-j, -json, --json", "Provide output in JSON format to the file 'multicharge.json'", &
       "-v, -version, --version", "Print program version and exit", &
       "-h, -help, --help", "Show this help message", &
-      "-s, -solver, --solver <type>", "Solver: 'CG' (Iterative) or 'DIRECT'", &
-      "-cgit <int>", "Max iterations (for CG)", &
-      "-cgtol <real>", "Tolerance (for CG)", &
-      "-cgmode <type>", "Mode of the CG solver"
+      "-s, -solver, --solver <type>", "Solver: 'CG' or 'DIRECT'", &
+      "-it, -maxiter, --maxiter <int>", "Max iterations", &
+      "-tol, -tolerance, --tolerance <real>", "Tolerance"
    write(unit, '(a)')
 
 end subroutine help
@@ -192,7 +191,7 @@ subroutine version(unit)
 end subroutine version
 
 subroutine get_arguments(input, model_id, input_format, grad, charge, &
-   & json, solver_choice, cgmiter, cgtol, cgmode, error)
+   & json, solver_input, error)
 
    !> Input file name
    character(len=:), allocatable :: input
@@ -207,19 +206,20 @@ subroutine get_arguments(input, model_id, input_format, grad, charge, &
    !> Charge
    real(wp), allocatable, intent(out) :: charge
    !> Solver args
-   !> Solver type: CG or DIRECT
-   character(len=:), allocatable, intent(out) :: solver_choice
-   !> Maximal number of the cg solver iterations
-   integer, allocatable, intent(out) :: cgmiter
-   !> CG solver tolerance
-   real(wp), allocatable, intent(out) :: cgtol
-   !> Type of the preconditioner: "default"=Jacobi 
-   character(len=32), allocatable, intent(out) :: cgmode
+   class(mchrg_solver_input), allocatable, intent(out) :: solver_input
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
    integer :: iarg, narg, iostat
    character(len=:), allocatable :: arg
+
+   !> Solver type: CG or DIRECT
+   character(len=:), allocatable :: solver_name
+   !> Maximal number of the cg solver iterations
+   integer :: maxiter
+   !> CG solver tolerance
+   real(wp) :: tol
+   !> Solver input
 
    model_id = mchrg_model%eeq2019
    grad = .false.
@@ -286,34 +286,38 @@ subroutine get_arguments(input, model_id, input_format, grad, charge, &
          json = .true.
       ! --- Solver Options ---
       case("-s", "-solver", "--solver")
-         if (allocated(solver_choice)) then
+         if (allocated(solver_input)) then
             call fatal_error(error, "Cannot use multiple solvers")
             exit
          end if
-         iarg = iarg + 1; call get_argument(iarg, solver_choice)
-         if (.not. allocated(solver_choice)) then
-            call fatal_error(error, "Missing solver type")
-            exit
+         iarg = iarg + 1; call get_argument(iarg, solver_name)
+         if (solver_name == "DIRECT" .or. solver_name == "direct" .or. solver_name == "LAPACK" ) then
+            allocate(direct_input :: solver_input)
          end if
-      case("-cgit")
+         if (solver_name == "CG" .or. solver_name == "cg" .or. solver_name == "iterative") then
+            allocate(cg_input :: solver_input)
+         end if
+         if (.not. allocated(solver_input)) then
+            allocate(direct_input :: solver_input)
+         end if
+      case("-it", "-maxiter", "--maxiter")
          iarg = iarg + 1; call get_argument(iarg, arg)
-         allocate(cgmiter)
-         read(arg, *, iostat=iostat) cgmiter
-         if (iostat /= 0) call fatal_error(error, "Invalid max-iter")
-      case("-cgtol")
+         read(arg, *, iostat=iostat) maxiter
+         if (iostat /= 0) call fatal_error(error, "Invalid maximal number of iterations")
+      case("-tol", "-tolerance", "--tolerance")
          iarg = iarg + 1; call get_argument(iarg, arg)
-         allocate(cgtol)
-         read(arg, *, iostat=iostat) cgtol
+         read(arg, *, iostat=iostat) tol
          if (iostat /= 0) call fatal_error(error, "Invalid tolerance")
-      case("-cgmode")
-         iarg = iarg + 1; call get_argument(iarg, arg)
-         allocate(cgmode)
-         read(arg, *, iostat=iostat) cgmode
-         if (iostat /= 0) call fatal_error(error, "Invalid iterative solver mode")
       ! ----------------------
       end select
    end do
 
+   select type(solver_input)
+
+   type is (cg_input)
+      solver_input%cgmiter = maxiter
+      solver_input%cgtol = tol
+   end select
 
    
    if (.not. allocated(input)) then
