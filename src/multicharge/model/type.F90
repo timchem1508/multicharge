@@ -247,17 +247,14 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
 
    if (add_lagr .eqv. .true.) then
       ! Unconstrained solution: extract only the charges
-      call slv%solve(amat, xvec, vrhs, ainv, cpq, error)
+      if (slv%need_pos_def .eqv. .false.) then
+         call slv%solve(amat, xvec, vrhs, ainv, cpq, error)
 
-      if (present(qvec)) then
-         qvec(:) = vrhs(:mol%nat)
-      end if
-
-      if (present(energy)) then
-         jmat = amat(:mol%nat, :mol%nat)
-         call symv(jmat, vrhs(:mol%nat), xvec(:mol%nat), &
-            & alpha=0.5_wp, beta=-1.0_wp, uplo='l')
-         energy(:) = energy(:) + vrhs(:mol%nat) * xvec(:mol%nat)
+         if (present(qvec)) then
+            qvec(:) = vrhs(:mol%nat)
+         end if
+      else
+         call fatal_error(error, "multicharge/model/type.f90: The CG solver does not support not positive definite matrix.")
       end if
    else
       ! Constrained system
@@ -299,14 +296,14 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       vrhs(ndim) = lambda
 
       !call write_vector(vrhs, "Solved VRHS Vector")
+   end if
 
       if (present(energy)) then
-         ! Extract only the Coulomb matrix without the constraints
+         jmat = amat(:mol%nat, :mol%nat)
          call symv(jmat, vrhs(:mol%nat), xvec(:mol%nat), &
             & alpha=0.5_wp, beta=-1.0_wp, uplo='l')
          energy(:) = energy(:) + vrhs(:mol%nat) * xvec(:mol%nat)
       end if
-   end if
 
       ! Allocate and get amat derivatives
       if (grad .or. cpq) then

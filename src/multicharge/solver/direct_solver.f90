@@ -29,12 +29,8 @@ module multicharge_solver_direct
 contains
 
     subroutine new_direct_solver(self, input)
-        class(mchrg_solver_type), allocatable, intent(out) :: self
+        class(mchrg_solver_type), intent(out) :: self
         type(direct_input), intent(in) :: input 
-        
-        !type(mchrg_solver_direct), allocatable :: self
-
-        allocate(mchrg_solver_direct :: self)
 
         self%need_pos_def = .false.
 

@@ -52,6 +52,10 @@ program main
    integer, allocatable :: maxiter
    real(wp), allocatable :: tol
 
+   ! Timer var 
+   real :: start, finish
+
+   call cpu_time(start)
    ! 1. Parse Arguments
    call get_arguments(input, model_id, input_format, grad, charge, json, &
                       solver_input, error)
@@ -151,6 +155,9 @@ program main
          "[Info] JSON dump of results written to '"//json_output//"'"
    end if
 
+   call cpu_time(finish)
+   print '("Time = ",f6.3," seconds.")',finish-start
+
 contains
 
 subroutine help(unit)
@@ -216,9 +223,9 @@ subroutine get_arguments(input, model_id, input_format, grad, charge, &
    !> Solver type: CG or DIRECT
    character(len=:), allocatable :: solver_name
    !> Maximal number of the cg solver iterations
-   integer :: maxiter
+   integer, allocatable :: maxiter
    !> CG solver tolerance
-   real(wp) :: tol
+   real(wp), allocatable :: tol
    !> Solver input
 
    model_id = mchrg_model%eeq2019
@@ -286,7 +293,7 @@ subroutine get_arguments(input, model_id, input_format, grad, charge, &
          json = .true.
       ! --- Solver Options ---
       case("-s", "-solver", "--solver")
-         if (allocated(solver_input)) then
+         if (allocated(solver_name)) then
             call fatal_error(error, "Cannot use multiple solvers")
             exit
          end if
@@ -297,14 +304,13 @@ subroutine get_arguments(input, model_id, input_format, grad, charge, &
          if (solver_name == "CG" .or. solver_name == "cg" .or. solver_name == "iterative") then
             allocate(cg_input :: solver_input)
          end if
-         if (.not. allocated(solver_input)) then
-            allocate(direct_input :: solver_input)
-         end if
       case("-it", "-maxiter", "--maxiter")
+         allocate(maxiter)
          iarg = iarg + 1; call get_argument(iarg, arg)
          read(arg, *, iostat=iostat) maxiter
          if (iostat /= 0) call fatal_error(error, "Invalid maximal number of iterations")
       case("-tol", "-tolerance", "--tolerance")
+         allocate(tol)
          iarg = iarg + 1; call get_argument(iarg, arg)
          read(arg, *, iostat=iostat) tol
          if (iostat /= 0) call fatal_error(error, "Invalid tolerance")
@@ -312,11 +318,19 @@ subroutine get_arguments(input, model_id, input_format, grad, charge, &
       end select
    end do
 
-   select type(solver_input)
+   if (.not. allocated(solver_name)) then
+      allocate(direct_input :: solver_input)
+      write(*,*) "Use the direct solver as a default"
+   end if
 
+   select type(solver_input)
    type is (cg_input)
+   if (allocated(maxiter)) then
       solver_input%cgmiter = maxiter
+   end if
+   if (allocated(tol)) then
       solver_input%cgtol = tol
+   end if
    end select
 
    

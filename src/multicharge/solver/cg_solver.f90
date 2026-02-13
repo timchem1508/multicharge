@@ -34,24 +34,20 @@ module multicharge_solver_cg
 contains
 
     subroutine new_cg_solver(self, input)
-        class(mchrg_solver_type), allocatable, intent(out) :: self
+        class(mchrg_solver_type), intent(out) :: self
         type(cg_input), intent(in) :: input     
                 
         real(wp), parameter :: cgmiter_def = 1000
         real(wp), parameter :: cgtol_def = 1.0e-15_wp
 
-        ! 1. Allocate as the specific child type
-        allocate(mchrg_solver_cg :: self)
-
-        ! 2. Use select type to access child-specific members
         select type (self)
         type is (mchrg_solver_cg)
             
-            allocate(self%need_pos_def)
             self%need_pos_def = .true.
 
             if (allocated(input%cgmiter)) then
                 self%cgmiter = input%cgmiter
+                write(*,*) "Maximum iterations:", self%cgmiter 
             else
                 write(*,*) "Default maximum number of iterations is used: 1000 it."
                 self%cgmiter = int(cgmiter_def)
@@ -59,6 +55,7 @@ contains
             
             if (allocated(input%cgtol)) then
                 self%cgtol = input%cgtol
+                write(*,*) "Tolerance:", self%cgtol
             else 
                 write(*,*) "Default tolerance is used: 1.0e-15"
                 self%cgtol = cgtol_def

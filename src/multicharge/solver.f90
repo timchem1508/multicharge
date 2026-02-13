@@ -30,14 +30,24 @@ subroutine new_mchrg_solver(solver, input, error)
 
     select type (input)
     type is (cg_input)
-        call new_cg_solver(solver, input)
-        return
+        block
+            class(mchrg_solver_cg), allocatable :: tmp
+            allocate(tmp)
+            call new_cg_solver(tmp, input)
+            call move_alloc(tmp, solver)
+        end block
     type is (direct_input)
-        call new_direct_solver(solver, input)
+        block
+            class(mchrg_solver_direct), allocatable :: tmp
+            allocate(tmp)
+            call new_direct_solver(tmp, input)
+            call move_alloc(tmp, solver)
+        end block
+    class default 
+        call fatal_error(error, "multicharge/solver.f90: Unknown solver input type")
         return
     end select
-
-    call fatal_error(error, "multicharge/solver.f90: Unknown solver type.")
+    
 end subroutine new_mchrg_solver
 
 end module multicharge_solver
