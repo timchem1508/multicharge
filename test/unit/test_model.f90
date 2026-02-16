@@ -26,7 +26,8 @@ module test_model
    use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
    use multicharge_solver_direct, only : mchrg_solver_direct, new_direct_solver, direct_input
    use multicharge_solver_cg, only : mchrg_solver_cg, new_cg_solver, cg_input
-   use multicharge_solver, only: new_mchrg_solver
+   use multicharge_solver, only: new_mchrg_solver, mchrg_solver_type, mchrg_solver_direct, &
+      & mchrg_solver_cg, mchrg_solver_input, cg_input, direct_input
    implicit none
    private
 
@@ -37,7 +38,8 @@ module test_model
    real(wp), parameter :: thr2 = sqrt(epsilon(1.0_wp))
 
    !> Global solver choice: 1 = direct, 2 = CG
-   integer, parameter :: solver_choice = 2
+   integer, parameter :: solver_choice = 1
+
 
 contains
 
@@ -120,23 +122,28 @@ subroutine test_dadr(error, mol, model)
    !> Solver variables
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
+   integer, allocatable :: maxiter
+   real(wp), allocatable :: tol
 
-   ! Select solver based on global choice
+  ! Select solver based on global choice
    if (solver_choice == 2) then
       allocate(cg_input :: solver_input)
-      select type(solver_input)
-      type is (cg_input)
-         solver_input%cgmiter = 1000
-         solver_input%cgtol   = 1.0e-15_wp
-      end select
-   else
+   end if 
+   if (solver_choice == 1) then
       allocate(direct_input :: solver_input)
-      select type(solver_input)
-      type is (direct_input)
-         ! no specific settings needed
-      end select
    end if
-   call new_mchrg_solver(slv, solver_input, error)
+
+   select type(solver_input)
+   type is (cg_input)
+   if (allocated(maxiter)) then
+      solver_input%cgmiter = maxiter
+   end if
+   if (allocated(tol)) then
+      solver_input%cgtol = tol
+   end if
+   end select
+
+   call new_mchrg_solver(slv, solver_input,  error)
 
    allocate (cache)
 
@@ -264,23 +271,28 @@ subroutine test_dadL(error, mol, model)
    !> Solver variables
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
+   integer, allocatable :: maxiter
+   real(wp), allocatable :: tol
 
-   ! Select solver based on global choice
+  ! Select solver based on global choice
    if (solver_choice == 2) then
       allocate(cg_input :: solver_input)
-      select type(solver_input)
-      type is (cg_input)
-         solver_input%cgmiter = 1000
-         solver_input%cgtol   = 1.0e-15_wp
-      end select
-   else
+   end if 
+   if (solver_choice == 1) then
       allocate(direct_input :: solver_input)
-      select type(solver_input)
-      type is (direct_input)
-         ! no specific settings needed
-      end select
    end if
-   call new_mchrg_solver(slv, solver_input, error)
+
+   select type(solver_input)
+   type is (cg_input)
+   if (allocated(maxiter)) then
+      solver_input%cgmiter = maxiter
+   end if
+   if (allocated(tol)) then
+      solver_input%cgtol = tol
+   end if
+   end select
+
+   call new_mchrg_solver(slv, solver_input,  error)
    
    allocate (cache)
 
@@ -371,23 +383,28 @@ subroutine test_dbdr(error, mol, model)
    !> Solver variables
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
+   integer, allocatable :: maxiter
+   real(wp), allocatable :: tol
 
-   ! Select solver based on global choice
+  ! Select solver based on global choice
    if (solver_choice == 2) then
       allocate(cg_input :: solver_input)
-      select type(solver_input)
-      type is (cg_input)
-         solver_input%cgmiter = 1000
-         solver_input%cgtol   = 1.0e-15_wp
-      end select
-   else
+   end if 
+   if (solver_choice == 1) then
       allocate(direct_input :: solver_input)
-      select type(solver_input)
-      type is (direct_input)
-         ! no specific settings needed
-      end select
    end if
-   call new_mchrg_solver(slv, solver_input, error)
+
+   select type(solver_input)
+   type is (cg_input)
+   if (allocated(maxiter)) then
+      solver_input%cgmiter = maxiter
+   end if
+   if (allocated(tol)) then
+      solver_input%cgtol = tol
+   end if
+   end select
+
+   call new_mchrg_solver(slv, solver_input,  error)
 
    allocate (cache)
    
@@ -463,23 +480,28 @@ subroutine test_dbdL(error, mol, model)
    !> Solver variables
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
+   integer, allocatable :: maxiter
+   real(wp), allocatable :: tol
 
-   ! Select solver based on global choice
+  ! Select solver based on global choice
    if (solver_choice == 2) then
       allocate(cg_input :: solver_input)
-      select type(solver_input)
-      type is (cg_input)
-         solver_input%cgmiter = 1000
-         solver_input%cgtol   = 1.0e-15_wp
-      end select
-   else
+   end if 
+   if (solver_choice == 1) then
       allocate(direct_input :: solver_input)
-      select type(solver_input)
-      type is (direct_input)
-         ! no specific settings needed
-      end select
    end if
-   call new_mchrg_solver(slv, solver_input, error)
+
+   select type(solver_input)
+   type is (cg_input)
+   if (allocated(maxiter)) then
+      solver_input%cgmiter = maxiter
+   end if
+   if (allocated(tol)) then
+      solver_input%cgtol = tol
+   end if
+   end select
+
+   call new_mchrg_solver(slv, solver_input,  error)
 
    allocate (cache)
 
@@ -564,23 +586,28 @@ subroutine gen_test(error, mol, model, qref, eref)
    !> Solver variables
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
+   integer, allocatable :: maxiter
+   real(wp), allocatable :: tol
 
-   ! Select solver based on global choice
+  ! Select solver based on global choice
    if (solver_choice == 2) then
       allocate(cg_input :: solver_input)
-      select type(solver_input)
-      type is (cg_input)
-         solver_input%cgmiter = 1000
-         solver_input%cgtol   = 1.0e-15_wp
-      end select
-   else
+   end if 
+   if (solver_choice == 1) then
       allocate(direct_input :: solver_input)
-      select type(solver_input)
-      type is (direct_input)
-         ! no specific settings needed
-      end select
    end if
-   call new_mchrg_solver(slv, solver_input, error)
+
+   select type(solver_input)
+   type is (cg_input)
+   if (allocated(maxiter)) then
+      solver_input%cgmiter = maxiter
+   end if
+   if (allocated(tol)) then
+      solver_input%cgtol = tol
+   end if
+   end select
+
+   call new_mchrg_solver(slv, solver_input,  error)
    
    allocate (cn(mol%nat), qloc(mol%nat))
 
@@ -647,23 +674,28 @@ subroutine test_numgrad(error, mol, model)
    !> Solver variables
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
+   integer, allocatable :: maxiter
+   real(wp), allocatable :: tol
 
-   ! Select solver based on global choice
+  ! Select solver based on global choice
    if (solver_choice == 2) then
       allocate(cg_input :: solver_input)
-      select type(solver_input)
-      type is (cg_input)
-         solver_input%cgmiter = 1000
-         solver_input%cgtol   = 1.0e-15_wp
-      end select
-   else
+   end if 
+   if (solver_choice == 1) then
       allocate(direct_input :: solver_input)
-      select type(solver_input)
-      type is (direct_input)
-         ! no specific settings needed
-      end select
    end if
-   call new_mchrg_solver(slv, solver_input, error)
+
+   select type(solver_input)
+   type is (cg_input)
+   if (allocated(maxiter)) then
+      solver_input%cgmiter = maxiter
+   end if
+   if (allocated(tol)) then
+      solver_input%cgtol = tol
+   end if
+   end select
+
+   call new_mchrg_solver(slv, solver_input,  error)
    
 
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
@@ -746,24 +778,28 @@ subroutine test_numsigma(error, mol, model)
    !> Solver variables
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
+   integer, allocatable :: maxiter
+   real(wp), allocatable :: tol
 
-   ! Select solver based on global choice
+  ! Select solver based on global choice
    if (solver_choice == 2) then
       allocate(cg_input :: solver_input)
-      select type(solver_input)
-      type is (cg_input)
-         solver_input%cgmiter = 1000
-         solver_input%cgtol   = 1.0e-15_wp
-      end select
-   else
+   end if 
+   if (solver_choice == 1) then
       allocate(direct_input :: solver_input)
-      select type(solver_input)
-      type is (direct_input)
-         ! no specific settings needed
-      end select
    end if
-   call new_mchrg_solver(slv, solver_input, error)
-   
+
+   select type(solver_input)
+   type is (cg_input)
+   if (allocated(maxiter)) then
+      solver_input%cgmiter = maxiter
+   end if
+   if (allocated(tol)) then
+      solver_input%cgtol = tol
+   end if
+   end select
+
+   call new_mchrg_solver(slv, solver_input,  error)
 
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
       & qloc(mol%nat), dqlocdr(3, mol%nat, mol%nat), dqlocdL(3, 3, mol%nat), &
@@ -847,10 +883,6 @@ subroutine test_numdqdr(error, mol, model)
 
    ! Force direct solver for derivative tests
    allocate(direct_input :: solver_input)
-   select type(solver_input)
-   type is (direct_input)
-      ! no specific settings needed
-   end select
    call new_mchrg_solver(slv, solver_input, error)
    
 
@@ -887,7 +919,6 @@ subroutine test_numdqdr(error, mol, model)
    call model%ncoord%get_coordination_number(mol, trans, cn, dcndr, dcndL)
    call model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
 
-   ! Inserted slv as 2nd argument
    call model%solve(mol, slv, error, cn, qloc, dcndr, dcndL, &
       & dqlocdr, dqlocdL, dqdr=dqdr, dqdL=dqdL)
    if (allocated(error)) return
@@ -931,10 +962,6 @@ subroutine test_numdqdL(error, mol, model)
 
    ! Force direct solver for derivative tests
    allocate(direct_input :: solver_input)
-   select type(solver_input)
-   type is (direct_input)
-      ! no specific settings needed
-   end select
    call new_mchrg_solver(slv, solver_input, error)
 
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
@@ -1078,23 +1105,28 @@ subroutine test_eeq_q_mb01(error)
    !> Solver variables
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
+   integer, allocatable :: maxiter
+   real(wp), allocatable :: tol
 
-   ! Select solver based on global choice
+  ! Select solver based on global choice
    if (solver_choice == 2) then
       allocate(cg_input :: solver_input)
-      select type(solver_input)
-      type is (cg_input)
-         solver_input%cgmiter = 1000
-         solver_input%cgtol   = 1.0e-15_wp
-      end select
-   else
+   end if 
+   if (solver_choice == 1) then
       allocate(direct_input :: solver_input)
-      select type(solver_input)
-      type is (direct_input)
-         ! no specific settings needed
-      end select
    end if
-   call new_mchrg_solver(slv, solver_input, error)
+
+   select type(solver_input)
+   type is (cg_input)
+   if (allocated(maxiter)) then
+      solver_input%cgmiter = maxiter
+   end if
+   if (allocated(tol)) then
+      solver_input%cgtol = tol
+   end if
+   end select
+
+   call new_mchrg_solver(slv, solver_input,  error)
    
    call get_structure(mol, "MB16-43", "01")
    call new_eeq2019_model(mol, model, error)
@@ -1609,26 +1641,32 @@ subroutine test_eeqbc_q_mb01(error)
       & 4.83486124588080E-1_wp]
 
    real(wp), allocatable :: qvec(:)
+
    !> Solver variables
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
+   integer, allocatable :: maxiter
+   real(wp), allocatable :: tol
 
-   ! Select solver based on global choice
+  ! Select solver based on global choice
    if (solver_choice == 2) then
       allocate(cg_input :: solver_input)
-      select type(solver_input)
-      type is (cg_input)
-         solver_input%cgmiter = 1000
-         solver_input%cgtol   = 1.0e-15_wp
-      end select
-   else
+   end if 
+   if (solver_choice == 1) then
       allocate(direct_input :: solver_input)
-      select type(solver_input)
-      type is (direct_input)
-         ! no specific settings needed
-      end select
    end if
-   call new_mchrg_solver(slv, solver_input, error)
+
+   select type(solver_input)
+   type is (cg_input)
+   if (allocated(maxiter)) then
+      solver_input%cgmiter = maxiter
+   end if
+   if (allocated(tol)) then
+      solver_input%cgtol = tol
+   end if
+   end select
+
+   call new_mchrg_solver(slv, solver_input,  error)
 
    call get_structure(mol, "MB16-43", "01")
    call new_eeqbc2025_model(mol, model, error)
@@ -1639,7 +1677,6 @@ subroutine test_eeqbc_q_mb01(error)
    allocate (qvec(mol%nat), source=0.0_wp)
    call get_charges(model, mol, error, qvec)
    if (allocated(error)) return
-   write(*, *) "Threshold check for get_charges wrapper", thr1
 
    if (any(abs(qvec - ref) > thr1)) then
       call test_failed(error, "Partial charges do not match")

@@ -192,7 +192,7 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    integer :: ic, jc, iat, ndim
    logical :: grad, cpq, dcn
    integer(ik), allocatable :: ipiv(:)
-   
+   logical :: add_lagr = .true.   
 
    ! Variables for solving ES equation
    real(wp), allocatable :: xvec(:), vrhs(:), amat(:, :)
@@ -208,7 +208,7 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    real(wp), allocatable :: vvec(:), uvec(:)
    ! Sums of the v and u vector elements
    real(wp) :: uvecsum, vvecsum
-   real(wp), allocatable :: chivec(:), unitvec(:)
+   real(wp), allocatable :: chivec(:), unitvec(:), jinv(:, :)
    real(wp) :: lambda ! Lagrangian factor for constraint
 
    ! Calculate gradient if the respective arrays are present
@@ -222,7 +222,13 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
 
    !call write_vector(qloc, "Local charges in solve")
    
-   ndim = mol%nat + 1
+   if (slv%need_pos_def .eqv. .true.) then
+      ndim = mol%nat 
+      add_lagr = .false.
+   else
+      ndim = mol%nat + 1
+      add_lagr = .true.
+   end if
 
    ! Setup the Coulomb matrix 
    allocate(amat(ndim, ndim))
@@ -233,15 +239,13 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    call self%get_xvec(mol, cache, xvec)
 
    ! Get RHS of ES equation
-   allocate(vrhs(ndim))
-   allocate(ainv(ndim, ndim))
 
    vrhs = xvec
    ainv = amat
 
    allocate(jmat(mol%nat, mol%nat))
 
-   if (slv%need_pos_def .eqv. .false.) then
+   if (add_lagr .eqv. .true.) then
 
       ! Solving the linear system
       call slv%solve(amat, xvec, vrhs, ainv, cpq, error)
@@ -265,6 +269,7 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       allocate(uvec(mol%nat))
       allocate(chivec(mol%nat))
       allocate(unitvec(mol%nat))
+      allocate(jinv(mol%nat, mol%nat))
 
       ! J matrix and chi vector for the constrained system
       jmat = amat(:mol%nat, :mol%nat)
@@ -277,10 +282,10 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       unitvec = 1.0_wp
 
       ! Constrained response: J*u = 1
-      call slv%solve(amat=jmat, xvec=unitvec, vrhs=uvec, cpq=cpq, error=error)
+      call slv%solve(amat=jmat, xvec=unitvec, vrhs=uvec, ainv=jinv, cpq=cpq, error=error)
       !call write_vector(uvec, "u vector")
       ! Constrained response: J*u = chi
-      call slv%solve(amat=jmat, xvec=chivec, vrhs=vvec, cpq=cpq, error=error)
+      call slv%solve(amat=jmat, xvec=chivec, vrhs=vvec, ainv=jinv, cpq=cpq, error=error)
       !call write_vector(vvec, "v vector")
 
       uvecsum = sum(uvec)
@@ -297,10 +302,12 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       end if
 
       deallocate(vrhs)
-      allocate(vrhs(ndim))
+      allocate(vrhs(mol%nat+1))
 
       vrhs(:mol%nat) = -vvec - lambda * uvec
-      vrhs(ndim) = lambda
+      vrhs(mol%nat+1) = lambda
+
+      ainv = jinv
 
       ! Electrostatic energy
       if (present(energy)) then

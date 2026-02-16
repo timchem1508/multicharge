@@ -145,8 +145,10 @@ subroutine get_xvec(self, mol, cache, xvec)
       tmp = self%kcnchi(izp) / sqrt(ptr%cn(iat) + reg)
       xvec(iat) = -self%chi(izp) + tmp * ptr%cn(iat)
    end do
-   xvec(mol%nat + 1) = mol%charge
-
+   if (size(xvec) > mol%nat) then
+      xvec(mol%nat + 1) = mol%charge
+   end if
+   
 end subroutine get_xvec
 
 subroutine get_xvec_derivs(self, mol, cache, dxdr, dxdL)
@@ -235,9 +237,11 @@ subroutine get_amat_0d(self, mol, amat)
    deallocate(amat_local)
    !$omp end parallel
 
-   amat(mol%nat + 1, 1:mol%nat + 1) = 1.0_wp
-   amat(1:mol%nat + 1, mol%nat + 1) = 1.0_wp
-   amat(mol%nat + 1, mol%nat + 1) = 0.0_wp
+   if (size(amat, 1) > mol%nat) then
+      amat(mol%nat + 1, 1:mol%nat + 1) = 1.0_wp
+      amat(1:mol%nat + 1, mol%nat + 1) = 1.0_wp
+      amat(mol%nat + 1, mol%nat + 1) = 0.0_wp
+   end if
 
 end subroutine get_amat_0d
 
@@ -300,9 +304,11 @@ subroutine get_amat_3d(self, mol, wsc, alpha, amat)
    deallocate(amat_local)
    !$omp end parallel
 
-   amat(mol%nat + 1, 1:mol%nat + 1) = 1.0_wp
-   amat(1:mol%nat + 1, mol%nat + 1) = 1.0_wp
-   amat(mol%nat + 1, mol%nat + 1) = 0.0_wp
+   if (size(amat, 1) > mol%nat) then
+      amat(mol%nat + 1, 1:mol%nat + 1) = 1.0_wp
+      amat(1:mol%nat + 1, mol%nat + 1) = 1.0_wp
+      amat(mol%nat + 1, mol%nat + 1) = 0.0_wp
+   end if
 
 end subroutine get_amat_3d
 

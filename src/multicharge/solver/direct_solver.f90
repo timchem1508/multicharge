@@ -41,7 +41,7 @@ contains
         class(mchrg_solver_direct), intent(in) :: self
         type(cache_container), intent(inout) :: cache
         real(wp), intent(inout) :: vrhs(:)
-        real(wp), intent(out), optional :: ainv(:, :)
+        real(wp), intent(out) :: ainv(:, :)
         logical, intent(in), optional :: cpq
         
     end subroutine update
@@ -56,7 +56,7 @@ contains
         !> Initial guess and solution
         real(wp), intent(inout) :: vrhs(:)
         !> Inverse A-matrix and coupled perturbed logical
-        real(wp), intent(out), optional :: ainv(:, :)
+        real(wp), intent(out) :: ainv(:, :)
         logical, intent(in), optional :: cpq
         type(error_type), allocatable, intent(out) :: error
     

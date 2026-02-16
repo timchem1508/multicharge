@@ -277,8 +277,10 @@ subroutine get_xvec(self, mol, cache, xvec)
       ptr%xtmp(iat) = -self%chi(izp) + self%kcnchi(izp) * ptr%cn(iat) &
          & + self%kqchi(izp) * ptr%qloc(iat)
    end do
-   ptr%xtmp(mol%nat + 1) = mol%charge
-
+   if (size(ptr%xtmp) > mol%nat) then
+      ptr%xtmp(mol%nat + 1) = mol%charge
+   end if
+   
    call gemv(ptr%cmat, ptr%xtmp, xvec)
 
    if (any(mol%periodic)) then
@@ -523,9 +525,11 @@ subroutine get_amat_0d(self, mol, cn, qloc, cmat, amat)
    deallocate(amat_local)
    !$omp end parallel
 
-   amat(mol%nat + 1, 1:mol%nat + 1) = 1.0_wp
-   amat(1:mol%nat + 1, mol%nat + 1) = 1.0_wp
-   amat(mol%nat + 1, mol%nat + 1) = 0.0_wp
+   if (size(amat, 1) > mol%nat) then
+      amat(mol%nat + 1, 1:mol%nat + 1) = 1.0_wp
+      amat(1:mol%nat + 1, mol%nat + 1) = 1.0_wp
+      amat(mol%nat + 1, mol%nat + 1) = 0.0_wp
+   end if
 
 end subroutine get_amat_0d
 
@@ -599,10 +603,11 @@ subroutine get_amat_3d(self, mol, wsc, cn, qloc, cmat, amat)
    deallocate(amat_local)
    !$omp end parallel
 
-   amat(mol%nat + 1, 1:mol%nat + 1) = 1.0_wp
-   amat(1:mol%nat + 1, mol%nat + 1) = 1.0_wp
-   amat(mol%nat + 1, mol%nat + 1) = 0.0_wp
-
+   if (size(amat, 1) > mol%nat) then
+      amat(mol%nat + 1, 1:mol%nat + 1) = 1.0_wp
+      amat(1:mol%nat + 1, mol%nat + 1) = 1.0_wp
+      amat(mol%nat + 1, mol%nat + 1) = 0.0_wp
+   end if
 end subroutine get_amat_3d
 
 subroutine get_amat_dir_3d(rij, gam, trans, kbc, rvdw, capi, capj, amat)

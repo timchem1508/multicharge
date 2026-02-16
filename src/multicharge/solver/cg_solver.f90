@@ -70,7 +70,7 @@ contains
         class(mchrg_solver_cg), intent(in) :: self
         type(cache_container), intent(inout) :: cache
         real(wp), intent(inout) :: vrhs(:)
-        real(wp), intent(out), optional :: ainv(:, :)
+        real(wp), intent(out) :: ainv(:, :)
         logical, intent(in), optional :: cpq
 
     end subroutine update
@@ -86,7 +86,7 @@ contains
         real(wp), intent(inout) :: vrhs(:)
         !> Inverse matrix and coupled perturbed logical 
         !> not used in CG but required by the interface
-        real(wp), intent(out), optional :: ainv(:, :)
+        real(wp), intent(out) :: ainv(:, :)
         logical, intent(in), optional :: cpq
         type(error_type), allocatable, intent(out) :: error
         

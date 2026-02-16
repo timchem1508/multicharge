@@ -24,7 +24,7 @@ module multicharge_solver_type
             real(wp), intent(in)  :: amat(:, :)
             real(wp), intent(in)  :: xvec(:)
             real(wp), intent(inout) :: vrhs(:)
-            real(wp), intent(out), optional :: ainv(:, :)
+            real(wp), intent(out) :: ainv(:, :)
             logical, intent(in), optional :: cpq
             type(error_type), allocatable, intent(out) :: error
         end subroutine solve
@@ -34,7 +34,7 @@ module multicharge_solver_type
             class(mchrg_solver_type), intent(in) :: self
             type(cache_container), intent(inout) :: cache
             real(wp), intent(inout) :: vrhs(:)
-            real(wp), intent(out), optional :: ainv(:, :)
+            real(wp), intent(out) :: ainv(:, :)
             logical, intent(in), optional :: cpq
         end subroutine update
     end interface
