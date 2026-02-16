@@ -48,16 +48,15 @@ program main
    real(wp), allocatable :: charge
 
    ! Solver configuration
-   !> Solver type: CG or DIRECT
    integer, allocatable :: maxiter
    real(wp), allocatable :: tol
 
-   ! Timer var 
+   ! Timer variables 
    real :: start, finish
    real :: start_solver, finish_solver
 
-   call cpu_time(start)
    ! 1. Parse Arguments
+   call cpu_time(start)
    call get_arguments(input, model_id, input_format, grad, charge, json, &
                       solver_input, error)
    if (allocated(error)) then
@@ -65,7 +64,7 @@ program main
       error stop
    end if
 
-   ! 2. Initialize Solver using factory with parsed arguments
+   ! 2. Initialize Solver using the solver_input
 
    call new_mchrg_solver(solver, solver_input,  error)
 
@@ -182,7 +181,7 @@ subroutine help(unit)
       "-m, -model, --model <model>", "Choose the charge model", &
       "-i, -input, --input <format>", "Hint for the format of the input file", &
       "-c, -charge, --charge <value>", "Set the molecular charge", &
-      "-g, -grad, --grad", "Evaluate molecular gradient and virial", &
+      "-g, -grad, --grad", "Evaluate molecular gradient and virial. Only for the direct solver.", &
       "-j, -json, --json", "Provide output in JSON format to the file 'multicharge.json'", &
       "-v, -version, --version", "Print program version and exit", &
       "-h, -help, --help", "Show this help message", &
@@ -327,6 +326,11 @@ subroutine get_arguments(input, model_id, input_format, grad, charge, &
    if (.not. allocated(solver_name)) then
       allocate(direct_input :: solver_input)
       write(*,*) "Use the direct solver as a default"
+   end if
+
+   if (grad .eqv. .true.) then
+      if (allocated(solver_input)) deallocate(solver_input)
+      allocate(direct_input :: solver_input)
    end if
 
    select type(solver_input)

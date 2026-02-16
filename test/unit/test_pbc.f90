@@ -27,6 +27,7 @@ module test_pbc
    use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
    use multicharge_solver_direct, only : mchrg_solver_direct, new_direct_solver, direct_input
    use multicharge_solver_cg, only : mchrg_solver_cg, new_cg_solver, cg_input
+   use multicharge_solver, only: new_mchrg_solver
    implicit none
    private
 
@@ -35,6 +36,9 @@ module test_pbc
    real(wp), parameter :: thr = 100 * epsilon(1.0_wp)
    real(wp), parameter :: thr1 = 1.0e5_wp*epsilon(1.0_wp)
    real(wp), parameter :: thr2 = sqrt(epsilon(1.0_wp))
+
+   !> Global solver choice: 1 = direct, 2 = CG
+   integer, parameter :: solver_choice = 2
 
 contains
 
@@ -69,8 +73,6 @@ end subroutine collect_pbc
 
 subroutine gen_test(error, mol, model, qref, eref)
 
-
-
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
 
@@ -92,28 +94,25 @@ subroutine gen_test(error, mol, model, qref, eref)
    real(wp), allocatable :: qvec(:)
 
    !> Solver variables
-   real(wp), allocatable :: tol
-   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
-   allocate(cg_input :: solver_input)
-   select type(solver_input)
-   type is (cg_input)
-      if (allocated(maxiter)) then
-         solver_input%cgmiter = maxiter
-      end if
-      if (allocated(tol)) then
-         solver_input%cgtol = tol
-      end if
-         block
-             class(mchrg_solver_cg), allocatable :: tmp
-             allocate(tmp)
-             call new_cg_solver(tmp, solver_input)
-             call move_alloc(tmp, slv)
-         end block
-   end select
-   
+   ! Select solver based on global choice
+   if (solver_choice == 2) then
+      allocate(cg_input :: solver_input)
+      select type(solver_input)
+      type is (cg_input)
+         solver_input%cgmiter = 1000
+         solver_input%cgtol   = 1.0e-15_wp
+      end select
+   else
+      allocate(direct_input :: solver_input)
+      select type(solver_input)
+      type is (direct_input)
+         ! no specific settings needed
+      end select
+   end if
+   call new_mchrg_solver(slv, solver_input, error)
 
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
@@ -162,8 +161,6 @@ end subroutine gen_test
 
 subroutine test_numgrad(error, mol, model)
 
-
-
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
@@ -183,28 +180,25 @@ subroutine test_numgrad(error, mol, model)
    real(wp) :: er, el
 
    !> Solver variables
-   real(wp), allocatable :: tol
-   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
-   allocate(cg_input :: solver_input)
-   select type(solver_input)
-   type is (cg_input)
-      if (allocated(maxiter)) then
-         solver_input%cgmiter = maxiter
-      end if
-      if (allocated(tol)) then
-         solver_input%cgtol = tol
-      end if
-         block
-             class(mchrg_solver_cg), allocatable :: tmp
-             allocate(tmp)
-             call new_cg_solver(tmp, solver_input)
-             call move_alloc(tmp, slv)
-         end block
-   end select
-   
+   ! Select solver based on global choice
+   if (solver_choice == 2) then
+      allocate(cg_input :: solver_input)
+      select type(solver_input)
+      type is (cg_input)
+         solver_input%cgmiter = 1000
+         solver_input%cgtol   = 1.0e-15_wp
+      end select
+   else
+      allocate(direct_input :: solver_input)
+      select type(solver_input)
+      type is (direct_input)
+         ! no specific settings needed
+      end select
+   end if
+   call new_mchrg_solver(slv, solver_input, error)
 
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
@@ -263,8 +257,6 @@ end subroutine test_numgrad
 
 subroutine test_numsigma(error, mol, model)
 
-
-
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
@@ -285,28 +277,25 @@ subroutine test_numsigma(error, mol, model)
    real(wp) :: er, el, eps(3, 3), numsigma(3, 3), sigma(3, 3), lattice(3, 3)
 
    !> Solver variables
-   real(wp), allocatable :: tol
-   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
-   allocate(cg_input :: solver_input)
-   select type(solver_input)
-   type is (cg_input)
-      if (allocated(maxiter)) then
-         solver_input%cgmiter = maxiter
-      end if
-      if (allocated(tol)) then
-         solver_input%cgtol = tol
-      end if
-         block
-             class(mchrg_solver_cg), allocatable :: tmp
-             allocate(tmp)
-             call new_cg_solver(tmp, solver_input)
-             call move_alloc(tmp, slv)
-         end block
-   end select
-
+   ! Select solver based on global choice
+   if (solver_choice == 2) then
+      allocate(cg_input :: solver_input)
+      select type(solver_input)
+      type is (cg_input)
+         solver_input%cgmiter = 1000
+         solver_input%cgtol   = 1.0e-15_wp
+      end select
+   else
+      allocate(direct_input :: solver_input)
+      select type(solver_input)
+      type is (direct_input)
+         ! no specific settings needed
+      end select
+   end if
+   call new_mchrg_solver(slv, solver_input, error)
 
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
@@ -376,8 +365,6 @@ end subroutine test_numsigma
 
 subroutine test_dbdr(error, mol, model)
 
-
-
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
@@ -397,28 +384,26 @@ subroutine test_dbdr(error, mol, model)
    type(cache_container), allocatable :: cache
 
    !> Solver variables
-   real(wp), allocatable :: tol
-   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
-   allocate(cg_input :: solver_input)
-   select type(solver_input)
-   type is (cg_input)
-      if (allocated(maxiter)) then
-         solver_input%cgmiter = maxiter
-      end if
-      if (allocated(tol)) then
-         solver_input%cgtol = tol
-      end if
-         block
-             class(mchrg_solver_cg), allocatable :: tmp
-             allocate(tmp)
-             call new_cg_solver(tmp, solver_input)
-             call move_alloc(tmp, slv)
-         end block
-   end select
-   
+   ! Select solver based on global choice
+   if (solver_choice == 2) then
+      allocate(cg_input :: solver_input)
+      select type(solver_input)
+      type is (cg_input)
+         solver_input%cgmiter = 1000
+         solver_input%cgtol   = 1.0e-15_wp
+      end select
+   else
+      allocate(direct_input :: solver_input)
+      select type(solver_input)
+      type is (direct_input)
+         ! no specific settings needed
+      end select
+   end if
+   call new_mchrg_solver(slv, solver_input, error)
+
    allocate(cache)
 
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
@@ -474,8 +459,6 @@ end subroutine test_dbdr
 
 subroutine test_dbdL(error, mol, model)
 
-
-
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
@@ -499,28 +482,26 @@ subroutine test_dbdL(error, mol, model)
    type(cache_container), allocatable :: cache
 
    !> Solver variables
-   real(wp), allocatable :: tol
-   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
-   allocate(cg_input :: solver_input)
-   select type(solver_input)
-   type is (cg_input)
-      if (allocated(maxiter)) then
-         solver_input%cgmiter = maxiter
-      end if
-      if (allocated(tol)) then
-         solver_input%cgtol = tol
-      end if
-         block
-             class(mchrg_solver_cg), allocatable :: tmp
-             allocate(tmp)
-             call new_cg_solver(tmp, solver_input)
-             call move_alloc(tmp, slv)
-         end block
-   end select
-   
+   ! Select solver based on global choice
+   if (solver_choice == 2) then
+      allocate(cg_input :: solver_input)
+      select type(solver_input)
+      type is (cg_input)
+         solver_input%cgmiter = 1000
+         solver_input%cgtol   = 1.0e-15_wp
+      end select
+   else
+      allocate(direct_input :: solver_input)
+      select type(solver_input)
+      type is (direct_input)
+         ! no specific settings needed
+      end select
+   end if
+   call new_mchrg_solver(slv, solver_input, error)
+
    allocate(cache)
 
    allocate(cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
@@ -613,28 +594,26 @@ subroutine test_dadr(error, mol, model)
    type(cache_container), allocatable :: cache
 
    !> Solver variables
-   real(wp), allocatable :: tol
-   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
-   allocate(cg_input :: solver_input)
-   select type(solver_input)
-   type is (cg_input)
-      if (allocated(maxiter)) then
-         solver_input%cgmiter = maxiter
-      end if
-      if (allocated(tol)) then
-         solver_input%cgtol = tol
-      end if
-         block
-             class(mchrg_solver_cg), allocatable :: tmp
-             allocate(tmp)
-             call new_cg_solver(tmp, solver_input)
-             call move_alloc(tmp, slv)
-         end block
-   end select
-   
+   ! Select solver based on global choice
+   if (solver_choice == 2) then
+      allocate(cg_input :: solver_input)
+      select type(solver_input)
+      type is (cg_input)
+         solver_input%cgmiter = 1000
+         solver_input%cgtol   = 1.0e-15_wp
+      end select
+   else
+      allocate(direct_input :: solver_input)
+      select type(solver_input)
+      type is (direct_input)
+         ! no specific settings needed
+      end select
+   end if
+   call new_mchrg_solver(slv, solver_input, error)
+
    allocate(cache)
 
    allocate(cn(mol%nat), qloc(mol%nat), amatr(mol%nat + 1, mol%nat + 1), amatl(mol%nat + 1, mol%nat + 1), &
@@ -716,8 +695,6 @@ end subroutine test_dadr
 
 subroutine test_dadL(error, mol, model)
 
-
-
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
@@ -741,28 +718,26 @@ subroutine test_dadL(error, mol, model)
    type(cache_container), allocatable :: cache
 
    !> Solver variables
-   real(wp), allocatable :: tol
-   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
-   allocate(cg_input :: solver_input)
-   select type(solver_input)
-   type is (cg_input)
-      if (allocated(maxiter)) then
-         solver_input%cgmiter = maxiter
-      end if
-      if (allocated(tol)) then
-         solver_input%cgtol = tol
-      end if
-         block
-             class(mchrg_solver_cg), allocatable :: tmp
-             allocate(tmp)
-             call new_cg_solver(tmp, solver_input)
-             call move_alloc(tmp, slv)
-         end block
-   end select
-   
+   ! Select solver based on global choice
+   if (solver_choice == 2) then
+      allocate(cg_input :: solver_input)
+      select type(solver_input)
+      type is (cg_input)
+         solver_input%cgmiter = 1000
+         solver_input%cgtol   = 1.0e-15_wp
+      end select
+   else
+      allocate(direct_input :: solver_input)
+      select type(solver_input)
+      type is (direct_input)
+         ! no specific settings needed
+      end select
+   end if
+   call new_mchrg_solver(slv, solver_input, error)
+
    allocate(cache)
 
    allocate(cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
@@ -841,8 +816,6 @@ end subroutine test_dadL
 
 subroutine test_numdqdr(error, mol, model)
 
-
-
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
@@ -861,28 +834,17 @@ subroutine test_numdqdr(error, mol, model)
    real(wp), allocatable :: numdr(:, :, :)
 
    !> Solver variables
-   real(wp), allocatable :: tol
-   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
-   allocate(cg_input :: solver_input)
+   ! Force direct solver for derivative tests
+   allocate(direct_input :: solver_input)
    select type(solver_input)
-   type is (cg_input)
-      if (allocated(maxiter)) then
-         solver_input%cgmiter = maxiter
-      end if
-      if (allocated(tol)) then
-         solver_input%cgtol = tol
-      end if
-         block
-             class(mchrg_solver_cg), allocatable :: tmp
-             allocate(tmp)
-             call new_cg_solver(tmp, solver_input)
-             call move_alloc(tmp, slv)
-         end block
+   type is (direct_input)
+      ! no specific settings needed
    end select
-   
+   call new_mchrg_solver(slv, solver_input, error)
+
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
    allocate(cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
@@ -932,8 +894,6 @@ end subroutine test_numdqdr
 
 subroutine test_numdqdL(error, mol, model)
 
-
-
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
@@ -952,30 +912,19 @@ subroutine test_numdqdL(error, mol, model)
    real(wp), allocatable :: qr(:), ql(:), dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: lattr(:, :), xyz(:, :), numdL(:, :, :)
    real(wp) :: eps(3, 3), lattice(3, 3)
-   
+
    !> Solver variables
-   real(wp), allocatable :: tol
-   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
-   allocate(cg_input :: solver_input)
+   ! Force direct solver for derivative tests
+   allocate(direct_input :: solver_input)
    select type(solver_input)
-   type is (cg_input)
-      if (allocated(maxiter)) then
-         solver_input%cgmiter = maxiter
-      end if
-      if (allocated(tol)) then
-         solver_input%cgtol = tol
-      end if
-         block
-             class(mchrg_solver_cg), allocatable :: tmp
-             allocate(tmp)
-             call new_cg_solver(tmp, solver_input)
-             call move_alloc(tmp, slv)
-         end block
+   type is (direct_input)
+      ! no specific settings needed
    end select
-   
+   call new_mchrg_solver(slv, solver_input, error)
+
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
    allocate(cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &

@@ -203,14 +203,12 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    type(cache_container), allocatable :: cache
    real(wp), allocatable :: trans(:, :)
 
-   !> Add Lagrangian constraint
-   logical :: add_lagr
-   !> Resonse vectors: vvec = electronegativity response (Jv=chi)
-   !> uvec = constraint response (Ju=1)
+   ! Resonse vectors: vvec = electronegativity response (Jv=chi)
+   ! uvec = constraint response (Ju=1)
    real(wp), allocatable :: vvec(:), uvec(:)
-   !> Sums of the v and u vector elements
+   ! Sums of the v and u vector elements
    real(wp) :: uvecsum, vvecsum
-   real(wp), allocatable :: chivec(:), jinv(:, :), unitvec(:)
+   real(wp), allocatable :: chivec(:), unitvec(:)
    real(wp) :: lambda ! Lagrangian factor for constraint
 
    ! Calculate gradient if the respective arrays are present
@@ -218,17 +216,15 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    grad = present(gradient) .and. present(sigma) .and. dcn
    cpq = present(dqdr) .and. present(dqdL) .and. dcn
 
-   ! Unconstrained solution flag
-   add_lagr = .false.
-
    ! Update cache
    allocate(cache)
    call self%update(mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
 
    !call write_vector(qloc, "Local charges in solve")
-
-   ! Setup the Coulomb matrix
+   
    ndim = mol%nat + 1
+
+   ! Setup the Coulomb matrix 
    allocate(amat(ndim, ndim))
    call self%get_coulomb_matrix(mol, cache, amat)
 
@@ -245,36 +241,46 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
 
    allocate(jmat(mol%nat, mol%nat))
 
-   if (add_lagr .eqv. .true.) then
-      ! Unconstrained solution: extract only the charges
-      if (slv%need_pos_def .eqv. .false.) then
-         call slv%solve(amat, xvec, vrhs, ainv, cpq, error)
+   if (slv%need_pos_def .eqv. .false.) then
 
-         if (present(qvec)) then
-            qvec(:) = vrhs(:mol%nat)
-         end if
-      else
-         call fatal_error(error, "multicharge/model/type.f90: The CG solver does not support not positive definite matrix.")
+      ! Solving the linear system
+      call slv%solve(amat, xvec, vrhs, ainv, cpq, error)
+
+      ! Partial charges
+      if (present(qvec)) then
+         qvec(:) = vrhs(:mol%nat)
       end if
+
+      ! Electrostatic energy
+      if (present(energy)) then
+         jmat = amat(:mol%nat, :mol%nat)
+         call symv(jmat, vrhs(:mol%nat), xvec(:mol%nat), &
+            & alpha=0.5_wp, beta=-1.0_wp, uplo='l')
+         energy(:) = energy(:) + vrhs(:mol%nat) * xvec(:mol%nat)
+      end if
+
    else
       ! Constrained system
       allocate(vvec(mol%nat))  
       allocate(uvec(mol%nat))
-      allocate(jinv(mol%nat, mol%nat))
       allocate(chivec(mol%nat))
       allocate(unitvec(mol%nat))
-      ! Constrained response: J*u = 1
+
+      ! J matrix and chi vector for the constrained system
       jmat = amat(:mol%nat, :mol%nat)
       chivec = -xvec(:mol%nat)
+
       do ic = 1, mol%nat
          uvec(ic)= 1.0_wp/jmat(ic, ic) + tiny(1.0_wp)
          vvec(ic) = chivec(ic)/jmat(ic, ic) + tiny(1.0_wp)
       end do
-
       unitvec = 1.0_wp
-      call slv%solve(jmat, unitvec, uvec, jinv, cpq, error)
+
+      ! Constrained response: J*u = 1
+      call slv%solve(amat=jmat, xvec=unitvec, vrhs=uvec, cpq=cpq, error=error)
       !call write_vector(uvec, "u vector")
-      call slv%solve(jmat, chivec, vvec, jinv, cpq, error)
+      ! Constrained response: J*u = chi
+      call slv%solve(amat=jmat, xvec=chivec, vrhs=vvec, cpq=cpq, error=error)
       !call write_vector(vvec, "v vector")
 
       uvecsum = sum(uvec)
@@ -283,7 +289,8 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       ! Lagrangian multiplier
       lambda = - (mol%charge + vvecsum) / uvecsum
       !write(*,*) "Lagrangian multiplier:", lambda
-      ! Final charges
+
+      ! Partial charges
       if (present(qvec)) then
          qvec(:) = -vvec - lambda * uvec
          !call write_vector(qvec, "Constrained charges")
@@ -295,15 +302,15 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       vrhs(:mol%nat) = -vvec - lambda * uvec
       vrhs(ndim) = lambda
 
-      !call write_vector(vrhs, "Solved VRHS Vector")
-   end if
-
+      ! Electrostatic energy
       if (present(energy)) then
-         jmat = amat(:mol%nat, :mol%nat)
          call symv(jmat, vrhs(:mol%nat), xvec(:mol%nat), &
             & alpha=0.5_wp, beta=-1.0_wp, uplo='l')
          energy(:) = energy(:) + vrhs(:mol%nat) * xvec(:mol%nat)
       end if
+
+      !call write_vector(vrhs, "Solved VRHS Vector")
+   end if
 
       ! Allocate and get amat derivatives
       if (grad .or. cpq) then

@@ -41,7 +41,7 @@ contains
         class(mchrg_solver_direct), intent(in) :: self
         type(cache_container), intent(inout) :: cache
         real(wp), intent(inout) :: vrhs(:)
-        real(wp), intent(out) :: ainv(:, :)
+        real(wp), intent(out), optional :: ainv(:, :)
         logical, intent(in), optional :: cpq
         
     end subroutine update
@@ -49,10 +49,14 @@ contains
     !> Solve method for direct solver
     subroutine solve(self, amat, xvec, vrhs, ainv, cpq, error)
         class(mchrg_solver_direct), intent(in) :: self
+        !> A matrix of Ax=b system
         real(wp), intent(in)  :: amat(:, :)
+        !> Initial search direction (b)
         real(wp), intent(in)  :: xvec(:)
+        !> Initial guess and solution
         real(wp), intent(inout) :: vrhs(:)
-        real(wp), intent(out) :: ainv(:, :)
+        !> Inverse A-matrix and coupled perturbed logical
+        real(wp), intent(out), optional :: ainv(:, :)
         logical, intent(in), optional :: cpq
         type(error_type), allocatable, intent(out) :: error
     

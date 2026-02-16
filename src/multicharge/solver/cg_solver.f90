@@ -70,7 +70,7 @@ contains
         class(mchrg_solver_cg), intent(in) :: self
         type(cache_container), intent(inout) :: cache
         real(wp), intent(inout) :: vrhs(:)
-        real(wp), intent(out) :: ainv(:, :)
+        real(wp), intent(out), optional :: ainv(:, :)
         logical, intent(in), optional :: cpq
 
     end subroutine update
@@ -84,7 +84,9 @@ contains
         real(wp), intent(in)  :: xvec(:)
         !> Initial guess and solution
         real(wp), intent(inout) :: vrhs(:)
-        real(wp), intent(out) :: ainv(:, :)
+        !> Inverse matrix and coupled perturbed logical 
+        !> not used in CG but required by the interface
+        real(wp), intent(out), optional :: ainv(:, :)
         logical, intent(in), optional :: cpq
         type(error_type), allocatable, intent(out) :: error
         
@@ -136,8 +138,7 @@ contains
             return
         end if
 
-        ainv = amat
-        !call write_vector(vrhs, "Initial VRHS Vector")
+        ! call write_vector(vrhs, "Initial VRHS Vector")
         ! Prepare/cache
         allocate(cache)
         call self%update(cache, vrhs, ainv, cpq)
