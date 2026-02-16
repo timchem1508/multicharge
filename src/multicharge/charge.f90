@@ -65,13 +65,26 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL)
    real(wp), allocatable :: trans(:, :)
 
    !> Solver variables
+   real(wp), allocatable :: tol
+   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
 
    allocate(cg_input :: solver_input)
-   select type (solver_input)
+   select type(solver_input)
    type is (cg_input)
-      call new_cg_solver(solver, solver_input)
+      if (allocated(maxiter)) then
+         solver_input%cgmiter = maxiter
+      end if
+      if (allocated(tol)) then
+         solver_input%cgtol = tol
+      end if
+         block
+             class(mchrg_solver_cg), allocatable :: tmp
+             allocate(tmp)
+             call new_cg_solver(tmp, solver_input)
+             call move_alloc(tmp, solver)
+         end block
    end select
 
    grad = present(dqdr) .and. present(dqdL)

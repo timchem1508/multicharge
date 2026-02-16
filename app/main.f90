@@ -54,6 +54,7 @@ program main
 
    ! Timer var 
    real :: start, finish
+   real :: start_solver, finish_solver
 
    call cpu_time(start)
    ! 1. Parse Arguments
@@ -136,8 +137,12 @@ program main
    call model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
    
    ! 5. Run Solve (Solver instance passed implicitly via argument or model)
+   call cpu_time(start_solver)
+
    call model%solve(mol, solver, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
       & energy, gradient, sigma, qvec, dqdr, dqdL)
+
+   call cpu_time(finish_solver)
 
    if (allocated(error)) then
       write(error_unit, '(a)') error%message
@@ -154,9 +159,10 @@ program main
       write(output_unit, '(a)') &
          "[Info] JSON dump of results written to '"//json_output//"'"
    end if
-
    call cpu_time(finish)
-   print '("Time = ",f6.3," seconds.")',finish-start
+
+   print '("Solver CPU Time : ",f6.3," seconds.")',finish_solver-start_solver
+   print '("Total CPU Time : ",f6.3," seconds.")',finish-start
 
 contains
 

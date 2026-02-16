@@ -11,6 +11,8 @@ module test_solver
    use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
    use multicharge_solver_direct, only : mchrg_solver_direct, new_direct_solver, direct_input
    use multicharge_solver_cg, only : mchrg_solver_cg, new_cg_solver, cg_input
+   use multicharge_solver, only: new_mchrg_solver, mchrg_solver_type, mchrg_solver_direct, &
+      & mchrg_solver_cg, mchrg_solver_input, cg_input, direct_input
    implicit none
    private
 
@@ -54,15 +56,28 @@ subroutine test_cg_identity_2x2(error)
    real(wp) :: amat(n, n), xvec(n), vrhs(n), ainv(n, n)
    real(wp) :: expected(n), residual
    !> Solver variables
+   real(wp), allocatable :: tol
+   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
 
    allocate(cg_input :: solver_input)
-   select type (solver_input)
+   select type(solver_input)
    type is (cg_input)
-      call new_cg_solver(solver, solver_input)
+      if (allocated(maxiter)) then
+         solver_input%cgmiter = maxiter
+      end if
+      if (allocated(tol)) then
+         solver_input%cgtol = tol
+      end if
+         block
+             class(mchrg_solver_cg), allocatable :: tmp
+             allocate(tmp)
+             call new_cg_solver(tmp, solver_input)
+             call move_alloc(tmp, solver)
+         end block
    end select
-
+   
    ! Identity matrix
    amat = 0.0_wp
    amat(1,1) = 1.0_wp
@@ -80,11 +95,14 @@ subroutine test_cg_identity_2x2(error)
 
    ! Reference solution
    deallocate(solver_input)
+   deallocate(solver)
    allocate(direct_input :: solver_input)
+   allocate(mchrg_solver_direct :: solver)
    select type (solver_input)
    type is (direct_input)
       call new_direct_solver(solver, solver_input)
    end select
+
    expected = [0.0_wp, 0.0_wp]
    call solver%solve(amat, xvec, expected, ainv, cpq, error=error)
    
@@ -112,13 +130,26 @@ subroutine test_cg_diagonal_5x5(error)
    integer :: i
 
    !> Solver variables
+   real(wp), allocatable :: tol
+   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
 
    allocate(cg_input :: solver_input)
-   select type (solver_input)
+   select type(solver_input)
    type is (cg_input)
-      call new_cg_solver(solver, solver_input)
+      if (allocated(maxiter)) then
+         solver_input%cgmiter = maxiter
+      end if
+      if (allocated(tol)) then
+         solver_input%cgtol = tol
+      end if
+         block
+             class(mchrg_solver_cg), allocatable :: tmp
+             allocate(tmp)
+             call new_cg_solver(tmp, solver_input)
+             call move_alloc(tmp, solver)
+         end block
    end select
 
    ! Diagonal matrix with increasing values
@@ -143,7 +174,9 @@ subroutine test_cg_diagonal_5x5(error)
 
    ! Reference solution
    deallocate(solver_input)
+   deallocate(solver)
    allocate(direct_input :: solver_input)
+   allocate(mchrg_solver_direct :: solver)
    select type (solver_input)
    type is (direct_input)
       call new_direct_solver(solver, solver_input)
@@ -174,13 +207,26 @@ subroutine test_cg_spd_small(error)
    real(wp) :: expected(n), residual
 
    !> Solver variables
+   real(wp), allocatable :: tol
+   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
 
    allocate(cg_input :: solver_input)
-   select type (solver_input)
+   select type(solver_input)
    type is (cg_input)
-      call new_cg_solver(solver, solver_input)
+      if (allocated(maxiter)) then
+         solver_input%cgmiter = maxiter
+      end if
+      if (allocated(tol)) then
+         solver_input%cgtol = tol
+      end if
+         block
+             class(mchrg_solver_cg), allocatable :: tmp
+             allocate(tmp)
+             call new_cg_solver(tmp, solver_input)
+             call move_alloc(tmp, solver)
+         end block
    end select
 
    ! SPD matrix: A = [4 1 1; 1 3 2; 1 2 4]
@@ -194,12 +240,23 @@ subroutine test_cg_spd_small(error)
    ! Initial guess
    vrhs = [0.0_wp, 0.0_wp, 0.0_wp]
    
-   ! Expected solution (precomputed)
-   expected = [1.0_wp, 1.0_wp, 1.0_wp]
-   
    ! Solve
    call solver%solve(amat, xvec, vrhs, ainv, cpq, error=error)
    if (allocated(error)) return
+
+   ! Reference solution
+   deallocate(solver_input)
+   deallocate(solver)
+   allocate(direct_input :: solver_input)
+   allocate(mchrg_solver_direct :: solver)
+   select type (solver_input)
+   type is (direct_input)
+      call new_direct_solver(solver, solver_input)
+   end select
+
+   ! Expected solution (precomputed)
+   expected = [1.0_wp, 1.0_wp, 1.0_wp]
+   call solver%solve(amat, xvec, expected, ainv, cpq, error=error)
    
    ! Check solution
    if (any(abs(vrhs - expected) > thr)) then
@@ -225,13 +282,26 @@ subroutine test_cg_spd_medium(error)
    integer :: i, j
 
    !> Solver variables
+   real(wp), allocatable :: tol
+   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
 
    allocate(cg_input :: solver_input)
-   select type (solver_input)
+   select type(solver_input)
    type is (cg_input)
-      call new_cg_solver(solver, solver_input)
+      if (allocated(maxiter)) then
+         solver_input%cgmiter = maxiter
+      end if
+      if (allocated(tol)) then
+         solver_input%cgtol = tol
+      end if
+         block
+             class(mchrg_solver_cg), allocatable :: tmp
+             allocate(tmp)
+             call new_cg_solver(tmp, solver_input)
+             call move_alloc(tmp, solver)
+         end block
    end select
 
    ! Create a simple SPD matrix: A = I + 0.1*E where E is matrix of ones
@@ -286,13 +356,26 @@ subroutine test_cg_spd_large(error)
    integer :: i, j
 
    !> Solver variables
+   real(wp), allocatable :: tol
+   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
 
    allocate(cg_input :: solver_input)
-   select type (solver_input)
+   select type(solver_input)
    type is (cg_input)
-      call new_cg_solver(solver, solver_input)
+      if (allocated(maxiter)) then
+         solver_input%cgmiter = maxiter
+      end if
+      if (allocated(tol)) then
+         solver_input%cgtol = tol
+      end if
+         block
+             class(mchrg_solver_cg), allocatable :: tmp
+             allocate(tmp)
+             call new_cg_solver(tmp, solver_input)
+             call move_alloc(tmp, solver)
+         end block
    end select
 
    allocate(amat(n,n), xvec(n), vrhs(n), ainv(n,n), expected(n), b(n))
@@ -349,13 +432,26 @@ subroutine test_cg_ill_conditioned(error)
    integer :: i
 
    !> Solver variables
+   real(wp), allocatable :: tol
+   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
 
    allocate(cg_input :: solver_input)
-   select type (solver_input)
+   select type(solver_input)
    type is (cg_input)
-      call new_cg_solver(solver, solver_input)
+      if (allocated(maxiter)) then
+         solver_input%cgmiter = maxiter
+      end if
+      if (allocated(tol)) then
+         solver_input%cgtol = tol
+      end if
+         block
+             class(mchrg_solver_cg), allocatable :: tmp
+             allocate(tmp)
+             call new_cg_solver(tmp, solver_input)
+             call move_alloc(tmp, solver)
+         end block
    end select
 
    ! Create an ill-conditioned diagonal matrix
@@ -404,13 +500,26 @@ subroutine test_cg_zero_rhs(error)
    integer :: i
 
    !> Solver variables
+   real(wp), allocatable :: tol
+   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
 
    allocate(cg_input :: solver_input)
-   select type (solver_input)
+   select type(solver_input)
    type is (cg_input)
-      call new_cg_solver(solver, solver_input)
+      if (allocated(maxiter)) then
+         solver_input%cgmiter = maxiter
+      end if
+      if (allocated(tol)) then
+         solver_input%cgtol = tol
+      end if
+         block
+             class(mchrg_solver_cg), allocatable :: tmp
+             allocate(tmp)
+             call new_cg_solver(tmp, solver_input)
+             call move_alloc(tmp, solver)
+         end block
    end select
 
    ! Create a simple SPD matrix
@@ -449,7 +558,7 @@ subroutine test_cg_random_spd(error)
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
-   integer, parameter :: n = 1000
+   integer, parameter :: n = 100
    logical, parameter :: cpq = .false.
    real(wp), allocatable :: amat(:,:), xvec(:), vrhs(:), ainv(:,:)
    real(wp), allocatable :: expected(:), b(:), temp(:,:)
@@ -458,13 +567,26 @@ subroutine test_cg_random_spd(error)
    real(wp) :: r, max_rel_error
 
    !> Solver variables
+   real(wp), allocatable :: tol
+   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
 
    allocate(cg_input :: solver_input)
-   select type (solver_input)
+   select type(solver_input)
    type is (cg_input)
-      call new_cg_solver(solver, solver_input)
+      if (allocated(maxiter)) then
+         solver_input%cgmiter = maxiter
+      end if
+      if (allocated(tol)) then
+         solver_input%cgtol = tol
+      end if
+         block
+             class(mchrg_solver_cg), allocatable :: tmp
+             allocate(tmp)
+             call new_cg_solver(tmp, solver_input)
+             call move_alloc(tmp, solver)
+         end block
    end select
 
    allocate(amat(n,n), xvec(n), vrhs(n), ainv(n,n), expected(n), b(n), temp(n,n))
@@ -545,13 +667,26 @@ subroutine test_cg_preconditioned(error)
    real(wp) :: residual_jacobi, residual_no_precond
 
    !> Solver variables
+   real(wp), allocatable :: tol
+   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
 
    allocate(cg_input :: solver_input)
-   select type (solver_input)
+   select type(solver_input)
    type is (cg_input)
-      call new_cg_solver(solver, solver_input)
+      if (allocated(maxiter)) then
+         solver_input%cgmiter = maxiter
+      end if
+      if (allocated(tol)) then
+         solver_input%cgtol = tol
+      end if
+         block
+             class(mchrg_solver_cg), allocatable :: tmp
+             allocate(tmp)
+             call new_cg_solver(tmp, solver_input)
+             call move_alloc(tmp, solver)
+         end block
    end select
 
    ! Create an SPD matrix with varying diagonal

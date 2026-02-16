@@ -91,13 +91,27 @@ subroutine gen_test(error, mol, model, qref, eref)
    real(wp), allocatable :: energy(:)
    real(wp), allocatable :: qvec(:)
 
+   !> Solver variables
+   real(wp), allocatable :: tol
+   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
    allocate(cg_input :: solver_input)
-   select type (solver_input)
+   select type(solver_input)
    type is (cg_input)
-      call new_cg_solver(slv, solver_input)
+      if (allocated(maxiter)) then
+         solver_input%cgmiter = maxiter
+      end if
+      if (allocated(tol)) then
+         solver_input%cgtol = tol
+      end if
+         block
+             class(mchrg_solver_cg), allocatable :: tmp
+             allocate(tmp)
+             call new_cg_solver(tmp, solver_input)
+             call move_alloc(tmp, slv)
+         end block
    end select
    
 
@@ -168,13 +182,27 @@ subroutine test_numgrad(error, mol, model)
    real(wp), allocatable :: numgrad(:, :)
    real(wp) :: er, el
 
+   !> Solver variables
+   real(wp), allocatable :: tol
+   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
    allocate(cg_input :: solver_input)
-   select type (solver_input)
+   select type(solver_input)
    type is (cg_input)
-      call new_cg_solver(slv, solver_input)
+      if (allocated(maxiter)) then
+         solver_input%cgmiter = maxiter
+      end if
+      if (allocated(tol)) then
+         solver_input%cgtol = tol
+      end if
+         block
+             class(mchrg_solver_cg), allocatable :: tmp
+             allocate(tmp)
+             call new_cg_solver(tmp, solver_input)
+             call move_alloc(tmp, slv)
+         end block
    end select
    
 
@@ -256,13 +284,27 @@ subroutine test_numsigma(error, mol, model)
    real(wp), allocatable :: lattr(:, :), xyz(:, :)
    real(wp) :: er, el, eps(3, 3), numsigma(3, 3), sigma(3, 3), lattice(3, 3)
 
+   !> Solver variables
+   real(wp), allocatable :: tol
+   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
    allocate(cg_input :: solver_input)
-   select type (solver_input)
+   select type(solver_input)
    type is (cg_input)
-      call new_cg_solver(slv, solver_input)
+      if (allocated(maxiter)) then
+         solver_input%cgmiter = maxiter
+      end if
+      if (allocated(tol)) then
+         solver_input%cgtol = tol
+      end if
+         block
+             class(mchrg_solver_cg), allocatable :: tmp
+             allocate(tmp)
+             call new_cg_solver(tmp, solver_input)
+             call move_alloc(tmp, slv)
+         end block
    end select
 
 
@@ -354,13 +396,27 @@ subroutine test_dbdr(error, mol, model)
    real(wp), allocatable :: numgrad(:, :, :), xvecr(:), xvecl(:)
    type(cache_container), allocatable :: cache
 
+   !> Solver variables
+   real(wp), allocatable :: tol
+   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
    allocate(cg_input :: solver_input)
-   select type (solver_input)
+   select type(solver_input)
    type is (cg_input)
-      call new_cg_solver(slv, solver_input)
+      if (allocated(maxiter)) then
+         solver_input%cgmiter = maxiter
+      end if
+      if (allocated(tol)) then
+         solver_input%cgtol = tol
+      end if
+         block
+             class(mchrg_solver_cg), allocatable :: tmp
+             allocate(tmp)
+             call new_cg_solver(tmp, solver_input)
+             call move_alloc(tmp, slv)
+         end block
    end select
    
    allocate(cache)
@@ -442,13 +498,27 @@ subroutine test_dbdL(error, mol, model)
    real(wp) :: eps(3, 3)
    type(cache_container), allocatable :: cache
 
+   !> Solver variables
+   real(wp), allocatable :: tol
+   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
    allocate(cg_input :: solver_input)
-   select type (solver_input)
+   select type(solver_input)
    type is (cg_input)
-      call new_cg_solver(slv, solver_input)
+      if (allocated(maxiter)) then
+         solver_input%cgmiter = maxiter
+      end if
+      if (allocated(tol)) then
+         solver_input%cgtol = tol
+      end if
+         block
+             class(mchrg_solver_cg), allocatable :: tmp
+             allocate(tmp)
+             call new_cg_solver(tmp, solver_input)
+             call move_alloc(tmp, slv)
+         end block
    end select
    
    allocate(cache)
@@ -542,13 +612,27 @@ subroutine test_dadr(error, mol, model)
    real(wp), allocatable :: qvec(:), numgrad(:, :, :), amatr(:, :), amatl(:, :), numtrace(:, :)
    type(cache_container), allocatable :: cache
 
+   !> Solver variables
+   real(wp), allocatable :: tol
+   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
    allocate(cg_input :: solver_input)
-   select type (solver_input)
+   select type(solver_input)
    type is (cg_input)
-      call new_cg_solver(slv, solver_input)
+      if (allocated(maxiter)) then
+         solver_input%cgmiter = maxiter
+      end if
+      if (allocated(tol)) then
+         solver_input%cgtol = tol
+      end if
+         block
+             class(mchrg_solver_cg), allocatable :: tmp
+             allocate(tmp)
+             call new_cg_solver(tmp, solver_input)
+             call move_alloc(tmp, slv)
+         end block
    end select
    
    allocate(cache)
@@ -656,13 +740,27 @@ subroutine test_dadL(error, mol, model)
    real(wp) :: eps(3, 3)
    type(cache_container), allocatable :: cache
 
+   !> Solver variables
+   real(wp), allocatable :: tol
+   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
    allocate(cg_input :: solver_input)
-   select type (solver_input)
+   select type(solver_input)
    type is (cg_input)
-      call new_cg_solver(slv, solver_input)
+      if (allocated(maxiter)) then
+         solver_input%cgmiter = maxiter
+      end if
+      if (allocated(tol)) then
+         solver_input%cgtol = tol
+      end if
+         block
+             class(mchrg_solver_cg), allocatable :: tmp
+             allocate(tmp)
+             call new_cg_solver(tmp, solver_input)
+             call move_alloc(tmp, slv)
+         end block
    end select
    
    allocate(cache)
@@ -762,13 +860,27 @@ subroutine test_numdqdr(error, mol, model)
    real(wp), allocatable :: ql(:), qr(:), dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: numdr(:, :, :)
 
+   !> Solver variables
+   real(wp), allocatable :: tol
+   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
    allocate(cg_input :: solver_input)
-   select type (solver_input)
+   select type(solver_input)
    type is (cg_input)
-      call new_cg_solver(slv, solver_input)
+      if (allocated(maxiter)) then
+         solver_input%cgmiter = maxiter
+      end if
+      if (allocated(tol)) then
+         solver_input%cgtol = tol
+      end if
+         block
+             class(mchrg_solver_cg), allocatable :: tmp
+             allocate(tmp)
+             call new_cg_solver(tmp, solver_input)
+             call move_alloc(tmp, slv)
+         end block
    end select
    
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
@@ -841,13 +953,27 @@ subroutine test_numdqdL(error, mol, model)
    real(wp), allocatable :: lattr(:, :), xyz(:, :), numdL(:, :, :)
    real(wp) :: eps(3, 3), lattice(3, 3)
    
+   !> Solver variables
+   real(wp), allocatable :: tol
+   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
    allocate(cg_input :: solver_input)
-   select type (solver_input)
+   select type(solver_input)
    type is (cg_input)
-      call new_cg_solver(slv, solver_input)
+      if (allocated(maxiter)) then
+         solver_input%cgmiter = maxiter
+      end if
+      if (allocated(tol)) then
+         solver_input%cgtol = tol
+      end if
+         block
+             class(mchrg_solver_cg), allocatable :: tmp
+             allocate(tmp)
+             call new_cg_solver(tmp, solver_input)
+             call move_alloc(tmp, slv)
+         end block
    end select
    
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
