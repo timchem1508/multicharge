@@ -38,7 +38,7 @@ module test_pbc
    real(wp), parameter :: thr2 = sqrt(epsilon(1.0_wp))
 
    !> Global solver choice: 1 = direct, 2 = CG
-   integer, parameter :: solver_choice = 1
+   integer, parameter :: solver_choice = 2
 
 contains
 

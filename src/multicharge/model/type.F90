@@ -155,7 +155,7 @@ subroutine get_rec_trans(lattice, trans)
 end subroutine get_rec_trans
 
 subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
-   & energy, gradient, sigma, qvec, dqdr, dqdL)
+   & energy, gradient, sigma, qvec, dqdr, dqdL, dfdq)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in), target :: self
    !> Molecular structure data
@@ -189,6 +189,9 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    !> Optional derivative of the atomic partial charges w.r.t. lattice vectors
    real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
 
+   ! Optional derivative of the electrostatic energy w.r.t. atomic partial charges
+   real(wp), intent(in), contiguous, optional :: dfdq(:)
+
    integer :: ic, jc, iat, ndim
    logical :: grad, cpq, dcn
    integer(ik), allocatable :: ipiv(:)
@@ -205,16 +208,25 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
 
    ! Resonse vectors: vvec = electronegativity response (Jv=chi)
    ! uvec = constraint response (Ju=1)
+   logical :: adj_grad
    real(wp), allocatable :: vvec(:), uvec(:)
    ! Sums of the v and u vector elements
    real(wp) :: uvecsum, vvecsum
    real(wp), allocatable :: chivec(:), unitvec(:), jinv(:, :)
    real(wp) :: lambda ! Lagrangian factor for constraint
 
+   ! Gradient solver
+   ! Derivative response J*y=dfdq
+   real(wp), allocatable :: yvec(:)
+   real(wp) :: yvecsum
+   ! Adjoint vector p
+   real(wp), allocatable :: padj(:)
+
    ! Calculate gradient if the respective arrays are present
    dcn = present(dcndr) .and. present(dcndL)
    grad = present(gradient) .and. present(sigma) .and. dcn
    cpq = present(dqdr) .and. present(dqdL) .and. dcn
+   adj_grad = present(dfdq) .and. slv%need_pos_def .eqv. .true. 
 
    ! Update cache
    allocate(cache)
@@ -222,6 +234,10 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
 
    !call write_vector(qloc, "Local charges in solve")
    
+   ! Determine the size of a linear system
+   ! If the solver method requires potive definite matrices, 
+   ! we need to add a Lagrangian multiplier to constrain the total charge,
+   ! otherwise we can solve the unconstrained system directly
    if (slv%need_pos_def .eqv. .true.) then
       ndim = mol%nat 
       add_lagr = .false.
@@ -234,11 +250,9 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    allocate(amat(ndim, ndim))
    call self%get_coulomb_matrix(mol, cache, amat)
 
-   ! Setup X-vector
+   ! Setup X-vector and A^-1 for the linear system
    allocate(xvec(ndim))
    call self%get_xvec(mol, cache, xvec)
-
-   ! Get RHS of ES equation
 
    vrhs = xvec
    ainv = amat
@@ -255,9 +269,9 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
          qvec(:) = vrhs(:mol%nat)
       end if
 
+      jmat = amat(:mol%nat, :mol%nat)
       ! Electrostatic energy
       if (present(energy)) then
-         jmat = amat(:mol%nat, :mol%nat)
          call symv(jmat, vrhs(:mol%nat), xvec(:mol%nat), &
             & alpha=0.5_wp, beta=-1.0_wp, uplo='l')
          energy(:) = energy(:) + vrhs(:mol%nat) * xvec(:mol%nat)
@@ -275,6 +289,7 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       jmat = amat(:mol%nat, :mol%nat)
       chivec = -xvec(:mol%nat)
 
+      ! Initial guess for vvec: v = chi / diag(J)
       do ic = 1, mol%nat
          uvec(ic)= 1.0_wp/jmat(ic, ic) + tiny(1.0_wp)
          vvec(ic) = chivec(ic)/jmat(ic, ic) + tiny(1.0_wp)
@@ -283,7 +298,7 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
 
       ! Constrained response: J*u = 1
       call slv%solve(amat=jmat, xvec=unitvec, vrhs=uvec, ainv=jinv, cpq=cpq, error=error)
-      !call write_vector(uvec, "u vector")
+      ! call write_vector(uvec, "u vector")
       ! Constrained response: J*u = chi
       call slv%solve(amat=jmat, xvec=chivec, vrhs=vvec, ainv=jinv, cpq=cpq, error=error)
       !call write_vector(vvec, "v vector")
@@ -301,6 +316,7 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
          !call write_vector(qvec, "Constrained charges")
       end if
 
+      ! Reconstruct the full VRHS for gradient calculations
       deallocate(vrhs)
       allocate(vrhs(mol%nat+1))
 
@@ -319,34 +335,82 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       !call write_vector(vrhs, "Solved VRHS Vector")
    end if
 
-      ! Allocate and get amat derivatives
-      if (grad .or. cpq) then
-         allocate(dadr(3, mol%nat, ndim), dadL(3, 3, ndim), atrace(3, mol%nat))
-         allocate(dxdr(3, mol%nat, ndim), dxdL(3, 3, ndim))
-         call self%get_xvec_derivs(mol, cache, dxdr, dxdL)
-         call self%get_coulomb_derivs(mol, cache, vrhs, dadr, dadL, atrace)
-         do iat = 1, mol%nat
-            dadr(:, iat, iat) = atrace(:, iat) + dadr(:, iat, iat)
-         end do
-      end if
+   ! Allocate and get amat derivatives
+   if (grad .or. cpq) then
+      allocate(dadr(3, mol%nat, mol%nat), dadL(3, 3, mol%nat), atrace(3, mol%nat))
+      allocate(dxdr(3, mol%nat, mol%nat), dxdL(3, 3, mol%nat))
+      call self%get_xvec_derivs(mol, cache, dxdr, dxdL)
+      call self%get_coulomb_derivs(mol, cache, vrhs, dadr, dadL, atrace)
+      do iat = 1, mol%nat
+         dadr(:, iat, iat) = atrace(:, iat) + dadr(:, iat, iat)
+      end do
+   end if
 
-      if (grad) then
+   if (grad) then
+      if (adj_grad) then
+         ! Adjoint gradient calculation
+         if (add_lagr .eqv. .true.) then
+            ! If the constraint response have not been calculated before
+            if (allocated(uvec)) deallocate(uvec)
+            allocate(uvec(mol%nat))
+            if (allocated(unitvec)) deallocate(unitvec)
+            allocate(unitvec(mol%nat))
+            if (allocated(jinv)) deallocate(jinv)
+            allocate(jinv(mol%nat, mol%nat))
+            ! Initial guess for uvec: u = 1 / diag(J)
+            do ic = 1, mol%nat
+               uvec(ic)= 1.0_wp/jmat(ic, ic) + tiny(1.0_wp)
+            end do
+            unitvec = 1.0_wp
+            ! Constrained response: J*u = 1
+            call slv%solve(amat=jmat, xvec=unitvec, vrhs=uvec, &
+               & ainv=jinv, cpq=cpq, error=error)
+            uvecsum = sum(uvec)
+         end if 
+
+         ! Solving the adjoint system J*y = dfdq
+         allocate(yvec(mol%nat))
+         allocate(padj(mol%nat))
+         ! Initial guess for yvec: y = dfdq / diag(J)
+         do ic = 1, mol%nat
+            yvec(ic)= dfdq(ic)/jmat(ic, ic) + tiny(1.0_wp)
+         end do
+         ! Derivative response: J*y = dfdq
+         call slv%solve(amat=jmat, xvec=dfdq, vrhs=yvec, &
+            & ainv=jinv, cpq=cpq, error=error)
+         yvecsum = sum(yvec)
+
+         ! Project out the component of yvec along the constraint direction uvec
+         padj = uvec - yvecsum / (uvecsum + tiny(1.0_wp)) * yvec
+
+         ! Gradient: dfdr =  p^T * (- dadr * q - dxvec)
+         gradient = 0.0_wp
+         do iat = 1, mol%nat
+            do ic = 1, mol%nat
+               ! Contribution from dadr*q
+               gradient(:, iat) = gradient(:, iat) &
+                  - padj(ic) * (dadr(:, iat, ic) * vrhs(ic))
+               ! Contribution from dxdr
+               gradient(:, iat) = gradient(:, iat) &
+                  - padj(ic) * (dxdr(:, iat, ic))
+            end do
+         end do
+      else
          gradient = 0.0_wp
          call gemv(dadr(:, :, :mol%nat), vrhs(:mol%nat), gradient, beta=1.0_wp, alpha=0.5_wp)
          call gemv(dxdr(:, :, :mol%nat), vrhs(:mol%nat), gradient, beta=1.0_wp, alpha=-1.0_wp)
          call gemv(dadL, vrhs, sigma, beta=1.0_wp, alpha=0.5_wp)
          call gemv(dxdL, vrhs, sigma, beta=1.0_wp, alpha=-1.0_wp)
       end if
-
-      if (cpq) then
-         do iat = 1, mol%nat
-            dadr(:, :, iat) = -dxdr(:, :, iat) + dadr(:, :, iat)
-            dadL(:, :, iat) = -dxdL(:, :, iat) + dadL(:, :, iat)
-         end do
-
-         call gemm(dadr, ainv(:, :mol%nat), dqdr, alpha=-1.0_wp)
-         call gemm(dadL, ainv(:, :mol%nat), dqdL, alpha=-1.0_wp)
-      end if         
+   end if
+   if (cpq) then
+      do iat = 1, mol%nat
+         dadr(:, :, iat) = -dxdr(:, :, iat) + dadr(:, :, iat)
+         dadL(:, :, iat) = -dxdL(:, :, iat) + dadL(:, :, iat)
+      end do
+      call gemm(dadr, ainv(:, :mol%nat), dqdr, alpha=-1.0_wp)
+      call gemm(dadL, ainv(:, :mol%nat), dqdL, alpha=-1.0_wp)
+   end if         
 end subroutine solve
 
 subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL)

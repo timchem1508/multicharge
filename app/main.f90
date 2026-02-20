@@ -25,6 +25,7 @@ program main
    use multicharge_solver, only: new_mchrg_solver, mchrg_solver_type, mchrg_solver_direct, &
       & mchrg_solver_cg, mchrg_solver_input, cg_input, direct_input
 
+
    implicit none
    character(len=*), parameter :: prog_name = "multicharge"
    character(len=*), parameter :: json_output = "multicharge.json"
@@ -307,7 +308,7 @@ subroutine get_arguments(input, model_id, input_format, grad, charge, &
             allocate(direct_input :: solver_input)
          end if
          if (solver_name == "CG" .or. solver_name == "cg" .or. solver_name == "iterative") then
-            allocate(cg_input :: solver_input)
+              allocate(cg_input :: solver_input)
          end if
       case("-it", "-maxiter", "--maxiter")
          allocate(maxiter)
