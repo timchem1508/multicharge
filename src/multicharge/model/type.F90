@@ -348,6 +348,7 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
 
    if (grad) then
       if (adj_grad) then
+         !write(*,*) "Using adjoint method for gradient calculation"
          ! Adjoint gradient calculation
          if (add_lagr .eqv. .true.) then
             ! If the constraint response have not been calculated before
@@ -377,22 +378,18 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
          end do
          ! Derivative response: J*y = dfdq
          call slv%solve(amat=jmat, xvec=dfdq, vrhs=yvec, &
-            & ainv=jinv, cpq=cpq, error=error)
+               & ainv=jinv, cpq=cpq, error=error)
          yvecsum = sum(yvec)
 
          ! Project out the component of yvec along the constraint direction uvec
-         padj = uvec - yvecsum / (uvecsum + tiny(1.0_wp)) * yvec
+         padj = yvec - (yvecsum / uvecsum) * uvec
 
-         ! Gradient: dfdr =  p^T * (- dadr * q - dxvec)
+         ! Gradient: df/dr = -padj^T * (dA/dr * q + dx/dr)
          gradient = 0.0_wp
          do iat = 1, mol%nat
             do ic = 1, mol%nat
-               ! Contribution from dadr*q
                gradient(:, iat) = gradient(:, iat) &
-                  - padj(ic) * (dadr(:, iat, ic) * vrhs(ic))
-               ! Contribution from dxdr
-               gradient(:, iat) = gradient(:, iat) &
-                  - padj(ic) * (dxdr(:, iat, ic))
+                     - padj(ic) * (dadr(:, iat, ic) * vrhs(ic) + dxdr(:, iat, ic))
             end do
          end do
       else
@@ -403,6 +400,7 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
          call gemv(dxdL, vrhs, sigma, beta=1.0_wp, alpha=-1.0_wp)
       end if
    end if
+
    if (cpq) then
       do iat = 1, mol%nat
          dadr(:, :, iat) = -dxdr(:, :, iat) + dadr(:, :, iat)
