@@ -18,6 +18,7 @@ module test_model
    use mctc_env_testing, only: new_unittest, unittest_type, error_type, test_failed
    use mctc_io_structure, only: structure_type, new
    use mstore, only: get_structure
+   use print_matrix, only: write_vector, write_matrix
    use multicharge_model_type, only: mchrg_model_type
    use multicharge_model_eeqbc, only: eeqbc_model
    use multicharge_param, only: new_eeq2019_model, new_eeqbc2025_model

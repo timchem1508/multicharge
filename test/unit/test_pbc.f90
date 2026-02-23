@@ -294,25 +294,8 @@ subroutine test_numsigma(error, mol, model)
    real(wp), allocatable :: tol
    
   ! Select solver based on global choice
-   if (solver_choice == 2) then
-      allocate(cg_input :: solver_input)
-   end if 
-   if (solver_choice == 1) then
-      allocate(direct_input :: solver_input)
-   end if
-
-   select type(solver_input)
-   type is (cg_input)
-   if (allocated(maxiter)) then
-      solver_input%cgmiter = maxiter
-   end if
-   if (allocated(tol)) then
-      solver_input%cgtol = tol
-   end if
-   end select
-
+   allocate(direct_input :: solver_input)
    call new_mchrg_solver(slv, solver_input,  error)
-
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
    allocate(cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
