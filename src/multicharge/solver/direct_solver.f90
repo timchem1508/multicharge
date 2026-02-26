@@ -15,7 +15,7 @@ module multicharge_solver_direct
 
     !> Input for Direct solver
     type, extends(mchrg_solver_input) :: direct_input
-        !> Use Direct solver
+        ! Use Direct solver
         logical :: direct = .true.
     end type direct_input
 
@@ -49,13 +49,13 @@ contains
     !> Solve method for direct solver
     subroutine solve(self, amat, xvec, vrhs, ainv, cpq, error)
         class(mchrg_solver_direct), intent(in) :: self
-        !> A matrix of Ax=b system
+        ! A matrix of Ax=b system
         real(wp), intent(in)  :: amat(:, :)
-        !> Initial search direction (b)
+        ! Initial search direction (b)
         real(wp), intent(in)  :: xvec(:)
-        !> Initial guess and solution
+        ! Initial guess and solution
         real(wp), intent(inout) :: vrhs(:)
-        !> Inverse A-matrix and coupled perturbed logical
+        ! Inverse A-matrix and coupled perturbed logical
         real(wp), intent(out) :: ainv(:, :)
         logical, intent(in), optional :: cpq
         type(error_type), allocatable, intent(out) :: error

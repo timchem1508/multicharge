@@ -1,5 +1,6 @@
 module multicharge_solver_cg
     use mctc_env, only: error_type, fatal_error, wp
+    use mctc_env_timer, only : timer_type, format_time
     use multicharge_blas, only: symv, gemv
     use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
     use multicharge_solver_cache, only: cache_container, mchrg_solver_cache
@@ -14,11 +15,13 @@ module multicharge_solver_cg
 
     !> Input for CG solver
     type, extends(mchrg_solver_input) :: cg_input
-        !> Maximal number of iterations
+        ! Maximal number of iterations
         integer, allocatable :: cgmiter
-        !> Convergence tolerance
+        ! Convergence tolerance
         real(wp), allocatable :: cgtol 
-        !> Use iterative CG solver
+        ! Output verbose
+        integer, allocatable :: verbose 
+        ! Use iterative CG solver
         logical :: cg = .true.
    end type cg_input
 
@@ -26,6 +29,7 @@ module multicharge_solver_cg
     type, extends(mchrg_solver_type) :: mchrg_solver_cg
         integer, allocatable :: cgmiter
         real(wp), allocatable :: cgtol
+        integer, allocatable :: verbose
     contains
         procedure :: solve
         procedure :: update
@@ -47,18 +51,20 @@ contains
 
             if (allocated(input%cgmiter)) then
                 self%cgmiter = input%cgmiter
-                write(*,*) "Maximum iterations:", self%cgmiter 
             else
-                write(*,*) "Default maximum number of iterations is used: 1000 it."
                 self%cgmiter = int(cgmiter_def)
             end if
             
             if (allocated(input%cgtol)) then
                 self%cgtol = input%cgtol
-                write(*,*) "Tolerance:", self%cgtol
             else 
-                write(*,*) "Default tolerance is used: 1.0e-15"
                 self%cgtol = cgtol_def
+            end if
+
+            if (allocated(input%verbose)) then
+                self%verbose = input%verbose
+            else 
+                self%verbose = 0
             end if
             
         end select
@@ -78,53 +84,57 @@ contains
     !> Solve method for CG solver
     subroutine solve(self, amat, xvec, vrhs, ainv, cpq, error)
         class(mchrg_solver_cg), intent(in) :: self
-        !> A matrix of Ax=b system
+        ! A matrix of Ax=b system
         real(wp), intent(in)  :: amat(:, :)
-        !> Initial search direction (b)
+        ! Initial search direction (b)
         real(wp), intent(in)  :: xvec(:)
-        !> Initial guess and solution
+        ! Initial guess and solution
         real(wp), intent(inout) :: vrhs(:)
-        !> Inverse matrix and coupled perturbed logical 
-        !> not used in CG but required by the interface
+        ! Inverse matrix and coupled perturbed logical 
+        ! not used in CG but required by the interface
         real(wp), intent(out) :: ainv(:, :)
         logical, intent(in), optional :: cpq
         type(error_type), allocatable, intent(out) :: error
         
-        !> Maximal number of iterations
+        ! Maximal number of iterations
         integer :: maxit
-        !> Tolerance of the solver
+        ! Tolerance of the solver
         real(wp) :: tol, tol_square
         
-        !> Iterations counter
+        ! Iterations counter
         integer :: it
-        !> Size of the xvec
+        ! Size of the xvec
         integer :: ndim
 
-        !> Search direction (p)
+        ! Search direction (p)
         real(wp), allocatable :: direction(:)
-        !> Initial direction norm 
+        ! Initial direction norm 
         real(wp) :: bnorm
-        !> Residual r = b - A*p
+        ! Residual r = b - A*p
         real(wp), allocatable :: residual(:)
-        !> Residual norm 
+        ! Residual norm 
         real(wp) :: rnorm
-        !> Diagonal preconditioner M^-1
+        ! Diagonal preconditioner M^-1
         real(wp), allocatable :: Mdiag(:)
-        !> Preconditioned residual z=M^-1*r
+        ! Preconditioned residual z=M^-1*r
         real(wp), allocatable ::  zres(:)
 
-        !> Matrix-vector product A*p
+        ! Matrix-vector product A*p
         real(wp), allocatable :: Ap(:)
-        !> Denominator of the step p^T*Ap
+        ! Denominator of the step p^T*Ap
         real(wp) :: denom
-        !> Step length
+        ! Step length
         real(wp) :: alpha
 
-        !> Direction update factor p_new/p
+        ! Direction update factor p_new/p
         real(wp) :: beta
-        !> Dynamical residuals
+        ! Dynamical residuals
         real(wp) :: rz_old, rz_new
+        ! Relative residuals test rnorm/bnorm
+        real(wp) :: rel_res
+
         type(cache_container), allocatable :: cache
+        type(timer_type) :: timer
         
         if (present(cpq) .and. cpq .eqv. .true.) then
             call fatal_error(error, "solve_cg: The inverse matrix cannot be calculated using an iterative solver.")
@@ -138,7 +148,6 @@ contains
             return
         end if
 
-        ! call write_vector(vrhs, "Initial VRHS Vector")
         ! Prepare/cache
         allocate(cache)
         call self%update(cache, vrhs, ainv, cpq)
@@ -147,11 +156,11 @@ contains
         tol = self%cgtol
         tol_square = tol**2
         maxit = self%cgmiter
-
-        !write(*,*) "CG Solver: max iterations = ", maxit
     
         allocate(residual(ndim), direction(ndim), zres(ndim), Ap(ndim), Mdiag(ndim))
-    
+
+        call timer%push("total")
+        call timer%push("initialization")   
         ! Jacobi preconditioner (inverse of diagonal)
         !$omp parallel default(none) &
         !$omp shared(Mdiag, amat, ndim, tol_square) private(it) 
@@ -183,11 +192,29 @@ contains
         ! Dynamical residual
         rz_old = dot_product(residual,zres)
         !$omp end critical (solve_cg_)
+
+        call timer%pop
+        if (self%verbose > 1) then
+            write(*, '(a, 1x, a)') "Initialisation time:", format_time(timer%get("initialization"))
+        end if
+
+        if (self%verbose > 1) then
+            write(*,*)
+            write(*,*) ' iter      |residual|        step      relative residual', &
+                      &'    Time / s'
+        end if
+
+        if (self%verbose == 1) then
+            write(*,*)
+            write(*,*) ' iter      |residual|        step      relative residual'
+        end if
     
         ! Conjugate Gradient iterations
         !$omp shared(Mdiag, amat, ndim, tol_square, vrhs, maxit) private(it) 
         !$omp do schedule(runtime)
         do it = 1, maxit
+            call timer%push("iteration")
+            !$omp critical (solve_cg_)
             call symv(amat, direction, Ap, alpha=1.0_wp, beta=0.0_wp)
             
             ! Compute step size alpha
@@ -202,15 +229,17 @@ contains
             
             ! Update solution and residual
             vrhs = vrhs + alpha * direction
-            !call write_vector(vrhs, "CG Solution Vector")
-            !write(*,*) " iteration ", it
             residual = residual - alpha * Ap
             
             ! Check convergence
             rnorm = dot_product(residual,residual)
-            if (rnorm / bnorm <= tol_square) then
-                write(*,*) "CG converged in ", it, " iterations."
-                !call write_vector(vrhs, "CG Solution Vector")
+            rel_res = rnorm / bnorm
+
+            if (rel_res <= tol_square) then
+                if (self%verbose > 0) then
+                    write(*,*)
+                    write(*,'(a, i0, a, es15.5)') "CG converged in ", it, " iterations with residual norm ", sqrt(rnorm)
+                end if
                 exit
             end if
             
@@ -220,6 +249,16 @@ contains
             beta = rz_new / rz_old
             direction = zres + beta * direction
             rz_old = rz_new
+
+            call timer%pop
+
+            if (self%verbose == 1) then
+                write(*, '(i6,*(1x, es15.5))') it, sqrt(rnorm), alpha, sqrt(rel_res)
+            end if
+
+            if (self%verbose > 1) then
+                write(*, '(i6,*(1x, es15.5))') it, sqrt(rnorm), alpha, sqrt(rel_res), timer%get("iteration")
+            end if
             
             if (it == maxit) then
                 call fatal_error(error, "solve_cg: CG did not converge within max iterations.")
@@ -227,6 +266,11 @@ contains
         end do
         !$omp end do
         !$omp end parallel
+        call timer%pop
+        if (self%verbose > 1) then
+            write(*, '(a, 1x, a)') "CG total time : ", format_time(timer%get("total"))
+            write(*,*)
+        end if 
     
     end subroutine solve
 

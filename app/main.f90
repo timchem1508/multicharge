@@ -16,12 +16,13 @@
 program main
    use, intrinsic :: iso_fortran_env, only: output_unit, error_unit, input_unit
    use mctc_env, only: error_type, fatal_error, get_argument, wp
+   use mctc_env_timer, only : timer_type, format_time
    use mctc_io, only: structure_type, read_structure, filetype, get_filetype
    use mctc_cutoff, only: get_lattice_points
    use multicharge, only: mchrg_model_type, mchrg_model, new_eeq2019_model, &
       & new_eeqbc2025_model, get_multicharge_version, &
       & write_ascii_model, write_ascii_properties, write_ascii_results
-   use multicharge_output, only: json_results
+   use multicharge_output, only: json_results, write_cg_solver, write_direct_solver
    use multicharge_solver, only: new_mchrg_solver, mchrg_solver_type, mchrg_solver_direct, &
       & mchrg_solver_cg, mchrg_solver_input, cg_input, direct_input
 
@@ -52,14 +53,17 @@ program main
    integer, allocatable :: maxiter
    real(wp), allocatable :: tol
 
-   ! Timer variables 
-   real :: start, finish
-   real :: start_solver, finish_solver
+   ! Verbose level
+   integer, allocatable :: verbose
+
+   ! Timer 
+   type(timer_type) :: timer
+
+   call timer%push("total")
 
    ! 1. Parse Arguments
-   call cpu_time(start)
    call get_arguments(input, model_id, input_format, grad, charge, json, &
-                      solver_input, error)
+                      solver_input, verbose, error)
    if (allocated(error)) then
       write(error_unit, '(a)') error%message
       error stop
@@ -137,12 +141,18 @@ program main
    call model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
    
    ! 5. Run Solve (Solver instance passed implicitly via argument or model)
-   call cpu_time(start_solver)
+
+   if (verbose > 0) then
+      select type (solver)
+      type is (mchrg_solver_cg)
+         call write_cg_solver(output_unit, solver)
+      type is (mchrg_solver_direct)
+         call write_direct_solver(output_unit, solver)
+      end select
+   end if 
 
    call model%solve(mol, solver, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
-      & energy, gradient, sigma, qvec, dqdr, dqdL)
-
-   call cpu_time(finish_solver)
+      & energy, gradient, sigma, qvec, dqdr, dqdL, verbose=verbose)
 
    if (allocated(error)) then
       write(error_unit, '(a)') error%message
@@ -159,10 +169,12 @@ program main
       write(output_unit, '(a)') &
          "[Info] JSON dump of results written to '"//json_output//"'"
    end if
-   call cpu_time(finish)
 
-   print '("Solver CPU Time : ",f6.3," seconds.")',finish_solver-start_solver
-   print '("Total CPU Time : ",f6.3," seconds.")',finish-start
+   call timer%pop
+   if (verbose > 1) then
+      write(*, '(a, 1x, a)') "Total execution time : ", format_time(timer%get("total"))
+      write(*,*)
+   end if
 
 contains
 
@@ -184,7 +196,8 @@ subroutine help(unit)
       "-c, -charge, --charge <value>", "Set the molecular charge", &
       "-g, -grad, --grad", "Evaluate molecular gradient and virial. Only for the direct solver.", &
       "-j, -json, --json", "Provide output in JSON format to the file 'multicharge.json'", &
-      "-v, -version, --version", "Print program version and exit", &
+      "-version, --version", "Print program version and exit", &
+      "-v, -verbosity, --verbosity <int>", "Size of an output and exit", &
       "-h, -help, --help", "Show this help message", &
       "-s, -solver, --solver <type>", "Solver: 'CG' or 'DIRECT'", &
       "-it, -maxiter, --maxiter <int>", "Max iterations", &
@@ -204,7 +217,7 @@ subroutine version(unit)
 end subroutine version
 
 subroutine get_arguments(input, model_id, input_format, grad, charge, &
-   & json, solver_input, error)
+   & json, solver_input, verbose, error)
 
    !> Input file name
    character(len=:), allocatable :: input
@@ -232,24 +245,35 @@ subroutine get_arguments(input, model_id, input_format, grad, charge, &
    integer, allocatable :: maxiter
    !> CG solver tolerance
    real(wp), allocatable :: tol
-   !> Solver input
+
+   ! Verbose number
+   integer, allocatable :: verbose
 
    model_id = mchrg_model%eeq2019
    grad = .false.
    json = .false.
    iarg = 0
+   verbose = 0
    narg = command_argument_count()
 
- do while(iarg < narg)
+   do while(iarg < narg)
       iarg = iarg + 1
       call get_argument(iarg, arg)
       select case(arg)
       case("-h", "-help", "--help")
          call help(output_unit)
          stop
-      case("-v", "-version", "--version")
+      case("-version", "--version")
          call version(output_unit)
          stop
+      case("-v", "-verbosity", "--verbosity")
+         iarg = iarg + 1
+         call get_argument(iarg, arg)
+         read(arg, *, iostat=iostat) verbose
+         if (iostat >  1) then
+            call fatal_error(error, "Invalid verbose level")
+            exit
+         end if
       case default
          if (.not. allocated(input)) then
             call move_alloc(arg, input)
@@ -297,7 +321,6 @@ subroutine get_arguments(input, model_id, input_format, grad, charge, &
          grad = .true.
       case("-j", "-json", "--json")
          json = .true.
-      ! --- Solver Options ---
       case("-s", "-solver", "--solver")
          if (allocated(solver_name)) then
             call fatal_error(error, "Cannot use multiple solvers")
@@ -320,13 +343,11 @@ subroutine get_arguments(input, model_id, input_format, grad, charge, &
          iarg = iarg + 1; call get_argument(iarg, arg)
          read(arg, *, iostat=iostat) tol
          if (iostat /= 0) call fatal_error(error, "Invalid tolerance")
-      ! ----------------------
       end select
    end do
 
    if (.not. allocated(solver_name)) then
       allocate(direct_input :: solver_input)
-      write(*,*) "Use the direct solver as a default"
    end if
 
    if (grad .eqv. .true.) then
@@ -341,6 +362,9 @@ subroutine get_arguments(input, model_id, input_format, grad, charge, &
    end if
    if (allocated(tol)) then
       solver_input%cgtol = tol
+   end if
+   if (allocated(verbose)) then
+      solver_input%verbose = verbose
    end if
    end select
 

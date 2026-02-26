@@ -29,6 +29,7 @@ module multicharge_model_type
    use mctc_io_math, only: matinv_3x3
    use mctc_cutoff, only: get_lattice_points
    use mctc_ncoord, only: ncoord_type
+   use mctc_env_timer, only : timer_type, format_time
    use multicharge_blas, only: gemv, symv, gemm
    use multicharge_lapack, only: sytrf, sytrs, sytri
    use multicharge_wignerseitz, only: wignerseitz_cell_type, new_wignerseitz_cell
@@ -155,7 +156,7 @@ subroutine get_rec_trans(lattice, trans)
 end subroutine get_rec_trans
 
 subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
-   & energy, gradient, sigma, qvec, dqdr, dqdL, dfdq)
+   & energy, gradient, sigma, qvec, dqdr, dqdL, dfdq, verbose)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in), target :: self
    !> Molecular structure data
@@ -192,6 +193,10 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    ! Optional derivative of the electrostatic energy w.r.t. atomic partial charges
    real(wp), intent(in), contiguous, optional :: dfdq(:)
 
+   ! Optional verbose output flag
+   integer, intent(in), optional :: verbose
+   integer :: verbose_solve
+
    integer :: ic, jc, iat, ndim
    logical :: grad, cpq, dcn
    integer(ik), allocatable :: ipiv(:)
@@ -222,17 +227,24 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    ! Adjoint vector p
    real(wp), allocatable :: padj(:)
 
+   ! Timer
+   type(timer_type) :: timer
+
    ! Calculate gradient if the respective arrays are present
    dcn = present(dcndr) .and. present(dcndL)
    grad = present(gradient) .and. present(sigma) .and. dcn
    cpq = present(dqdr) .and. present(dqdL) .and. dcn
    adj_grad = present(dfdq) .and. slv%need_pos_def .eqv. .true. 
 
+   if (.not. present(verbose)) then
+      verbose_solve = 0
+   else
+      verbose_solve = verbose
+   end if 
+
    ! Update cache
    allocate(cache)
    call self%update(mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
-
-   !call write_vector(qloc, "Local charges in solve")
    
    ! Determine the size of a linear system
    ! If the solver method requires potive definite matrices, 
@@ -246,6 +258,8 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       add_lagr = .true.
    end if
 
+   call timer%push("total")
+   call timer%push("setup")
    ! Setup the Coulomb matrix 
    allocate(amat(ndim, ndim))
    call self%get_coulomb_matrix(mol, cache, amat)
@@ -253,6 +267,18 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    ! Setup X-vector and A^-1 for the linear system
    allocate(xvec(ndim))
    call self%get_xvec(mol, cache, xvec)
+   call timer%pop
+
+   if (verbose_solve > 0) then
+      write(*,*)
+      write(*,'( 54("-"))')
+      write(*,'(a)') "             Charge equilibration solver            "
+      write(*,'( 54("-"))')
+      write(*,*)
+      if (verbose_solve > 1) then
+         write(*, '(a, 1x, a)') "A-matrix and X-vector formation time : ", format_time(timer%get("setup"))
+      end if
+   end if
 
    vrhs = xvec
    ainv = amat
@@ -296,24 +322,29 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       end do
       unitvec = 1.0_wp
 
+      if (verbose_solve > 0) then
+         write(*,*)
+         write(*,*) 'Solving constrained system: J*u = 1'
+      end if
       ! Constrained response: J*u = 1
       call slv%solve(amat=jmat, xvec=unitvec, vrhs=uvec, ainv=jinv, cpq=cpq, error=error)
-      ! call write_vector(uvec, "u vector")
+
+      if (verbose_solve > 0) then
+         write(*,*)
+         write(*,*) 'Solving constrained system: J*v = chi'
+      end if
       ! Constrained response: J*u = chi
       call slv%solve(amat=jmat, xvec=chivec, vrhs=vvec, ainv=jinv, cpq=cpq, error=error)
-      !call write_vector(vvec, "v vector")
 
       uvecsum = sum(uvec)
       vvecsum = sum(vvec)
-      !write(*,*) "Sum v vector:", vvecsum
+
       ! Lagrangian multiplier
       lambda = - (mol%charge + vvecsum) / uvecsum
-      !write(*,*) "Lagrangian multiplier:", lambda
 
       ! Partial charges
       if (present(qvec)) then
          qvec(:) = -vvec - lambda * uvec
-         !call write_vector(qvec, "Constrained charges")
       end if
 
       ! Reconstruct the full VRHS for gradient calculations
@@ -331,8 +362,6 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
             & alpha=0.5_wp, beta=-1.0_wp, uplo='l')
          energy(:) = energy(:) + vrhs(:mol%nat) * xvec(:mol%nat)
       end if
-
-      !call write_vector(vrhs, "Solved VRHS Vector")
    end if
 
    ! Allocate and get amat derivatives
@@ -346,9 +375,14 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       end do
    end if
 
+
    if (grad) then
+      call timer%push("gradient")
+      if (verbose_solve > 0) then
+         write(*,*)
+         write(*,*) ' Calculating gradients'
+      end if
       if (adj_grad) then
-         !write(*,*) "Using adjoint method for gradient calculation"
          ! Adjoint gradient calculation
          if (add_lagr .eqv. .true.) then
             ! If the constraint response have not been calculated before
@@ -369,6 +403,10 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
             uvecsum = sum(uvec)
          end if 
 
+         if (verbose_solve > 0) then
+            write(*,*)
+            write(*,*) 'Solving adjoint system: J*y = dfdq'
+         end if
          ! Solving the adjoint system J*y = dfdq
          allocate(yvec(mol%nat))
          allocate(padj(mol%nat))
@@ -385,6 +423,10 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
          padj = yvec - (yvecsum / uvecsum) * uvec
 
          ! Gradient: df/dr = -padj^T * (dA/dr * q + dx/dr)
+
+         !$omp parallel default(none) &
+         !$omp shared(gradient, dadr, dxdr, vrhs, padj) private(iat, ic) 
+         !$omp do schedule(runtime)
          gradient = 0.0_wp
          do iat = 1, mol%nat
             do ic = 1, mol%nat
@@ -392,12 +434,20 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
                      - padj(ic) * (dadr(:, iat, ic) * vrhs(ic) + dxdr(:, iat, ic))
             end do
          end do
+         !$omp end do
+         !$omp end parallel
       else
          gradient = 0.0_wp
          call gemv(dadr(:, :, :mol%nat), vrhs(:mol%nat), gradient, beta=1.0_wp, alpha=0.5_wp)
          call gemv(dxdr(:, :, :mol%nat), vrhs(:mol%nat), gradient, beta=1.0_wp, alpha=-1.0_wp)
          call gemv(dadL, vrhs, sigma, beta=1.0_wp, alpha=0.5_wp)
          call gemv(dxdL, vrhs, sigma, beta=1.0_wp, alpha=-1.0_wp)
+      end if
+      call timer%pop
+      if (verbose_solve > 1) then
+         write(*,*)
+         write(*, '(a, 1x, a)') "Gradient calculation time : ", format_time(timer%get("gradient"))
+         write(*,*)
       end if
    end if
 
@@ -408,7 +458,15 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       end do
       call gemm(dadr, ainv(:, :mol%nat), dqdr, alpha=-1.0_wp)
       call gemm(dadL, ainv(:, :mol%nat), dqdL, alpha=-1.0_wp)
-   end if         
+   end if     
+   
+   call timer%pop
+
+   if (verbose_solve > 1) then
+      write(*, '(a, 1x, a)') "Total solve time : ", format_time(timer%get("total"))
+      write(*,*)
+      write(*,*)
+   end if
 end subroutine solve
 
 subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL)
