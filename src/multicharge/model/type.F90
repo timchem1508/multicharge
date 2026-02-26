@@ -189,12 +189,12 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    real(wp), intent(out), contiguous, optional :: dqdr(:, :, :)
    !> Optional derivative of the atomic partial charges w.r.t. lattice vectors
    real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
-
    ! Optional derivative of the electrostatic energy w.r.t. atomic partial charges
-   real(wp), intent(in), contiguous, optional :: dfdq(:)
+   real(wp), intent(in), optional :: dfdq(:)
 
-   ! Optional verbose output flag
+   ! Optional print verbossity number input flag
    integer, intent(in), optional :: verbose
+   ! Local variable for print verbosity
    integer :: verbose_solve
 
    integer :: ic, jc, iat, ndim
@@ -218,7 +218,8 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    ! Sums of the v and u vector elements
    real(wp) :: uvecsum, vvecsum
    real(wp), allocatable :: chivec(:), unitvec(:), jinv(:, :)
-   real(wp) :: lambda ! Lagrangian factor for constraint
+   ! Lagrangian factor for constraint
+   real(wp) :: lambda 
 
    ! Gradient solver
    ! Derivative response J*y=dfdq
@@ -407,13 +408,16 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
             write(*,*)
             write(*,*) 'Solving adjoint system: J*y = dfdq'
          end if
+
          ! Solving the adjoint system J*y = dfdq
          allocate(yvec(mol%nat))
          allocate(padj(mol%nat))
+
          ! Initial guess for yvec: y = dfdq / diag(J)
          do ic = 1, mol%nat
             yvec(ic)= dfdq(ic)/jmat(ic, ic) + tiny(1.0_wp)
          end do
+
          ! Derivative response: J*y = dfdq
          call slv%solve(amat=jmat, xvec=dfdq, vrhs=yvec, &
                & ainv=jinv, cpq=cpq, error=error)
@@ -437,12 +441,14 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
          !$omp end do
          !$omp end parallel
       else
+         ! If no input dfdq present
          gradient = 0.0_wp
          call gemv(dadr(:, :, :mol%nat), vrhs(:mol%nat), gradient, beta=1.0_wp, alpha=0.5_wp)
          call gemv(dxdr(:, :, :mol%nat), vrhs(:mol%nat), gradient, beta=1.0_wp, alpha=-1.0_wp)
          call gemv(dadL, vrhs, sigma, beta=1.0_wp, alpha=0.5_wp)
          call gemv(dxdL, vrhs, sigma, beta=1.0_wp, alpha=-1.0_wp)
       end if
+
       call timer%pop
       if (verbose_solve > 1) then
          write(*,*)
