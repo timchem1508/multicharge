@@ -95,12 +95,11 @@ subroutine new_eeq_model(self, mol, error, chi, rad, eta, kcnchi, &
 
 end subroutine new_eeq_model
 
-!> Update cache for EEQ model – now accepts solver argument (unused)
-subroutine update(self, mol, cache, solver, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
+subroutine update(self, mol, cache, ndim, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
    class(eeq_model), intent(in) :: self
    type(structure_type), intent(in) :: mol
    type(cache_container), intent(inout) :: cache
-   class(mchrg_solver_type), intent(in) :: solver   ! <-- new argument (unused)
+   integer, intent(in) :: ndim   
    real(wp), intent(in) :: cn(:)
    real(wp), intent(in), optional :: qloc(:)
    real(wp), intent(in), optional :: dcndr(:, :, :)

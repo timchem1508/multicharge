@@ -81,12 +81,12 @@ module multicharge_model_type
    end type mchrg_model_type
 
    abstract interface
-      subroutine update(self, mol, cache, solver, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
-         import :: mchrg_model_type, structure_type, cache_container, wp, mchrg_solver_type
+      subroutine update(self, mol, cache, ndim, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
+         import :: mchrg_model_type, structure_type, cache_container, wp
          class(mchrg_model_type), intent(in) :: self
          type(structure_type), intent(in) :: mol
          type(cache_container), intent(inout) :: cache
-         class(mchrg_solver_type), intent(in) :: solver   ! <-- new argument
+         integer, intent(in) :: ndim   
          real(wp), intent(in) :: cn(:)
          real(wp), intent(in), optional :: qloc(:)
          real(wp), intent(in), optional :: dcndr(:, :, :)
@@ -200,6 +200,7 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    integer :: ic, jc, iat, ndim
    logical :: grad, cpq, dcn
    integer(ik), allocatable :: ipiv(:)
+   logical :: add_lagr = .true.   
 
    ! Variables for solving ES equation
    real(wp), allocatable :: xvec(:), vrhs(:), amat(:, :)
@@ -242,19 +243,21 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       verbose_solve = verbose
    end if 
 
-   ! Update cache, passing the solver that will be used
-   allocate(cache)
-   call self%update(mol, cache, slv, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
-   
    ! Determine the size of a linear system
-   ! If the solver method requires potive definite matrices, 
+   ! If the solver method requires positive definite matrices, 
    ! we need to add a Lagrangian multiplier to constrain the total charge,
    ! otherwise we can solve the unconstrained system directly
    if (slv%need_pos_def .eqv. .true.) then
       ndim = mol%nat 
+      add_lagr = .false.
    else
       ndim = mol%nat + 1
+      add_lagr = .true.
    end if
+
+   ! Update cache, passing the system size ndim
+   allocate(cache)
+   call self%update(mol, cache, ndim, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
 
    call timer%push("total")
    call timer%push("setup")
@@ -280,7 +283,7 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
 
    allocate(jmat(mol%nat, mol%nat))
 
-   if (slv%need_pos_def .eqv. .false.) then
+   if (add_lagr .eqv. .true.) then
 
       vrhs = xvec
       ainv = amat
@@ -380,7 +383,7 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       end if
       if (adj_grad) then
          ! Adjoint gradient calculation
-           if (slv%need_pos_def .eqv. .false.) then
+         if (add_lagr .eqv. .true.) then
             ! If the constraint response have not been calculated before
             if (allocated(uvec)) deallocate(uvec)
             allocate(uvec(mol%nat))

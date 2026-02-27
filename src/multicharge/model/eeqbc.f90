@@ -176,12 +176,11 @@ subroutine new_eeqbc_model(self, mol, error, chi, rad, &
 
 end subroutine new_eeqbc_model
 
-!> Update cache for EEQBC model – now accepts solver argument
-subroutine update(self, mol, cache, solver, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
+subroutine update(self, mol, cache, ndim, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
    class(eeqbc_model), intent(in) :: self
    type(structure_type), intent(in) :: mol
    type(cache_container), intent(inout) :: cache
-   class(mchrg_solver_type), intent(in) :: solver   ! <-- new argument
+   integer, intent(in) :: ndim   ! <-- system size (nat or nat+1)
    real(wp), intent(in) :: cn(:)
    real(wp), intent(in), optional :: qloc(:)
    real(wp), intent(in), optional :: dcndr(:, :, :)
@@ -191,18 +190,10 @@ subroutine update(self, mol, cache, solver, cn, qloc, dcndr, dcndL, dqlocdr, dql
 
    logical :: grad
    type(eeqbc_cache), pointer :: ptr
-   integer :: ndim
 
    call taint(cache, ptr)
 
    grad = present(dcndr) .and. present(dcndL) .and. present(dqlocdr) .and. present(dqlocdL)
-
-   ! Determine system size based on the solver that will be used
-   if (solver%need_pos_def) then
-      ndim = mol%nat
-   else
-      ndim = mol%nat + 1
-   end if
 
    ! Refer CN and local charge arrays in cache
    ptr%cn = cn
@@ -219,7 +210,7 @@ subroutine update(self, mol, cache, solver, cn, qloc, dcndr, dcndL, dqlocdr, dql
       ptr%dqlocdL = dqlocdL
    end if
 
-   ! Allocate temporary vector with correct size (depends on solver)
+   ! Allocate temporary vector with correct size (depends on ndim)
    if (.not. allocated(ptr%xtmp)) then
       allocate(ptr%xtmp(ndim))
    else if (size(ptr%xtmp) /= ndim) then

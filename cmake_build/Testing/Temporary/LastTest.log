@@ -1,10 +1,10 @@
-Start testing: Feb 27 15:52 CET
+Start testing: Feb 27 16:12 CET
 ----------------------------------------------------------
 1/36 Testing: mctc-lib/cutoff
 1/36 Test: mctc-lib/cutoff
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "cutoff"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/cutoff" start time: Feb 27 15:52 CET
+"mctc-lib/cutoff" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: cutoff
@@ -18,7 +18,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/cutoff" end time: Feb 27 15:52 CET
+"mctc-lib/cutoff" end time: Feb 27 16:12 CET
 "mctc-lib/cutoff" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -26,7 +26,7 @@ Test Passed.
 2/36 Test: mctc-lib/data
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "data"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/data" start time: Feb 27 15:52 CET
+"mctc-lib/data" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: data
@@ -50,7 +50,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/data" end time: Feb 27 15:52 CET
+"mctc-lib/data" end time: Feb 27 16:12 CET
 "mctc-lib/data" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -58,7 +58,7 @@ Test Passed.
 3/36 Test: mctc-lib/math
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "math"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/math" start time: Feb 27 15:52 CET
+"mctc-lib/math" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: math
@@ -74,7 +74,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/math" end time: Feb 27 15:52 CET
+"mctc-lib/math" end time: Feb 27 16:12 CET
 "mctc-lib/math" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -82,7 +82,7 @@ Test Passed.
 4/36 Test: mctc-lib/ncoord
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "ncoord"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/ncoord" start time: Feb 27 15:52 CET
+"mctc-lib/ncoord" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: ncoord
@@ -211,7 +211,7 @@ Output:
 Test time =   0.83 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/ncoord" end time: Feb 27 15:52 CET
+"mctc-lib/ncoord" end time: Feb 27 16:12 CET
 "mctc-lib/ncoord" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -219,7 +219,7 @@ Test Passed.
 5/36 Test: mctc-lib/read
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/read" start time: Feb 27 15:52 CET
+"mctc-lib/read" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: read
@@ -249,7 +249,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/read" end time: Feb 27 15:52 CET
+"mctc-lib/read" end time: Feb 27 16:12 CET
 "mctc-lib/read" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -257,7 +257,7 @@ Test Passed.
 6/36 Test: mctc-lib/read-aims
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read-aims"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/read-aims" start time: Feb 27 15:52 CET
+"mctc-lib/read-aims" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: read-aims
@@ -311,7 +311,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/read-aims" end time: Feb 27 15:52 CET
+"mctc-lib/read-aims" end time: Feb 27 16:12 CET
 "mctc-lib/read-aims" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -319,7 +319,7 @@ Test Passed.
 7/36 Test: mctc-lib/read-cjson
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read-cjson"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/read-cjson" start time: Feb 27 15:52 CET
+"mctc-lib/read-cjson" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: read-cjson
@@ -396,7 +396,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/read-cjson" end time: Feb 27 15:52 CET
+"mctc-lib/read-cjson" end time: Feb 27 16:12 CET
 "mctc-lib/read-cjson" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -404,7 +404,7 @@ Test Passed.
 8/36 Test: mctc-lib/read-ctfile
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read-ctfile"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/read-ctfile" start time: Feb 27 15:52 CET
+"mctc-lib/read-ctfile" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: read-ctfile
@@ -572,7 +572,7 @@ Output:
 Test time =   0.01 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/read-ctfile" end time: Feb 27 15:52 CET
+"mctc-lib/read-ctfile" end time: Feb 27 16:12 CET
 "mctc-lib/read-ctfile" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -580,7 +580,7 @@ Test Passed.
 9/36 Test: mctc-lib/read-gaussian
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read-gaussian"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/read-gaussian" start time: Feb 27 15:52 CET
+"mctc-lib/read-gaussian" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: read-gaussian
@@ -622,7 +622,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/read-gaussian" end time: Feb 27 15:52 CET
+"mctc-lib/read-gaussian" end time: Feb 27 16:12 CET
 "mctc-lib/read-gaussian" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -630,7 +630,7 @@ Test Passed.
 10/36 Test: mctc-lib/read-genformat
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read-genformat"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/read-genformat" start time: Feb 27 15:52 CET
+"mctc-lib/read-genformat" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: read-genformat
@@ -722,7 +722,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/read-genformat" end time: Feb 27 15:52 CET
+"mctc-lib/read-genformat" end time: Feb 27 16:12 CET
 "mctc-lib/read-genformat" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -730,7 +730,7 @@ Test Passed.
 11/36 Test: mctc-lib/read-json
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read-json"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/read-json" start time: Feb 27 15:52 CET
+"mctc-lib/read-json" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: read-json
@@ -756,7 +756,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/read-json" end time: Feb 27 15:52 CET
+"mctc-lib/read-json" end time: Feb 27 16:12 CET
 "mctc-lib/read-json" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -764,7 +764,7 @@ Test Passed.
 12/36 Test: mctc-lib/read-pdb
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read-pdb"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/read-pdb" start time: Feb 27 15:52 CET
+"mctc-lib/read-pdb" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: read-pdb
@@ -804,7 +804,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/read-pdb" end time: Feb 27 15:52 CET
+"mctc-lib/read-pdb" end time: Feb 27 16:12 CET
 "mctc-lib/read-pdb" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -812,7 +812,7 @@ Test Passed.
 13/36 Test: mctc-lib/read-pymatgen
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read-pymatgen"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/read-pymatgen" start time: Feb 27 15:52 CET
+"mctc-lib/read-pymatgen" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: read-pymatgen
@@ -886,7 +886,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/read-pymatgen" end time: Feb 27 15:52 CET
+"mctc-lib/read-pymatgen" end time: Feb 27 16:12 CET
 "mctc-lib/read-pymatgen" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -894,7 +894,7 @@ Test Passed.
 14/36 Test: mctc-lib/read-qchem
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read-qchem"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/read-qchem" start time: Feb 27 15:52 CET
+"mctc-lib/read-qchem" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: read-qchem
@@ -982,7 +982,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/read-qchem" end time: Feb 27 15:52 CET
+"mctc-lib/read-qchem" end time: Feb 27 16:12 CET
 "mctc-lib/read-qchem" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -990,7 +990,7 @@ Test Passed.
 15/36 Test: mctc-lib/read-qcschema
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read-qcschema"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/read-qcschema" start time: Feb 27 15:52 CET
+"mctc-lib/read-qcschema" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: read-qcschema
@@ -1103,7 +1103,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/read-qcschema" end time: Feb 27 15:52 CET
+"mctc-lib/read-qcschema" end time: Feb 27 16:12 CET
 "mctc-lib/read-qcschema" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -1111,7 +1111,7 @@ Test Passed.
 16/36 Test: mctc-lib/read-turbomole
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read-turbomole"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/read-turbomole" start time: Feb 27 15:52 CET
+"mctc-lib/read-turbomole" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: read-turbomole
@@ -1290,7 +1290,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/read-turbomole" end time: Feb 27 15:52 CET
+"mctc-lib/read-turbomole" end time: Feb 27 16:12 CET
 "mctc-lib/read-turbomole" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -1298,7 +1298,7 @@ Test Passed.
 17/36 Test: mctc-lib/read-vasp
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read-vasp"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/read-vasp" start time: Feb 27 15:52 CET
+"mctc-lib/read-vasp" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: read-vasp
@@ -1349,7 +1349,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/read-vasp" end time: Feb 27 15:52 CET
+"mctc-lib/read-vasp" end time: Feb 27 16:12 CET
 "mctc-lib/read-vasp" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -1357,7 +1357,7 @@ Test Passed.
 18/36 Test: mctc-lib/read-xyz
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read-xyz"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/read-xyz" start time: Feb 27 15:52 CET
+"mctc-lib/read-xyz" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: read-xyz
@@ -1431,7 +1431,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/read-xyz" end time: Feb 27 15:52 CET
+"mctc-lib/read-xyz" end time: Feb 27 16:12 CET
 "mctc-lib/read-xyz" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -1439,7 +1439,7 @@ Test Passed.
 19/36 Test: mctc-lib/symbols
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "symbols"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/symbols" start time: Feb 27 15:52 CET
+"mctc-lib/symbols" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: symbols
@@ -1457,7 +1457,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/symbols" end time: Feb 27 15:52 CET
+"mctc-lib/symbols" end time: Feb 27 16:12 CET
 "mctc-lib/symbols" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -1465,7 +1465,7 @@ Test Passed.
 20/36 Test: mctc-lib/write
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "write"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/write" start time: Feb 27 15:52 CET
+"mctc-lib/write" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: write
@@ -1495,7 +1495,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/write" end time: Feb 27 15:52 CET
+"mctc-lib/write" end time: Feb 27 16:12 CET
 "mctc-lib/write" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -1503,7 +1503,7 @@ Test Passed.
 21/36 Test: mctc-lib/write-aims
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "write-aims"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/write-aims" start time: Feb 27 15:52 CET
+"mctc-lib/write-aims" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: write-aims
@@ -1515,7 +1515,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/write-aims" end time: Feb 27 15:52 CET
+"mctc-lib/write-aims" end time: Feb 27 16:12 CET
 "mctc-lib/write-aims" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -1523,7 +1523,7 @@ Test Passed.
 22/36 Test: mctc-lib/write-cjson
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "write-cjson"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/write-cjson" start time: Feb 27 15:52 CET
+"mctc-lib/write-cjson" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: write-cjson
@@ -1537,7 +1537,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/write-cjson" end time: Feb 27 15:52 CET
+"mctc-lib/write-cjson" end time: Feb 27 16:12 CET
 "mctc-lib/write-cjson" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -1545,7 +1545,7 @@ Test Passed.
 23/36 Test: mctc-lib/write-ctfile
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "write-ctfile"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/write-ctfile" start time: Feb 27 15:52 CET
+"mctc-lib/write-ctfile" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: write-ctfile
@@ -1563,7 +1563,7 @@ Output:
 Test time =   0.02 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/write-ctfile" end time: Feb 27 15:52 CET
+"mctc-lib/write-ctfile" end time: Feb 27 16:12 CET
 "mctc-lib/write-ctfile" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -1571,7 +1571,7 @@ Test Passed.
 24/36 Test: mctc-lib/write-gaussian
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "write-gaussian"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/write-gaussian" start time: Feb 27 15:52 CET
+"mctc-lib/write-gaussian" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: write-gaussian
@@ -1581,7 +1581,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/write-gaussian" end time: Feb 27 15:52 CET
+"mctc-lib/write-gaussian" end time: Feb 27 16:12 CET
 "mctc-lib/write-gaussian" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -1589,7 +1589,7 @@ Test Passed.
 25/36 Test: mctc-lib/write-genformat
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "write-genformat"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/write-genformat" start time: Feb 27 15:52 CET
+"mctc-lib/write-genformat" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: write-genformat
@@ -1603,7 +1603,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/write-genformat" end time: Feb 27 15:52 CET
+"mctc-lib/write-genformat" end time: Feb 27 16:12 CET
 "mctc-lib/write-genformat" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -1611,7 +1611,7 @@ Test Passed.
 26/36 Test: mctc-lib/write-pdb
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "write-pdb"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/write-pdb" start time: Feb 27 15:52 CET
+"mctc-lib/write-pdb" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: write-pdb
@@ -1621,7 +1621,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/write-pdb" end time: Feb 27 15:52 CET
+"mctc-lib/write-pdb" end time: Feb 27 16:12 CET
 "mctc-lib/write-pdb" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -1629,7 +1629,7 @@ Test Passed.
 27/36 Test: mctc-lib/write-pymatgen
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "write-pymatgen"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/write-pymatgen" start time: Feb 27 15:52 CET
+"mctc-lib/write-pymatgen" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: write-pymatgen
@@ -1643,7 +1643,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/write-pymatgen" end time: Feb 27 15:52 CET
+"mctc-lib/write-pymatgen" end time: Feb 27 16:12 CET
 "mctc-lib/write-pymatgen" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -1651,7 +1651,7 @@ Test Passed.
 28/36 Test: mctc-lib/write-qchem
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "write-qchem"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/write-qchem" start time: Feb 27 15:52 CET
+"mctc-lib/write-qchem" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: write-qchem
@@ -1663,7 +1663,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/write-qchem" end time: Feb 27 15:52 CET
+"mctc-lib/write-qchem" end time: Feb 27 16:12 CET
 "mctc-lib/write-qchem" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -1671,7 +1671,7 @@ Test Passed.
 29/36 Test: mctc-lib/write-qcschema
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "write-qcschema"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/write-qcschema" start time: Feb 27 15:52 CET
+"mctc-lib/write-qcschema" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: write-qcschema
@@ -1685,7 +1685,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/write-qcschema" end time: Feb 27 15:52 CET
+"mctc-lib/write-qcschema" end time: Feb 27 16:12 CET
 "mctc-lib/write-qcschema" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -1693,7 +1693,7 @@ Test Passed.
 30/36 Test: mctc-lib/write-turbomole
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "write-turbomole"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/write-turbomole" start time: Feb 27 15:52 CET
+"mctc-lib/write-turbomole" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: write-turbomole
@@ -1709,7 +1709,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/write-turbomole" end time: Feb 27 15:52 CET
+"mctc-lib/write-turbomole" end time: Feb 27 16:12 CET
 "mctc-lib/write-turbomole" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -1717,7 +1717,7 @@ Test Passed.
 31/36 Test: mctc-lib/write-vasp
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "write-vasp"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/write-vasp" start time: Feb 27 15:52 CET
+"mctc-lib/write-vasp" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: write-vasp
@@ -1733,7 +1733,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/write-vasp" end time: Feb 27 15:52 CET
+"mctc-lib/write-vasp" end time: Feb 27 16:12 CET
 "mctc-lib/write-vasp" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -1741,7 +1741,7 @@ Test Passed.
 32/36 Test: mctc-lib/write-xyz
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "write-xyz"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
-"mctc-lib/write-xyz" start time: Feb 27 15:52 CET
+"mctc-lib/write-xyz" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: write-xyz
@@ -1751,7 +1751,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"mctc-lib/write-xyz" end time: Feb 27 15:52 CET
+"mctc-lib/write-xyz" end time: Feb 27 16:12 CET
 "mctc-lib/write-xyz" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -1759,7 +1759,7 @@ Test Passed.
 33/36 Test: model
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/test/unit/multicharge-tester" "model"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/test/unit
-"model" start time: Feb 27 15:52 CET
+"model" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: model
@@ -2916,7 +2916,7 @@ Output:
 Test time =   0.06 sec
 ----------------------------------------------------------
 Test Passed.
-"model" end time: Feb 27 15:52 CET
+"model" end time: Feb 27 16:12 CET
 "model" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -2924,7 +2924,7 @@ Test Passed.
 34/36 Test: pbc
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/test/unit/multicharge-tester" "pbc"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/test/unit
-"pbc" start time: Feb 27 15:52 CET
+"pbc" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: pbc
@@ -3275,10 +3275,10 @@ Output:
  CG converged successfully.
        ... eeqbc-dfdr-urea [PASSED]
 <end of output>
-Test time =   3.43 sec
+Test time =   3.39 sec
 ----------------------------------------------------------
 Test Passed.
-"pbc" end time: Feb 27 15:52 CET
+"pbc" end time: Feb 27 16:12 CET
 "pbc" time elapsed: 00:00:03
 ----------------------------------------------------------
 
@@ -3286,7 +3286,7 @@ Test Passed.
 35/36 Test: wignerseitz
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/test/unit/multicharge-tester" "wignerseitz"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/test/unit
-"wignerseitz" start time: Feb 27 15:52 CET
+"wignerseitz" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: wignerseitz
@@ -3302,7 +3302,7 @@ Output:
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"wignerseitz" end time: Feb 27 15:52 CET
+"wignerseitz" end time: Feb 27 16:12 CET
 "wignerseitz" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -3310,7 +3310,7 @@ Test Passed.
 36/36 Test: solver
 Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/test/unit/multicharge-tester" "solver"
 Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/test/unit
-"solver" start time: Feb 27 15:52 CET
+"solver" start time: Feb 27 16:12 CET
 Output:
 ----------------------------------------------------------
 # Testing: solver
@@ -3318,31 +3318,31 @@ Output:
  CG converged successfully.
 CG Solver CPU Time :  0.000 seconds.
 Direct Solver CPU Time :  0.000 seconds.
-CG Solver ime profit :  1.000
+CG Solver ime profit :  1.182
        ... cg-identity-2x2 [PASSED]
   Starting cg-diagonal-5x5 ... (2/8)
  CG converged successfully.
 CG Solver CPU Time :  0.000 seconds.
 Direct Solver CPU Time :  0.000 seconds.
-CG Solver ime profit :  0.400
+CG Solver ime profit :  0.500
        ... cg-diagonal-5x5 [PASSED]
   Starting cg-spd-small ... (3/8)
  CG converged successfully.
 CG Solver CPU Time :  0.000 seconds.
 Direct Solver CPU Time :  0.000 seconds.
-CG Solver ime profit :  0.667
+CG Solver ime profit :  2.000
        ... cg-spd-small [PASSED]
   Starting cg-spd-large ... (4/8)
  CG converged successfully.
-CG Solver CPU Time :  0.007 seconds.
-Direct Solver CPU Time :  0.086 seconds.
-CG Solver ime profit : 12.890
+CG Solver CPU Time :  0.008 seconds.
+Direct Solver CPU Time :  0.136 seconds.
+CG Solver ime profit : 16.673
        ... cg-spd-large [PASSED]
   Starting cg-ill-conditioned ... (5/8)
  CG converged successfully.
 CG Solver CPU Time :  0.000 seconds.
 Direct Solver CPU Time :  0.000 seconds.
-CG Solver ime profit :  0.429
+CG Solver ime profit :  0.444
        ... cg-ill-conditioned [PASSED]
   Starting cg-zero-rhs ... (6/8)
  CG converged successfully.
@@ -3354,20 +3354,20 @@ CG Solver ime profit :  0.500
  CG converged successfully.
 CG Solver CPU Time :  0.000 seconds.
 Direct Solver CPU Time :  0.000 seconds.
-CG Solver ime profit :  1.000
+CG Solver ime profit :  1.020
        ... cg-random-spd [PASSED]
   Starting cg-preconditioned ... (8/8)
  CG converged successfully.
 CG Solver CPU Time :  0.000 seconds.
 Direct Solver CPU Time :  0.000 seconds.
-CG Solver ime profit :  0.600
+CG Solver ime profit :  0.667
        ... cg-preconditioned [PASSED]
 <end of output>
-Test time =   0.10 sec
+Test time =   0.15 sec
 ----------------------------------------------------------
 Test Passed.
-"solver" end time: Feb 27 15:52 CET
+"solver" end time: Feb 27 16:12 CET
 "solver" time elapsed: 00:00:00
 ----------------------------------------------------------
 
-End testing: Feb 27 15:52 CET
+End testing: Feb 27 16:12 CET
