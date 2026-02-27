@@ -1,4 +1,0 @@
-ninja_dyndep_version = 1.0
-build subprojects/mstore/app/fortranize/CMakeFiles/mstore-fortranize.dir/main.f90.o | subprojects/mstore/app/fortranize/fortranize.mod: dyndep | subprojects/mctc-lib/include/mctc_env.mod subprojects/mctc-lib/include/mctc_io.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mctc-lib/include/mctc_io_symbols.mod subprojects/mctc-lib/include/mctc_version.mod subprojects/mstore/include/mstore.mod
-  restat = 1
-

@@ -1,3 +1,0 @@
-ninja_dyndep_version = 1.0
-build subprojects/mstore/app/info/CMakeFiles/mstore-info.dir/main.f90.o: dyndep | subprojects/mctc-lib/include/mctc_env.mod subprojects/mctc-lib/include/mctc_io.mod subprojects/mctc-lib/include/mctc_io_symbols.mod subprojects/mctc-lib/include/mctc_version.mod subprojects/mstore/include/mstore.mod
-

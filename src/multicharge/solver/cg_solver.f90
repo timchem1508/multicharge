@@ -245,7 +245,6 @@ contains
                         & " iterations with residual norm ", sqrt(rnorm)
                 end if
                 if (self%verbose > 0) call timer%pop   ! pop "iteration"
-                write(*,*) "CG converged successfully."
                 exit
             end if
             
