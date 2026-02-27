@@ -1,0 +1,3 @@
+ninja_dyndep_version = 1.0
+build app/CMakeFiles/multicharge-exe.dir/main.f90.o: dyndep | subprojects/mctc-lib/include/mctc_cutoff.mod subprojects/mctc-lib/include/mctc_env.mod subprojects/mctc-lib/include/mctc_io.mod include/multicharge.mod include/multicharge_output.mod include/multicharge_solver.mod
+

@@ -1,0 +1,40 @@
+{
+	"revision" : 0,
+	"rules" : 
+	[
+		{
+			"outputs" : [],
+			"primary-output" : "subprojects/mctc-lib/CMakeFiles/mctc-lib-lib.dir/src/mctc/io/write/genformat.f90.o",
+			"provides" : 
+			[
+				{
+					"compiled-module-path" : "subprojects/mctc-lib/include/mctc_io_write_genformat.mod",
+					"is-interface" : true,
+					"logical-name" : "mctc_io_write_genformat.mod"
+				}
+			],
+			"requires" : 
+			[
+				{
+					"logical-name" : "mctc_env_accuracy.mod"
+				},
+				{
+					"logical-name" : "mctc_io_constants.mod"
+				},
+				{
+					"logical-name" : "mctc_io_convert.mod"
+				},
+				{
+					"logical-name" : "mctc_io_math.mod"
+				},
+				{
+					"logical-name" : "mctc_io_structure.mod"
+				},
+				{
+					"logical-name" : "mctc_io_symbols.mod"
+				}
+			]
+		}
+	],
+	"version" : 0
+}

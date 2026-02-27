@@ -1,0 +1,25 @@
+{
+	"revision" : 0,
+	"rules" : 
+	[
+		{
+			"outputs" : [],
+			"primary-output" : "subprojects/mstore/CMakeFiles/mstore-lib.dir/src/mstore/data/record.f90.o",
+			"provides" : 
+			[
+				{
+					"compiled-module-path" : "subprojects/mstore/include/mstore_data_record.mod",
+					"is-interface" : true,
+					"logical-name" : "mstore_data_record.mod"
+				}
+			],
+			"requires" : 
+			[
+				{
+					"logical-name" : "mctc_io.mod"
+				}
+			]
+		}
+	],
+	"version" : 0
+}

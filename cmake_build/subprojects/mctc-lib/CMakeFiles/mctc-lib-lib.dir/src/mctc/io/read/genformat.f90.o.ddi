@@ -1,0 +1,46 @@
+{
+	"revision" : 0,
+	"rules" : 
+	[
+		{
+			"outputs" : [],
+			"primary-output" : "subprojects/mctc-lib/CMakeFiles/mctc-lib-lib.dir/src/mctc/io/read/genformat.f90.o",
+			"provides" : 
+			[
+				{
+					"compiled-module-path" : "subprojects/mctc-lib/include/mctc_io_read_genformat.mod",
+					"is-interface" : true,
+					"logical-name" : "mctc_io_read_genformat.mod"
+				}
+			],
+			"requires" : 
+			[
+				{
+					"logical-name" : "mctc_env_accuracy.mod"
+				},
+				{
+					"logical-name" : "mctc_env_error.mod"
+				},
+				{
+					"logical-name" : "mctc_io_constants.mod"
+				},
+				{
+					"logical-name" : "mctc_io_convert.mod"
+				},
+				{
+					"logical-name" : "mctc_io_structure.mod"
+				},
+				{
+					"logical-name" : "mctc_io_structure_info.mod"
+				},
+				{
+					"logical-name" : "mctc_io_symbols.mod"
+				},
+				{
+					"logical-name" : "mctc_io_utils.mod"
+				}
+			]
+		}
+	],
+	"version" : 0
+}

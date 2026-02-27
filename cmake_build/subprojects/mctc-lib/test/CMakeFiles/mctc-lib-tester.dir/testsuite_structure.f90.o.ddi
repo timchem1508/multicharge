@@ -1,0 +1,28 @@
+{
+	"revision" : 0,
+	"rules" : 
+	[
+		{
+			"outputs" : [],
+			"primary-output" : "subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/testsuite_structure.f90.o",
+			"provides" : 
+			[
+				{
+					"compiled-module-path" : "subprojects/mctc-lib/test/testsuite_structure.mod",
+					"is-interface" : true,
+					"logical-name" : "testsuite_structure.mod"
+				}
+			],
+			"requires" : 
+			[
+				{
+					"logical-name" : "mctc_env_accuracy.mod"
+				},
+				{
+					"logical-name" : "mctc_io_structure.mod"
+				}
+			]
+		}
+	],
+	"version" : 0
+}

@@ -1,0 +1,20 @@
+{
+	"revision" : 0,
+	"rules" : 
+	[
+		{
+			"outputs" : [],
+			"primary-output" : "CMakeFiles/multicharge-lib.dir/src/multicharge/version.f90.o",
+			"provides" : 
+			[
+				{
+					"compiled-module-path" : "include/multicharge_version.mod",
+					"is-interface" : true,
+					"logical-name" : "multicharge_version.mod"
+				}
+			],
+			"requires" : []
+		}
+	],
+	"version" : 0
+}

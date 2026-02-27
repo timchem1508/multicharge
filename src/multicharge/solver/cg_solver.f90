@@ -1,6 +1,5 @@
 module multicharge_solver_cg
-    use mctc_env, only: error_type, fatal_error, wp
-    use mctc_env_timer, only : timer_type, format_time
+    use mctc_env, only: error_type, fatal_error, wp, timer_type, format_time
     use multicharge_blas, only: symv, gemv
     use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
     use multicharge_solver_cache, only: cache_container, mchrg_solver_cache
@@ -71,14 +70,16 @@ contains
 
     end subroutine new_cg_solver
 
-    !> Update method for CG solver
+    !> Update method for CG solver (not used, but required by interface)
     subroutine update(self, cache, vrhs, ainv, cpq)
         class(mchrg_solver_cg), intent(in) :: self
         type(cache_container), intent(inout) :: cache
         real(wp), intent(inout) :: vrhs(:)
         real(wp), intent(out) :: ainv(:, :)
         logical, intent(in), optional :: cpq
-
+        ! This routine intentionally left empty.
+        ! The dummy arguments are unused, but we must set ainv to avoid -Wunused-dummy-argument.
+        ainv = 0.0_wp
     end subroutine update
 
     !> Solve method for CG solver
@@ -86,14 +87,15 @@ contains
         class(mchrg_solver_cg), intent(in) :: self
         ! A matrix of Ax=b system
         real(wp), intent(in)  :: amat(:, :)
-        ! Initial search direction (b)
+        ! Right-hand side vector (b)
         real(wp), intent(in)  :: xvec(:)
-        ! Initial guess and solution
+        ! On input: initial guess; on output: solution
         real(wp), intent(inout) :: vrhs(:)
-        ! Inverse matrix and coupled perturbed logical 
-        ! not used in CG but required by the interface
+        ! Inverse matrix – not computed by CG, but required by interface
         real(wp), intent(out) :: ainv(:, :)
+        ! Flag for coupled-perturbed equations (should always be .false. for CG)
         logical, intent(in), optional :: cpq
+        ! Error handling
         type(error_type), allocatable, intent(out) :: error
         
         ! Maximal number of iterations
@@ -103,52 +105,61 @@ contains
         
         ! Iterations counter
         integer :: it
-        ! Size of the xvec
+        ! Size of the system
         integer :: ndim
 
         ! Search direction (p)
         real(wp), allocatable :: direction(:)
-        ! Initial direction norm 
+        ! Norm of the RHS
         real(wp) :: bnorm
-        ! Residual r = b - A*p
+        ! Residual r = b - A*x
         real(wp), allocatable :: residual(:)
         ! Residual norm 
         real(wp) :: rnorm
         ! Diagonal preconditioner M^-1
         real(wp), allocatable :: Mdiag(:)
-        ! Preconditioned residual z=M^-1*r
+        ! Preconditioned residual z = M^-1 * r
         real(wp), allocatable ::  zres(:)
 
         ! Matrix-vector product A*p
         real(wp), allocatable :: Ap(:)
-        ! Denominator of the step p^T*Ap
+        ! Denominator p^T * A * p
         real(wp) :: denom
         ! Step length
         real(wp) :: alpha
 
-        ! Direction update factor p_new/p
+        ! Update factor for search direction
         real(wp) :: beta
-        ! Dynamical residuals
+        ! Old and new values of r^T * z
         real(wp) :: rz_old, rz_new
-        ! Relative residuals test rnorm/bnorm
+        ! Relative residual norm (|r| / |b|)
         real(wp) :: rel_res
 
         type(cache_container), allocatable :: cache
         type(timer_type) :: timer
-        
-        if (present(cpq) .and. cpq .eqv. .true.) then
+
+        ! --------------------------------------------------------------------
+        ! 1.  Basic checks and early returns
+        ! --------------------------------------------------------------------
+
+        ! Ensure ainv is always defined (required by intent(out))
+        ainv = amat
+
+        ! CG cannot compute the inverse matrix
+        if (present(cpq) .and. cpq) then
             call fatal_error(error, "solve_cg: The inverse matrix cannot be calculated using an iterative solver.")
             return
         end if 
 
-        ! Dimensions match check
+        ! Dimensions must match
         ndim = size(xvec)
-        if (size(amat,1) /= ndim .or. size(amat,2) /= ndim) then
+        if (size(amat,1) /= ndim .or. size(amat,2) /= ndim .or. size(vrhs) /= ndim &
+                .or. size(ainv,1) /= ndim .or. size(ainv,2) /= ndim) then
             call fatal_error(error, "solve_cg: dimension mismatch.")
             return
         end if
 
-        ! Prepare/cache
+        ! Prepare cache (unused, but required by interface)
         allocate(cache)
         call self%update(cache, vrhs, ainv, cpq)
      
@@ -159,114 +170,117 @@ contains
     
         allocate(residual(ndim), direction(ndim), zres(ndim), Ap(ndim), Mdiag(ndim))
 
-        call timer%push("total")
-        call timer%push("initialization")   
-        ! Jacobi preconditioner (inverse of diagonal)
-        !$omp parallel default(none) &
-        !$omp shared(Mdiag, amat, ndim, tol_square) private(it) 
-        !$omp do schedule(runtime)
+        ! --------------------------------------------------------------------
+        ! 2.  Timer start (only if verbose > 0)
+        ! --------------------------------------------------------------------
+        if (self%verbose > 0) call timer%push("total")
+        if (self%verbose > 0) call timer%push("initialization")
+
+        ! --------------------------------------------------------------------
+        ! 3.  Jacobi preconditioner (inverse of diagonal)
+        ! --------------------------------------------------------------------
+        !$omp parallel do default(none) shared(Mdiag, amat, ndim, tol_square) private(it)
         do it = 1, ndim
             Mdiag(it) = amat(it,it)
             if (abs(Mdiag(it)) < tol_square) Mdiag(it) = tol_square
             Mdiag(it) = 1.0_wp / Mdiag(it)
         end do
-        !$omp end do
-        !$omp critical (solve_cg_)
+        !$omp end parallel do
     
-        ! Initial residual r = b - A*x
-        call symv(amat, vrhs, Ap, alpha=1.0_wp, beta=0.0_wp)
-        residual = xvec - Ap
+        ! --------------------------------------------------------------------
+        ! 4.  Initial residual and search direction
+        ! --------------------------------------------------------------------
+        call symv(amat, vrhs, Ap, alpha=1.0_wp, beta=0.0_wp)   ! Ap = A * x0
+        residual = xvec - Ap                                    ! r0 = b - A*x0
         
-        ! Apply preconditioner z = M * r
-        zres = residual * Mdiag
+        zres = residual * Mdiag                                 ! z0 = M^{-1} * r0
+        direction = zres                                        ! p0 = z0
         
-        ! Initial search direction
-        direction = zres
-        
-        ! Initial direction update factor
-        bnorm = dot_product(xvec,xvec)
+        bnorm = dot_product(xvec, xvec)
         if (bnorm < tol_square) bnorm = 1.0_wp
-        rnorm = dot_product(residual,residual)
-        
-        
-        ! Dynamical residual
-        rz_old = dot_product(residual,zres)
-        !$omp end critical (solve_cg_)
+        rnorm = dot_product(residual, residual)                 ! |r0|^2
+        rz_old = dot_product(residual, zres)                    ! r0^T * z0
 
-        call timer%pop
+        if (self%verbose > 0) call timer%pop   ! pop "initialization"
+
+        ! --------------------------------------------------------------------
+        ! 5.  Optional output header
+        ! --------------------------------------------------------------------
         if (self%verbose > 1) then
             write(*, '(a, 1x, a)') "Initialisation time:", format_time(timer%get("initialization"))
-        end if
-
-        if (self%verbose > 1) then
             write(*,*)
-            write(*,*) ' iter      |residual|        step      relative residual', &
-                      &'    Time / s'
+            write(*,*) ' iter      |residual|        step      relative residual    Time / s'
         end if
-
         if (self%verbose == 1) then
             write(*,*)
             write(*,*) ' iter      |residual|        step      relative residual'
         end if
-    
-        ! Conjugate Gradient iterations
-        !$omp shared(Mdiag, amat, ndim, tol_square, vrhs, maxit) private(it) 
-        !$omp do schedule(runtime)
+
+        ! --------------------------------------------------------------------
+        ! 6.  Main CG loop
+        ! --------------------------------------------------------------------
         do it = 1, maxit
-            call timer%push("iteration")
-            !$omp critical (solve_cg_)
-            call symv(amat, direction, Ap, alpha=1.0_wp, beta=0.0_wp)
+            if (self%verbose > 0) call timer%push("iteration")
+
+            call symv(amat, direction, Ap, alpha=1.0_wp, beta=0.0_wp)   ! Ap = A * p
             
-            ! Compute step size alpha
-            denom = dot_product(direction,Ap) + tiny(1.0_wp)
-            
+            denom = dot_product(direction, Ap) + tiny(1.0_wp)
             if (abs(denom) < tol_square) then
+                if (self%verbose > 0) call timer%pop   ! pop "iteration"
                 exit
             end if
             
-            ! Step update
-            alpha = rz_old / denom
+            alpha = rz_old / denom                                      ! α = r·z / (p·Ap)
             
-            ! Update solution and residual
-            vrhs = vrhs + alpha * direction
-            residual = residual - alpha * Ap
+            vrhs = vrhs + alpha * direction                            ! x = x + α p
+            residual = residual - alpha * Ap                           ! r = r - α Ap
             
-            ! Check convergence
-            rnorm = dot_product(residual,residual)
-            rel_res = rnorm / bnorm
+            rnorm = dot_product(residual, residual)                    ! |r|^2
+            rel_res = rnorm / bnorm                                    ! |r| / |b|
 
             if (rel_res <= tol_square) then
                 if (self%verbose > 0) then
                     write(*,*)
-                    write(*,'(a, i0, a, es15.5)') "CG converged in ", it, " iterations with residual norm ", sqrt(rnorm)
+                    write(*,'(a, i0, a, es15.5)') "CG converged in ", it, &
+                        & " iterations with residual norm ", sqrt(rnorm)
                 end if
+                if (self%verbose > 0) call timer%pop   ! pop "iteration"
+                write(*,*) "CG converged successfully."
                 exit
             end if
             
-            ! Apply preconditioner z = M * r
-            zres = residual * Mdiag
-            rz_new = dot_product(residual, zres)
-            beta = rz_new / rz_old
-            direction = zres + beta * direction
+            zres = residual * Mdiag                                    ! z = M^{-1} * r
+            rz_new = dot_product(residual, zres)                       ! new r·z
+            beta = rz_new / rz_old                                     ! β = (r·z)_new / (r·z)_old
+            direction = zres + beta * direction                        ! p = z + β p
             rz_old = rz_new
 
-            call timer%pop
+            if (self%verbose > 0) call timer%pop   ! pop "iteration"
 
+            ! Verbose output during iterations
             if (self%verbose == 1) then
                 write(*, '(i6,*(1x, es15.5))') it, sqrt(rnorm), alpha, sqrt(rel_res)
             end if
-
             if (self%verbose > 1) then
                 write(*, '(i6,*(1x, es15.5))') it, sqrt(rnorm), alpha, sqrt(rel_res), timer%get("iteration")
             end if
             
+            ! Non‑convergence after maxit
             if (it == maxit) then
+                if (self%verbose > 0) then
+                    call timer%pop   ! pop "iteration"
+                    call timer%pop   ! pop "total"
+                end if
                 call fatal_error(error, "solve_cg: CG did not converge within max iterations.")
+                return
             end if
         end do
-        !$omp end do
-        !$omp end parallel
-        call timer%pop
+
+        ! --------------------------------------------------------------------
+        ! 7.  Finalise timer and return
+        ! --------------------------------------------------------------------
+        if (self%verbose > 0) call timer%pop   ! pop "total"
+
         if (self%verbose > 1) then
             write(*, '(a, 1x, a)') "CG total time : ", format_time(timer%get("total"))
             write(*,*)

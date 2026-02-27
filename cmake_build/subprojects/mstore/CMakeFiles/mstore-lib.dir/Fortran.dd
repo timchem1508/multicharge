@@ -1,0 +1,43 @@
+ninja_dyndep_version = 1.0
+build subprojects/mstore/CMakeFiles/mstore-lib.dir/src/mstore/data/collection.f90.o | subprojects/mstore/include/mstore_data_collection.mod: dyndep | subprojects/mstore/include/mstore_data_record.mod
+  restat = 1
+
+build subprojects/mstore/CMakeFiles/mstore-lib.dir/src/mstore/data/record.f90.o | subprojects/mstore/include/mstore_data_record.mod: dyndep | subprojects/mctc-lib/include/mctc_io.mod
+  restat = 1
+
+build subprojects/mstore/CMakeFiles/mstore-lib.dir/src/mstore/data/store.f90.o | subprojects/mstore/include/mstore_data_store.mod: dyndep | subprojects/mctc-lib/include/mctc_env_error.mod subprojects/mstore/include/mstore_data_collection.mod subprojects/mstore/include/mstore_data_record.mod
+  restat = 1
+
+build subprojects/mstore/CMakeFiles/mstore-lib.dir/src/mstore/amino20x4.f90.o | subprojects/mstore/include/mstore_amino20x4.mod: dyndep | subprojects/mctc-lib/include/mctc_env_accuracy.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mstore/include/mstore_data_record.mod
+  restat = 1
+
+build subprojects/mstore/CMakeFiles/mstore-lib.dir/src/mstore/but14diol.f90.o | subprojects/mstore/include/mstore_but14diol.mod: dyndep | subprojects/mctc-lib/include/mctc_env_accuracy.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mstore/include/mstore_data_record.mod
+  restat = 1
+
+build subprojects/mstore/CMakeFiles/mstore-lib.dir/src/mstore/f_block.f90.o | subprojects/mstore/include/mstore_f_block.mod: dyndep | subprojects/mctc-lib/include/mctc_env_accuracy.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mstore/include/mstore_data_record.mod
+  restat = 1
+
+build subprojects/mstore/CMakeFiles/mstore-lib.dir/src/mstore/heavy28.f90.o | subprojects/mstore/include/mstore_heavy28.mod: dyndep | subprojects/mctc-lib/include/mctc_env_accuracy.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mstore/include/mstore_data_record.mod
+  restat = 1
+
+build subprojects/mstore/CMakeFiles/mstore-lib.dir/src/mstore/ice10.f90.o | subprojects/mstore/include/mstore_ice10.mod: dyndep | subprojects/mctc-lib/include/mctc_env_accuracy.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mstore/include/mstore_data_record.mod
+  restat = 1
+
+build subprojects/mstore/CMakeFiles/mstore-lib.dir/src/mstore/il16.f90.o | subprojects/mstore/include/mstore_il16.mod: dyndep | subprojects/mctc-lib/include/mctc_env_accuracy.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mstore/include/mstore_data_record.mod
+  restat = 1
+
+build subprojects/mstore/CMakeFiles/mstore-lib.dir/src/mstore/mb16_43.f90.o | subprojects/mstore/include/mstore_mb16_43.mod: dyndep | subprojects/mctc-lib/include/mctc_env_accuracy.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mstore/include/mstore_data_record.mod
+  restat = 1
+
+build subprojects/mstore/CMakeFiles/mstore-lib.dir/src/mstore/upu23.f90.o | subprojects/mstore/include/mstore_upu23.mod: dyndep | subprojects/mctc-lib/include/mctc_env_accuracy.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mstore/include/mstore_data_record.mod
+  restat = 1
+
+build subprojects/mstore/CMakeFiles/mstore-lib.dir/src/mstore/x23.f90.o | subprojects/mstore/include/mstore_x23.mod: dyndep | subprojects/mctc-lib/include/mctc_env_accuracy.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mstore/include/mstore_data_record.mod
+  restat = 1
+
+build subprojects/mstore/CMakeFiles/mstore-lib.dir/src/mstore.f90.o | subprojects/mstore/include/mstore.mod: dyndep | subprojects/mctc-lib/include/mctc_env.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mstore/include/mstore_amino20x4.mod subprojects/mstore/include/mstore_but14diol.mod subprojects/mstore/include/mstore_data_collection.mod subprojects/mstore/include/mstore_data_record.mod subprojects/mstore/include/mstore_data_store.mod subprojects/mstore/include/mstore_f_block.mod subprojects/mstore/include/mstore_heavy28.mod subprojects/mstore/include/mstore_ice10.mod subprojects/mstore/include/mstore_il16.mod subprojects/mstore/include/mstore_mb16_43.mod subprojects/mstore/include/mstore_upu23.mod subprojects/mstore/include/mstore_x23.mod
+  restat = 1
+
+build subprojects/mstore/CMakeFiles/mstore-lib.dir/src/mstore_version.f90.o | subprojects/mstore/include/mstore_version.mod: dyndep
+  restat = 1
+

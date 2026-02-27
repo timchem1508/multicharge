@@ -15,6 +15,7 @@
 
 add_subdirectory("model")
 add_subdirectory("param")
+add_subdirectory("solver")
 
 set(dir "${CMAKE_CURRENT_SOURCE_DIR}")
 
@@ -30,6 +31,8 @@ list(
   "${dir}/version.f90"
   "${dir}/wignerseitz.f90"
   "${dir}/cache.f90"
+  "${dir}/solver.f90"
+  "${dir}/print_matrix.f90"
 )
 
 set(srcs "${srcs}" PARENT_SCOPE)

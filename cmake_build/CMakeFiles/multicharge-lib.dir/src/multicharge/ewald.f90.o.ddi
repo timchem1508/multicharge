@@ -1,0 +1,31 @@
+{
+	"revision" : 0,
+	"rules" : 
+	[
+		{
+			"outputs" : [],
+			"primary-output" : "CMakeFiles/multicharge-lib.dir/src/multicharge/ewald.f90.o",
+			"provides" : 
+			[
+				{
+					"compiled-module-path" : "include/multicharge_ewald.mod",
+					"is-interface" : true,
+					"logical-name" : "multicharge_ewald.mod"
+				}
+			],
+			"requires" : 
+			[
+				{
+					"logical-name" : "mctc_env.mod"
+				},
+				{
+					"logical-name" : "mctc_io_constants.mod"
+				},
+				{
+					"logical-name" : "mctc_io_math.mod"
+				}
+			]
+		}
+	],
+	"version" : 0
+}

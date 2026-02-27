@@ -1,0 +1,10 @@
+prefix=/usr/local
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: mstore
+Description: Molecular structure store for testing
+Version: 0.3.0
+Requires: mctc-lib
+Libs: -L${libdir} -lmstore
+Cflags: -I${includedir} -I${includedir}/mstore/GNU-13.3.0

@@ -1,0 +1,102 @@
+ninja_dyndep_version = 1.0
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/main.f90.o: dyndep | subprojects/mctc-lib/include/mctc_env_system.mod subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/test/test_cutoff.mod subprojects/mctc-lib/test/test_data.mod subprojects/mctc-lib/test/test_math.mod subprojects/mctc-lib/test/test_ncoord.mod subprojects/mctc-lib/test/test_read.mod subprojects/mctc-lib/test/test_read_aims.mod subprojects/mctc-lib/test/test_read_cjson.mod subprojects/mctc-lib/test/test_read_ctfile.mod subprojects/mctc-lib/test/test_read_gaussian.mod subprojects/mctc-lib/test/test_read_genformat.mod subprojects/mctc-lib/test/test_read_json.mod subprojects/mctc-lib/test/test_read_pdb.mod subprojects/mctc-lib/test/test_read_pymatgen.mod subprojects/mctc-lib/test/test_read_qchem.mod subprojects/mctc-lib/test/test_read_qcschema.mod subprojects/mctc-lib/test/test_read_turbomole.mod subprojects/mctc-lib/test/test_read_vasp.mod subprojects/mctc-lib/test/test_read_xyz.mod subprojects/mctc-lib/test/test_symbols.mod subprojects/mctc-lib/test/test_write.mod subprojects/mctc-lib/test/test_write_aims.mod subprojects/mctc-lib/test/test_write_cjson.mod subprojects/mctc-lib/test/test_write_ctfile.mod subprojects/mctc-lib/test/test_write_gaussian.mod subprojects/mctc-lib/test/test_write_genformat.mod subprojects/mctc-lib/test/test_write_pdb.mod subprojects/mctc-lib/test/test_write_pymatgen.mod subprojects/mctc-lib/test/test_write_qchem.mod subprojects/mctc-lib/test/test_write_qcschema.mod subprojects/mctc-lib/test/test_write_turbomole.mod subprojects/mctc-lib/test/test_write_vasp.mod subprojects/mctc-lib/test/test_write_xyz.mod
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/testsuite_structure.f90.o | subprojects/mctc-lib/test/testsuite_structure.mod: dyndep | subprojects/mctc-lib/include/mctc_env_accuracy.mod subprojects/mctc-lib/include/mctc_io_structure.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_cutoff.f90.o | subprojects/mctc-lib/test/test_cutoff.mod: dyndep | subprojects/mctc-lib/include/mctc_cutoff.mod subprojects/mctc-lib/include/mctc_env.mod subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mctc-lib/test/testsuite_structure.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_data.f90.o | subprojects/mctc-lib/test/test_data.mod: dyndep | subprojects/mctc-lib/include/mctc_data.mod subprojects/mctc-lib/include/mctc_env.mod subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mctc-lib/test/testsuite_structure.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_math.f90.o | subprojects/mctc-lib/test/test_math.mod: dyndep | subprojects/mctc-lib/include/mctc_env_accuracy.mod subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_math.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_ncoord.f90.o | subprojects/mctc-lib/test/test_ncoord.mod: dyndep | subprojects/mctc-lib/include/mctc_cutoff.mod subprojects/mctc-lib/include/mctc_data_covrad.mod subprojects/mctc-lib/include/mctc_data_paulingen.mod subprojects/mctc-lib/include/mctc_env.mod subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mctc-lib/include/mctc_ncoord.mod subprojects/mctc-lib/include/mctc_ncoord_dexp.mod subprojects/mctc-lib/include/mctc_ncoord_erf.mod subprojects/mctc-lib/include/mctc_ncoord_erf_dftd4.mod subprojects/mctc-lib/include/mctc_ncoord_erf_en.mod subprojects/mctc-lib/include/mctc_ncoord_exp.mod subprojects/mctc-lib/include/mctc_ncoord_type.mod subprojects/mctc-lib/test/testsuite_structure.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_read.f90.o | subprojects/mctc-lib/test/test_read.mod: dyndep | subprojects/mctc-lib/include/mctc_env_accuracy.mod subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_filetype.mod subprojects/mctc-lib/include/mctc_io_read.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mctc-lib/include/mctc_version.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_read_aims.f90.o | subprojects/mctc-lib/test/test_read_aims.mod: dyndep | subprojects/mctc-lib/include/mctc_env.mod subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_read_aims.mod subprojects/mctc-lib/include/mctc_io_structure.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_read_cjson.f90.o | subprojects/mctc-lib/test/test_read_cjson.mod: dyndep | subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_read_cjson.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mctc-lib/include/mctc_version.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_read_ctfile.f90.o | subprojects/mctc-lib/test/test_read_ctfile.mod: dyndep | subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_read_ctfile.mod subprojects/mctc-lib/include/mctc_io_structure.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_read_gaussian.f90.o | subprojects/mctc-lib/test/test_read_gaussian.mod: dyndep | subprojects/mctc-lib/include/mctc_env_accuracy.mod subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_read_gaussian.mod subprojects/mctc-lib/include/mctc_io_structure.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_read_genformat.f90.o | subprojects/mctc-lib/test/test_read_genformat.mod: dyndep | subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_read_genformat.mod subprojects/mctc-lib/include/mctc_io_structure.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_read_json.f90.o | subprojects/mctc-lib/test/test_read_json.mod: dyndep | subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_read_json.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mctc-lib/include/mctc_version.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_read_pdb.f90.o | subprojects/mctc-lib/test/test_read_pdb.mod: dyndep | subprojects/mctc-lib/include/mctc_env_accuracy.mod subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_read_pdb.mod subprojects/mctc-lib/include/mctc_io_structure.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_read_pymatgen.f90.o | subprojects/mctc-lib/test/test_read_pymatgen.mod: dyndep | subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_read_pymatgen.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mctc-lib/include/mctc_version.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_read_qchem.f90.o | subprojects/mctc-lib/test/test_read_qchem.mod: dyndep | subprojects/mctc-lib/include/mctc_env.mod subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_read_qchem.mod subprojects/mctc-lib/include/mctc_io_structure.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_read_qcschema.f90.o | subprojects/mctc-lib/test/test_read_qcschema.mod: dyndep | subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_read_qcschema.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mctc-lib/include/mctc_version.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_read_turbomole.f90.o | subprojects/mctc-lib/test/test_read_turbomole.mod: dyndep | subprojects/mctc-lib/include/mctc_env.mod subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_read_turbomole.mod subprojects/mctc-lib/include/mctc_io_structure.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_read_vasp.f90.o | subprojects/mctc-lib/test/test_read_vasp.mod: dyndep | subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_read_vasp.mod subprojects/mctc-lib/include/mctc_io_structure.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_read_xyz.f90.o | subprojects/mctc-lib/test/test_read_xyz.mod: dyndep | subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_read_xyz.mod subprojects/mctc-lib/include/mctc_io_structure.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_symbols.f90.o | subprojects/mctc-lib/test/test_symbols.mod: dyndep | subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_symbols.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_write.f90.o | subprojects/mctc-lib/test/test_write.mod: dyndep | subprojects/mctc-lib/include/mctc_env_accuracy.mod subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_read.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mctc-lib/include/mctc_io_write.mod subprojects/mctc-lib/include/mctc_version.mod subprojects/mctc-lib/test/testsuite_structure.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_write_aims.f90.o | subprojects/mctc-lib/test/test_write_aims.mod: dyndep | subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_read_aims.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mctc-lib/include/mctc_io_write_aims.mod subprojects/mctc-lib/test/testsuite_structure.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_write_cjson.f90.o | subprojects/mctc-lib/test/test_write_cjson.mod: dyndep | subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_read_cjson.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mctc-lib/include/mctc_io_write_cjson.mod subprojects/mctc-lib/include/mctc_version.mod subprojects/mctc-lib/test/testsuite_structure.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_write_ctfile.f90.o | subprojects/mctc-lib/test/test_write_ctfile.mod: dyndep | subprojects/mctc-lib/include/mctc_env_accuracy.mod subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_read_ctfile.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mctc-lib/include/mctc_io_write_ctfile.mod subprojects/mctc-lib/test/testsuite_structure.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_write_gaussian.f90.o | subprojects/mctc-lib/test/test_write_gaussian.mod: dyndep | subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_read_gaussian.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mctc-lib/include/mctc_io_write_gaussian.mod subprojects/mctc-lib/test/testsuite_structure.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_write_genformat.f90.o | subprojects/mctc-lib/test/test_write_genformat.mod: dyndep | subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_read_genformat.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mctc-lib/include/mctc_io_structure_info.mod subprojects/mctc-lib/include/mctc_io_write_genformat.mod subprojects/mctc-lib/test/testsuite_structure.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_write_pdb.f90.o | subprojects/mctc-lib/test/test_write_pdb.mod: dyndep | subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_read_pdb.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mctc-lib/include/mctc_io_write_pdb.mod subprojects/mctc-lib/test/testsuite_structure.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_write_pymatgen.f90.o | subprojects/mctc-lib/test/test_write_pymatgen.mod: dyndep | subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_read_pymatgen.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mctc-lib/include/mctc_io_write_pymatgen.mod subprojects/mctc-lib/include/mctc_version.mod subprojects/mctc-lib/test/testsuite_structure.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_write_qchem.f90.o | subprojects/mctc-lib/test/test_write_qchem.mod: dyndep | subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_read_qchem.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mctc-lib/include/mctc_io_write_qchem.mod subprojects/mctc-lib/test/testsuite_structure.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_write_qcschema.f90.o | subprojects/mctc-lib/test/test_write_qcschema.mod: dyndep | subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_read_qcschema.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mctc-lib/include/mctc_io_write_qcschema.mod subprojects/mctc-lib/include/mctc_version.mod subprojects/mctc-lib/test/testsuite_structure.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_write_turbomole.f90.o | subprojects/mctc-lib/test/test_write_turbomole.mod: dyndep | subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_convert.mod subprojects/mctc-lib/include/mctc_io_read_turbomole.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mctc-lib/include/mctc_io_write_turbomole.mod subprojects/mctc-lib/test/testsuite_structure.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_write_vasp.f90.o | subprojects/mctc-lib/test/test_write_vasp.mod: dyndep | subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_read_vasp.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mctc-lib/include/mctc_io_structure_info.mod subprojects/mctc-lib/include/mctc_io_write_vasp.mod subprojects/mctc-lib/test/testsuite_structure.mod
+  restat = 1
+
+build subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_write_xyz.f90.o | subprojects/mctc-lib/test/test_write_xyz.mod: dyndep | subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_read_xyz.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mctc-lib/include/mctc_io_write_xyz.mod subprojects/mctc-lib/test/testsuite_structure.mod
+  restat = 1
+

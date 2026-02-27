@@ -1,0 +1,64 @@
+{
+	"revision" : 0,
+	"rules" : 
+	[
+		{
+			"outputs" : [],
+			"primary-output" : "test/unit/CMakeFiles/multicharge-tester.dir/test_solver.f90.o",
+			"provides" : 
+			[
+				{
+					"compiled-module-path" : "test/unit/test_solver.mod",
+					"is-interface" : true,
+					"logical-name" : "test_solver.mod"
+				}
+			],
+			"requires" : 
+			[
+				{
+					"logical-name" : "mctc_env.mod"
+				},
+				{
+					"logical-name" : "mctc_env_testing.mod"
+				},
+				{
+					"logical-name" : "mctc_io_structure.mod"
+				},
+				{
+					"logical-name" : "mstore.mod"
+				},
+				{
+					"logical-name" : "multicharge_charge.mod"
+				},
+				{
+					"logical-name" : "multicharge_model_cache.mod"
+				},
+				{
+					"logical-name" : "multicharge_model_eeqbc.mod"
+				},
+				{
+					"logical-name" : "multicharge_model_type.mod"
+				},
+				{
+					"logical-name" : "multicharge_param.mod"
+				},
+				{
+					"logical-name" : "multicharge_solver.mod"
+				},
+				{
+					"logical-name" : "multicharge_solver_cg.mod"
+				},
+				{
+					"logical-name" : "multicharge_solver_direct.mod"
+				},
+				{
+					"logical-name" : "multicharge_solver_type.mod"
+				},
+				{
+					"logical-name" : "print_matrix.mod"
+				}
+			]
+		}
+	],
+	"version" : 0
+}

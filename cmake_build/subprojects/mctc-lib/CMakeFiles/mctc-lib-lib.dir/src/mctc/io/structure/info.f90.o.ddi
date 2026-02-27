@@ -1,0 +1,25 @@
+{
+	"revision" : 0,
+	"rules" : 
+	[
+		{
+			"outputs" : [],
+			"primary-output" : "subprojects/mctc-lib/CMakeFiles/mctc-lib-lib.dir/src/mctc/io/structure/info.f90.o",
+			"provides" : 
+			[
+				{
+					"compiled-module-path" : "subprojects/mctc-lib/include/mctc_io_structure_info.mod",
+					"is-interface" : true,
+					"logical-name" : "mctc_io_structure_info.mod"
+				}
+			],
+			"requires" : 
+			[
+				{
+					"logical-name" : "mctc_env_accuracy.mod"
+				}
+			]
+		}
+	],
+	"version" : 0
+}

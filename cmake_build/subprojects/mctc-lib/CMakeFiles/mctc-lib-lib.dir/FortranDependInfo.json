@@ -1,0 +1,34 @@
+{
+	"bmi-installation" : null,
+	"compiler-frontend-variant" : "GNU",
+	"compiler-id" : "GNU",
+	"compiler-simulate-id" : "",
+	"config" : "RelWithDebInfo",
+	"cxx-modules" : {},
+	"dir-cur-bld" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib",
+	"dir-cur-src" : "/home/zakharov/Documents/prog/mcharge/multicharge/subprojects/mctc-lib",
+	"dir-top-bld" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build",
+	"dir-top-src" : "/home/zakharov/Documents/prog/mcharge/multicharge",
+	"exports" : 
+	[
+		{
+			"cxx-module-info-dir" : "",
+			"destination" : "lib/cmake/mctc-lib",
+			"export-name" : "mctc-lib-lib",
+			"export-prefix" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/CMakeFiles/Export/e7ceb3b9ced0b8a89360c363874eb270",
+			"install" : true,
+			"namespace" : "mctc-lib::"
+		}
+	],
+	"forward-modules-from-target-dirs" : [],
+	"include-dirs" : 
+	[
+		"/home/zakharov/Documents/prog/mcharge/multicharge/subprojects/mctc-lib/include",
+		"subprojects/mctc-lib/include"
+	],
+	"language" : "Fortran",
+	"linked-target-dirs" : [],
+	"module-dir" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/include",
+	"submodule-ext" : ".smod",
+	"submodule-sep" : "@"
+}

@@ -31,6 +31,7 @@ module multicharge_model_eeq
    use multicharge_ewald, only: get_alpha
    use multicharge_model_type, only: mchrg_model_type, get_dir_trans, get_rec_trans
    use multicharge_model_cache, only: cache_container, model_cache
+   use multicharge_solver_type, only: mchrg_solver_type   ! <-- added for solver argument
    implicit none
    private
 
@@ -94,10 +95,12 @@ subroutine new_eeq_model(self, mol, error, chi, rad, eta, kcnchi, &
 
 end subroutine new_eeq_model
 
-subroutine update(self, mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
+!> Update cache for EEQ model – now accepts solver argument (unused)
+subroutine update(self, mol, cache, solver, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
    class(eeq_model), intent(in) :: self
    type(structure_type), intent(in) :: mol
    type(cache_container), intent(inout) :: cache
+   class(mchrg_solver_type), intent(in) :: solver   ! <-- new argument (unused)
    real(wp), intent(in) :: cn(:)
    real(wp), intent(in), optional :: qloc(:)
    real(wp), intent(in), optional :: dcndr(:, :, :)
@@ -145,7 +148,7 @@ subroutine get_xvec(self, mol, cache, xvec)
       tmp = self%kcnchi(izp) / sqrt(ptr%cn(iat) + reg)
       xvec(iat) = -self%chi(izp) + tmp * ptr%cn(iat)
    end do
-   if (size(xvec) > mol%nat) then
+   if (size(xvec) == mol%nat + 1) then
       xvec(mol%nat + 1) = mol%charge
    end if
    
@@ -237,7 +240,7 @@ subroutine get_amat_0d(self, mol, amat)
    deallocate(amat_local)
    !$omp end parallel
 
-   if (size(amat, 1) > mol%nat) then
+   if (size(amat, 1) == mol%nat + 1) then
       amat(mol%nat + 1, 1:mol%nat + 1) = 1.0_wp
       amat(1:mol%nat + 1, mol%nat + 1) = 1.0_wp
       amat(mol%nat + 1, mol%nat + 1) = 0.0_wp
@@ -304,7 +307,7 @@ subroutine get_amat_3d(self, mol, wsc, alpha, amat)
    deallocate(amat_local)
    !$omp end parallel
 
-   if (size(amat, 1) > mol%nat) then
+   if (size(amat, 1) == mol%nat + 1) then
       amat(mol%nat + 1, 1:mol%nat + 1) = 1.0_wp
       amat(1:mol%nat + 1, mol%nat + 1) = 1.0_wp
       amat(mol%nat + 1, mol%nat + 1) = 0.0_wp

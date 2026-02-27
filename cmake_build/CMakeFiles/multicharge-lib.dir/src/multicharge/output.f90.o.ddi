@@ -1,0 +1,46 @@
+{
+	"revision" : 0,
+	"rules" : 
+	[
+		{
+			"outputs" : [],
+			"primary-output" : "CMakeFiles/multicharge-lib.dir/src/multicharge/output.f90.o",
+			"provides" : 
+			[
+				{
+					"compiled-module-path" : "include/multicharge_output.mod",
+					"is-interface" : true,
+					"logical-name" : "multicharge_output.mod"
+				}
+			],
+			"requires" : 
+			[
+				{
+					"logical-name" : "mctc_env.mod"
+				},
+				{
+					"logical-name" : "mctc_io.mod"
+				},
+				{
+					"logical-name" : "mctc_io_constants.mod"
+				},
+				{
+					"logical-name" : "mctc_io_convert.mod"
+				},
+				{
+					"logical-name" : "multicharge_model.mod"
+				},
+				{
+					"logical-name" : "multicharge_solver_cg.mod"
+				},
+				{
+					"logical-name" : "multicharge_solver_direct.mod"
+				},
+				{
+					"logical-name" : "multicharge_version.mod"
+				}
+			]
+		}
+	],
+	"version" : 0
+}

@@ -1,0 +1,31 @@
+{
+	"revision" : 0,
+	"rules" : 
+	[
+		{
+			"outputs" : [],
+			"primary-output" : "subprojects/mstore/CMakeFiles/mstore-lib.dir/src/mstore/but14diol.f90.o",
+			"provides" : 
+			[
+				{
+					"compiled-module-path" : "subprojects/mstore/include/mstore_but14diol.mod",
+					"is-interface" : true,
+					"logical-name" : "mstore_but14diol.mod"
+				}
+			],
+			"requires" : 
+			[
+				{
+					"logical-name" : "mctc_env_accuracy.mod"
+				},
+				{
+					"logical-name" : "mctc_io_structure.mod"
+				},
+				{
+					"logical-name" : "mstore_data_record.mod"
+				}
+			]
+		}
+	],
+	"version" : 0
+}

@@ -15,6 +15,7 @@
 
 subdir('model')
 subdir('param')
+subdir('solver')
 
 srcs += files(
   'blas.F90',
@@ -27,4 +28,6 @@ srcs += files(
   'version.f90',
   'wignerseitz.f90',
   'cache.f90',
+  'solver.f90',
+  'print_matrix.f90',
 )

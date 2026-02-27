@@ -1,0 +1,34 @@
+{
+	"revision" : 0,
+	"rules" : 
+	[
+		{
+			"outputs" : [],
+			"primary-output" : "subprojects/mctc-lib/CMakeFiles/mctc-lib-lib.dir/src/mctc/ncoord/dexp.f90.o",
+			"provides" : 
+			[
+				{
+					"compiled-module-path" : "subprojects/mctc-lib/include/mctc_ncoord_dexp.mod",
+					"is-interface" : true,
+					"logical-name" : "mctc_ncoord_dexp.mod"
+				}
+			],
+			"requires" : 
+			[
+				{
+					"logical-name" : "mctc_data_covrad.mod"
+				},
+				{
+					"logical-name" : "mctc_env.mod"
+				},
+				{
+					"logical-name" : "mctc_io.mod"
+				},
+				{
+					"logical-name" : "mctc_ncoord_type.mod"
+				}
+			]
+		}
+	],
+	"version" : 0
+}

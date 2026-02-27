@@ -1,0 +1,172 @@
+{
+	"modules" : 
+	{
+		"test_cutoff.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_cutoff.mod",
+			"is-private" : false
+		},
+		"test_data.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_data.mod",
+			"is-private" : false
+		},
+		"test_math.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_math.mod",
+			"is-private" : false
+		},
+		"test_ncoord.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_ncoord.mod",
+			"is-private" : false
+		},
+		"test_read.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_read.mod",
+			"is-private" : false
+		},
+		"test_read_aims.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_read_aims.mod",
+			"is-private" : false
+		},
+		"test_read_cjson.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_read_cjson.mod",
+			"is-private" : false
+		},
+		"test_read_ctfile.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_read_ctfile.mod",
+			"is-private" : false
+		},
+		"test_read_gaussian.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_read_gaussian.mod",
+			"is-private" : false
+		},
+		"test_read_genformat.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_read_genformat.mod",
+			"is-private" : false
+		},
+		"test_read_json.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_read_json.mod",
+			"is-private" : false
+		},
+		"test_read_pdb.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_read_pdb.mod",
+			"is-private" : false
+		},
+		"test_read_pymatgen.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_read_pymatgen.mod",
+			"is-private" : false
+		},
+		"test_read_qchem.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_read_qchem.mod",
+			"is-private" : false
+		},
+		"test_read_qcschema.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_read_qcschema.mod",
+			"is-private" : false
+		},
+		"test_read_turbomole.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_read_turbomole.mod",
+			"is-private" : false
+		},
+		"test_read_vasp.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_read_vasp.mod",
+			"is-private" : false
+		},
+		"test_read_xyz.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_read_xyz.mod",
+			"is-private" : false
+		},
+		"test_symbols.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_symbols.mod",
+			"is-private" : false
+		},
+		"test_write.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_write.mod",
+			"is-private" : false
+		},
+		"test_write_aims.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_write_aims.mod",
+			"is-private" : false
+		},
+		"test_write_cjson.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_write_cjson.mod",
+			"is-private" : false
+		},
+		"test_write_ctfile.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_write_ctfile.mod",
+			"is-private" : false
+		},
+		"test_write_gaussian.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_write_gaussian.mod",
+			"is-private" : false
+		},
+		"test_write_genformat.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_write_genformat.mod",
+			"is-private" : false
+		},
+		"test_write_pdb.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_write_pdb.mod",
+			"is-private" : false
+		},
+		"test_write_pymatgen.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_write_pymatgen.mod",
+			"is-private" : false
+		},
+		"test_write_qchem.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_write_qchem.mod",
+			"is-private" : false
+		},
+		"test_write_qcschema.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_write_qcschema.mod",
+			"is-private" : false
+		},
+		"test_write_turbomole.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_write_turbomole.mod",
+			"is-private" : false
+		},
+		"test_write_vasp.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_write_vasp.mod",
+			"is-private" : false
+		},
+		"test_write_xyz.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/test_write_xyz.mod",
+			"is-private" : false
+		},
+		"testsuite_structure.mod" : 
+		{
+			"bmi" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/testsuite_structure.mod",
+			"is-private" : false
+		}
+	},
+	"references" : {},
+	"usages" : {}
+}

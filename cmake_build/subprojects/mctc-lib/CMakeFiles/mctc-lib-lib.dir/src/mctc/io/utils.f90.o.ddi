@@ -1,0 +1,28 @@
+{
+	"revision" : 0,
+	"rules" : 
+	[
+		{
+			"outputs" : [],
+			"primary-output" : "subprojects/mctc-lib/CMakeFiles/mctc-lib-lib.dir/src/mctc/io/utils.f90.o",
+			"provides" : 
+			[
+				{
+					"compiled-module-path" : "subprojects/mctc-lib/include/mctc_io_utils.mod",
+					"is-interface" : true,
+					"logical-name" : "mctc_io_utils.mod"
+				}
+			],
+			"requires" : 
+			[
+				{
+					"logical-name" : "mctc_env_accuracy.mod"
+				},
+				{
+					"logical-name" : "mctc_env_error.mod"
+				}
+			]
+		}
+	],
+	"version" : 0
+}

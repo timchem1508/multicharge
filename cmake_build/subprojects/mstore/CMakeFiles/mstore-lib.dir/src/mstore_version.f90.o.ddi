@@ -1,0 +1,20 @@
+{
+	"revision" : 0,
+	"rules" : 
+	[
+		{
+			"outputs" : [],
+			"primary-output" : "subprojects/mstore/CMakeFiles/mstore-lib.dir/src/mstore_version.f90.o",
+			"provides" : 
+			[
+				{
+					"compiled-module-path" : "subprojects/mstore/include/mstore_version.mod",
+					"is-interface" : true,
+					"logical-name" : "mstore_version.mod"
+				}
+			],
+			"requires" : []
+		}
+	],
+	"version" : 0
+}

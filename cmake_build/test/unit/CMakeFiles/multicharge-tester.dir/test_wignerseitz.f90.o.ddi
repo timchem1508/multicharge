@@ -1,0 +1,40 @@
+{
+	"revision" : 0,
+	"rules" : 
+	[
+		{
+			"outputs" : [],
+			"primary-output" : "test/unit/CMakeFiles/multicharge-tester.dir/test_wignerseitz.f90.o",
+			"provides" : 
+			[
+				{
+					"compiled-module-path" : "test/unit/test_wignerseitz.mod",
+					"is-interface" : true,
+					"logical-name" : "test_wignerseitz.mod"
+				}
+			],
+			"requires" : 
+			[
+				{
+					"logical-name" : "mctc_cutoff.mod"
+				},
+				{
+					"logical-name" : "mctc_env.mod"
+				},
+				{
+					"logical-name" : "mctc_env_testing.mod"
+				},
+				{
+					"logical-name" : "mctc_io_structure.mod"
+				},
+				{
+					"logical-name" : "mstore.mod"
+				},
+				{
+					"logical-name" : "multicharge_wignerseitz.mod"
+				}
+			]
+		}
+	],
+	"version" : 0
+}

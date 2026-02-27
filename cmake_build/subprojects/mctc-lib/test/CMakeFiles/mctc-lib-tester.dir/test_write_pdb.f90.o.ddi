@@ -1,0 +1,37 @@
+{
+	"revision" : 0,
+	"rules" : 
+	[
+		{
+			"outputs" : [],
+			"primary-output" : "subprojects/mctc-lib/test/CMakeFiles/mctc-lib-tester.dir/test_write_pdb.f90.o",
+			"provides" : 
+			[
+				{
+					"compiled-module-path" : "subprojects/mctc-lib/test/test_write_pdb.mod",
+					"is-interface" : true,
+					"logical-name" : "test_write_pdb.mod"
+				}
+			],
+			"requires" : 
+			[
+				{
+					"logical-name" : "mctc_env_testing.mod"
+				},
+				{
+					"logical-name" : "mctc_io_read_pdb.mod"
+				},
+				{
+					"logical-name" : "mctc_io_structure.mod"
+				},
+				{
+					"logical-name" : "mctc_io_write_pdb.mod"
+				},
+				{
+					"logical-name" : "testsuite_structure.mod"
+				}
+			]
+		}
+	],
+	"version" : 0
+}

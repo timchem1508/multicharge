@@ -1,0 +1,15 @@
+ninja_dyndep_version = 1.0
+build test/unit/CMakeFiles/multicharge-tester.dir/main.f90.o: dyndep | subprojects/mctc-lib/include/mctc_env.mod subprojects/mctc-lib/include/mctc_env_testing.mod test/unit/test_model.mod test/unit/test_pbc.mod test/unit/test_solver.mod test/unit/test_wignerseitz.mod
+
+build test/unit/CMakeFiles/multicharge-tester.dir/test_model.f90.o | test/unit/test_model.mod: dyndep | subprojects/mctc-lib/include/mctc_env.mod subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mstore/include/mstore.mod include/multicharge_charge.mod include/multicharge_model_cache.mod include/multicharge_model_eeqbc.mod include/multicharge_model_type.mod include/multicharge_param.mod include/multicharge_solver.mod include/multicharge_solver_cg.mod include/multicharge_solver_direct.mod include/multicharge_solver_type.mod include/print_matrix.mod
+  restat = 1
+
+build test/unit/CMakeFiles/multicharge-tester.dir/test_pbc.f90.o | test/unit/test_pbc.mod: dyndep | subprojects/mctc-lib/include/mctc_cutoff.mod subprojects/mctc-lib/include/mctc_env.mod subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mstore/include/mstore.mod include/multicharge_model_cache.mod include/multicharge_model_eeqbc.mod include/multicharge_model_type.mod include/multicharge_param.mod include/multicharge_solver.mod include/multicharge_solver_cg.mod include/multicharge_solver_direct.mod include/multicharge_solver_type.mod
+  restat = 1
+
+build test/unit/CMakeFiles/multicharge-tester.dir/test_wignerseitz.f90.o | test/unit/test_wignerseitz.mod: dyndep | subprojects/mctc-lib/include/mctc_cutoff.mod subprojects/mctc-lib/include/mctc_env.mod subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mstore/include/mstore.mod include/multicharge_wignerseitz.mod
+  restat = 1
+
+build test/unit/CMakeFiles/multicharge-tester.dir/test_solver.f90.o | test/unit/test_solver.mod: dyndep | subprojects/mctc-lib/include/mctc_env.mod subprojects/mctc-lib/include/mctc_env_testing.mod subprojects/mctc-lib/include/mctc_io_structure.mod subprojects/mstore/include/mstore.mod include/multicharge_charge.mod include/multicharge_model_cache.mod include/multicharge_model_eeqbc.mod include/multicharge_model_type.mod include/multicharge_param.mod include/multicharge_solver.mod include/multicharge_solver_cg.mod include/multicharge_solver_direct.mod include/multicharge_solver_type.mod include/print_matrix.mod
+  restat = 1
+

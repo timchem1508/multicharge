@@ -1,0 +1,35 @@
+{
+	"bmi-installation" : 
+	{
+		"destination" : "bin",
+		"message-level" : "",
+		"permissions" : "",
+		"script-location" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mstore/app/info/CMakeFiles/mstore-info.dir/install-cxx-module-bmi-RelWithDebInfo.cmake"
+	},
+	"compiler-frontend-variant" : "GNU",
+	"compiler-id" : "GNU",
+	"compiler-simulate-id" : "",
+	"config" : "RelWithDebInfo",
+	"cxx-modules" : {},
+	"dir-cur-bld" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mstore/app/info",
+	"dir-cur-src" : "/home/zakharov/Documents/prog/mcharge/multicharge/subprojects/mstore/app/info",
+	"dir-top-bld" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build",
+	"dir-top-src" : "/home/zakharov/Documents/prog/mcharge/multicharge",
+	"exports" : [],
+	"forward-modules-from-target-dirs" : [],
+	"include-dirs" : 
+	[
+		"subprojects/mstore/include",
+		"/home/zakharov/Documents/prog/mcharge/multicharge/subprojects/mctc-lib/include",
+		"subprojects/mctc-lib/include"
+	],
+	"language" : "Fortran",
+	"linked-target-dirs" : 
+	[
+		"/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mstore/CMakeFiles/mstore-lib.dir",
+		"/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/CMakeFiles/mctc-lib-lib.dir"
+	],
+	"module-dir" : "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mstore/app/info",
+	"submodule-ext" : ".smod",
+	"submodule-sep" : "@"
+}

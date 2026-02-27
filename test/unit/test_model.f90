@@ -38,7 +38,7 @@ module test_model
    real(wp), parameter :: thr1 = 1.0e5_wp*epsilon(1.0_wp)
    real(wp), parameter :: thr2 = sqrt(epsilon(1.0_wp))
 
-   !> Global solver choice: 1 = direct, 2 = CG
+   ! Global solver choice: 1 = direct, 2 = CG
    integer, parameter :: solver_choice = 2
 
 
@@ -84,7 +84,7 @@ subroutine collect_model(testsuite)
       & new_unittest("eeqbc-dbdr-mb05", test_eeqbc_dbdr_mb05), &
       & new_unittest("eeqbc-charges-mb01", test_eeqbc_q_mb01), &
       & new_unittest("eeqbc-charges-mb02", test_eeqbc_q_mb02), &
-      !& new_unittest("eeqbc-charges-actinides", test_eeqbc_q_actinides), &
+      & new_unittest("eeqbc-charges-actinides", test_eeqbc_q_actinides), &
       & new_unittest("eeqbc-energy-mb03", test_eeqbc_e_mb03), &
       & new_unittest("eeqbc-energy-mb04", test_eeqbc_e_mb04), &
       & new_unittest("eeqbc-gradient-mb05", test_eeqbc_g_mb05), &
@@ -172,14 +172,14 @@ subroutine test_dadr(error, mol, model)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
-         call model%update(mol, cache, cn, qloc)
+         call model%update(mol, cache, slv, cn, qloc)
          call model%get_coulomb_matrix(mol, cache, amatr1)
 
          ! Second right-hand side (x+2h)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
-         call model%update(mol, cache, cn, qloc)
+         call model%update(mol, cache, slv, cn, qloc)
          call model%get_coulomb_matrix(mol, cache, amatr2)
 
          ! Return to original position before calculating left sides
@@ -189,14 +189,14 @@ subroutine test_dadr(error, mol, model)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - step
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
-         call model%update(mol, cache, cn, qloc)
+         call model%update(mol, cache, slv, cn, qloc)
          call model%get_coulomb_matrix(mol, cache, amatl1)
 
          ! Second left-hand side (x-2h)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - step
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
-         call model%update(mol, cache, cn, qloc)
+         call model%update(mol, cache, slv, cn, qloc)
          call model%get_coulomb_matrix(mol, cache, amatl2)
 
          ! Return to original position
@@ -217,7 +217,7 @@ subroutine test_dadr(error, mol, model)
    ! Analytical gradient
    call model%ncoord%get_coordination_number(mol, trans, cn, dcndr, dcndL)
    call model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
-   call model%update(mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
+   call model%update(mol, cache, slv, cn,  qloc, dcndr, dcndL, dqlocdr, dqlocdL)
    call model%get_coulomb_derivs(mol, cache, qvec, dadr, dadL, atrace)
 
    ! Add trace of the A matrix
@@ -297,7 +297,7 @@ subroutine test_dadL(error, mol, model)
          mol%xyz(:, :) = matmul(eps, xyz)
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
-         call model%update(mol, cache, cn, qloc)
+         call model%update(mol, cache, slv, cn, qloc)
          call model%get_coulomb_matrix(mol, cache, amatr)
          if (allocated(error)) exit lp
 
@@ -306,7 +306,7 @@ subroutine test_dadL(error, mol, model)
          mol%xyz(:, :) = matmul(eps, xyz)
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
-         call model%update(mol, cache, cn, qloc)
+         call model%update(mol, cache, slv, cn, qloc)
          call model%get_coulomb_matrix(mol, cache, amatl)
          if (allocated(error)) exit lp
 
@@ -323,7 +323,7 @@ subroutine test_dadL(error, mol, model)
 
    call model%ncoord%get_coordination_number(mol, trans, cn, dcndr, dcndL)
    call model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
-   call model%update(mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
+   call model%update(mol, cache, slv, cn,  qloc, dcndr, dcndL, dqlocdr, dqlocdL)
 
    call model%get_coulomb_derivs(mol, cache, qvec, dadr, dadL, atrace)
    if (allocated(error)) return
@@ -387,7 +387,7 @@ subroutine test_dbdr(error, mol, model)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
-         call model%update(mol, cache, cn, qloc)
+         call model%update(mol, cache, slv, cn, qloc)
          call model%get_xvec(mol, cache, xvecr)
 
          ! Left-hand side
@@ -395,7 +395,7 @@ subroutine test_dbdr(error, mol, model)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - 2*step
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
-         call model%update(mol, cache, cn, qloc)
+         call model%update(mol, cache, slv, cn, qloc)
          call model%get_xvec(mol, cache, xvecl)
 
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
@@ -406,7 +406,7 @@ subroutine test_dbdr(error, mol, model)
    ! Analytical gradient
    call model%ncoord%get_coordination_number(mol, trans, cn, dcndr, dcndL)
    call model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
-   call model%update(mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
+   call model%update(mol, cache, slv, cn,  qloc, dcndr, dcndL, dqlocdr, dqlocdL)
    call model%get_xvec(mol, cache, xvecl) ! need to call this for xtmp in cache (eeqbc)
    call model%get_xvec_derivs(mol, cache, dbdr, dbdL)
 
@@ -477,7 +477,7 @@ subroutine test_dbdL(error, mol, model)
          mol%xyz(:, :) = matmul(eps, xyz)
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
-         call model%update(mol, cache, cn, qloc)
+         call model%update(mol, cache, slv, cn, qloc)
          call model%get_xvec(mol, cache, xvecr)
 
          ! Left-hand side
@@ -486,7 +486,7 @@ subroutine test_dbdL(error, mol, model)
          mol%xyz(:, :) = matmul(eps, xyz)
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
-         call model%update(mol, cache, cn, qloc)
+         call model%update(mol, cache, slv, cn, qloc)
          call model%get_xvec(mol, cache, xvecl)
 
          eps(jc, ic) = eps(jc, ic) + step
@@ -500,7 +500,7 @@ subroutine test_dbdL(error, mol, model)
    ! Analytical gradient
    call model%ncoord%get_coordination_number(mol, trans, cn, dcndr, dcndL)
    call model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
-   call model%update(mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
+   call model%update(mol, cache, slv, cn,  qloc, dcndr, dcndL, dqlocdr, dqlocdL)
    call model%get_xvec(mol, cache, xvecl) ! need to call this for xtmp in cache (eeqbc)
    call model%get_xvec_derivs(mol, cache, dbdr, dbdL)
 
@@ -542,14 +542,13 @@ subroutine gen_test(error, mol, model, qref, eref)
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
-   if (allocated(solver_input)) deallocate(solver_input)
-  ! Select solver based on global choice
-   if (solver_choice == 2) then
-      allocate(cg_input :: solver_input)
-   end if 
-   if (solver_choice == 1) then
-      allocate(direct_input :: solver_input)
-   end if
+   allocate(cg_input :: solver_input)
+   select type(solver_input)
+   type is (cg_input)
+      allocate(solver_input%cgmiter, source=1000)
+      allocate(solver_input%cgtol, source=1.0e-15_wp)
+      allocate(solver_input%verbose, source=0)
+   end select
 
    call new_mchrg_solver(slv, solver_input,  error)
    

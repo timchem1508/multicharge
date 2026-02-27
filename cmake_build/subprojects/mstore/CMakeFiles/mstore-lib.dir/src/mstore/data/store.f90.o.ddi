@@ -1,0 +1,31 @@
+{
+	"revision" : 0,
+	"rules" : 
+	[
+		{
+			"outputs" : [],
+			"primary-output" : "subprojects/mstore/CMakeFiles/mstore-lib.dir/src/mstore/data/store.f90.o",
+			"provides" : 
+			[
+				{
+					"compiled-module-path" : "subprojects/mstore/include/mstore_data_store.mod",
+					"is-interface" : true,
+					"logical-name" : "mstore_data_store.mod"
+				}
+			],
+			"requires" : 
+			[
+				{
+					"logical-name" : "mctc_env_error.mod"
+				},
+				{
+					"logical-name" : "mstore_data_collection.mod"
+				},
+				{
+					"logical-name" : "mstore_data_record.mod"
+				}
+			]
+		}
+	],
+	"version" : 0
+}

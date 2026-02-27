@@ -1,0 +1,3373 @@
+Start testing: Feb 27 15:52 CET
+----------------------------------------------------------
+1/36 Testing: mctc-lib/cutoff
+1/36 Test: mctc-lib/cutoff
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "cutoff"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/cutoff" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: cutoff
+  Starting lattice-points-cutoff ... (1/3)
+       ... lattice-points-cutoff [PASSED]
+  Starting lattice-points-rep ... (2/3)
+       ... lattice-points-rep [PASSED]
+  Starting wrap ... (3/3)
+       ... wrap [PASSED]
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/cutoff" end time: Feb 27 15:52 CET
+"mctc-lib/cutoff" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/36 Testing: mctc-lib/data
+2/36 Test: mctc-lib/data
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "data"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/data" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: data
+  Starting atomic_rad ... (1/8)
+       ... atomic_rad [PASSED]
+  Starting atomic_rad_mb01 ... (2/8)
+       ... atomic_rad_mb01 [PASSED]
+  Starting covalent_rad ... (3/8)
+       ... covalent_rad [PASSED]
+  Starting covalent_rad_mb02 ... (4/8)
+       ... covalent_rad_mb02 [PASSED]
+  Starting pauling_en ... (5/8)
+       ... pauling_en [PASSED]
+  Starting pauling_en_mb03 ... (6/8)
+       ... pauling_en_mb03 [PASSED]
+  Starting vdw_rad ... (7/8)
+       ... vdw_rad [PASSED]
+  Starting vdw_rad_mb04 ... (8/8)
+       ... vdw_rad_mb04 [PASSED]
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/data" end time: Feb 27 15:52 CET
+"mctc-lib/data" time elapsed: 00:00:00
+----------------------------------------------------------
+
+3/36 Testing: mctc-lib/math
+3/36 Test: mctc-lib/math
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "math"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/math" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: math
+  Starting valid-eigval ... (1/4)
+       ... valid-eigval [PASSED]
+  Starting valid-eigvec ... (2/4)
+       ... valid-eigvec [PASSED]
+  Starting valid-matdet ... (3/4)
+       ... valid-matdet [PASSED]
+  Starting valid-matinv ... (4/4)
+       ... valid-matinv [PASSED]
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/math" end time: Feb 27 15:52 CET
+"mctc-lib/math" time elapsed: 00:00:00
+----------------------------------------------------------
+
+4/36 Testing: mctc-lib/ncoord
+4/36 Test: mctc-lib/ncoord
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "ncoord"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/ncoord" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: ncoord
+  Starting cn-mb01_dexp ... (1/60)
+       ... cn-mb01_dexp [PASSED]
+  Starting cn-mb01_dexp-defaults ... (2/60)
+       ... cn-mb01_dexp-defaults [PASSED]
+  Starting cn-mb02_dexp ... (3/60)
+       ... cn-mb02_dexp [PASSED]
+  Starting cn-mb03_dexp ... (4/60)
+       ... cn-mb03_dexp [PASSED]
+  Starting cn-acetic_dexp ... (5/60)
+       ... cn-acetic_dexp [PASSED]
+  Starting dcndr-mb04_dexp ... (6/60)
+       ... dcndr-mb04_dexp [PASSED]
+  Starting dcndr-mb05_dexp ... (7/60)
+       ... dcndr-mb05_dexp [PASSED]
+  Starting dcndr-ammonia_dexp ... (8/60)
+       ... dcndr-ammonia_dexp [PASSED]
+  Starting dcndL-mb06_dexp ... (9/60)
+       ... dcndL-mb06_dexp [PASSED]
+  Starting dcndL-mb07_dexp ... (10/60)
+       ... dcndL-mb07_dexp [PASSED]
+  Starting dcndL-antracene_dexp ... (11/60)
+       ... dcndL-antracene_dexp [PASSED]
+  Starting cn-mb01_exp ... (12/60)
+       ... cn-mb01_exp [PASSED]
+  Starting cn-mb01_exp-defaults ... (13/60)
+       ... cn-mb01_exp-defaults [PASSED]
+  Starting cn-mb02_exp ... (14/60)
+       ... cn-mb02_exp [PASSED]
+  Starting cn-mb03_exp ... (15/60)
+       ... cn-mb03_exp [PASSED]
+  Starting cn-acetic_exp ... (16/60)
+       ... cn-acetic_exp [PASSED]
+  Starting dcndr-mb04_exp ... (17/60)
+       ... dcndr-mb04_exp [PASSED]
+  Starting dcndr-mb05_exp ... (18/60)
+       ... dcndr-mb05_exp [PASSED]
+  Starting dcndr-ammonia_exp ... (19/60)
+       ... dcndr-ammonia_exp [PASSED]
+  Starting dcndL-mb06_exp ... (20/60)
+       ... dcndL-mb06_exp [PASSED]
+  Starting dcndL-mb07_exp ... (21/60)
+       ... dcndL-mb07_exp [PASSED]
+  Starting dcndL-antracene_exp ... (22/60)
+       ... dcndL-antracene_exp [PASSED]
+  Starting cn-mb01_erf ... (23/60)
+       ... cn-mb01_erf [PASSED]
+  Starting cn-mb01_erf-defaults ... (24/60)
+       ... cn-mb01_erf-defaults [PASSED]
+  Starting cn-mb02_erf ... (25/60)
+       ... cn-mb02_erf [PASSED]
+  Starting cn-mb03_erf ... (26/60)
+       ... cn-mb03_erf [PASSED]
+  Starting cn-acetic_erf ... (27/60)
+       ... cn-acetic_erf [PASSED]
+  Starting dcndr-mb04_erf ... (28/60)
+       ... dcndr-mb04_erf [PASSED]
+  Starting dcndr-mb05_erf ... (29/60)
+       ... dcndr-mb05_erf [PASSED]
+  Starting dcndr-ammonia_erf ... (30/60)
+       ... dcndr-ammonia_erf [PASSED]
+  Starting dcndL-mb06_erf ... (31/60)
+       ... dcndL-mb06_erf [PASSED]
+  Starting dcndL-mb07_erf ... (32/60)
+       ... dcndL-mb07_erf [PASSED]
+  Starting dcndL-antracene_erf ... (33/60)
+       ... dcndL-antracene_erf [PASSED]
+  Starting cn-mb01_erf_en ... (34/60)
+       ... cn-mb01_erf_en [PASSED]
+  Starting cn-mb01_erf_en-defaults ... (35/60)
+       ... cn-mb01_erf_en-defaults [PASSED]
+  Starting cn-mb02_erf_en ... (36/60)
+       ... cn-mb02_erf_en [PASSED]
+  Starting cn-mb03_erf_en ... (37/60)
+       ... cn-mb03_erf_en [PASSED]
+  Starting cn-acetic_erf_en ... (38/60)
+       ... cn-acetic_erf_en [PASSED]
+  Starting dcndr-mb04_erf_en ... (39/60)
+       ... dcndr-mb04_erf_en [PASSED]
+  Starting dcndr-mb05_erf_en ... (40/60)
+       ... dcndr-mb05_erf_en [PASSED]
+  Starting dcndr-ammonia_erf_en ... (41/60)
+       ... dcndr-ammonia_erf_en [PASSED]
+  Starting dcndL-mb06_erf_en ... (42/60)
+       ... dcndL-mb06_erf_en [PASSED]
+  Starting dcndL-mb07_erf_en ... (43/60)
+       ... dcndL-mb07_erf_en [PASSED]
+  Starting dcndL-antracene_erf_en ... (44/60)
+       ... dcndL-antracene_erf_en [PASSED]
+  Starting cn-mb01_erf_dftd4 ... (45/60)
+       ... cn-mb01_erf_dftd4 [PASSED]
+  Starting cn-mb01_erf_dftd4-defaults ... (46/60)
+       ... cn-mb01_erf_dftd4-defaults [PASSED]
+  Starting dfdcn-mb01_erf_dftd4 ... (47/60)
+       ... dfdcn-mb01_erf_dftd4 [PASSED]
+  Starting cn-mb02_erf_dftd4 ... (48/60)
+       ... cn-mb02_erf_dftd4 [PASSED]
+  Starting dfdcn-mb02_erf_dftd4 ... (49/60)
+       ... dfdcn-mb02_erf_dftd4 [PASSED]
+  Starting cn-mb03_erf_dftd4 ... (50/60)
+       ... cn-mb03_erf_dftd4 [PASSED]
+  Starting cn-acetic_erf_dftd4 ... (51/60)
+       ... cn-acetic_erf_dftd4 [PASSED]
+  Starting dcndr-mb04_erf_dftd4 ... (52/60)
+       ... dcndr-mb04_erf_dftd4 [PASSED]
+  Starting dcndr-mb05_erf_dftd4 ... (53/60)
+       ... dcndr-mb05_erf_dftd4 [PASSED]
+  Starting dcndr-ammonia_erf_dftd4 ... (54/60)
+       ... dcndr-ammonia_erf_dftd4 [PASSED]
+  Starting dcndL-mb06_erf_dftd4 ... (55/60)
+       ... dcndL-mb06_erf_dftd4 [PASSED]
+  Starting dcndL-mb07_erf_dftd4 ... (56/60)
+       ... dcndL-mb07_erf_dftd4 [PASSED]
+  Starting dcndL-antracene_erf_dftd4 ... (57/60)
+       ... dcndL-antracene_erf_dftd4 [PASSED]
+  Starting cn_unknown ... (58/60)
+       ... cn_unknown [EXPECTED FAIL]
+  Message: Unsupported option for coordination number
+  Starting cn_count_string_to_id ... (59/60)
+       ... cn_count_string_to_id [PASSED]
+  Starting cn_count_id_to_string ... (60/60)
+       ... cn_count_id_to_string [PASSED]
+<end of output>
+Test time =   0.83 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/ncoord" end time: Feb 27 15:52 CET
+"mctc-lib/ncoord" time elapsed: 00:00:00
+----------------------------------------------------------
+
+5/36 Testing: mctc-lib/read
+5/36 Test: mctc-lib/read
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/read" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: read
+  Starting valid-cjson ... (1/10)
+       ... valid-cjson [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting valid-mol ... (2/10)
+       ... valid-mol [PASSED]
+  Starting valid-sdf ... (3/10)
+       ... valid-sdf [PASSED]
+  Starting valid-gen ... (4/10)
+       ... valid-gen [PASSED]
+  Starting valid-pdb ... (5/10)
+       ... valid-pdb [PASSED]
+  Starting valid-qchem ... (6/10)
+       ... valid-qchem [PASSED]
+  Starting valid-qcschema ... (7/10)
+       ... valid-qcschema [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting valid-vasp ... (8/10)
+       ... valid-vasp [PASSED]
+  Starting valid-coord ... (9/10)
+       ... valid-coord [PASSED]
+  Starting valid-xyz ... (10/10)
+       ... valid-xyz [PASSED]
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/read" end time: Feb 27 15:52 CET
+"mctc-lib/read" time elapsed: 00:00:00
+----------------------------------------------------------
+
+6/36 Testing: mctc-lib/read-aims
+6/36 Test: mctc-lib/read-aims
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read-aims"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/read-aims" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: read-aims
+  Starting valid1-aims ... (1/11)
+       ... valid1-aims [PASSED]
+  Starting valid2-aims ... (2/11)
+       ... valid2-aims [PASSED]
+  Starting valid3-aims ... (3/11)
+       ... valid3-aims [PASSED]
+  Starting valid4-aims ... (4/11)
+       ... valid4-aims [PASSED]
+  Starting valid5-aims ... (5/11)
+       ... valid5-aims [PASSED]
+  Starting valid6-aims ... (6/11)
+       ... valid6-aims [PASSED]
+  Starting valid7-aims ... (7/11)
+       ... valid7-aims [PASSED]
+  Starting invalid1-aims ... (8/11)
+       ... invalid1-aims [EXPECTED FAIL]
+  Message: Error: Cannot map symbol to atomic number
+ --> (input):7:36-37
+  |
+7 | atom   -0.5203   -0.9011   -0.0000 hh
+  |                                    ^^ unknown element
+  |
+  Starting invalid2-aims ... (9/11)
+       ... invalid2-aims [EXPECTED FAIL]
+  Message: Error: Unexpected keyword found
+ --> (input):4:1-7
+  |
+4 | lattice    1.85 1.85 0.0
+  | ^^^^^^^ invalid in this context
+  |
+  Starting invalid3-aims ... (10/11)
+       ... invalid3-aims [EXPECTED FAIL]
+  Message: Error: Cannot read lattice vectors
+ --> (input):3:31-37
+  |
+3 | lattice_vector     0.00000    abcdefg    2.95812
+  |                               ^^^^^^^ expected real value
+  |
+  Starting invalid4-aims ... (11/11)
+       ... invalid4-aims [EXPECTED FAIL]
+  Message: Error: No atoms found
+ --> (input):5
+  |
+5 | 
+  |^ expected atom specification
+  |
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/read-aims" end time: Feb 27 15:52 CET
+"mctc-lib/read-aims" time elapsed: 00:00:00
+----------------------------------------------------------
+
+7/36 Testing: mctc-lib/read-cjson
+7/36 Test: mctc-lib/read-cjson
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read-cjson"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/read-cjson" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: read-cjson
+  Starting valid1-cjson ... (1/23)
+       ... valid1-cjson [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting valid2-cjson ... (2/23)
+       ... valid2-cjson [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting valid3-cjson ... (3/23)
+       ... valid3-cjson [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting valid4-cjson ... (4/23)
+       ... valid4-cjson [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting valid5-cjson ... (5/23)
+       ... valid5-cjson [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting valid6-cjson ... (6/23)
+       ... valid6-cjson [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-schema-version-value ... (7/23)
+       ... invalid-schema-version-value [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting numbers-coords-mismatch1 ... (8/23)
+       ... numbers-coords-mismatch1 [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting numbers-coords-mismatch2 ... (9/23)
+       ... numbers-coords-mismatch2 [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-coordinate-type1 ... (10/23)
+       ... invalid-coordinate-type1 [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-coordinate-type2 ... (11/23)
+       ... invalid-coordinate-type2 [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting missing-schema ... (12/23)
+       ... missing-schema [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting missing-coords ... (13/23)
+       ... missing-coords [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting missing-bonds ... (14/23)
+       ... missing-bonds [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting mismatch-bonds ... (15/23)
+       ... mismatch-bonds [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-root-data ... (16/23)
+       ... invalid-root-data [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-atoms-type ... (17/23)
+       ... invalid-atoms-type [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-element-type1 ... (18/23)
+       ... invalid-element-type1 [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-element-type2 ... (19/23)
+       ... invalid-element-type2 [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-element-number ... (20/23)
+       ... invalid-element-number [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-unit-cell-type ... (21/23)
+       ... invalid-unit-cell-type [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-schema-version-type ... (22/23)
+       ... invalid-schema-version-type [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting incomplete ... (23/23)
+       ... incomplete [EXPECTED FAIL]
+  Message: JSON support not enabled
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/read-cjson" end time: Feb 27 15:52 CET
+"mctc-lib/read-cjson" time elapsed: 00:00:00
+----------------------------------------------------------
+
+8/36 Testing: mctc-lib/read-ctfile
+8/36 Test: mctc-lib/read-ctfile
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read-ctfile"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/read-ctfile" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: read-ctfile
+  Starting valid1-mol ... (1/28)
+       ... valid1-mol [PASSED]
+  Starting valid2-mol ... (2/28)
+       ... valid2-mol [PASSED]
+  Starting valid3-mol ... (3/28)
+       ... valid3-mol [PASSED]
+  Starting valid4-mol ... (4/28)
+       ... valid4-mol [PASSED]
+  Starting valid5-mol ... (5/28)
+       ... valid5-mol [PASSED]
+  Starting invalid1-mol ... (6/28)
+       ... invalid1-mol [EXPECTED FAIL]
+  Message: Error: Cannot read header of molfile
+ --> (input):4:1-3
+  |
+4 |    -0.0090   -0.0157    0.0000 C   0  0  0  0  0  0  0  0  0  0  0  0
+  | ^^^ expected integer value
+  |
+  Starting invalid2-mol ... (7/28)
+       ... invalid2-mol [EXPECTED FAIL]
+  Message: Error: Cannot read coordinates from connection table
+  --> (input):11:1-10
+   |
+11 | M  END
+   | ^^^^^^^^^^ unexpected value
+   |
+  Starting invalid3-mol ... (8/28)
+       ... invalid3-mol [EXPECTED FAIL]
+  Message: Error: Cannot map symbol to atomic number
+ --> (input):5:32-34
+  |
+5 |    -0.0090   -0.0157   -0.0000 *** 0  0  0  0  0  0  0  0  0  0  0  0
+  |                                ^^^ unknown element
+  |
+  Starting invalid4-mol ... (9/28)
+       ... invalid4-mol [EXPECTED FAIL]
+  Message: Error: Cannot read charges
+  --> (input):29:23-25
+   |
+29 | M  CHG  3   1   1   3   b   2  -1
+   |                       ^^^ expected integer value
+   |
+  Starting invalid5-mol ... (10/28)
+       ... invalid5-mol [EXPECTED FAIL]
+  Message: Error: Invalid number of atoms
+ --> (input):4:1-3
+  |
+4 |   0 12  0  0  0  0            999 V2000
+  | ^^^ expected positive integer
+  |
+  Starting invalid6-mol ... (11/28)
+       ... invalid6-mol [EXPECTED FAIL]
+  Message: Error: ATOM block is not terminated
+  --> (input):24:8-9
+   |
+24 | M  V30 17 H 3.622875 0.736438 0.730780 0
+   |        ^^ expected END label
+   |
+  Starting invalid7-mol ... (12/28)
+       ... invalid7-mol [EXPECTED FAIL]
+  Message: Error: Cannot read connection table
+  --> (input):44:14-20
+   |
+44 | M  V30 BEGIN INVALID
+   |              ^^^^^^^ Unknown entry found
+   |
+  Starting invalid8-mol ... (13/28)
+       ... invalid8-mol [EXPECTED FAIL]
+  Message: Error: BOND block is not terminated
+  --> (input):42:8-9
+   |
+42 | M  V30 16 1 8 17
+   |        ^^ expected END label
+   |
+  Starting invalid9-mol ... (14/28)
+       ... invalid9-mol [EXPECTED FAIL]
+  Message: Error: Connection table is not terminated
+  --> (input):44:7
+   |
+44 | M  END
+   |       ^ expected ATOM label
+   |
+  Starting maestro-mol ... (15/28)
+       ... maestro-mol [PASSED]
+  Starting valid1-sdf ... (16/28)
+       ... valid1-sdf [PASSED]
+  Starting valid2-sdf ... (17/28)
+       ... valid2-sdf [PASSED]
+  Starting valid3-sdf ... (18/28)
+       ... valid3-sdf [PASSED]
+  Starting invalid1-sdf ... (19/28)
+       ... invalid1-sdf [EXPECTED FAIL]
+  Message: Failed while reading SDF key-value pairs
+  Starting invalid2-sdf ... (20/28)
+       ... invalid2-sdf [EXPECTED FAIL]
+  Message: Error: Cannot read topology from connection table
+  --> (input):29:1-3
+   |
+29 | M  END
+   | ^^^ unexpected value
+   |
+  Starting invalid3-sdf ... (21/28)
+       ... invalid3-sdf [EXPECTED FAIL]
+  Message: Cannot read connection table
+  Starting invalid4-sdf ... (22/28)
+       ... invalid4-sdf [EXPECTED FAIL]
+  Message: Error: Cannot read charges
+  --> (input):31:15-17
+   |
+31 | M  CHG  1 5 1
+   |               ^^^ expected integer value
+   |
+  Starting invalid5-sdf ... (23/28)
+       ... invalid5-sdf [EXPECTED FAIL]
+  Message: Error: Cannot read atom properties
+  --> (input):12:48
+   |
+12 | M  V30 5 N -0.553725 -1.908221 -0.092137 0 CHG=b
+   |                                                ^ unexpected value
+   |
+  Starting invalid6-sdf ... (24/28)
+       ... invalid6-sdf [EXPECTED FAIL]
+  Message: Error: Cannot map symbol to atomic number
+  --> (input):15:10
+   |
+15 | M  V30 8 * 2.575104 0.984442 0.587951 0
+   |          ^ unknown element
+   |
+  Starting invalid7-sdf ... (25/28)
+       ... invalid7-sdf [EXPECTED FAIL]
+  Message: Error: Cannot read connection table counts
+ --> (input):6:21
+  |
+6 | M  V30 COUNTS 17 16 a 0 0
+  |                     ^ expected integer value
+  |
+  Starting unsupported1-sdf ... (26/28)
+       ... unsupported1-sdf [EXPECTED FAIL]
+  Message: Error: Mapping atoms is not supported
+  --> (input):10:40
+   |
+10 | M  V30 3 O -2.469860 0.872693 1.126516 1
+   |                                        ^ unsupported value
+   |
+  Starting unsupported2-sdf ... (27/28)
+       ... unsupported2-sdf [EXPECTED FAIL]
+  Message: Error: Invalid number of atoms
+ --> (input):6:15
+  |
+6 | M  V30 COUNTS 0 0 0 0 0
+  |               ^ expected positive integer
+  |
+  Starting unsupported3-sdf ... (28/28)
+       ... unsupported3-sdf [EXPECTED FAIL]
+  Message: Error: Cannot read connection table
+ --> (input):9
+  |
+9 | 
+  |^ CTAB header not found
+  |
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/read-ctfile" end time: Feb 27 15:52 CET
+"mctc-lib/read-ctfile" time elapsed: 00:00:00
+----------------------------------------------------------
+
+9/36 Testing: mctc-lib/read-gaussian
+9/36 Test: mctc-lib/read-gaussian
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read-gaussian"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/read-gaussian" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: read-gaussian
+  Starting valid1-ein ... (1/5)
+       ... valid1-ein [PASSED]
+  Starting invalid1-ein ... (2/5)
+       ... invalid1-ein [EXPECTED FAIL]
+  Message: Error: Could not read number of atoms
+ --> (input):1:21-30
+  |
+1 |          4         1      zero       one
+  |                     ^^^^^^^^^^ expected integer value
+  |
+  Starting invalid2-ein ... (3/5)
+       ... invalid2-ein [EXPECTED FAIL]
+  Message: Error: Found no atoms, cannot work without atoms!
+ --> (input):1:1-10
+  |
+1 |         -4         1         0         1
+  | ^^^^^^^^^^ expected positive integer
+  |
+  Starting invalid3-ein ... (4/5)
+       ... invalid3-ein [EXPECTED FAIL]
+  Message: Error: Could not read geometry from Gaussian file
+ --> (input):5:11-30
+  |
+5 |          1      abcd.efgh-jklm      1.573811509290      0.528409372569      0.000000000000 
+  |           ^^^^^^^^^^^^^^^^^^^^ unexpected value
+  |
+  Starting invalid4-ein ... (5/5)
+       ... invalid4-ein [EXPECTED FAIL]
+  Message: Error: Invalid atomic number
+ --> (input):5:1-10
+  |
+5 |         -1      0.908640499019      1.573811509290      0.528409372569      0.000000000000 
+  | ^^^^^^^^^^ expected positive integer
+  |
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/read-gaussian" end time: Feb 27 15:52 CET
+"mctc-lib/read-gaussian" time elapsed: 00:00:00
+----------------------------------------------------------
+
+10/36 Testing: mctc-lib/read-genformat
+10/36 Test: mctc-lib/read-genformat
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read-genformat"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/read-genformat" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: read-genformat
+  Starting valid1-gen ... (1/15)
+       ... valid1-gen [PASSED]
+  Starting valid2-gen ... (2/15)
+       ... valid2-gen [PASSED]
+  Starting valid3-gen ... (3/15)
+       ... valid3-gen [PASSED]
+  Starting valid4-gen ... (4/15)
+       ... valid4-gen [PASSED]
+  Starting valid5-gen ... (5/15)
+       ... valid5-gen [PASSED]
+  Starting valid6-gen ... (6/15)
+       ... valid6-gen [PASSED]
+  Starting invalid1-gen ... (7/15)
+       ... invalid1-gen [EXPECTED FAIL]
+  Message: Error: Could not read number of atoms
+ --> (input):1:1-2
+  |
+1 | -2  F
+  | ^^ expected integer value
+  |
+  Starting invalid2-gen ... (8/15)
+       ... invalid2-gen [EXPECTED FAIL]
+  Message: Error: Invalid input version found
+ --> (input):1:4
+  |
+1 | 2  X
+  |    ^ unknown identifier
+  |
+  Starting invalid3-gen ... (9/15)
+       ... invalid3-gen [EXPECTED FAIL]
+  Message: Error: Cannot map symbol to atomic number
+ --> (input):2:4-7
+  |
+2 | Ga ***As
+  |    ^^^^ unknown element
+  |
+  Starting invalid4-gen ... (10/15)
+       ... invalid4-gen [EXPECTED FAIL]
+  Message: Error: Cannot read coordinates
+ --> (input):2
+  |
+2 | 
+  |^ unexpected value
+  |
+  Starting invalid5-gen ... (11/15)
+       ... invalid5-gen [EXPECTED FAIL]
+  Message: Error: Unexpected end of file
+ --> (input):4
+  |
+4 | 
+  |^ missing lattice information
+  |
+  Starting invalid6-gen ... (12/15)
+       ... invalid6-gen [EXPECTED FAIL]
+  Message: Error: Cannot read lattice vector
+ --> (input):6:1-13
+  |
+6 | ************* ************* 0.0000000E+00
+  | ^^^^^^^^^^^^^ expected real value
+  |
+  Starting invalid7-gen ... (13/15)
+       ... invalid7-gen [EXPECTED FAIL]
+  Message: Error: Cannot read lattice vector
+  --> (input):16:5-9
+   |
+16 | 3.0 ***** 1
+   |     ^^^^^ expected real value
+   |
+  Starting invalid8-gen ... (14/15)
+       ... invalid8-gen [EXPECTED FAIL]
+  Message: Error: Invalid helical axis rotation order
+ --> (input):6:23-25
+  |
+6 | 0.2140932670E+01 18.0 -10
+  |                       ^^^ expected positive value
+  |
+  Starting invalid9-gen ... (15/15)
+       ... invalid9-gen [EXPECTED FAIL]
+  Message: Error: Cannot read origin
+ --> (input):5:37
+  |
+5 | 0.0000000000E+00    0.0000000000E+00
+  |                                     ^ expected real value
+  |
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/read-genformat" end time: Feb 27 15:52 CET
+"mctc-lib/read-genformat" time elapsed: 00:00:00
+----------------------------------------------------------
+
+11/36 Testing: mctc-lib/read-json
+11/36 Test: mctc-lib/read-json
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read-json"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/read-json" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: read-json
+  Starting valid-pymatgen-mol ... (1/6)
+       ... valid-pymatgen-mol [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting valid-cjson-mol ... (2/6)
+       ... valid-cjson-mol [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting valid-qcschema-mol ... (3/6)
+       ... valid-qcschema-mol [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting valid-pymatgen-sol ... (4/6)
+       ... valid-pymatgen-sol [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting valid-cjson-sol ... (5/6)
+       ... valid-cjson-sol [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting valid-qcschema-sol ... (6/6)
+       ... valid-qcschema-sol [EXPECTED FAIL]
+  Message: JSON support not enabled
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/read-json" end time: Feb 27 15:52 CET
+"mctc-lib/read-json" time elapsed: 00:00:00
+----------------------------------------------------------
+
+12/36 Testing: mctc-lib/read-pdb
+12/36 Test: mctc-lib/read-pdb
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read-pdb"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/read-pdb" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: read-pdb
+  Starting valid1-pdb ... (1/7)
+       ... valid1-pdb [PASSED]
+  Starting valid2-pdb ... (2/7)
+       ... valid2-pdb [PASSED]
+  Starting valid3-pdb ... (3/7)
+       ... valid3-pdb [PASSED]
+  Starting valid4-pdb ... (4/7)
+       ... valid4-pdb [PASSED]
+  Starting invalid1-pdb ... (5/7)
+       ... invalid1-pdb [EXPECTED FAIL]
+  Message: Error: Cannot read coordinates from record
+  --> (input):21:31-38
+   |
+21 | ATOM     21  HB3 ASN Z   2       a.bcd  -6.029  12.503  1.00  0.00           H
+   |                               ^^^^^^^^ unexpected value
+   |
+  Starting invalid2-pdb ... (6/7)
+       ... invalid2-pdb [EXPECTED FAIL]
+  Message: Error: Too few entries provided in record
+  --> (input):43:70
+   |
+43 | HETATM 2505 FE   HEM A 154       9.621  -9.800   9.781  1.00  0.00 Fe
+   |                                                                      ^ record too short
+   |
+  Starting invalid3-pdb ... (7/7)
+       ... invalid3-pdb [EXPECTED FAIL]
+  Message: Error: Cannot map symbol to atomic number
+  --> (input):14:77-78
+   |
+14 | ATOM     10  X   GLY Z   1      -1.141  -4.323  12.291  1.00  1.85           X
+   |                                                                             ^^ unknown element
+   |
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/read-pdb" end time: Feb 27 15:52 CET
+"mctc-lib/read-pdb" time elapsed: 00:00:00
+----------------------------------------------------------
+
+13/36 Testing: mctc-lib/read-pymatgen
+13/36 Test: mctc-lib/read-pymatgen
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read-pymatgen"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/read-pymatgen" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: read-pymatgen
+  Starting valid-pymatgen-mol1 ... (1/22)
+       ... valid-pymatgen-mol1 [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting valid-pymatgen-sol1 ... (2/22)
+       ... valid-pymatgen-sol1 [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting missing-module ... (3/22)
+       ... missing-module [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting incorrect-module ... (4/22)
+       ... incorrect-module [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting missing-class ... (5/22)
+       ... missing-class [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting incorrect-class ... (6/22)
+       ... incorrect-class [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting incorrect-charge ... (7/22)
+       ... incorrect-charge [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting incorrect-multiplicity ... (8/22)
+       ... incorrect-multiplicity [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting unphysical-multiplicity ... (9/22)
+       ... unphysical-multiplicity [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting incorrect-sites ... (10/22)
+       ... incorrect-sites [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting incorrect-sites-entry ... (11/22)
+       ... incorrect-sites-entry [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting incorrect-label ... (12/22)
+       ... incorrect-label [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting incorrect-xyz ... (13/22)
+       ... incorrect-xyz [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting incorrect-xyz-value ... (14/22)
+       ... incorrect-xyz-value [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting incorrect-xyz-size ... (15/22)
+       ... incorrect-xyz-size [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting incorrect-root ... (16/22)
+       ... incorrect-root [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting incorrect-lattice ... (17/22)
+       ... incorrect-lattice [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting incorrect-lattice-table ... (18/22)
+       ... incorrect-lattice-table [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting incorrect-lattice-value ... (19/22)
+       ... incorrect-lattice-value [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting incorrect-lattice-size ... (20/22)
+       ... incorrect-lattice-size [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting incorrect-lattice-dim ... (21/22)
+       ... incorrect-lattice-dim [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting incorrect-lattice-rank ... (22/22)
+       ... incorrect-lattice-rank [EXPECTED FAIL]
+  Message: JSON support not enabled
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/read-pymatgen" end time: Feb 27 15:52 CET
+"mctc-lib/read-pymatgen" time elapsed: 00:00:00
+----------------------------------------------------------
+
+14/36 Testing: mctc-lib/read-qchem
+14/36 Test: mctc-lib/read-qchem
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read-qchem"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/read-qchem" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: read-qchem
+  Starting valid1-qchem ... (1/13)
+       ... valid1-qchem [PASSED]
+  Starting valid2-qchem ... (2/13)
+       ... valid2-qchem [PASSED]
+  Starting valid3-qchem ... (3/13)
+       ... valid3-qchem [PASSED]
+  Starting valid4-qchem ... (4/13)
+       ... valid4-qchem [PASSED]
+  Starting invalid1-qchem ... (5/13)
+       ... invalid1-qchem [EXPECTED FAIL]
+  Message: Error: Cannot map symbol to atomic number
+ --> (input):9:1-2
+  |
+9 | hh  -0.5203   -0.9011   -0.0000
+  | ^^ unknown element
+  |
+  Starting invalid2-qchem ... (6/13)
+       ... invalid2-qchem [EXPECTED FAIL]
+  Message: Error: Failed to read charge and multiplicity
+ --> (input):2:3
+  |
+2 | 24
+  |   ^ expected integer value
+  |
+  Starting invalid3-qchem ... (7/13)
+       ... invalid3-qchem [EXPECTED FAIL]
+  Message: Error: Failed to read molecule block
+  --> (input):14
+   |
+14 | 
+   |^ unexpected end of input
+   |
+  Starting invalid4-qchem ... (8/13)
+       ... invalid4-qchem [EXPECTED FAIL]
+  Message: Error: No atoms found
+ --> (input):5
+  |
+5 | 
+  |^ expected molecule block
+  |
+  Starting invalid5-qchem ... (9/13)
+       ... invalid5-qchem [EXPECTED FAIL]
+  Message: Error: Cannot read coordinates
+ --> (input):4:6-11
+  |
+4 | C    ******    1.2038    0.0000
+  |      ^^^^^^ expected value
+  |
+  Starting invalid6-qchem ... (10/13)
+       ... invalid6-qchem [EXPECTED FAIL]
+  Message: Error: Cannot read coordinates
+ --> (input):4:2
+  |
+4 | H
+  |  ^ expected value
+  |
+  Starting invalid7-qchem ... (11/13)
+       ... invalid7-qchem [EXPECTED FAIL]
+  Message: Error: Cannot read coordinates
+ --> (input):4:5
+  |
+4 | H  1
+  |     ^ expected value
+  |
+  Starting invalid8-qchem ... (12/13)
+       ... invalid8-qchem [EXPECTED FAIL]
+  Message: Error: Cannot read coordinates
+ --> (input):4:6-13
+  |
+4 | H  2 1.407461
+  |      ^^^^^^^^ invalid atom index
+  |
+  Starting invalid9-qchem ... (13/13)
+       ... invalid9-qchem [EXPECTED FAIL]
+  Message: Error: Cannot map symbol to atomic number
+ --> (input):4:1
+  |
+4 | *
+  | ^ unknown element
+  |
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/read-qchem" end time: Feb 27 15:52 CET
+"mctc-lib/read-qchem" time elapsed: 00:00:00
+----------------------------------------------------------
+
+15/36 Testing: mctc-lib/read-qcschema
+15/36 Test: mctc-lib/read-qcschema
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read-qcschema"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/read-qcschema" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: read-qcschema
+  Starting valid1-qcschema ... (1/35)
+       ... valid1-qcschema [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting valid2-qcschema ... (2/35)
+       ... valid2-qcschema [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting valid3-qcschema ... (3/35)
+       ... valid3-qcschema [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting valid4-qcschema ... (4/35)
+       ... valid4-qcschema [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting valid5-qcschema ... (5/35)
+       ... valid5-qcschema [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting extras1-qcschema ... (6/35)
+       ... extras1-qcschema [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting incomplete ... (7/35)
+       ... incomplete [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting mismatch-schema ... (8/35)
+       ... mismatch-schema [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting mismatch-geometry-symbols ... (9/35)
+       ... mismatch-geometry-symbols [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting missing-symbols ... (10/35)
+       ... missing-symbols [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-molecule ... (11/35)
+       ... invalid-molecule [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-symbols ... (12/35)
+       ... invalid-symbols [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-geometry ... (13/35)
+       ... invalid-geometry [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-connectivity1 ... (14/35)
+       ... invalid-connectivity1 [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-connectivity2 ... (15/35)
+       ... invalid-connectivity2 [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-connectivity3 ... (16/35)
+       ... invalid-connectivity3 [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-comment ... (17/35)
+       ... invalid-comment [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-charge ... (18/35)
+       ... invalid-charge [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-multiplicity ... (19/35)
+       ... invalid-multiplicity [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-schema-version-value1 ... (20/35)
+       ... invalid-schema-version-value1 [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-schema-version-value2 ... (21/35)
+       ... invalid-schema-version-value2 [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-schema-version-value3 ... (22/35)
+       ... invalid-schema-version-value3 [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-schema-version-type1 ... (23/35)
+       ... invalid-schema-version-type1 [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-schema-version-type2 ... (24/35)
+       ... invalid-schema-version-type2 [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-schema-name-value1 ... (25/35)
+       ... invalid-schema-name-value1 [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-schema-name-value2 ... (26/35)
+       ... invalid-schema-name-value2 [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-schema-name-type1 ... (27/35)
+       ... invalid-schema-name-type1 [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-schema-name-type2 ... (28/35)
+       ... invalid-schema-name-type2 [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting invalid-root-data ... (29/35)
+       ... invalid-root-data [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting extras-incomplete-lattice ... (30/35)
+       ... extras-incomplete-lattice [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting extras-incompatible-lattice1 ... (31/35)
+       ... extras-incompatible-lattice1 [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting extras-incompatible-lattice2 ... (32/35)
+       ... extras-incompatible-lattice2 [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting extras-incompatible-periodic ... (33/35)
+       ... extras-incompatible-periodic [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting extras-type-mismatch ... (34/35)
+       ... extras-type-mismatch [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting cjson ... (35/35)
+       ... cjson [EXPECTED FAIL]
+  Message: JSON support not enabled
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/read-qcschema" end time: Feb 27 15:52 CET
+"mctc-lib/read-qcschema" time elapsed: 00:00:00
+----------------------------------------------------------
+
+16/36 Testing: mctc-lib/read-turbomole
+16/36 Test: mctc-lib/read-turbomole
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read-turbomole"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/read-turbomole" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: read-turbomole
+  Starting valid1-coord ... (1/27)
+       ... valid1-coord [PASSED]
+  Starting valid2-coord ... (2/27)
+       ... valid2-coord [PASSED]
+  Starting valid3-coord ... (3/27)
+       ... valid3-coord [PASSED]
+  Starting valid4-coord ... (4/27)
+       ... valid4-coord [PASSED]
+  Starting valid5-coord ... (5/27)
+       ... valid5-coord [PASSED]
+  Starting valid6-coord ... (6/27)
+       ... valid6-coord [PASSED]
+  Starting valid7-coord ... (7/27)
+       ... valid7-coord [PASSED]
+  Starting valid8-coord ... (8/27)
+       ... valid8-coord [PASSED]
+  Starting valid9-coord ... (9/27)
+       ... valid9-coord [PASSED]
+  Starting valid10-coord ... (10/27)
+       ... valid10-coord [PASSED]
+  Starting valid11-coord ... (11/27)
+       ... valid11-coord [PASSED]
+  Starting invalid1-coord ... (12/27)
+       ... invalid1-coord [EXPECTED FAIL]
+  Message: Error: coordinates not present, cannot work without coordinates
+ --> (input):1:1-4
+  |
+1 | $end
+  | ^^^^ unexpected end of input
+  |
+  Starting invalid2-coord ... (13/27)
+       ... invalid2-coord [EXPECTED FAIL]
+  Message: Error: Missing lattice or cell data
+  --> (input):11:1-9
+   |
+11 | $periodic 3
+   | ^^^^^^^^^ periodic system defined here
+   |
+  Starting invalid3-coord ... (14/27)
+       ... invalid3-coord [EXPECTED FAIL]
+  Message: Error: Cell parameters defined without periodicity
+  --> (input):12:1-5
+   |
+12 | $cell
+   | ^^^^^ cell defined here
+   |
+  Starting invalid4-coord ... (15/27)
+       ... invalid4-coord [EXPECTED FAIL]
+  Message: Error: Cannot map symbol to atomic number
+ --> (input):2:34-37
+  |
+2 | -1.1469443  0.0697649  1.1470196 --->o
+  |                                  ^^^^ unknown element
+  |
+  Starting invalid5-coord ... (16/27)
+       ... invalid5-coord [EXPECTED FAIL]
+  Message: Error: Number of lattice vectors does not match periodicity
+ --> (input):9:11
+  |
+6 | $lattice angs
+  | -------- lattice vectors defined here
+  :
+9 | $periodic 3
+  |           ^ conflicting periodicity
+  |
+  Starting invalid6-coord ... (17/27)
+       ... invalid6-coord [EXPECTED FAIL]
+  Message: Error: Molecular systems cannot have fractional coordinates
+ --> (input):1:8-11
+  |
+1 | $coord frac
+  |        ^^^^ fractional modifier found
+  |
+  Starting invalid7-coord ... (18/27)
+       ... invalid7-coord [EXPECTED FAIL]
+  Message: Error: Conflicting lattice and cell groups
+  --> (input):37:1-5
+   |
+35 | $lattice
+   | -------- lattice first defined here
+   :
+37 | $cell
+   | ^^^^^ conflicting cell group
+   |
+  Starting invalid8-coord ... (19/27)
+       ... invalid8-coord [EXPECTED FAIL]
+  Message: Error: Cannot read coordinates
+ --> (input):5:13-21
+  |
+5 | -1.1469443  abcd.efgh  1.1470196 O
+  |             ^^^^^^^^^ expected real value
+  |
+  Starting invalid9-coord ... (20/27)
+       ... invalid9-coord [EXPECTED FAIL]
+  Message: Error: Cannot read periodicity of system
+ --> (input):6:11
+  |
+6 | $periodic 4
+  |           ^ expected integer (0 to 3)
+  |
+  Starting invalid10-coord ... (21/27)
+       ... invalid10-coord [EXPECTED FAIL]
+  Message: Error: Cannot read eht entry
+  --> (input):18:13-15
+   |
+18 | $eht charge=one unpaired=0
+   |             ^^^ expected integer value
+   |
+  Starting invalid11-coord ... (22/27)
+       ... invalid11-coord [EXPECTED FAIL]
+  Message: Error: Cannot read eht entry
+  --> (input):18:15
+   |
+18 | $eht unpaired=
+   |               ^ expected integer value
+   |
+  Starting invalid12-coord ... (23/27)
+       ... invalid12-coord [EXPECTED FAIL]
+  Message: Error: Duplicated coord data group
+ --> (input):8:1-6
+  |
+1 | $coord
+  | ------ coordinates first defined here
+  :
+8 | $coord
+  | ^^^^^^ duplicated coordinate group
+  |
+  Starting invalid13-coord ... (24/27)
+       ... invalid13-coord [EXPECTED FAIL]
+  Message: Error: Duplicated cell data group
+  --> (input):10:1-5
+   |
+ 6 | $cell  angs
+   | ----- cell parameters first defined here
+   :
+10 | $cell  angs
+   | ^^^^^ duplicated cell group
+   |
+  Starting invalid14-coord ... (25/27)
+       ... invalid14-coord [EXPECTED FAIL]
+  Message: Error: Duplicated periodic data group
+  --> (input):10:1-9
+   |
+ 7 | $periodic 2
+   | --------- periodicity first defined here
+   :
+10 | $periodic 2
+   | ^^^^^^^^^ duplicated periodicity data
+   |
+  Starting invalid15-coord ... (26/27)
+       ... invalid15-coord [EXPECTED FAIL]
+  Message: Error: Duplicated eht data group
+ --> (input):7:1-4
+  |
+1 | $eht charge=0
+  | ---- charge/multiplicity first defined here
+  :
+7 | $eht unpaired=0
+  | ^^^^ duplicated eht data
+  |
+  Starting invalid16-coord ... (27/27)
+       ... invalid16-coord [EXPECTED FAIL]
+  Message: Error: Duplicated lattice data group
+  --> (input):10:1-8
+   |
+ 1 | $lattice angs
+   | -------- lattice parameters first defined here
+   :
+10 | $lattice angs
+   | ^^^^^^^^ duplicated lattice group
+   |
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/read-turbomole" end time: Feb 27 15:52 CET
+"mctc-lib/read-turbomole" time elapsed: 00:00:00
+----------------------------------------------------------
+
+17/36 Testing: mctc-lib/read-vasp
+17/36 Test: mctc-lib/read-vasp
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read-vasp"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/read-vasp" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: read-vasp
+  Starting valid1-poscar ... (1/13)
+       ... valid1-poscar [PASSED]
+  Starting valid2-poscar ... (2/13)
+       ... valid2-poscar [PASSED]
+  Starting valid3-poscar ... (3/13)
+       ... valid3-poscar [PASSED]
+  Starting valid4-poscar ... (4/13)
+       ... valid4-poscar [PASSED]
+  Starting valid5-poscar ... (5/13)
+       ... valid5-poscar [PASSED]
+  Starting invalid1-poscar ... (6/13)
+       ... invalid1-poscar [EXPECTED FAIL]
+  Message: Unexpected end of input encountered
+  Starting invalid2-poscar ... (7/13)
+       ... invalid2-poscar [EXPECTED FAIL]
+  Message: Unexpected end of geometry encountered
+  Starting invalid3-poscar ... (8/13)
+       ... invalid3-poscar [EXPECTED FAIL]
+  Message: Unexpected end of lattice vectors encountered
+  Starting invalid4-poscar ... (9/13)
+       ... invalid4-poscar [EXPECTED FAIL]
+  Message: Number of atom types mismatches the number of counts
+  Starting invalid5-poscar ... (10/13)
+       ... invalid5-poscar [EXPECTED FAIL]
+  Message: Error: Cannot read lattice vectors from input
+ --> (input):3:6-12
+  |
+3 |      *******    0.00000    0.00000
+  |      ^^^^^^^ expected real value
+  |
+  Starting invalid6-poscar ... (11/13)
+       ... invalid6-poscar [EXPECTED FAIL]
+  Message: Unknown element 'Oxygen' encountered
+  Starting invalid7-poscar ... (12/13)
+       ... invalid7-poscar [EXPECTED FAIL]
+  Message: Error: Cannot read scaling factor
+ --> (input):2:1-2
+  |
+2 | Ti  O 
+  | ^^ expected real value
+  |
+  Starting issue60 ... (13/13)
+       ... issue60 [PASSED]
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/read-vasp" end time: Feb 27 15:52 CET
+"mctc-lib/read-vasp" time elapsed: 00:00:00
+----------------------------------------------------------
+
+18/36 Testing: mctc-lib/read-xyz
+18/36 Test: mctc-lib/read-xyz
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "read-xyz"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/read-xyz" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: read-xyz
+  Starting valid1-xyz ... (1/12)
+       ... valid1-xyz [PASSED]
+  Starting valid2-xyz ... (2/12)
+       ... valid2-xyz [PASSED]
+  Starting valid3-xyz ... (3/12)
+       ... valid3-xyz [PASSED]
+  Starting valid4-xyz ... (4/12)
+       ... valid4-xyz [PASSED]
+  Starting valid5-xyz ... (5/12)
+       ... valid5-xyz [PASSED]
+  Starting invalid1-xyz ... (6/12)
+       ... invalid1-xyz [EXPECTED FAIL]
+  Message: Error: Atom number missmatch in xyz file
+ --> (input):1:1
+  |
+1 | 9
+  | ^ found 6 atoms in input
+  |
+  Starting invalid2-xyz ... (7/12)
+       ... invalid2-xyz [EXPECTED FAIL]
+  Message: Error: Could not read number of atoms
+ --> (input):1:1
+  |
+1 | 
+  | ^ expected integer value
+  |
+  Starting invalid3-xyz ... (8/12)
+       ... invalid3-xyz [EXPECTED FAIL]
+  Message: Error: Unexpected end of file
+ --> (input):2
+  |
+2 | 
+  |^ expected value
+  |
+  Starting invalid4-xyz ... (9/12)
+       ... invalid4-xyz [EXPECTED FAIL]
+  Message: Error: Impossible number of atoms provided
+ --> (input):1:1-2
+  |
+1 | -3
+  | ^^ expected positive integer value
+  |
+  Starting invalid5-xyz ... (10/12)
+       ... invalid5-xyz [EXPECTED FAIL]
+  Message: Error: Cannot map symbol to atomic number
+ --> (input):3:1-4
+  |
+3 | ****o   1.1847029    1.1150792   -0.0344641 
+  | ^^^^ unknown element
+  |
+  Starting invalid6-xyz ... (11/12)
+       ... invalid6-xyz [EXPECTED FAIL]
+  Message: Error: Could not parse coordinates from xyz file
+ --> (input):3:42
+  |
+3 | 1.1847029    1.1150792   -0.0344641      O
+  |                                          ^ expected real value
+  |
+  Starting invalid7-xyz ... (12/12)
+       ... invalid7-xyz [EXPECTED FAIL]
+  Message: Error: Could not read number of atoms
+ --> (input):1:1-4
+  |
+1 | nine
+  | ^^^^ expected integer value
+  |
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/read-xyz" end time: Feb 27 15:52 CET
+"mctc-lib/read-xyz" time elapsed: 00:00:00
+----------------------------------------------------------
+
+19/36 Testing: mctc-lib/symbols
+19/36 Test: mctc-lib/symbols
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "symbols"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/symbols" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: symbols
+  Starting valid-num-ids ... (1/5)
+       ... valid-num-ids [PASSED]
+  Starting valid-sym-ids ... (2/5)
+       ... valid-sym-ids [PASSED]
+  Starting valid-num ... (3/5)
+       ... valid-num [PASSED]
+  Starting valid-pse ... (4/5)
+       ... valid-pse [PASSED]
+  Starting valid-sym ... (5/5)
+       ... valid-sym [PASSED]
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/symbols" end time: Feb 27 15:52 CET
+"mctc-lib/symbols" time elapsed: 00:00:00
+----------------------------------------------------------
+
+20/36 Testing: mctc-lib/write
+20/36 Test: mctc-lib/write
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "write"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/write" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: write
+  Starting valid-cjson ... (1/10)
+       ... valid-cjson [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting valid-mol ... (2/10)
+       ... valid-mol [PASSED]
+  Starting valid-sdf ... (3/10)
+       ... valid-sdf [PASSED]
+  Starting valid-gen ... (4/10)
+       ... valid-gen [PASSED]
+  Starting valid-pdb ... (5/10)
+       ... valid-pdb [PASSED]
+  Starting valid-qchem ... (6/10)
+       ... valid-qchem [PASSED]
+  Starting valid-qcschema ... (7/10)
+       ... valid-qcschema [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting valid-vasp ... (8/10)
+       ... valid-vasp [PASSED]
+  Starting valid-coord ... (9/10)
+       ... valid-coord [PASSED]
+  Starting valid-xyz ... (10/10)
+       ... valid-xyz [PASSED]
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/write" end time: Feb 27 15:52 CET
+"mctc-lib/write" time elapsed: 00:00:00
+----------------------------------------------------------
+
+21/36 Testing: mctc-lib/write-aims
+21/36 Test: mctc-lib/write-aims
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "write-aims"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/write-aims" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: write-aims
+  Starting valid1-aims ... (1/2)
+       ... valid1-aims [PASSED]
+  Starting valid2-aims ... (2/2)
+       ... valid2-aims [PASSED]
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/write-aims" end time: Feb 27 15:52 CET
+"mctc-lib/write-aims" time elapsed: 00:00:00
+----------------------------------------------------------
+
+22/36 Testing: mctc-lib/write-cjson
+22/36 Test: mctc-lib/write-cjson
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "write-cjson"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/write-cjson" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: write-cjson
+  Starting valid1-cjson ... (1/2)
+       ... valid1-cjson [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting valid2-cjson ... (2/2)
+       ... valid2-cjson [EXPECTED FAIL]
+  Message: JSON support not enabled
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/write-cjson" end time: Feb 27 15:52 CET
+"mctc-lib/write-cjson" time elapsed: 00:00:00
+----------------------------------------------------------
+
+23/36 Testing: mctc-lib/write-ctfile
+23/36 Test: mctc-lib/write-ctfile
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "write-ctfile"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/write-ctfile" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: write-ctfile
+  Starting valid1-mol ... (1/5)
+       ... valid1-mol [PASSED]
+  Starting valid1-sdf ... (2/5)
+       ... valid1-sdf [PASSED]
+  Starting v3k-large-mol ... (3/5)
+       ... v3k-large-mol [PASSED]
+  Starting v3k-large-sdf ... (4/5)
+       ... v3k-large-sdf [PASSED]
+  Starting v3k-with-bonds ... (5/5)
+       ... v3k-with-bonds [PASSED]
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/write-ctfile" end time: Feb 27 15:52 CET
+"mctc-lib/write-ctfile" time elapsed: 00:00:00
+----------------------------------------------------------
+
+24/36 Testing: mctc-lib/write-gaussian
+24/36 Test: mctc-lib/write-gaussian
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "write-gaussian"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/write-gaussian" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: write-gaussian
+  Starting valid1-ein ... (1/1)
+       ... valid1-ein [PASSED]
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/write-gaussian" end time: Feb 27 15:52 CET
+"mctc-lib/write-gaussian" time elapsed: 00:00:00
+----------------------------------------------------------
+
+25/36 Testing: mctc-lib/write-genformat
+25/36 Test: mctc-lib/write-genformat
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "write-genformat"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/write-genformat" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: write-genformat
+  Starting valid1-gen ... (1/3)
+       ... valid1-gen [PASSED]
+  Starting valid2-gen ... (2/3)
+       ... valid2-gen [PASSED]
+  Starting valid3-gen ... (3/3)
+       ... valid3-gen [PASSED]
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/write-genformat" end time: Feb 27 15:52 CET
+"mctc-lib/write-genformat" time elapsed: 00:00:00
+----------------------------------------------------------
+
+26/36 Testing: mctc-lib/write-pdb
+26/36 Test: mctc-lib/write-pdb
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "write-pdb"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/write-pdb" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: write-pdb
+  Starting valid1-pdb ... (1/1)
+       ... valid1-pdb [PASSED]
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/write-pdb" end time: Feb 27 15:52 CET
+"mctc-lib/write-pdb" time elapsed: 00:00:00
+----------------------------------------------------------
+
+27/36 Testing: mctc-lib/write-pymatgen
+27/36 Test: mctc-lib/write-pymatgen
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "write-pymatgen"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/write-pymatgen" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: write-pymatgen
+  Starting valid1-pymatgen ... (1/2)
+       ... valid1-pymatgen [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting valid2-pymatgen ... (2/2)
+       ... valid2-pymatgen [EXPECTED FAIL]
+  Message: JSON support not enabled
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/write-pymatgen" end time: Feb 27 15:52 CET
+"mctc-lib/write-pymatgen" time elapsed: 00:00:00
+----------------------------------------------------------
+
+28/36 Testing: mctc-lib/write-qchem
+28/36 Test: mctc-lib/write-qchem
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "write-qchem"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/write-qchem" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: write-qchem
+  Starting valid1-qchem ... (1/2)
+       ... valid1-qchem [PASSED]
+  Starting valid2-qchem ... (2/2)
+       ... valid2-qchem [PASSED]
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/write-qchem" end time: Feb 27 15:52 CET
+"mctc-lib/write-qchem" time elapsed: 00:00:00
+----------------------------------------------------------
+
+29/36 Testing: mctc-lib/write-qcschema
+29/36 Test: mctc-lib/write-qcschema
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "write-qcschema"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/write-qcschema" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: write-qcschema
+  Starting valid1-qcschema ... (1/2)
+       ... valid1-qcschema [EXPECTED FAIL]
+  Message: JSON support not enabled
+  Starting valid2-qcschema ... (2/2)
+       ... valid2-qcschema [EXPECTED FAIL]
+  Message: JSON support not enabled
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/write-qcschema" end time: Feb 27 15:52 CET
+"mctc-lib/write-qcschema" time elapsed: 00:00:00
+----------------------------------------------------------
+
+30/36 Testing: mctc-lib/write-turbomole
+30/36 Test: mctc-lib/write-turbomole
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "write-turbomole"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/write-turbomole" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: write-turbomole
+  Starting valid1-coord ... (1/4)
+       ... valid1-coord [PASSED]
+  Starting valid2-coord ... (2/4)
+       ... valid2-coord [PASSED]
+  Starting valid1-coord-angs ... (3/4)
+       ... valid1-coord-angs [PASSED]
+  Starting valid2-coord-angs ... (4/4)
+       ... valid2-coord-angs [PASSED]
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/write-turbomole" end time: Feb 27 15:52 CET
+"mctc-lib/write-turbomole" time elapsed: 00:00:00
+----------------------------------------------------------
+
+31/36 Testing: mctc-lib/write-vasp
+31/36 Test: mctc-lib/write-vasp
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "write-vasp"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/write-vasp" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: write-vasp
+  Starting valid1-poscar ... (1/4)
+       ... valid1-poscar [PASSED]
+  Starting valid2-poscar ... (2/4)
+       ... valid2-poscar [PASSED]
+  Starting valid3-poscar ... (3/4)
+       ... valid3-poscar [PASSED]
+  Starting valid4-poscar ... (4/4)
+       ... valid4-poscar [PASSED]
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/write-vasp" end time: Feb 27 15:52 CET
+"mctc-lib/write-vasp" time elapsed: 00:00:00
+----------------------------------------------------------
+
+32/36 Testing: mctc-lib/write-xyz
+32/36 Test: mctc-lib/write-xyz
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test/mctc-lib-tester" "write-xyz"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/subprojects/mctc-lib/test
+"mctc-lib/write-xyz" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: write-xyz
+  Starting valid1-xyz ... (1/1)
+       ... valid1-xyz [PASSED]
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"mctc-lib/write-xyz" end time: Feb 27 15:52 CET
+"mctc-lib/write-xyz" time elapsed: 00:00:00
+----------------------------------------------------------
+
+33/36 Testing: model
+33/36 Test: model
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/test/unit/multicharge-tester" "model"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/test/unit
+"model" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: model
+  Starting eeq-dadr-mb01 ... (1/46)
+ CG converged successfully.
+ CG converged successfully.
+       ... eeq-dadr-mb01 [PASSED]
+  Starting eeq-dadL-mb01 ... (2/46)
+ CG converged successfully.
+ CG converged successfully.
+       ... eeq-dadL-mb01 [PASSED]
+  Starting eeq-dbdr-mb01 ... (3/46)
+       ... eeq-dbdr-mb01 [PASSED]
+  Starting eeq-dbdL-mb01 ... (4/46)
+       ... eeq-dbdL-mb01 [PASSED]
+  Starting eeq-charges-mb01 ... (5/46)
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+       ... eeq-charges-mb01 [PASSED]
+  Starting eeq-charges-mb02 ... (6/46)
+ CG converged successfully.
+ CG converged successfully.
+       ... eeq-charges-mb02 [PASSED]
+  Starting eeq-charges-actinides ... (7/46)
+ CG converged successfully.
+ CG converged successfully.
+       ... eeq-charges-actinides [PASSED]
+  Starting eeq-energy-mb03 ... (8/46)
+ CG converged successfully.
+ CG converged successfully.
+       ... eeq-energy-mb03 [PASSED]
+  Starting eeq-energy-mb04 ... (9/46)
+ CG converged successfully.
+ CG converged successfully.
+       ... eeq-energy-mb04 [PASSED]
+  Starting eeq-gradient-mb05 ... (10/46)
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+       ... eeq-gradient-mb05 [PASSED]
+  Starting eeq-gradient-mb06 ... (11/46)
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+       ... eeq-gradient-mb06 [PASSED]
+  Starting eeq-sigma-mb07 ... (12/46)
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+       ... eeq-sigma-mb07 [PASSED]
+  Starting eeq-sigma-mb08 ... (13/46)
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+       ... eeq-sigma-mb08 [PASSED]
+  Starting eeq-dqdr-mb09 ... (14/46)
+       ... eeq-dqdr-mb09 [PASSED]
+  Starting eeq-dqdr-mb10 ... (15/46)
+       ... eeq-dqdr-mb10 [PASSED]
+  Starting eeq-dqdL-mb11 ... (16/46)
+       ... eeq-dqdL-mb11 [PASSED]
+  Starting eeq-dqdL-mb12 ... (17/46)
+       ... eeq-dqdL-mb12 [PASSED]
+  Starting gradient-h2plus ... (18/46)
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+       ... gradient-h2plus [PASSED]
+  Starting eeq-dadr-znooh ... (19/46)
+ CG converged successfully.
+ CG converged successfully.
+       ... eeq-dadr-znooh [PASSED]
+  Starting eeq-dbdr-znooh ... (20/46)
+       ... eeq-dbdr-znooh [PASSED]
+  Starting gradient-znooh ... (21/46)
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+       ... gradient-znooh [PASSED]
+  Starting dqdr-znooh ... (22/46)
+       ... dqdr-znooh [PASSED]
+  Starting eeq-dfdr-mb06 ... (23/46)
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+       ... eeq-dfdr-mb06 [PASSED]
+  Starting eeq-dfdr-mb10 ... (24/46)
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+       ... eeq-dfdr-mb10 [PASSED]
+  Starting eeqbc-dadr-mb01 ... (25/46)
+ CG converged successfully.
+ CG converged successfully.
+       ... eeqbc-dadr-mb01 [PASSED]
+  Starting eeqbc-dadL-mb01 ... (26/46)
+ CG converged successfully.
+ CG converged successfully.
+       ... eeqbc-dadL-mb01 [PASSED]
+  Starting eeqbc-dbdr-mb01 ... (27/46)
+       ... eeqbc-dbdr-mb01 [PASSED]
+  Starting eeqbc-dbdL-mb01 ... (28/46)
+       ... eeqbc-dbdL-mb01 [PASSED]
+  Starting eeqbc-dadr-mb05 ... (29/46)
+ CG converged successfully.
+ CG converged successfully.
+       ... eeqbc-dadr-mb05 [PASSED]
+  Starting eeqbc-dadL-mb05 ... (30/46)
+ CG converged successfully.
+ CG converged successfully.
+       ... eeqbc-dadL-mb05 [PASSED]
+  Starting eeqbc-dbdr-mb05 ... (31/46)
+       ... eeqbc-dbdr-mb05 [PASSED]
+  Starting eeqbc-charges-mb01 ... (32/46)
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+       ... eeqbc-charges-mb01 [PASSED]
+  Starting eeqbc-charges-mb02 ... (33/46)
+ CG converged successfully.
+ CG converged successfully.
+       ... eeqbc-charges-mb02 [PASSED]
+  Starting eeqbc-charges-actinides ... (34/46)
+ CG converged successfully.
+ CG converged successfully.
+       ... eeqbc-charges-actinides [PASSED]
+  Starting eeqbc-energy-mb03 ... (35/46)
+ CG converged successfully.
+ CG converged successfully.
+       ... eeqbc-energy-mb03 [PASSED]
+  Starting eeqbc-energy-mb04 ... (36/46)
+ CG converged successfully.
+ CG converged successfully.
+       ... eeqbc-energy-mb04 [PASSED]
+  Starting eeqbc-gradient-mb05 ... (37/46)
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+       ... eeqbc-gradient-mb05 [PASSED]
+  Starting eeqbc-gradient-mb06 ... (38/46)
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+       ... eeqbc-gradient-mb06 [PASSED]
+  Starting eeqbc-sigma-mb07 ... (39/46)
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+       ... eeqbc-sigma-mb07 [PASSED]
+  Starting eeqbc-sigma-mb08 ... (40/46)
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+       ... eeqbc-sigma-mb08 [PASSED]
+  Starting eeqbc-dqdr-mb09 ... (41/46)
+       ... eeqbc-dqdr-mb09 [PASSED]
+  Starting eeqbc-dqdr-mb10 ... (42/46)
+       ... eeqbc-dqdr-mb10 [PASSED]
+  Starting eeqbc-dqdL-mb11 ... (43/46)
+       ... eeqbc-dqdL-mb11 [PASSED]
+  Starting eeqbc-dqdL-mb12 ... (44/46)
+       ... eeqbc-dqdL-mb12 [PASSED]
+  Starting eeqbc-dfdr-mb06 ... (45/46)
+ CG converged successfully.
+ CG converged successfully.
+       ... eeqbc-dfdr-mb06 [PASSED]
+  Starting eeqbc-dfdr-mb10 ... (46/46)
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+       ... eeqbc-dfdr-mb10 [PASSED]
+<end of output>
+Test time =   0.06 sec
+----------------------------------------------------------
+Test Passed.
+"model" end time: Feb 27 15:52 CET
+"model" time elapsed: 00:00:00
+----------------------------------------------------------
+
+34/36 Testing: pbc
+34/36 Test: pbc
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/test/unit/multicharge-tester" "pbc"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/test/unit
+"pbc" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: pbc
+  Starting eeq-charges-cyanamide ... (1/19)
+ CG converged successfully.
+ CG converged successfully.
+       ... eeq-charges-cyanamide [PASSED]
+  Starting eeq-energy-formamide ... (2/19)
+ CG converged successfully.
+ CG converged successfully.
+       ... eeq-energy-formamide [PASSED]
+  Starting eeq-dbdr-co2 ... (3/19)
+       ... eeq-dbdr-co2 [PASSED]
+  Starting eeq-dbdL-co2 ... (4/19)
+       ... eeq-dbdL-co2 [PASSED]
+  Starting eeq-dadr-ice ... (5/19)
+ CG converged successfully.
+ CG converged successfully.
+       ... eeq-dadr-ice [PASSED]
+  Starting eeq-dadL-ice ... (6/19)
+ CG converged successfully.
+ CG converged successfully.
+       ... eeq-dadL-ice [PASSED]
+  Starting eeq-gradient-co2 ... (7/19)
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+       ... eeq-gradient-co2 [PASSED]
+  Starting eeq-sigma-ice ... (8/19)
+       ... eeq-sigma-ice [PASSED]
+  Starting eeq-dqdr-urea ... (9/19)
+       ... eeq-dqdr-urea [PASSED]
+  Starting eeq-dfdr-urea ... (10/19)
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+       ... eeq-dfdr-urea [PASSED]
+  Starting eeq-dqdL-oxacb ... (11/19)
+       ... eeq-dqdL-oxacb [PASSED]
+  Starting eeqbc-dbdr-co2 ... (12/19)
+       ... eeqbc-dbdr-co2 [PASSED]
+  Starting eeqbc-dbdL-co2 ... (13/19)
+       ... eeqbc-dbdL-co2 [PASSED]
+  Starting eeqbc-dadr-ice ... (14/19)
+ CG converged successfully.
+       ... eeqbc-dadr-ice [PASSED]
+  Starting eeqbc-dadL-ice ... (15/19)
+ CG converged successfully.
+       ... eeqbc-dadL-ice [PASSED]
+  Starting eeqbc-gradient-co2 ... (16/19)
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+       ... eeqbc-gradient-co2 [PASSED]
+  Starting eeqbc-sigma-ice ... (17/19)
+       ... eeqbc-sigma-ice [PASSED]
+  Starting eeqbc-dqdr-urea ... (18/19)
+       ... eeqbc-dqdr-urea [PASSED]
+  Starting eeqbc-dfdr-urea ... (19/19)
+ CG converged successfully.
+ CG converged successfully.
+ CG converged successfully.
+       ... eeqbc-dfdr-urea [PASSED]
+<end of output>
+Test time =   3.43 sec
+----------------------------------------------------------
+Test Passed.
+"pbc" end time: Feb 27 15:52 CET
+"pbc" time elapsed: 00:00:03
+----------------------------------------------------------
+
+35/36 Testing: wignerseitz
+35/36 Test: wignerseitz
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/test/unit/multicharge-tester" "wignerseitz"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/test/unit
+"wignerseitz" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: wignerseitz
+  Starting lattice-points-0d ... (1/4)
+       ... lattice-points-0d [PASSED]
+  Starting lattice-points-3d ... (2/4)
+       ... lattice-points-3d [PASSED]
+  Starting wignerseitz-cell-0d ... (3/4)
+       ... wignerseitz-cell-0d [PASSED]
+  Starting wignerseitz-cell-3d ... (4/4)
+       ... wignerseitz-cell-3d [PASSED]
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"wignerseitz" end time: Feb 27 15:52 CET
+"wignerseitz" time elapsed: 00:00:00
+----------------------------------------------------------
+
+36/36 Testing: solver
+36/36 Test: solver
+Command: "/home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/test/unit/multicharge-tester" "solver"
+Directory: /home/zakharov/Documents/prog/mcharge/multicharge/cmake_build/test/unit
+"solver" start time: Feb 27 15:52 CET
+Output:
+----------------------------------------------------------
+# Testing: solver
+  Starting cg-identity-2x2 ... (1/8)
+ CG converged successfully.
+CG Solver CPU Time :  0.000 seconds.
+Direct Solver CPU Time :  0.000 seconds.
+CG Solver ime profit :  1.000
+       ... cg-identity-2x2 [PASSED]
+  Starting cg-diagonal-5x5 ... (2/8)
+ CG converged successfully.
+CG Solver CPU Time :  0.000 seconds.
+Direct Solver CPU Time :  0.000 seconds.
+CG Solver ime profit :  0.400
+       ... cg-diagonal-5x5 [PASSED]
+  Starting cg-spd-small ... (3/8)
+ CG converged successfully.
+CG Solver CPU Time :  0.000 seconds.
+Direct Solver CPU Time :  0.000 seconds.
+CG Solver ime profit :  0.667
+       ... cg-spd-small [PASSED]
+  Starting cg-spd-large ... (4/8)
+ CG converged successfully.
+CG Solver CPU Time :  0.007 seconds.
+Direct Solver CPU Time :  0.086 seconds.
+CG Solver ime profit : 12.890
+       ... cg-spd-large [PASSED]
+  Starting cg-ill-conditioned ... (5/8)
+ CG converged successfully.
+CG Solver CPU Time :  0.000 seconds.
+Direct Solver CPU Time :  0.000 seconds.
+CG Solver ime profit :  0.429
+       ... cg-ill-conditioned [PASSED]
+  Starting cg-zero-rhs ... (6/8)
+ CG converged successfully.
+CG Solver CPU Time :  0.000 seconds.
+Direct Solver CPU Time :  0.000 seconds.
+CG Solver ime profit :  0.500
+       ... cg-zero-rhs [PASSED]
+  Starting cg-random-spd ... (7/8)
+ CG converged successfully.
+CG Solver CPU Time :  0.000 seconds.
+Direct Solver CPU Time :  0.000 seconds.
+CG Solver ime profit :  1.000
+       ... cg-random-spd [PASSED]
+  Starting cg-preconditioned ... (8/8)
+ CG converged successfully.
+CG Solver CPU Time :  0.000 seconds.
+Direct Solver CPU Time :  0.000 seconds.
+CG Solver ime profit :  0.600
+       ... cg-preconditioned [PASSED]
+<end of output>
+Test time =   0.10 sec
+----------------------------------------------------------
+Test Passed.
+"solver" end time: Feb 27 15:52 CET
+"solver" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Feb 27 15:52 CET

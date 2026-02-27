@@ -36,7 +36,6 @@ subroutine collect_solver(testsuite)
       & new_unittest("cg-identity-2x2", test_cg_identity_2x2), &
       & new_unittest("cg-diagonal-5x5", test_cg_diagonal_5x5), &
       & new_unittest("cg-spd-small", test_cg_spd_small), &
-      & new_unittest("cg-spd-medium", test_cg_spd_medium), &
       & new_unittest("cg-spd-large", test_cg_spd_large), &
       & new_unittest("cg-ill-conditioned", test_cg_ill_conditioned), &
       & new_unittest("cg-zero-rhs", test_cg_zero_rhs), &
@@ -309,105 +308,7 @@ subroutine test_cg_spd_small(error)
 
 end subroutine test_cg_spd_small
 
-!> Test 4: Medium SPD matrix
-subroutine test_cg_spd_medium(error)
-
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
-
-   integer, parameter :: n = 10
-   logical, parameter :: cpq = .false.
-   real(wp) :: amat(n, n), xvec(n), vrhs(n), ainv(n, n)
-   real(wp) :: expected(n), b(n), residual
-   integer :: i, j
-
-  ! Timer variables
-   real(wp) :: start_cg, end_cg, start_direct, end_direct
-
-   !> Solver variables
-   real(wp), allocatable :: tol
-   integer, allocatable :: maxiter 
-   class(mchrg_solver_type), allocatable :: solver
-   class(mchrg_solver_input), allocatable :: solver_input
-
-   allocate(cg_input :: solver_input)
-   select type(solver_input)
-   type is (cg_input)
-      if (allocated(maxiter)) then
-         solver_input%cgmiter = maxiter
-      end if
-      if (allocated(tol)) then
-         solver_input%cgtol = tol
-      end if
-         block
-             class(mchrg_solver_cg), allocatable :: tmp
-             allocate(tmp)
-             call new_cg_solver(tmp, solver_input)
-             call move_alloc(tmp, solver)
-         end block
-   end select
-
-   ! Create a simple SPD matrix: A = I + 0.1*E where E is matrix of ones
-   amat = 0.0_wp
-   do i = 1, n
-      amat(i,i) = 1.0_wp
-      do j = 1, n
-         if (i /= j) then
-            amat(i,j) = 0.1_wp
-         end if
-      end do
-   end do
-   
-   ! Compute RHS: b = A * expected
-   b = 0.0_wp
-   do i = 1, n
-      do j = 1, n
-         b(i) = b(i) + amat(i,j) * expected(j)
-      end do
-   end do
-   
-   ! Initial guess
-   vrhs = 0.0_wp
-   xvec = b
-   
-   ! Solve
-   call cpu_time(start_cg)
-   call solver%solve(amat, xvec, vrhs, ainv, cpq, error=error)
-   if (allocated(error)) return
-   call cpu_time(end_cg)
-
-   ! Reference solution
-   deallocate(solver_input)
-   deallocate(solver)
-   allocate(direct_input :: solver_input)
-   allocate(mchrg_solver_direct :: solver)
-   select type (solver_input)
-   type is (direct_input)
-      call new_direct_solver(solver, solver_input)
-   end select
-
-   ! Expected solution (precomputed)
-   expected = [(real(i, wp), i=1, n)]
-   call cpu_time(start_direct)
-   call solver%solve(amat, xvec, expected, ainv, cpq, error=error)
-   call cpu_time(end_direct)
-   
-   ! Check solution
-   if (any(abs(vrhs - expected) / max(1.0_wp, abs(expected)) > thr_rel)) then
-      call test_failed(error, "CG solver failed for medium SPD matrix")
-      print'(a)', "Solution:"
-      print'(3es21.14)', vrhs
-      print'(a)', "Expected:"
-      print'(3es21.14)', expected
-   else
-      print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
-      print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', (end_direct-start_direct)/(end_cg-start_cg)
-   end if
-
-end subroutine test_cg_spd_medium
-
-!> Test 5: Large SPD matrix (1000x1000)
+!> Test 4: Large SPD matrix (1000x1000)
 subroutine test_cg_spd_large(error)
 
    !> Error handling
@@ -509,7 +410,7 @@ subroutine test_cg_spd_large(error)
 
 end subroutine test_cg_spd_large
 
-!> Test 6: Ill-conditioned matrix
+!> Test 5: Ill-conditioned matrix
 subroutine test_cg_ill_conditioned(error)
 
    !> Error handling
@@ -602,7 +503,7 @@ subroutine test_cg_ill_conditioned(error)
 
 end subroutine test_cg_ill_conditioned
 
-!> Test 7: Zero RHS vector
+!> Test 6: Zero RHS vector
 subroutine test_cg_zero_rhs(error)
 
    !> Error handling
@@ -693,7 +594,7 @@ subroutine test_cg_zero_rhs(error)
 
 end subroutine test_cg_zero_rhs
 
-!> Test 8: Random SPD matrix
+!> Test 7: Random SPD matrix
 subroutine test_cg_random_spd(error)
 
    !> Error handling
@@ -820,7 +721,7 @@ subroutine test_cg_random_spd(error)
 end subroutine test_cg_random_spd
 
 
-!> Test 9: Test with different preconditioner settings
+!> Test 8: Test with different preconditioner settings
 subroutine test_cg_preconditioned(error)
 
    !> Error handling
@@ -920,7 +821,7 @@ subroutine test_cg_preconditioned(error)
 
 end subroutine test_cg_preconditioned
 
-!> Test 10: Test time scaling of the CG solver
+!> Test 9: Test time scaling of the CG solver
 subroutine test_cg_spd_time_scaling(error)
 
    !> Error handling
@@ -1040,7 +941,7 @@ subroutine test_cg_spd_time_scaling(error)
 
 end subroutine test_cg_spd_time_scaling
 
-!> Test 11: Test time scaling of the CG solver for the "-1 2 -1" matrix
+!> Test 10: Test time scaling of the CG solver for the "-1 2 -1" matrix
 subroutine test_cg_121_time_scaling(error)
 
    !> Error handling

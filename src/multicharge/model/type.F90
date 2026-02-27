@@ -23,13 +23,12 @@
 !> General charge model
 module multicharge_model_type
 
-   use mctc_env, only: error_type, fatal_error, wp, ik => IK
+   use mctc_env, only: timer_type, format_time, error_type, fatal_error, wp,  ik => IK
    use mctc_io, only: structure_type
    use mctc_io_constants, only: pi
    use mctc_io_math, only: matinv_3x3
    use mctc_cutoff, only: get_lattice_points
    use mctc_ncoord, only: ncoord_type
-   use mctc_env_timer, only : timer_type, format_time
    use multicharge_blas, only: gemv, symv, gemm
    use multicharge_lapack, only: sytrf, sytrs, sytri
    use multicharge_wignerseitz, only: wignerseitz_cell_type, new_wignerseitz_cell
@@ -82,11 +81,12 @@ module multicharge_model_type
    end type mchrg_model_type
 
    abstract interface
-      subroutine update(self, mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
-         import :: mchrg_model_type, structure_type, cache_container, wp
+      subroutine update(self, mol, cache, solver, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
+         import :: mchrg_model_type, structure_type, cache_container, wp, mchrg_solver_type
          class(mchrg_model_type), intent(in) :: self
          type(structure_type), intent(in) :: mol
          type(cache_container), intent(inout) :: cache
+         class(mchrg_solver_type), intent(in) :: solver   ! <-- new argument
          real(wp), intent(in) :: cn(:)
          real(wp), intent(in), optional :: qloc(:)
          real(wp), intent(in), optional :: dcndr(:, :, :)
@@ -200,7 +200,6 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    integer :: ic, jc, iat, ndim
    logical :: grad, cpq, dcn
    integer(ik), allocatable :: ipiv(:)
-   logical :: add_lagr = .true.   
 
    ! Variables for solving ES equation
    real(wp), allocatable :: xvec(:), vrhs(:), amat(:, :)
@@ -243,9 +242,9 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       verbose_solve = verbose
    end if 
 
-   ! Update cache
+   ! Update cache, passing the solver that will be used
    allocate(cache)
-   call self%update(mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
+   call self%update(mol, cache, slv, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
    
    ! Determine the size of a linear system
    ! If the solver method requires potive definite matrices, 
@@ -253,10 +252,8 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    ! otherwise we can solve the unconstrained system directly
    if (slv%need_pos_def .eqv. .true.) then
       ndim = mol%nat 
-      add_lagr = .false.
    else
       ndim = mol%nat + 1
-      add_lagr = .true.
    end if
 
    call timer%push("total")
@@ -281,12 +278,12 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       end if
    end if
 
-   vrhs = xvec
-   ainv = amat
-
    allocate(jmat(mol%nat, mol%nat))
 
-   if (add_lagr .eqv. .true.) then
+   if (slv%need_pos_def .eqv. .false.) then
+
+      vrhs = xvec
+      ainv = amat
 
       ! Solving the linear system
       call slv%solve(amat, xvec, vrhs, ainv, cpq, error)
@@ -341,7 +338,7 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       vvecsum = sum(vvec)
 
       ! Lagrangian multiplier
-      lambda = - (mol%charge + vvecsum) / uvecsum
+      lambda = - (mol%charge + vvecsum) / (uvecsum + tiny(1.0_wp))
 
       ! Partial charges
       if (present(qvec)) then
@@ -349,13 +346,11 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       end if
 
       ! Reconstruct the full VRHS for gradient calculations
-      deallocate(vrhs)
+      if (allocated(vrhs)) deallocate(vrhs)
       allocate(vrhs(mol%nat+1))
 
       vrhs(:mol%nat) = -vvec - lambda * uvec
       vrhs(mol%nat+1) = lambda
-
-      ainv = jinv
 
       ! Electrostatic energy
       if (present(energy)) then
@@ -385,7 +380,7 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       end if
       if (adj_grad) then
          ! Adjoint gradient calculation
-         if (add_lagr .eqv. .true.) then
+           if (slv%need_pos_def .eqv. .false.) then
             ! If the constraint response have not been calculated before
             if (allocated(uvec)) deallocate(uvec)
             allocate(uvec(mol%nat))
@@ -424,14 +419,15 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
          yvecsum = sum(yvec)
 
          ! Project out the component of yvec along the constraint direction uvec
-         padj = yvec - (yvecsum / uvecsum) * uvec
+         padj = yvec - (yvecsum / (uvecsum + tiny(1.0_wp))) * uvec
 
          ! Gradient: df/dr = -padj^T * (dA/dr * q + dx/dr)
+         gradient = 0.0_wp
 
          !$omp parallel default(none) &
-         !$omp shared(gradient, dadr, dxdr, vrhs, padj) private(iat, ic) 
+         !$omp shared(gradient, dadr, dxdr, vrhs, padj, mol) private(iat, ic) 
          !$omp do schedule(runtime)
-         gradient = 0.0_wp
+
          do iat = 1, mol%nat
             do ic = 1, mol%nat
                gradient(:, iat) = gradient(:, iat) &

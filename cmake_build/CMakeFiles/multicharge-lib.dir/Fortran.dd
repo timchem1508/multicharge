@@ -1,0 +1,67 @@
+ninja_dyndep_version = 1.0
+build CMakeFiles/multicharge-lib.dir/src/multicharge/model/eeq.f90.o | include/multicharge_model_eeq.mod: dyndep | subprojects/mctc-lib/include/mctc_env.mod subprojects/mctc-lib/include/mctc_io.mod subprojects/mctc-lib/include/mctc_io_constants.mod subprojects/mctc-lib/include/mctc_io_math.mod subprojects/mctc-lib/include/mctc_ncoord.mod include/multicharge_ewald.mod include/multicharge_model_cache.mod include/multicharge_model_type.mod include/multicharge_solver_type.mod include/multicharge_wignerseitz.mod
+  restat = 1
+
+build CMakeFiles/multicharge-lib.dir/src/multicharge/model/eeqbc.f90.o | include/multicharge_model_eeqbc.mod: dyndep | subprojects/mctc-lib/include/mctc_env.mod subprojects/mctc-lib/include/mctc_io.mod subprojects/mctc-lib/include/mctc_io_constants.mod subprojects/mctc-lib/include/mctc_ncoord.mod include/multicharge_blas.mod include/multicharge_model_cache.mod include/multicharge_model_type.mod include/multicharge_solver_type.mod include/multicharge_wignerseitz.mod
+  restat = 1
+
+build CMakeFiles/multicharge-lib.dir/src/multicharge/model/type.F90.o | include/multicharge_model_type.mod: dyndep | subprojects/mctc-lib/include/mctc_cutoff.mod subprojects/mctc-lib/include/mctc_env.mod subprojects/mctc-lib/include/mctc_io.mod subprojects/mctc-lib/include/mctc_io_constants.mod subprojects/mctc-lib/include/mctc_io_math.mod subprojects/mctc-lib/include/mctc_ncoord.mod include/multicharge_blas.mod include/multicharge_lapack.mod include/multicharge_model_cache.mod include/multicharge_solver_type.mod include/multicharge_wignerseitz.mod include/print_matrix.mod
+  restat = 1
+
+build CMakeFiles/multicharge-lib.dir/src/multicharge/param/eeq2019.f90.o | include/multicharge_param_eeq2019.mod: dyndep | subprojects/mctc-lib/include/mctc_env.mod subprojects/mctc-lib/include/mctc_io_symbols.mod
+  restat = 1
+
+build CMakeFiles/multicharge-lib.dir/src/multicharge/param/eeqbc2025.f90.o | include/multicharge_param_eeqbc2025.mod: dyndep | subprojects/mctc-lib/include/mctc_env.mod subprojects/mctc-lib/include/mctc_io_symbols.mod
+  restat = 1
+
+build CMakeFiles/multicharge-lib.dir/src/multicharge/solver/direct_solver.f90.o | include/multicharge_solver_direct.mod: dyndep | subprojects/mctc-lib/include/mctc_env.mod include/multicharge_blas.mod include/multicharge_lapack.mod include/multicharge_solver_cache.mod include/multicharge_solver_type.mod include/print_matrix.mod
+  restat = 1
+
+build CMakeFiles/multicharge-lib.dir/src/multicharge/solver/cg_solver.f90.o | include/multicharge_solver_cg.mod: dyndep | subprojects/mctc-lib/include/mctc_env.mod include/multicharge_blas.mod include/multicharge_solver_cache.mod include/multicharge_solver_type.mod include/print_matrix.mod
+  restat = 1
+
+build CMakeFiles/multicharge-lib.dir/src/multicharge/solver/type.f90.o | include/multicharge_solver_type.mod: dyndep | subprojects/mctc-lib/include/mctc_env.mod include/multicharge_solver_cache.mod
+  restat = 1
+
+build CMakeFiles/multicharge-lib.dir/src/multicharge/solver/solver_cache.f90.o | include/multicharge_solver_cache.mod: dyndep | subprojects/mctc-lib/include/mctc_env.mod
+  restat = 1
+
+build CMakeFiles/multicharge-lib.dir/src/multicharge/blas.F90.o | include/multicharge_blas.mod: dyndep | subprojects/mctc-lib/include/mctc_env.mod
+  restat = 1
+
+build CMakeFiles/multicharge-lib.dir/src/multicharge/charge.f90.o | include/multicharge_charge.mod: dyndep | subprojects/mctc-lib/include/mctc_cutoff.mod subprojects/mctc-lib/include/mctc_env.mod subprojects/mctc-lib/include/mctc_io.mod include/multicharge_model_type.mod include/multicharge_output.mod include/multicharge_param.mod include/multicharge_solver_cache.mod include/multicharge_solver_cg.mod include/multicharge_solver_direct.mod include/multicharge_solver_type.mod
+  restat = 1
+
+build CMakeFiles/multicharge-lib.dir/src/multicharge/ewald.f90.o | include/multicharge_ewald.mod: dyndep | subprojects/mctc-lib/include/mctc_env.mod subprojects/mctc-lib/include/mctc_io_constants.mod subprojects/mctc-lib/include/mctc_io_math.mod
+  restat = 1
+
+build CMakeFiles/multicharge-lib.dir/src/multicharge/lapack.F90.o | include/multicharge_lapack.mod: dyndep | subprojects/mctc-lib/include/mctc_env.mod
+  restat = 1
+
+build CMakeFiles/multicharge-lib.dir/src/multicharge/model.f90.o | include/multicharge_model.mod: dyndep | include/multicharge_model_eeq.mod include/multicharge_model_eeqbc.mod include/multicharge_model_type.mod
+  restat = 1
+
+build CMakeFiles/multicharge-lib.dir/src/multicharge/output.f90.o | include/multicharge_output.mod: dyndep | subprojects/mctc-lib/include/mctc_env.mod subprojects/mctc-lib/include/mctc_io.mod subprojects/mctc-lib/include/mctc_io_constants.mod subprojects/mctc-lib/include/mctc_io_convert.mod include/multicharge_model.mod include/multicharge_solver_cg.mod include/multicharge_solver_direct.mod include/multicharge_version.mod
+  restat = 1
+
+build CMakeFiles/multicharge-lib.dir/src/multicharge/param.f90.o | include/multicharge_param.mod: dyndep | subprojects/mctc-lib/include/mctc_data.mod subprojects/mctc-lib/include/mctc_env.mod subprojects/mctc-lib/include/mctc_io.mod subprojects/mctc-lib/include/mctc_io_convert.mod include/multicharge_model.mod include/multicharge_param_eeq2019.mod include/multicharge_param_eeqbc2025.mod
+  restat = 1
+
+build CMakeFiles/multicharge-lib.dir/src/multicharge/version.f90.o | include/multicharge_version.mod: dyndep
+  restat = 1
+
+build CMakeFiles/multicharge-lib.dir/src/multicharge/wignerseitz.f90.o | include/multicharge_wignerseitz.mod: dyndep | subprojects/mctc-lib/include/mctc_cutoff.mod subprojects/mctc-lib/include/mctc_env.mod subprojects/mctc-lib/include/mctc_io.mod
+  restat = 1
+
+build CMakeFiles/multicharge-lib.dir/src/multicharge/cache.f90.o | include/multicharge_model_cache.mod: dyndep | subprojects/mctc-lib/include/mctc_env.mod subprojects/mctc-lib/include/mctc_io.mod include/multicharge_wignerseitz.mod
+  restat = 1
+
+build CMakeFiles/multicharge-lib.dir/src/multicharge/solver.f90.o | include/multicharge_solver.mod: dyndep | subprojects/mctc-lib/include/mctc_env.mod include/multicharge_solver_cache.mod include/multicharge_solver_cg.mod include/multicharge_solver_direct.mod include/multicharge_solver_type.mod
+  restat = 1
+
+build CMakeFiles/multicharge-lib.dir/src/multicharge/print_matrix.f90.o | include/print_matrix.mod: dyndep
+  restat = 1
+
+build CMakeFiles/multicharge-lib.dir/src/multicharge.f90.o | include/multicharge.mod: dyndep | include/multicharge_charge.mod include/multicharge_model.mod include/multicharge_output.mod include/multicharge_param.mod include/multicharge_version.mod
+  restat = 1
+

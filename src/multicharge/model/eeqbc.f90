@@ -30,6 +30,7 @@ module multicharge_model_eeqbc
    use multicharge_model_type, only: mchrg_model_type, get_dir_trans
    use multicharge_blas, only: gemv, gemm
    use multicharge_model_cache, only: cache_container, model_cache
+   use multicharge_solver_type, only: mchrg_solver_type   ! <-- added for solver argument
    implicit none
    private
 
@@ -175,10 +176,12 @@ subroutine new_eeqbc_model(self, mol, error, chi, rad, &
 
 end subroutine new_eeqbc_model
 
-subroutine update(self, mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
+!> Update cache for EEQBC model – now accepts solver argument
+subroutine update(self, mol, cache, solver, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
    class(eeqbc_model), intent(in) :: self
    type(structure_type), intent(in) :: mol
    type(cache_container), intent(inout) :: cache
+   class(mchrg_solver_type), intent(in) :: solver   ! <-- new argument
    real(wp), intent(in) :: cn(:)
    real(wp), intent(in), optional :: qloc(:)
    real(wp), intent(in), optional :: dcndr(:, :, :)
@@ -187,12 +190,19 @@ subroutine update(self, mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
    real(wp), intent(in), optional :: dqlocdL(:, :, :)
 
    logical :: grad
-
    type(eeqbc_cache), pointer :: ptr
+   integer :: ndim
 
    call taint(cache, ptr)
 
    grad = present(dcndr) .and. present(dcndL) .and. present(dqlocdr) .and. present(dqlocdL)
+
+   ! Determine system size based on the solver that will be used
+   if (solver%need_pos_def) then
+      ndim = mol%nat
+   else
+      ndim = mol%nat + 1
+   end if
 
    ! Refer CN and local charge arrays in cache
    ptr%cn = cn
@@ -209,13 +219,19 @@ subroutine update(self, mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
       ptr%dqlocdL = dqlocdL
    end if
 
-   ! Allocate (for get_xvec and xvec_derivs)
+   ! Allocate temporary vector with correct size (depends on solver)
    if (.not. allocated(ptr%xtmp)) then
-      allocate(ptr%xtmp(mol%nat + 1))
+      allocate(ptr%xtmp(ndim))
+   else if (size(ptr%xtmp) /= ndim) then
+      deallocate(ptr%xtmp)
+      allocate(ptr%xtmp(ndim))
    end if
 
-   ! Allocate cmat
+   ! Allocate cmat (always size nat+1 because it includes the constraint row/col)
    if (.not. allocated(ptr%cmat)) then
+      allocate(ptr%cmat(mol%nat + 1, mol%nat + 1))
+   else if (size(ptr%cmat, 1) /= mol%nat + 1) then
+      deallocate(ptr%cmat)
       allocate(ptr%cmat(mol%nat + 1, mol%nat + 1))
    end if
 
@@ -277,10 +293,12 @@ subroutine get_xvec(self, mol, cache, xvec)
       ptr%xtmp(iat) = -self%chi(izp) + self%kcnchi(izp) * ptr%cn(iat) &
          & + self%kqchi(izp) * ptr%qloc(iat)
    end do
+
+   ! Only write the extra element if xtmp has room for it (i.e., for constrained systems)
    if (size(ptr%xtmp) > mol%nat) then
       ptr%xtmp(mol%nat + 1) = mol%charge
    end if
-   
+
    call gemv(ptr%cmat, ptr%xtmp, xvec)
 
    if (any(mol%periodic)) then
@@ -442,7 +460,7 @@ subroutine get_xvec_derivs(self, mol, cache, dxdr, dxdL)
 
             vec = mol%xyz(:, iat) - mol%xyz(:, jat)
             dxdL_local(:, :, iat) = dxdL_local(:, :, iat) + ptr%xtmp(jat) * spread(ptr%dcdr(:, iat, jat), 1, 3) * spread(vec, 2, 3)
-         dxdL_local(:, :, jat) = dxdL_local(:, :, jat) + ptr%xtmp(iat) * spread(ptr%dcdr(:, jat, iat), 1, 3) * spread(-vec, 2, 3)
+            dxdL_local(:, :, jat) = dxdL_local(:, :, jat) + ptr%xtmp(iat) * spread(ptr%dcdr(:, jat, iat), 1, 3) * spread(-vec, 2, 3)
          end do
          dxdr_local(:, iat, iat) = dxdr_local(:, iat, iat) + ptr%xtmp(iat) * ptr%dcdr(:, iat, iat)
          dxdL_local(:, :, iat) = dxdL_local(:, :, iat) + ptr%xtmp(iat) * ptr%dcdL(:, :, iat)
@@ -525,7 +543,7 @@ subroutine get_amat_0d(self, mol, cn, qloc, cmat, amat)
    deallocate(amat_local)
    !$omp end parallel
 
-   if (size(amat, 1) > mol%nat) then
+   if (size(amat, 1) == mol%nat + 1) then
       amat(mol%nat + 1, 1:mol%nat + 1) = 1.0_wp
       amat(1:mol%nat + 1, mol%nat + 1) = 1.0_wp
       amat(mol%nat + 1, mol%nat + 1) = 0.0_wp
@@ -603,7 +621,7 @@ subroutine get_amat_3d(self, mol, wsc, cn, qloc, cmat, amat)
    deallocate(amat_local)
    !$omp end parallel
 
-   if (size(amat, 1) > mol%nat) then
+   if (size(amat, 1) == mol%nat + 1) then
       amat(mol%nat + 1, 1:mol%nat + 1) = 1.0_wp
       amat(1:mol%nat + 1, mol%nat + 1) = 1.0_wp
       amat(mol%nat + 1, mol%nat + 1) = 0.0_wp
