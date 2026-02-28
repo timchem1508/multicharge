@@ -23,10 +23,10 @@ module multicharge_charge
    use mctc_io, only : structure_type
    use mctc_cutoff, only : get_lattice_points
    use multicharge_model_type, only : mchrg_model_type
-   use multicharge_solver_type, only : mchrg_solver_type, mchrg_solver_input
-   use multicharge_solver_direct, only : mchrg_solver_direct, new_direct_solver, direct_input, direct_cache
-   use multicharge_solver_cg, only : mchrg_solver_cg, new_cg_solver, cg_input, cg_cache
-   use multicharge_solver_cache, only: mchrg_solver_cache
+   use solver_type, only : mchrg_solver_type, mchrg_solver_input
+   use direct_solver, only : mchrg_solver_direct, new_direct_solver, direct_input, direct_cache
+   use cg_solver, only : mchrg_solver_cg, new_cg_solver, cg_input, cg_cache
+   use solver_cache, only: mchrg_solver_cache
    use multicharge_param, only : new_eeq2019_model, new_eeqbc2025_model
 
    use multicharge_output, only: json_results
@@ -35,7 +35,6 @@ module multicharge_charge
    private
 
    public :: get_charges, get_eeq_charges, get_eeqbc_charges
-
 
 contains
 
@@ -65,26 +64,18 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL)
    real(wp), allocatable :: trans(:, :)
 
    !> Solver variables
-   real(wp), allocatable :: tol
-   integer, allocatable :: maxiter 
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
 
    allocate(cg_input :: solver_input)
    select type(solver_input)
    type is (cg_input)
-      if (allocated(maxiter)) then
-         solver_input%cgmiter = maxiter
-      end if
-      if (allocated(tol)) then
-         solver_input%cgtol = tol
-      end if
-         block
-             class(mchrg_solver_cg), allocatable :: tmp
-             allocate(tmp)
-             call new_cg_solver(tmp, solver_input)
-             call move_alloc(tmp, solver)
-         end block
+      block
+          class(mchrg_solver_cg), allocatable :: tmp
+          allocate(tmp)
+          call new_cg_solver(tmp, solver_input)
+          call move_alloc(tmp, solver)
+      end block
    end select
 
    grad = present(dqdr) .and. present(dqdL)
@@ -98,7 +89,6 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL)
    call get_lattice_points(mol%periodic, mol%lattice, mchrg_model%ncoord%cutoff, trans)
    call mchrg_model%ncoord%get_coordination_number(mol, trans, cn, dcndr, dcndL)
    call mchrg_model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
-
    call mchrg_model%solve(mol, solver, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
       & qvec=qvec, dqdr=dqdr, dqdL=dqdL)
 
@@ -126,8 +116,6 @@ subroutine get_eeq_charges(mol, error, qvec, dqdr, dqdL)
 
    call new_eeq2019_model(mol, eeq_model, error)
 
-
-   ! Pass the solver to get_charges
    call get_charges(eeq_model, mol, error, qvec, dqdr, dqdL)
 
 end subroutine get_eeq_charges
@@ -155,8 +143,8 @@ subroutine get_eeqbc_charges(mol, error, qvec, dqdr, dqdL)
 
    call new_eeqbc2025_model(mol, eeqbc_model, error)
 
-   ! Pass the solver to get_charges
    call get_charges(eeqbc_model, mol, error, qvec, dqdr, dqdL)
+
 end subroutine get_eeqbc_charges
 
 

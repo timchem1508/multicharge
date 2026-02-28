@@ -7,12 +7,12 @@
 !> Proxy module to reexport the solver implementations
 module multicharge_solver
    use mctc_env, only : error_type, fatal_error
-   use multicharge_solver_type, only : mchrg_solver_type, mchrg_solver_input
-   use multicharge_solver_direct, only : mchrg_solver_direct, new_direct_solver, & 
+   use solver_type, only : mchrg_solver_type, mchrg_solver_input
+   use direct_solver, only : mchrg_solver_direct, new_direct_solver, & 
                                         & direct_input, direct_cache
-   use multicharge_solver_cg, only : mchrg_solver_cg, new_cg_solver, cg_input, &
+   use cg_solver, only : mchrg_solver_cg, new_cg_solver, cg_input, &
                                     & cg_cache
-   use multicharge_solver_cache, only: mchrg_solver_cache
+   use solver_cache, only: mchrg_solver_cache
    implicit none
    private
 

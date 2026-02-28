@@ -9,11 +9,9 @@ module test_solver
    use multicharge_param, only: new_eeq2019_model, new_eeqbc2025_model
    use multicharge_model_cache, only: cache_container
    use multicharge_charge, only: get_charges, get_eeq_charges, get_eeqbc_charges
-   use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
-   use multicharge_solver_direct, only : mchrg_solver_direct, new_direct_solver, direct_input
-   use multicharge_solver_cg, only : mchrg_solver_cg, new_cg_solver, cg_input
-   use multicharge_solver, only: new_mchrg_solver, mchrg_solver_type, mchrg_solver_direct, &
-      & mchrg_solver_cg, mchrg_solver_input, cg_input, direct_input
+   use solver_type, only: mchrg_solver_type, mchrg_solver_input
+   use direct_solver, only : mchrg_solver_direct, new_direct_solver, direct_input
+   use cg_solver, only : mchrg_solver_cg, new_cg_solver, cg_input
    implicit none
    private
 
@@ -42,7 +40,7 @@ subroutine collect_solver(testsuite)
       & new_unittest("cg-random-spd", test_cg_random_spd), &
       & new_unittest("cg-preconditioned", test_cg_preconditioned) &
       !& new_unittest("time-scaling", test_cg_spd_time_scaling), &
-      !& new_unittest("time-scaling-(-12-1)-matrix", test_cg_121_time_scaling) &
+      !& new_unittest("time-scaling-tri-diag-matrix", test_cg_121_time_scaling) &
       & ]
 
 end subroutine collect_solver

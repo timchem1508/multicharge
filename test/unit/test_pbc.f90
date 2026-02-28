@@ -24,9 +24,9 @@ module test_pbc
    use multicharge_model_eeqbc, only: eeqbc_model
    use multicharge_param, only: new_eeq2019_model, new_eeqbc2025_model
    use multicharge_model_cache, only: cache_container
-   use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
-   use multicharge_solver_direct, only : mchrg_solver_direct, new_direct_solver, direct_input
-   use multicharge_solver_cg, only : mchrg_solver_cg, new_cg_solver, cg_input
+   use solver_type, only: mchrg_solver_type, mchrg_solver_input
+   use direct_solver, only : mchrg_solver_direct, new_direct_solver, direct_input
+   use cg_solver, only : mchrg_solver_cg, new_cg_solver, cg_input
    use multicharge_solver, only: new_mchrg_solver
    implicit none
    private
@@ -36,9 +36,6 @@ module test_pbc
    real(wp), parameter :: thr = 100 * epsilon(1.0_wp)
    real(wp), parameter :: thr1 = 1.0e5_wp*epsilon(1.0_wp)
    real(wp), parameter :: thr2 = sqrt(epsilon(1.0_wp))
-
-   !> Global solver choice: 1 = direct, 2 = CG
-   integer, parameter :: solver_choice = 2
 
 contains
 
@@ -98,13 +95,8 @@ subroutine gen_test(error, mol, model, qref, eref)
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
-  ! Select solver based on global choice
-   if (solver_choice == 2) then
-      allocate(cg_input :: solver_input)
-   end if 
-   if (solver_choice == 1) then
-      allocate(direct_input :: solver_input)
-   end if
+  
+allocate(cg_input :: solver_input)
 
    call new_mchrg_solver(slv, solver_input,  error)
 
@@ -177,13 +169,8 @@ subroutine test_numgrad(error, mol, model)
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
    
-  ! Select solver based on global choice
-   if (solver_choice == 2) then
-      allocate(cg_input :: solver_input)
-   end if 
-   if (solver_choice == 1) then
-      allocate(direct_input :: solver_input)
-   end if
+  
+   allocate(cg_input :: solver_input)
 
    call new_mchrg_solver(slv, solver_input,  error)
 
@@ -266,12 +253,10 @@ subroutine test_numsigma(error, mol, model)
    !> Solver variables
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
-   integer, allocatable :: maxiter
-   real(wp), allocatable :: tol
-   
-  ! Select solver based on global choice
+  
    allocate(direct_input :: solver_input)
    call new_mchrg_solver(slv, solver_input,  error)
+
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
    allocate(cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
@@ -362,14 +347,7 @@ subroutine test_dbdr(error, mol, model)
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
    
-  ! Select solver based on global choice
-   if (solver_choice == 2) then
-      allocate(cg_input :: solver_input)
-   end if 
-   if (solver_choice == 1) then
-      allocate(direct_input :: solver_input)
-   end if
-
+   allocate(cg_input :: solver_input)
    call new_mchrg_solver(slv, solver_input,  error)
 
    allocate(cache)
@@ -453,14 +431,7 @@ subroutine test_dbdL(error, mol, model)
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
    
-  ! Select solver based on global choice
-   if (solver_choice == 2) then
-      allocate(cg_input :: solver_input)
-   end if 
-   if (solver_choice == 1) then
-      allocate(direct_input :: solver_input)
-   end if
-
+   allocate(cg_input :: solver_input)
    call new_mchrg_solver(slv, solver_input,  error)
 
    allocate(cache)
@@ -558,13 +529,8 @@ subroutine test_dadr(error, mol, model)
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
    
-  ! Select solver based on global choice
-   if (solver_choice == 2) then
-      allocate(cg_input :: solver_input)
-   end if 
-   if (solver_choice == 1) then
-      allocate(direct_input :: solver_input)
-   end if
+  
+allocate(cg_input :: solver_input)
 
    call new_mchrg_solver(slv, solver_input,  error)
 
@@ -674,15 +640,8 @@ subroutine test_dadL(error, mol, model)
    !> Solver variables
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
-   
-  ! Select solver based on global choice
-   if (solver_choice == 2) then
-      allocate(cg_input :: solver_input)
-   end if 
-   if (solver_choice == 1) then
-      allocate(direct_input :: solver_input)
-   end if
-
+     
+   allocate(cg_input :: solver_input)
    call new_mchrg_solver(slv, solver_input,  error)
 
    allocate(cache)

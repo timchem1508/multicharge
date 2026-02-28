@@ -1,9 +1,8 @@
-module multicharge_solver_cg
+module cg_solver
     use mctc_env, only: error_type, fatal_error, wp, timer_type, format_time
     use multicharge_blas, only: symv, gemv
-    use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
-    use multicharge_solver_cache, only: cache_container, mchrg_solver_cache
-    use print_matrix, only: write_vector, write_matrix
+    use solver_type, only: mchrg_solver_type, mchrg_solver_input
+    use solver_cache, only: cache_container, mchrg_solver_cache
     implicit none
     private
 
@@ -103,8 +102,8 @@ contains
         ! Tolerance of the solver
         real(wp) :: tol, tol_square
         
-        ! Iterations counter
-        integer :: it
+        ! Counters
+        integer :: it, iat
         ! Size of the system
         integer :: ndim
 
@@ -138,11 +137,6 @@ contains
         type(cache_container), allocatable :: cache
         type(timer_type) :: timer
 
-        ! --------------------------------------------------------------------
-        ! 1.  Basic checks and early returns
-        ! --------------------------------------------------------------------
-
-        ! Ensure ainv is always defined (required by intent(out))
         ainv = amat
 
         ! CG cannot compute the inverse matrix
@@ -159,53 +153,39 @@ contains
             return
         end if
 
-        ! Prepare cache (unused, but required by interface)
         allocate(cache)
         call self%update(cache, vrhs, ainv, cpq)
-     
-        ! Global thresholds
+
         tol = self%cgtol
         tol_square = tol**2
         maxit = self%cgmiter
     
         allocate(residual(ndim), direction(ndim), zres(ndim), Ap(ndim), Mdiag(ndim))
 
-        ! --------------------------------------------------------------------
-        ! 2.  Timer start (only if verbose > 0)
-        ! --------------------------------------------------------------------
         if (self%verbose > 0) call timer%push("total")
         if (self%verbose > 0) call timer%push("initialization")
 
-        ! --------------------------------------------------------------------
-        ! 3.  Jacobi preconditioner (inverse of diagonal)
-        ! --------------------------------------------------------------------
-        !$omp parallel do default(none) shared(Mdiag, amat, ndim, tol_square) private(it)
-        do it = 1, ndim
-            Mdiag(it) = amat(it,it)
-            if (abs(Mdiag(it)) < tol_square) Mdiag(it) = tol_square
-            Mdiag(it) = 1.0_wp / Mdiag(it)
+        !$omp parallel do default(none) shared(Mdiag, amat, ndim, tol_square) private(iat)
+        do iat = 1, ndim
+            Mdiag(iat) = amat(iat,iat)
+            if (abs(Mdiag(iat)) < tol_square) Mdiag(iat) = tol_square
+            Mdiag(iat) = 1.0_wp / Mdiag(iat)
         end do
         !$omp end parallel do
     
-        ! --------------------------------------------------------------------
-        ! 4.  Initial residual and search direction
-        ! --------------------------------------------------------------------
-        call symv(amat, vrhs, Ap, alpha=1.0_wp, beta=0.0_wp)   ! Ap = A * x0
-        residual = xvec - Ap                                    ! r0 = b - A*x0
+        call symv(amat, vrhs, Ap, alpha=1.0_wp, beta=0.0_wp)   
+        residual = xvec - Ap                                    
         
-        zres = residual * Mdiag                                 ! z0 = M^{-1} * r0
-        direction = zres                                        ! p0 = z0
+        zres = residual * Mdiag                                 
+        direction = zres                                    
         
         bnorm = dot_product(xvec, xvec)
         if (bnorm < tol_square) bnorm = 1.0_wp
-        rnorm = dot_product(residual, residual)                 ! |r0|^2
-        rz_old = dot_product(residual, zres)                    ! r0^T * z0
+        rnorm = dot_product(residual, residual)                
+        rz_old = dot_product(residual, zres)                    
 
-        if (self%verbose > 0) call timer%pop   ! pop "initialization"
+        if (self%verbose > 0) call timer%pop   
 
-        ! --------------------------------------------------------------------
-        ! 5.  Optional output header
-        ! --------------------------------------------------------------------
         if (self%verbose > 1) then
             write(*, '(a, 1x, a)') "Initialisation time:", format_time(timer%get("initialization"))
             write(*,*)
@@ -216,55 +196,82 @@ contains
             write(*,*) ' iter      |residual|        step      relative residual'
         end if
 
-        ! --------------------------------------------------------------------
-        ! 6.  Main CG loop
-        ! --------------------------------------------------------------------
         do it = 1, maxit
+
             if (self%verbose > 0) call timer%push("iteration")
 
-            call symv(amat, direction, Ap, alpha=1.0_wp, beta=0.0_wp)   ! Ap = A * p
-            
-            denom = dot_product(direction, Ap) + tiny(1.0_wp)
+            call symv(amat, direction, Ap, alpha=1.0_wp, beta=0.0_wp)
+
+            denom = 0.0_wp
+            !$omp parallel do reduction(+:denom) default(none) &
+            !$omp shared(ndim,direction,Ap) private(iat)
+            do iat = 1, ndim
+                denom = denom + direction(iat) * Ap(iat)
+            end do
+            !$omp end parallel do
+
+            denom = denom + tiny(1.0_wp)
+
             if (abs(denom) < tol_square) then
-                if (self%verbose > 0) call timer%pop   ! pop "iteration"
+                if (self%verbose > 0) call timer%pop
                 exit
             end if
-            
-            alpha = rz_old / denom                                      ! α = r·z / (p·Ap)
-            
-            vrhs = vrhs + alpha * direction                            ! x = x + α p
-            residual = residual - alpha * Ap                           ! r = r - α Ap
-            
-            rnorm = dot_product(residual, residual)                    ! |r|^2
-            rel_res = rnorm / bnorm                                    ! |r| / |b|
+
+            alpha = rz_old / denom
+
+            !$omp parallel do default(none) shared(ndim,vrhs,residual,alpha,direction,Ap) private(iat)
+            do iat = 1, ndim
+                vrhs(iat)     = vrhs(iat)     + alpha * direction(iat)
+                residual(iat) = residual(iat) - alpha * Ap(iat)
+            end do
+            !$omp end parallel do
+
+            rnorm = 0.0_wp
+            !$omp parallel do reduction(+:rnorm) default(none) &
+            !$omp shared(ndim,residual) private(iat)
+            do iat = 1, ndim
+                rnorm = rnorm + residual(iat) * residual(iat)
+            end do
+            !$omp end parallel do
+
+            rel_res = rnorm / bnorm
 
             if (rel_res <= tol_square) then
                 if (self%verbose > 0) then
                     write(*,*)
-                    write(*,'(a, i0, a, es15.5)') "CG converged in ", it, &
-                        & " iterations with residual norm ", sqrt(rnorm)
+                    write(*,'(a, i0, a, es15.5)') &
+                        "CG converged in ", it, &
+                        " iterations with residual norm ", sqrt(rnorm)
+                    call timer%pop
                 end if
-                if (self%verbose > 0) call timer%pop   ! pop "iteration"
                 exit
             end if
-            
-            zres = residual * Mdiag                                    ! z = M^{-1} * r
-            rz_new = dot_product(residual, zres)                       ! new r·z
-            beta = rz_new / rz_old                                     ! β = (r·z)_new / (r·z)_old
-            direction = zres + beta * direction                        ! p = z + β p
+
+            !$omp parallel do default(none) shared(ndim,zres,residual,Mdiag) private(iat)
+            do iat = 1, ndim
+                zres(iat) = residual(iat) * Mdiag(iat)
+            end do
+            !$omp end parallel do
+
+            rz_new = 0.0_wp
+            !$omp parallel do reduction(+:rz_new) default(none) &
+            !$omp shared(ndim,residual,zres) private(iat)
+            do iat = 1, ndim
+                rz_new = rz_new + residual(iat) * zres(iat)
+            end do
+            !$omp end parallel do
+
+            beta   = rz_new / rz_old
             rz_old = rz_new
 
-            if (self%verbose > 0) call timer%pop   ! pop "iteration"
+            !$omp parallel do default(none) shared(ndim,direction,zres,beta) private(iat)
+            do iat = 1, ndim
+                direction(iat) = zres(iat) + beta * direction(iat)
+            end do
+            !$omp end parallel do
 
-            ! Verbose output during iterations
-            if (self%verbose == 1) then
-                write(*, '(i6,*(1x, es15.5))') it, sqrt(rnorm), alpha, sqrt(rel_res)
-            end if
-            if (self%verbose > 1) then
-                write(*, '(i6,*(1x, es15.5))') it, sqrt(rnorm), alpha, sqrt(rel_res), timer%get("iteration")
-            end if
-            
-            ! Non‑convergence after maxit
+            if (self%verbose > 0) call timer%pop
+
             if (it == maxit) then
                 if (self%verbose > 0) then
                     call timer%pop   ! pop "iteration"
@@ -273,12 +280,18 @@ contains
                 call fatal_error(error, "solve_cg: CG did not converge within max iterations.")
                 return
             end if
+
+
+            if (self%verbose == 1) then
+                write(*, '(i6,*(1x, es15.5))') it, sqrt(rnorm), alpha, sqrt(rel_res)
+            end if
+            if (self%verbose > 1) then
+                write(*, '(i6,*(1x, es15.5))') it, sqrt(rnorm), alpha, sqrt(rel_res), timer%get("iteration")
+            end if
+
         end do
 
-        ! --------------------------------------------------------------------
-        ! 7.  Finalise timer and return
-        ! --------------------------------------------------------------------
-        if (self%verbose > 0) call timer%pop   ! pop "total"
+        if (self%verbose > 0) call timer%pop   
 
         if (self%verbose > 1) then
             write(*, '(a, 1x, a)') "CG total time : ", format_time(timer%get("total"))
@@ -287,4 +300,4 @@ contains
     
     end subroutine solve
 
-end module multicharge_solver_cg
+end module cg_solver

@@ -15,8 +15,8 @@
 
 
 srcs += files(
-  'cg_solver.f90',
-  'direct_solver.f90',
+  'cg.f90',
+  'direct.f90',
   'type.f90',
-  'solver_cache.f90'
+  'cache.f90'
 )

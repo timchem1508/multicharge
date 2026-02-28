@@ -48,10 +48,6 @@ program main
    real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: charge
 
-   ! Solver configuration
-   integer, allocatable :: maxiter
-   real(wp), allocatable :: tol
-
    ! Verbose level
    integer, allocatable :: verbose
 
@@ -189,18 +185,18 @@ subroutine help(unit)
       "higher multipole moments", &
       ""
 
-   write(unit, '(2x, a, t35, a)') &
-      "-m, -model, --model <model>", "Choose the charge model", &
+   write(unit, '(2x, a, t45, a)') &
+      "-m, -model, --model <model>", "Choose the charge model (eeq or eeqbc)", &
       "-i, -input, --input <format>", "Hint for the format of the input file", &
-      "-c, -charge, --charge <value>", "Set the molecular charge", &
+      "-c, -charge, --charge <value>", "Provide the molecular charge", &
+      "-s, -solver, --solver <type>", "Provide the partial charge solver: 'CG' or 'DIRECT' (default)", &
+      "-it, -maxiter, --maxiter <int>", "Provide the maximal number of iterations", &
+      "-tol, -tolerance, --tolerance <real>", "Provide the tolerance of the solver", &
       "-g, -grad, --grad", "Evaluate molecular gradient and virial. Only for the direct solver.", &
+      "-v, -verbosity, --verbosity <int>", "Provide verbosity level of output", &
       "-j, -json, --json", "Provide output in JSON format to the file 'multicharge.json'", &
       "-version, --version", "Print program version and exit", &
-      "-v, -verbosity, --verbosity <int>", "Size of an output and exit", &
-      "-h, -help, --help", "Show this help message", &
-      "-s, -solver, --solver <type>", "Solver: 'CG' or 'DIRECT'", &
-      "-it, -maxiter, --maxiter <int>", "Max iterations", &
-      "-tol, -tolerance, --tolerance <real>", "Tolerance"
+      "-h, -help, --help", "Show this help message"
    write(unit, '(a)')
 
 end subroutine help

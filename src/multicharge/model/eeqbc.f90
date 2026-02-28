@@ -30,7 +30,6 @@ module multicharge_model_eeqbc
    use multicharge_model_type, only: mchrg_model_type, get_dir_trans
    use multicharge_blas, only: gemv, gemm
    use multicharge_model_cache, only: cache_container, model_cache
-   use multicharge_solver_type, only: mchrg_solver_type   ! <-- added for solver argument
    implicit none
    private
 

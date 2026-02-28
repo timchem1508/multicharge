@@ -17,7 +17,7 @@
 !> Contains the cache baseclass for the linear equations solvers and a container for mutable cache data
 
 !> Cache for charge models
-module multicharge_solver_cache
+module solver_cache
    use mctc_env, only: wp
    
    implicit none
@@ -35,4 +35,4 @@ module multicharge_solver_cache
       logical, allocatable :: cpq
    end type mchrg_solver_cache
 
-end module multicharge_solver_cache
+end module solver_cache

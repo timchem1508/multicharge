@@ -1,10 +1,10 @@
-module multicharge_solver_direct
+module direct_solver
     use mctc_env, only: error_type, fatal_error, wp
     use print_matrix, only: write_vector, write_matrix
     use multicharge_blas, only: symv
     use multicharge_lapack, only: sytrf, sytrs, sytri
-    use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
-    use multicharge_solver_cache, only: cache_container, mchrg_solver_cache
+    use solver_type, only: mchrg_solver_type, mchrg_solver_input
+    use solver_cache, only: cache_container, mchrg_solver_cache
 
     implicit none
     private
@@ -113,4 +113,4 @@ contains
     
     end subroutine solve
 
-end module multicharge_solver_direct
+end module direct_solver

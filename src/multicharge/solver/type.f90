@@ -1,6 +1,6 @@
-module multicharge_solver_type
+module solver_type
     use mctc_env, only: error_type, wp
-    use multicharge_solver_cache, only: cache_container
+    use solver_cache, only: cache_container
     implicit none
     private
 
@@ -43,4 +43,4 @@ module multicharge_solver_type
     type, abstract, public :: mchrg_solver_input
     end type mchrg_solver_input
 
-end module multicharge_solver_type
+end module solver_type

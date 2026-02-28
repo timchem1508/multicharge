@@ -33,8 +33,7 @@ module multicharge_model_type
    use multicharge_lapack, only: sytrf, sytrs, sytri
    use multicharge_wignerseitz, only: wignerseitz_cell_type, new_wignerseitz_cell
    use multicharge_model_cache, only: model_cache, cache_container
-   use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
-   use print_matrix, only: write_matrix, write_vector
+   use solver_type, only: mchrg_solver_type, mchrg_solver_input
    
    implicit none
    private
@@ -317,10 +316,12 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       chivec = -xvec(:mol%nat)
 
       ! Initial guess for vvec: v = chi / diag(J)
+      !$omp parallel do default(none) shared(mol,jmat,uvec,vvec,chivec)
       do ic = 1, mol%nat
          uvec(ic)= 1.0_wp/jmat(ic, ic) + tiny(1.0_wp)
-         vvec(ic) = chivec(ic)/jmat(ic, ic) + tiny(1.0_wp)
+         vvec(ic)= chivec(ic)/jmat(ic, ic) + tiny(1.0_wp)
       end do
+      !$omp end parallel do
       unitvec = 1.0_wp
 
       if (verbose_solve > 0) then
@@ -427,18 +428,20 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
          ! Gradient: df/dr = -padj^T * (dA/dr * q + dx/dr)
          gradient = 0.0_wp
 
-         !$omp parallel default(none) &
-         !$omp shared(gradient, dadr, dxdr, vrhs, padj, mol) private(iat, ic) 
-         !$omp do schedule(runtime)
-
+         !$omp parallel do collapse(2) default(none) &
+         !$omp shared(mol,gradient,dadr,dxdr,vrhs,padj) private(iat,ic) schedule(static)
          do iat = 1, mol%nat
             do ic = 1, mol%nat
-               gradient(:, iat) = gradient(:, iat) &
-                     - padj(ic) * (dadr(:, iat, ic) * vrhs(ic) + dxdr(:, iat, ic))
+               gradient(1,iat) = gradient(1,iat) &
+                  - padj(ic) * (dadr(1,iat,ic) * vrhs(ic) + dxdr(1,iat,ic))
+               gradient(2,iat) = gradient(2,iat) &
+                  - padj(ic) * (dadr(2,iat,ic) * vrhs(ic) + dxdr(2,iat,ic))
+               gradient(3,iat) = gradient(3,iat) &
+                  - padj(ic) * (dadr(3,iat,ic) * vrhs(ic) + dxdr(3,iat,ic))
             end do
          end do
-         !$omp end do
-         !$omp end parallel
+         !$omp end parallel do
+         
       else
          ! If no input dfdq present
          gradient = 0.0_wp
