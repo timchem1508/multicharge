@@ -29,5 +29,4 @@ srcs += files(
   'wignerseitz.f90',
   'cache.f90',
   'solver.f90',
-  'print_matrix.f90',
 )

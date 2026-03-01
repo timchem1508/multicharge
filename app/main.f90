@@ -48,7 +48,7 @@ program main
    real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: charge
 
-   ! Verbose level
+   ! Verbosity level
    integer, allocatable :: verbose
 
    ! Timer 
@@ -65,7 +65,6 @@ program main
    end if
 
    ! 2. Initialize Solver using the solver_input
-
    call new_mchrg_solver(solver, solver_input,  error)
 
    ! 3. Load Structure
@@ -228,21 +227,20 @@ subroutine get_arguments(input, model_id, input_format, grad, charge, &
    real(wp), allocatable, intent(out) :: charge
    !> Solver args
    class(mchrg_solver_input), allocatable, intent(out) :: solver_input
+   !> Verbosity number
+   integer, allocatable :: verbose
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
    integer :: iarg, narg, iostat
    character(len=:), allocatable :: arg
 
-   !> Solver type: CG or DIRECT
+   ! Solver type: CG or DIRECT
    character(len=:), allocatable :: solver_name
-   !> Maximal number of the cg solver iterations
+   ! Maximal number of the cg solver iterations
    integer, allocatable :: maxiter
-   !> CG solver tolerance
+   ! CG solver tolerance
    real(wp), allocatable :: tol
-
-   ! Verbose number
-   integer, allocatable :: verbose
 
    model_id = mchrg_model%eeq2019
    grad = .false.
@@ -266,7 +264,7 @@ subroutine get_arguments(input, model_id, input_format, grad, charge, &
          call get_argument(iarg, arg)
          read(arg, *, iostat=iostat) verbose
          if (iostat >  1) then
-            call fatal_error(error, "Invalid verbose level")
+            call fatal_error(error, "Invalid verbosity level")
             exit
          end if
       case default
@@ -342,12 +340,12 @@ subroutine get_arguments(input, model_id, input_format, grad, charge, &
    end do
 
    if (.not. allocated(solver_name)) then
-      allocate(direct_input :: solver_input)
+      allocate(direct_input :: solver_input) ! Default solver is direct
    end if
 
    if (grad .eqv. .true.) then
       if (allocated(solver_input)) deallocate(solver_input)
-      allocate(direct_input :: solver_input)
+      allocate(direct_input :: solver_input) ! Force direct solver for gradient evaluation
    end if
 
    select type(solver_input)
@@ -362,7 +360,6 @@ subroutine get_arguments(input, model_id, input_format, grad, charge, &
       solver_input%verbose = verbose
    end if
    end select
-
    
    if (.not. allocated(input)) then
       if (.not. allocated(error)) then

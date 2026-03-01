@@ -71,6 +71,9 @@ end subroutine collect_pbc
 
 subroutine gen_test(error, mol, model, qref, eref)
 
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
 
@@ -83,21 +86,16 @@ subroutine gen_test(error, mol, model, qref, eref)
    !> Reference energies
    real(wp), intent(in), optional :: eref(:)
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: slv
+   class(mchrg_solver_input), allocatable :: solver_input
 
    real(wp), parameter :: cutoff = 25.0_wp
    real(wp), allocatable :: cn(:), qloc(:), trans(:, :)
    real(wp), allocatable :: energy(:)
    real(wp), allocatable :: qvec(:)
-
-   !> Solver variables
-   class(mchrg_solver_type), allocatable :: slv
-   class(mchrg_solver_input), allocatable :: solver_input
-
-  
-allocate(cg_input :: solver_input)
-
+ 
+   allocate(cg_input :: solver_input)
    call new_mchrg_solver(slv, solver_input,  error)
 
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
@@ -147,14 +145,18 @@ end subroutine gen_test
 
 subroutine test_numgrad(error, mol, model)
 
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: slv
+   class(mchrg_solver_input), allocatable :: solver_input
 
    integer :: iat, ic
    real(wp), parameter :: cutoff = 25.0_wp
@@ -165,13 +167,7 @@ subroutine test_numgrad(error, mol, model)
    real(wp), allocatable :: numgrad(:, :)
    real(wp) :: er, el
 
-   !> Solver variables
-   class(mchrg_solver_type), allocatable :: slv
-   class(mchrg_solver_input), allocatable :: solver_input
-   
-  
    allocate(cg_input :: solver_input)
-
    call new_mchrg_solver(slv, solver_input,  error)
 
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
@@ -325,14 +321,18 @@ end subroutine test_numsigma
 
 subroutine test_dbdr(error, mol, model)
 
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: slv
+   class(mchrg_solver_input), allocatable :: solver_input
 
    integer :: iat, ic
    real(wp), parameter :: cutoff = 25.0_wp
@@ -343,10 +343,6 @@ subroutine test_dbdr(error, mol, model)
    real(wp), allocatable :: numgrad(:, :, :), xvecr(:), xvecl(:)
    type(cache_container), allocatable :: cache
 
-   !> Solver variables
-   class(mchrg_solver_type), allocatable :: slv
-   class(mchrg_solver_input), allocatable :: solver_input
-   
    allocate(cg_input :: solver_input)
    call new_mchrg_solver(slv, solver_input,  error)
 
@@ -405,14 +401,18 @@ end subroutine test_dbdr
 
 subroutine test_dbdL(error, mol, model)
 
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: slv
+   class(mchrg_solver_input), allocatable :: solver_input
 
    integer :: iat, ic, jc
    real(wp), parameter :: cutoff = 25.0_wp
@@ -427,10 +427,6 @@ subroutine test_dbdL(error, mol, model)
    real(wp) :: eps(3, 3)
    type(cache_container), allocatable :: cache
 
-   !> Solver variables
-   class(mchrg_solver_type), allocatable :: slv
-   class(mchrg_solver_input), allocatable :: solver_input
-   
    allocate(cg_input :: solver_input)
    call new_mchrg_solver(slv, solver_input,  error)
 
@@ -504,14 +500,18 @@ end subroutine test_dbdL
 
 subroutine test_dadr(error, mol, model)
 
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: slv
+   class(mchrg_solver_input), allocatable :: solver_input
 
    integer :: iat, ic, jat, kat
    real(wp) :: thr2_local
@@ -525,13 +525,7 @@ subroutine test_dadr(error, mol, model)
    real(wp), allocatable :: qvec(:), numgrad(:, :, :), amatr(:, :), amatl(:, :), numtrace(:, :)
    type(cache_container), allocatable :: cache
 
-   !> Solver variables
-   class(mchrg_solver_type), allocatable :: slv
-   class(mchrg_solver_input), allocatable :: solver_input
-   
-  
-allocate(cg_input :: solver_input)
-
+   allocate(cg_input :: solver_input)
    call new_mchrg_solver(slv, solver_input,  error)
 
    allocate(cache)
@@ -615,14 +609,18 @@ end subroutine test_dadr
 
 subroutine test_dadL(error, mol, model)
 
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: slv
+   class(mchrg_solver_input), allocatable :: solver_input
 
    integer :: ic, jc, iat
    real(wp), parameter :: cutoff = 25.0_wp
@@ -636,10 +634,6 @@ subroutine test_dadL(error, mol, model)
    real(wp) :: lattice(3, 3)
    real(wp) :: eps(3, 3)
    type(cache_container), allocatable :: cache
-
-   !> Solver variables
-   class(mchrg_solver_type), allocatable :: slv
-   class(mchrg_solver_input), allocatable :: solver_input
      
    allocate(cg_input :: solver_input)
    call new_mchrg_solver(slv, solver_input,  error)
@@ -722,14 +716,18 @@ end subroutine test_dadL
 
 subroutine test_numdqdr(error, mol, model)
 
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: slv
+   class(mchrg_solver_input), allocatable :: solver_input
 
    integer :: iat, ic
    real(wp), parameter :: cutoff = 25.0_wp
@@ -739,11 +737,6 @@ subroutine test_numdqdr(error, mol, model)
    real(wp), allocatable :: ql(:), qr(:), dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: numdr(:, :, :)
 
-   !> Solver variables
-   class(mchrg_solver_type), allocatable :: slv
-   class(mchrg_solver_input), allocatable :: solver_input
-
-   ! Force direct solver for derivative tests
    allocate(direct_input :: solver_input)
    call new_mchrg_solver(slv, solver_input, error)
 
@@ -796,14 +789,18 @@ end subroutine test_numdqdr
 
 subroutine test_numdqdL(error, mol, model)
 
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: slv
+   class(mchrg_solver_input), allocatable :: solver_input
 
    integer :: ic, jc
    real(wp), parameter :: cutoff = 25.0_wp
@@ -815,11 +812,6 @@ subroutine test_numdqdL(error, mol, model)
    real(wp), allocatable :: lattr(:, :), xyz(:, :), numdL(:, :, :)
    real(wp) :: eps(3, 3), lattice(3, 3)
 
-   !> Solver variables
-   class(mchrg_solver_type), allocatable :: slv
-   class(mchrg_solver_input), allocatable :: solver_input
-
-   ! Force direct solver for derivative tests
    allocate(direct_input :: solver_input)
    call new_mchrg_solver(slv, solver_input, error)
 
@@ -886,6 +878,9 @@ end subroutine test_numdqdL
 
 subroutine test_dfdr(error, mol, dfdq, model)
 
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
@@ -895,10 +890,11 @@ subroutine test_dfdr(error, mol, dfdq, model)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: slv_dqdr, slv_dfdr
+   class(mchrg_solver_input), allocatable :: solver_dqdr_input, solver_dfdr_input
 
-   !> Direct product gradient
+   ! Direct product gradient
    real(wp), allocatable :: dfdr(:, :)
 
    integer :: iat, ic
@@ -909,10 +905,6 @@ subroutine test_dfdr(error, mol, dfdq, model)
    real(wp), allocatable :: ql(:), qr(:), dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: gradient(:, :), sigma(:, :)
    
-   !> Solver variables
-   class(mchrg_solver_type), allocatable :: slv_dqdr, slv_dfdr
-   class(mchrg_solver_input), allocatable :: solver_dqdr_input, solver_dfdr_input
-
    ! Allocate direct solver input for dqdr
    allocate(direct_input :: solver_dqdr_input)
    call new_mchrg_solver(slv_dqdr, solver_dqdr_input, error)

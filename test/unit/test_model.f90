@@ -108,6 +108,10 @@ subroutine test_dadr(error, mol, model)
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: slv
+   class(mchrg_solver_input), allocatable :: solver_input
+
    integer :: iat, ic, jat, kat
    real(wp) :: thr2_local
    real(wp), parameter :: trans(3, 1) = 0.0_wp
@@ -118,10 +122,6 @@ subroutine test_dadr(error, mol, model)
    real(wp), allocatable :: dadr(:, :, :), dadL(:, :, :), atrace(:, :)
    real(wp), allocatable :: qvec(:), numgrad(:, :, :), amatr1(:, :), amatr2(:, :), amatl1(:, :), amatl2(:, :), numtrace(:, :)
    type(cache_container), allocatable :: cache
-
-   !> Solver variables
-   class(mchrg_solver_type), allocatable :: slv
-   class(mchrg_solver_input), allocatable :: solver_input
 
    allocate(cg_input :: solver_input)
    call new_mchrg_solver(slv, solver_input,  error)
@@ -237,6 +237,10 @@ subroutine test_dadL(error, mol, model)
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: slv
+   class(mchrg_solver_input), allocatable :: solver_input
+
    integer :: ic, jc, iat
    real(wp), parameter :: trans(3, 1) = 0.0_wp
    real(wp), parameter :: step = 1.0e-6_wp, unity(3, 3) = reshape(&
@@ -249,11 +253,6 @@ subroutine test_dadL(error, mol, model)
    real(wp) :: eps(3, 3)
    type(cache_container), allocatable :: cache
 
-   !> Solver variables
-   class(mchrg_solver_type), allocatable :: slv
-   class(mchrg_solver_input), allocatable :: solver_input
-
-  
    allocate(cg_input :: solver_input)
    call new_mchrg_solver(slv, solver_input,  error)
    
@@ -334,6 +333,10 @@ subroutine test_dbdr(error, mol, model)
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: slv
+   class(mchrg_solver_input), allocatable :: solver_input
+
    integer :: iat, ic
    real(wp), parameter :: trans(3, 1) = 0.0_wp
    real(wp), parameter :: step = 1.0e-6_wp
@@ -343,13 +346,7 @@ subroutine test_dbdr(error, mol, model)
    real(wp), allocatable :: numgrad(:, :, :), xvecr(:), xvecl(:)
    type(cache_container), allocatable :: cache
 
-   !> Solver variables
-   class(mchrg_solver_type), allocatable :: slv
-   class(mchrg_solver_input), allocatable :: solver_input
-
-  
-allocate(cg_input :: solver_input)
-
+   allocate(cg_input :: solver_input)
    call new_mchrg_solver(slv, solver_input,  error)
 
    allocate (cache)
@@ -411,6 +408,10 @@ subroutine test_dbdL(error, mol, model)
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: slv
+   class(mchrg_solver_input), allocatable :: solver_input
+
    integer :: iat, ic, jc
    real(wp), parameter :: trans(3, 1) = 0.0_wp
    real(wp), parameter :: step = 1.0e-6_wp, unity(3, 3) = reshape(&
@@ -422,14 +423,8 @@ subroutine test_dbdL(error, mol, model)
    real(wp), allocatable :: xyz(:, :)
    real(wp) :: eps(3, 3)
    type(cache_container), allocatable :: cache
-
-   !> Solver variables
-   class(mchrg_solver_type), allocatable :: slv
-   class(mchrg_solver_input), allocatable :: solver_input
-
   
-allocate(cg_input :: solver_input)
-
+   allocate(cg_input :: solver_input)
    call new_mchrg_solver(slv, solver_input,  error)
 
    allocate (cache)
@@ -492,6 +487,9 @@ end subroutine test_dbdL
 
 subroutine gen_test(error, mol, model, qref, eref)
 
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
 
@@ -504,17 +502,14 @@ subroutine gen_test(error, mol, model, qref, eref)
    !> Reference energies
    real(wp), intent(in), optional :: eref(:)
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: slv
+   class(mchrg_solver_input), allocatable :: solver_input
 
    real(wp), parameter :: trans(3, 1) = 0.0_wp
    real(wp), allocatable :: cn(:), qloc(:)
    real(wp), allocatable :: energy(:)
    real(wp), allocatable :: qvec(:)
-
-   !> Solver variables
-   class(mchrg_solver_type), allocatable :: slv
-   class(mchrg_solver_input), allocatable :: solver_input
 
    allocate(cg_input :: solver_input)
    select type(solver_input)
@@ -569,6 +564,8 @@ end subroutine gen_test
 
 subroutine test_numgrad(error, mol, model)
 
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
 
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
@@ -576,8 +573,9 @@ subroutine test_numgrad(error, mol, model)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: slv
+   class(mchrg_solver_input), allocatable :: solver_input
 
    integer :: iat, ic
    real(wp), parameter :: trans(3, 1) = 0.0_wp
@@ -588,13 +586,7 @@ subroutine test_numgrad(error, mol, model)
    real(wp), allocatable :: numgrad(:, :)
    real(wp) :: er, el
 
-   !> Solver variables
-   class(mchrg_solver_type), allocatable :: slv
-   class(mchrg_solver_input), allocatable :: solver_input
-
-  
-allocate(cg_input :: solver_input)
-
+   allocate(cg_input :: solver_input)
    call new_mchrg_solver(slv, solver_input,  error)
    
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
@@ -654,6 +646,8 @@ end subroutine test_numgrad
 
 subroutine test_numsigma(error, mol, model)
 
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
 
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
@@ -661,8 +655,9 @@ subroutine test_numsigma(error, mol, model)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: slv
+   class(mchrg_solver_input), allocatable :: solver_input
 
    integer :: ic, jc
    real(wp), parameter :: trans(3, 1) = 0.0_wp
@@ -674,13 +669,7 @@ subroutine test_numsigma(error, mol, model)
    real(wp), allocatable :: xyz(:, :)
    real(wp) :: er, el, eps(3, 3), numsigma(3, 3), sigma(3, 3)
 
-   !> Solver variables
-   class(mchrg_solver_type), allocatable :: slv
-   class(mchrg_solver_input), allocatable :: solver_input
-
-  
-allocate(cg_input :: solver_input)
-
+   allocate(cg_input :: solver_input)
    call new_mchrg_solver(slv, solver_input,  error)
 
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
@@ -741,6 +730,8 @@ end subroutine test_numsigma
 
 subroutine test_numdqdr(error, mol, model)
 
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
 
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
@@ -748,8 +739,9 @@ subroutine test_numdqdr(error, mol, model)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: slv
+   class(mchrg_solver_input), allocatable :: solver_input
 
    integer :: iat, ic
    real(wp), parameter :: trans(3, 1) = 0.0_wp
@@ -759,15 +751,9 @@ subroutine test_numdqdr(error, mol, model)
    real(wp), allocatable :: ql(:), qr(:), dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: numdr(:, :, :)
    
-   !> Solver variables
-   class(mchrg_solver_type), allocatable :: slv
-   class(mchrg_solver_input), allocatable :: solver_input
-
-   ! Force direct solver for derivative tests
    allocate(direct_input :: solver_input)
    call new_mchrg_solver(slv, solver_input, error)
    
-
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
       & qloc(mol%nat), dqlocdr(3, mol%nat, mol%nat), dqlocdL(3, 3, mol%nat), &
       & ql(mol%nat), qr(mol%nat), dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat), &
@@ -819,14 +805,18 @@ end subroutine test_numdqdr
 
 subroutine test_numdqdL(error, mol, model)
 
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: slv
+   class(mchrg_solver_input), allocatable :: solver_input
 
    integer :: ic, jc
    real(wp), parameter :: trans(3, 1) = 0.0_wp
@@ -837,12 +827,7 @@ subroutine test_numdqdL(error, mol, model)
    real(wp), allocatable :: qr(:), ql(:), dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: lattr(:, :), xyz(:, :), numdL(:, :, :)
    real(wp) :: eps(3, 3)
-   
-   !> Solver variables
-   class(mchrg_solver_type), allocatable :: slv
-   class(mchrg_solver_input), allocatable :: solver_input
 
-   ! Force direct solver for derivative tests
    allocate(direct_input :: solver_input)
    call new_mchrg_solver(slv, solver_input, error)
 
@@ -904,6 +889,9 @@ end subroutine test_numdqdL
 
 subroutine test_dfdr(error, mol, dfdq, model)
 
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+   
    !> Molecular structure data
    type(structure_type), intent(inout) :: mol
 
@@ -913,10 +901,11 @@ subroutine test_dfdr(error, mol, dfdq, model)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: slv_dqdr, slv_dfdr
+   class(mchrg_solver_input), allocatable :: solver_dqdr_input, solver_dfdr_input
 
-   !> Direct product gradient
+   ! Direct product gradient
    real(wp), allocatable :: dfdr(:, :)
 
    integer :: iat, ic
@@ -926,10 +915,6 @@ subroutine test_dfdr(error, mol, dfdq, model)
    real(wp), allocatable :: qloc(:), dqlocdr(:, :, :), dqlocdL(:, :, :)
    real(wp), allocatable :: ql(:), qr(:), dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: gradient(:, :), sigma(:, :)
-   
-   !> Solver variables
-   class(mchrg_solver_type), allocatable :: slv_dqdr, slv_dfdr
-   class(mchrg_solver_input), allocatable :: solver_dqdr_input, solver_dfdr_input
 
    ! Allocate direct solver input for dqdr
    allocate(direct_input :: solver_dqdr_input)
@@ -1048,10 +1033,14 @@ end subroutine test_eeq_dbdL_mb01
 
 subroutine test_eeq_q_mb01(error)
 
-
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: slv
+   class(mchrg_solver_input), allocatable :: solver_input
+
+   !> Molecular structure data
    type(structure_type) :: mol
    class(mchrg_model_type), allocatable :: model
    real(wp), parameter :: ref(16) = [&
@@ -1064,13 +1053,7 @@ subroutine test_eeq_q_mb01(error)
 
    real(wp), allocatable :: qvec(:)
 
-   !> Solver variables
-   class(mchrg_solver_type), allocatable :: slv
-   class(mchrg_solver_input), allocatable :: solver_input
-
-   
-allocate(cg_input :: solver_input)
-
+   allocate(cg_input :: solver_input)
    call new_mchrg_solver(slv, solver_input,  error)
    
    call get_structure(mol, "MB16-43", "01")
@@ -1607,10 +1590,14 @@ end subroutine test_eeqbc_dbdr_mb05
 
 subroutine test_eeqbc_q_mb01(error)
 
-
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
+   !> Solver variables
+   class(mchrg_solver_type), allocatable :: slv
+   class(mchrg_solver_input), allocatable :: solver_input
+
+   !> Molecular structure data
    type(structure_type) :: mol
    class(mchrg_model_type), allocatable :: model
    real(wp), parameter :: ref(16) = [&
@@ -1623,13 +1610,7 @@ subroutine test_eeqbc_q_mb01(error)
 
    real(wp), allocatable :: qvec(:)
 
-   !> Solver variables
-   class(mchrg_solver_type), allocatable :: slv
-   class(mchrg_solver_input), allocatable :: solver_input
-
-  
-allocate(cg_input :: solver_input)
-
+   allocate(cg_input :: solver_input)
    call new_mchrg_solver(slv, solver_input,  error)
 
    call get_structure(mol, "MB16-43", "01")
@@ -1671,6 +1652,7 @@ subroutine test_eeqbc_q_mb02(error)
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
+   !> Molecular structure data
    type(structure_type) :: mol
    class(mchrg_model_type), allocatable :: model
    real(wp), parameter :: ref(16) = [&

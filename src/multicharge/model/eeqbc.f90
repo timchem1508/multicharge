@@ -179,7 +179,7 @@ subroutine update(self, mol, cache, ndim, cn, qloc, dcndr, dcndL, dqlocdr, dqloc
    class(eeqbc_model), intent(in) :: self
    type(structure_type), intent(in) :: mol
    type(cache_container), intent(inout) :: cache
-   integer, intent(in) :: ndim   ! <-- system size (nat or nat+1)
+   integer, intent(in) :: ndim  
    real(wp), intent(in) :: cn(:)
    real(wp), intent(in), optional :: qloc(:)
    real(wp), intent(in), optional :: dcndr(:, :, :)

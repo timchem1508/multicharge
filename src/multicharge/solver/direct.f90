@@ -1,6 +1,5 @@
 module direct_solver
     use mctc_env, only: error_type, fatal_error, wp
-    use print_matrix, only: write_vector, write_matrix
     use multicharge_blas, only: symv
     use multicharge_lapack, only: sytrf, sytrs, sytri
     use solver_type, only: mchrg_solver_type, mchrg_solver_input
@@ -57,7 +56,9 @@ contains
         real(wp), intent(inout) :: vrhs(:)
         ! Inverse A-matrix and coupled perturbed logical
         real(wp), intent(out) :: ainv(:, :)
+        ! Coupled-perturbed equations flag (optional)
         logical, intent(in), optional :: cpq
+        !> Error handling
         type(error_type), allocatable, intent(out) :: error
     
         integer  :: local_info

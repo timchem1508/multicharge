@@ -38,9 +38,11 @@ contains
     subroutine new_cg_solver(self, input)
         class(mchrg_solver_type), intent(out) :: self
         type(cg_input), intent(in) :: input     
-                
-        real(wp), parameter :: cgmiter_def = 1000
+
+        ! Default values        
+        integer, parameter :: cgmiter_def = 1000
         real(wp), parameter :: cgtol_def = 1.0e-15_wp
+        integer, parameter :: verbose_def = 0
 
         select type (self)
         type is (mchrg_solver_cg)
@@ -62,7 +64,7 @@ contains
             if (allocated(input%verbose)) then
                 self%verbose = input%verbose
             else 
-                self%verbose = 0
+                self%verbose = verbose_def
             end if
             
         end select
@@ -76,8 +78,7 @@ contains
         real(wp), intent(inout) :: vrhs(:)
         real(wp), intent(out) :: ainv(:, :)
         logical, intent(in), optional :: cpq
-        ! This routine intentionally left empty.
-        ! The dummy arguments are unused, but we must set ainv to avoid -Wunused-dummy-argument.
+
         ainv = 0.0_wp
     end subroutine update
 
@@ -94,7 +95,7 @@ contains
         real(wp), intent(out) :: ainv(:, :)
         ! Flag for coupled-perturbed equations (should always be .false. for CG)
         logical, intent(in), optional :: cpq
-        ! Error handling
+        !> Error handling
         type(error_type), allocatable, intent(out) :: error
         
         ! Maximal number of iterations
@@ -111,25 +112,24 @@ contains
         real(wp), allocatable :: direction(:)
         ! Norm of the RHS
         real(wp) :: bnorm
-        ! Residual r = b - A*x
+        ! Residual 
         real(wp), allocatable :: residual(:)
         ! Residual norm 
         real(wp) :: rnorm
-        ! Diagonal preconditioner M^-1
+        ! Diagonal preconditioner 
         real(wp), allocatable :: Mdiag(:)
-        ! Preconditioned residual z = M^-1 * r
+        ! Preconditioned residual 
         real(wp), allocatable ::  zres(:)
 
-        ! Matrix-vector product A*p
+        ! Matrix-vector product 
         real(wp), allocatable :: Ap(:)
-        ! Denominator p^T * A * p
+        ! Denominator of the step length
         real(wp) :: denom
         ! Step length
         real(wp) :: alpha
 
         ! Update factor for search direction
         real(wp) :: beta
-        ! Old and new values of r^T * z
         real(wp) :: rz_old, rz_new
         ! Relative residual norm (|r| / |b|)
         real(wp) :: rel_res
@@ -145,7 +145,7 @@ contains
             return
         end if 
 
-        ! Dimensions must match
+        ! Dimensions check
         ndim = size(xvec)
         if (size(amat,1) /= ndim .or. size(amat,2) /= ndim .or. size(vrhs) /= ndim &
                 .or. size(ainv,1) /= ndim .or. size(ainv,2) /= ndim) then
@@ -162,9 +162,10 @@ contains
     
         allocate(residual(ndim), direction(ndim), zres(ndim), Ap(ndim), Mdiag(ndim))
 
-        if (self%verbose > 0) call timer%push("total")
-        if (self%verbose > 0) call timer%push("initialization")
+        if (self%verbose > 1) call timer%push("total")
+        if (self%verbose > 1) call timer%push("initialization")
 
+        ! Diagonal preconditioner M^-1 (Jacobi preconditioner)
         !$omp parallel do default(none) shared(Mdiag, amat, ndim, tol_square) private(iat)
         do iat = 1, ndim
             Mdiag(iat) = amat(iat,iat)
@@ -173,18 +174,23 @@ contains
         end do
         !$omp end parallel do
     
+        ! Initial residual r = b - A*x
         call symv(amat, vrhs, Ap, alpha=1.0_wp, beta=0.0_wp)   
         residual = xvec - Ap                                    
         
+        ! Initial preconditioned residual z = M^-1 * r
         zres = residual * Mdiag                                 
         direction = zres                                    
         
+        ! Initial norm of the right-hand side (b)
         bnorm = dot_product(xvec, xvec)
         if (bnorm < tol_square) bnorm = 1.0_wp
+
+        ! Initial residual norm and r^T * z
         rnorm = dot_product(residual, residual)                
         rz_old = dot_product(residual, zres)                    
 
-        if (self%verbose > 0) call timer%pop   
+        if (self%verbose > 1) call timer%pop  ! initialization timer stop
 
         if (self%verbose > 1) then
             write(*, '(a, 1x, a)') "Initialisation time:", format_time(timer%get("initialization"))
@@ -196,10 +202,12 @@ contains
             write(*,*) ' iter      |residual|        step      relative residual'
         end if
 
+        ! Main CG iteration loop
         do it = 1, maxit
 
-            if (self%verbose > 0) call timer%push("iteration")
+            if (self%verbose > 1) call timer%push("iteration")
 
+            ! Matrix-vector product Ap = A * p
             call symv(amat, direction, Ap, alpha=1.0_wp, beta=0.0_wp)
 
             denom = 0.0_wp
@@ -217,8 +225,10 @@ contains
                 exit
             end if
 
+            ! Step length alpha = (r^T * z) / (p^T * A * p)
             alpha = rz_old / denom
 
+            ! Update solution x = x + alpha * p and residual r = r - alpha * A*p
             !$omp parallel do default(none) shared(ndim,vrhs,residual,alpha,direction,Ap) private(iat)
             do iat = 1, ndim
                 vrhs(iat)     = vrhs(iat)     + alpha * direction(iat)
@@ -226,6 +236,7 @@ contains
             end do
             !$omp end parallel do
 
+            ! Compute the new residual norm
             rnorm = 0.0_wp
             !$omp parallel do reduction(+:rnorm) default(none) &
             !$omp shared(ndim,residual) private(iat)
@@ -234,6 +245,7 @@ contains
             end do
             !$omp end parallel do
 
+            ! Relative residual norm to check convergence
             rel_res = rnorm / bnorm
 
             if (rel_res <= tol_square) then
@@ -247,6 +259,7 @@ contains
                 exit
             end if
 
+            ! Preconditioned updatedresidual z = M^-1 * r
             !$omp parallel do default(none) shared(ndim,zres,residual,Mdiag) private(iat)
             do iat = 1, ndim
                 zres(iat) = residual(iat) * Mdiag(iat)
@@ -261,6 +274,7 @@ contains
             end do
             !$omp end parallel do
 
+            ! Update search direction p = z + beta * p
             beta   = rz_new / rz_old
             rz_old = rz_new
 
@@ -270,10 +284,10 @@ contains
             end do
             !$omp end parallel do
 
-            if (self%verbose > 0) call timer%pop
+            if (self%verbose > 1) call timer%pop ! iteration timer stop
 
             if (it == maxit) then
-                if (self%verbose > 0) then
+                if (self%verbose > 1) then
                     call timer%pop   ! pop "iteration"
                     call timer%pop   ! pop "total"
                 end if
@@ -291,7 +305,7 @@ contains
 
         end do
 
-        if (self%verbose > 0) call timer%pop   
+        if (self%verbose > 1) call timer%pop   
 
         if (self%verbose > 1) then
             write(*, '(a, 1x, a)') "CG total time : ", format_time(timer%get("total"))

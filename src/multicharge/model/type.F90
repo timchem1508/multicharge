@@ -190,17 +190,15 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
    ! Optional derivative of the electrostatic energy w.r.t. atomic partial charges
    real(wp), intent(in), optional :: dfdq(:)
-
    ! Optional print verbossity number input flag
    integer, intent(in), optional :: verbose
-   ! Local variable for print verbosity
-   integer :: verbose_solve
 
    integer :: ic, jc, iat, ndim
    logical :: grad, cpq, dcn
-   integer(ik), allocatable :: ipiv(:)
    logical :: add_lagr = .true.   
 
+   ! Local variable for print verbosity
+   integer :: verbose_solve
    ! Variables for solving ES equation
    real(wp), allocatable :: xvec(:), vrhs(:), amat(:, :)
    real(wp), allocatable :: ainv(:, :), jmat(:, :)
@@ -210,24 +208,25 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    type(cache_container), allocatable :: cache
    real(wp), allocatable :: trans(:, :)
 
-   ! Resonse vectors: vvec = electronegativity response (Jv=chi)
+   ! Response vectors: vvec = electronegativity response (Jv=chi)
    ! uvec = constraint response (Ju=1)
-   logical :: adj_grad
+   real(wp), allocatable :: chivec(:), unitvec(:)
    real(wp), allocatable :: vvec(:), uvec(:)
    ! Sums of the v and u vector elements
    real(wp) :: uvecsum, vvecsum
-   real(wp), allocatable :: chivec(:), unitvec(:), jinv(:, :)
+   real(wp), allocatable :: jinv(:, :)
    ! Lagrangian factor for constraint
    real(wp) :: lambda 
 
    ! Gradient solver
+   logical :: adj_grad
    ! Derivative response J*y=dfdq
    real(wp), allocatable :: yvec(:)
    real(wp) :: yvecsum
    ! Adjoint vector p
    real(wp), allocatable :: padj(:)
 
-   ! Timer
+   !> Timer
    type(timer_type) :: timer
 
    ! Calculate gradient if the respective arrays are present
@@ -242,10 +241,8 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       verbose_solve = verbose
    end if 
 
-   ! Determine the size of a linear system
-   ! If the solver method requires positive definite matrices, 
-   ! we need to add a Lagrangian multiplier to constrain the total charge,
-   ! otherwise we can solve the unconstrained system directly
+   ! The cg_solver requires postive definite system,
+   ! so the Lagrangian constraint is handled separately.
    if (slv%need_pos_def .eqv. .true.) then
       ndim = mol%nat 
       add_lagr = .false.
@@ -254,7 +251,7 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       add_lagr = .true.
    end if
 
-   ! Update cache, passing the system size ndim
+   ! Update cache
    allocate(cache)
    call self%update(mol, cache, ndim, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
 
@@ -267,7 +264,8 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    ! Setup X-vector and A^-1 for the linear system
    allocate(xvec(ndim))
    call self%get_xvec(mol, cache, xvec)
-   call timer%pop
+
+   call timer%pop ! stop setup timer
 
    if (verbose_solve > 0) then
       write(*,*)
@@ -344,17 +342,17 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       ! Lagrangian multiplier
       lambda = - (mol%charge + vvecsum) / (uvecsum + tiny(1.0_wp))
 
-      ! Partial charges
-      if (present(qvec)) then
-         qvec(:) = -vvec - lambda * uvec
-      end if
-
       ! Reconstruct the full VRHS for gradient calculations
       if (allocated(vrhs)) deallocate(vrhs)
       allocate(vrhs(mol%nat+1))
 
       vrhs(:mol%nat) = -vvec - lambda * uvec
       vrhs(mol%nat+1) = lambda
+
+      ! Partial charges
+      if (present(qvec)) then
+         qvec(:) = vrhs(:mol%nat)
+      end if
 
       ! Electrostatic energy
       if (present(energy)) then
@@ -375,7 +373,7 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       end do
    end if
 
-
+   ! Calculate gradients if requested
    if (grad) then
       call timer%push("gradient")
       if (verbose_solve > 0) then
@@ -451,7 +449,7 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
          call gemv(dxdL, vrhs, sigma, beta=1.0_wp, alpha=-1.0_wp)
       end if
 
-      call timer%pop
+      call timer%pop ! stop gradient timer
       if (verbose_solve > 1) then
          write(*,*)
          write(*, '(a, 1x, a)') "Gradient calculation time : ", format_time(timer%get("gradient"))
@@ -459,6 +457,7 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       end if
    end if
 
+   ! Calculate charge derivatives if requested
    if (cpq) then
       do iat = 1, mol%nat
          dadr(:, :, iat) = -dxdr(:, :, iat) + dadr(:, :, iat)
@@ -468,7 +467,7 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       call gemm(dadL, ainv(:, :mol%nat), dqdL, alpha=-1.0_wp)
    end if     
    
-   call timer%pop
+   call timer%pop ! stop total solve timer
 
    if (verbose_solve > 1) then
       write(*, '(a, 1x, a)') "Total solve time : ", format_time(timer%get("total"))

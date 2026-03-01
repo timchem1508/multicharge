@@ -32,7 +32,6 @@ list(
   "${dir}/wignerseitz.f90"
   "${dir}/cache.f90"
   "${dir}/solver.f90"
-  "${dir}/print_matrix.f90"
 )
 
 set(srcs "${srcs}" PARENT_SCOPE)
