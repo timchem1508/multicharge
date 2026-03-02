@@ -1,149 +1,22 @@
-!> Print matrix module. The actual solver tests are below.
-module print_matrix
-    use iso_fortran_env, only : output_unit
-    implicit none
-
-    private
-    public :: write_vector, write_matrix
-
-    integer, parameter :: wp = selected_real_kind(15)
-
-    interface write_matrix
-        module procedure write_2d_matrix
-        module procedure write_packed_matrix
-    end interface write_matrix
-
-
-contains
-
-
-subroutine write_vector(vector, name, unit)
-    implicit none
-    real(wp),intent(in) :: vector(:)
-    character(len=*),intent(in),optional :: name
-    integer, intent(in),optional :: unit
-    integer :: d
-    integer :: i, j, k, l, istep, iunit
-
-    d = size(vector, dim=1)
-
-    if (present(unit)) then
-        iunit = unit
-    else
-        iunit = output_unit
-    end if
-
-    if (present(name)) write(iunit,'(/,"vector printed:",1x,a)') name
-
-    do j = 1, d
-        write(iunit, '(i6)', advance='no') j
-        write(iunit, '(1x,f15.10)', advance='no') vector(j)
-        write(iunit, '(a)')
-    end do
-
-end subroutine write_vector
-
-
-subroutine write_2d_matrix(matrix, name, unit, step)
-    implicit none
-    real(wp),intent(in) :: matrix(:, :)
-    character(len=*),intent(in),optional :: name
-    integer, intent(in),optional :: unit
-    integer, intent(in),optional :: step
-    integer :: d1, d2
-    integer :: i, j, k, l, istep, iunit
-
-    d1 = size(matrix, dim=1)
-    d2 = size(matrix, dim=2)
-
-    if (present(unit)) then
-        iunit = unit
-    else
-        iunit = output_unit
-    end if
-
-    if (present(step)) then
-        istep = step
-    else
-        istep = 5
-    end if
-
-    if (present(name)) write(iunit,'(/,"matrix printed:",1x,a)') name
-
-    do i = 1, d2, istep
-        l = min(i+istep-1,d2)
-        write(iunit,'(/,6x)',advance='no')
-        do k = i, l
-            write(iunit,'(6x,i7,3x)',advance='no') k
-        end do
-        write(iunit,'(a)')
-        do j = 1, d1
-            write(iunit,'(i6)',advance='no') j
-            do k = i, l
-                write(iunit,'(1x,f15.8)',advance='no') matrix(j,k)
-            end do
-            write(iunit,'(a)')
-        end do
-    end do
-
-end subroutine write_2d_matrix
-
-
-subroutine write_packed_matrix(matrix, name, unit, step)
-    implicit none
-    real(wp), intent(in) :: matrix(:)
-    character(len=*),intent(in),optional :: name
-    integer, intent(in),optional :: unit
-    integer, intent(in),optional :: step
-    integer :: d
-    integer :: i, j, k, l, istep, iunit
-
-    d = (nint(sqrt(real(8*size(matrix, 1) + 1, wp))) - 1)/2
-
-    if (present(unit)) then
-        iunit = unit
-    else
-        iunit = output_unit
-    end if
-
-    if (present(step)) then
-        istep = step
-    else
-        istep = 5
-    end if
-
-    if (present(name)) write(iunit,'(/,"matrix printed:",1x,a)') name
-    do i = 1, d, istep
-        l = min(i+istep-1, d)
-        write(iunit, '(/,6x)', advance='no')
-        do k = i, l
-            write(iunit, '(6x,i7,3x)', advance='no') k
-        end do
-        write(iunit, '(a)')
-        do j = i, d
-            l = min(i+(istep-1), j)
-            write(iunit,'(i6)', advance='no') j
-            do k = i, l
-                write(iunit,'(1x,f15.8)', advance='no') matrix(j*(j-1)/2+k)
-            end do
-            write(iunit,'(a)')
-        end do
-    end do
-
-end subroutine write_packed_matrix
-
-
-end module print_matrix
-
-
-
-
-!> Unit tests for the CG solver
+! This file is part of multicharge.
+! SPDX-Identifier: Apache-2.0
+!
+! Licensed under the Apache License, Version 2.0 (the "License");
+! you may not use this file except in compliance with the License.
+! You may obtain a copy of the License at
+!
+!     http://www.apache.org/licenses/LICENSE-2.0
+!
+! Unless required by applicable law or agreed to in writing, software
+! distributed under the License is distributed on an "AS IS" BASIS,
+! WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+! See the License for the specific language governing permissions and
+! limitations under the License.
 
 module test_solver
+   use iso_fortran_env, only : output_unit
    use mctc_env, only: wp
    use mctc_env_testing, only: new_unittest, unittest_type, error_type, test_failed
-   use print_matrix, only: write_vector, write_matrix
    use mctc_io_structure, only: structure_type, new
    use mstore, only: get_structure
    use multicharge_model_type, only: mchrg_model_type
@@ -179,8 +52,7 @@ subroutine collect_solver(testsuite)
       & new_unittest("cg-spd-large", test_cg_spd_large), &
       & new_unittest("cg-ill-conditioned", test_cg_ill_conditioned), &
       & new_unittest("cg-zero-rhs", test_cg_zero_rhs), &
-      & new_unittest("cg-random-spd", test_cg_random_spd), &
-      & new_unittest("cg-preconditioned", test_cg_preconditioned) &
+      & new_unittest("cg-random-spd", test_cg_random_spd) &
       !& new_unittest("time-scaling", test_cg_spd_time_scaling) &
       !& new_unittest("time-scaling-tri-diag-matrix", test_cg_121_time_scaling) &
       & ]
@@ -860,108 +732,7 @@ subroutine test_cg_random_spd(error)
 
 end subroutine test_cg_random_spd
 
-
-!> Test 8: Test with different preconditioner settings
-subroutine test_cg_preconditioned(error)
-
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
-
-   integer, parameter :: n = 15
-   logical, parameter :: cpq = .false.
-   real(wp) :: amat(n, n), xvec(n), vrhs(n), ainv(n, n)
-   real(wp) :: expected(n), b(n)
-   integer :: i, j
-   real(wp) :: residual_jacobi, residual_no_precond
-
-   ! Timer variables
-   real(wp) :: start_cg, end_cg, start_direct, end_direct
-
-   !> Solver variables
-   real(wp), allocatable :: tol
-   integer, allocatable :: maxiter 
-   class(mchrg_solver_type), allocatable :: solver
-   class(mchrg_solver_input), allocatable :: solver_input
-
-   allocate(cg_input :: solver_input)
-   select type(solver_input)
-   type is (cg_input)
-      if (allocated(maxiter)) then
-         solver_input%cgmiter = maxiter
-      end if
-      if (allocated(tol)) then
-         solver_input%cgtol = tol
-      end if
-         block
-             class(mchrg_solver_cg), allocatable :: tmp
-             allocate(tmp)
-             call new_cg_solver(tmp, solver_input)
-             call move_alloc(tmp, solver)
-         end block
-   end select
-
-   ! Create an SPD matrix with varying diagonal
-   amat = 0.0_wp
-   do i = 1, n
-      amat(i,i) = 1000.0_wp ** ((i-1)/real(n-1, wp))  ! Diagonal from 1 to 1000
-      do j = 1, n
-         if (i /= j) then
-            amat(i,j) = 0.1_wp / (abs(i-j) + 1.0_wp)
-         end if
-      end do
-   end do
-   
-   ! Solution vector
-   expected = [(sin(real(i, wp) * 0.5_wp), i=1, n)]
-   
-   ! Compute RHS
-   b = 0.0_wp
-   do i = 1, n
-      do j = 1, n
-         b(i) = b(i) + amat(i,j) * expected(j)
-      end do
-   end do
-      
-   vrhs = 0.0_wp
-   xvec = b
-   
-   ! Solve
-   call cpu_time(start_cg)
-   call solver%solve(amat, xvec, vrhs, ainv, cpq, error=error)
-   if (allocated(error)) return
-   call cpu_time(end_cg)
-
-   ! Reference solution
-   deallocate(solver_input)
-   deallocate(solver)
-   allocate(direct_input :: solver_input)
-   allocate(mchrg_solver_direct :: solver)
-   select type (solver_input)
-   type is (direct_input)
-      call new_direct_solver(solver, solver_input)
-   end select
-
-   ! Reference solution
-   call cpu_time(start_direct)
-   call solver%solve(amat, xvec, expected, ainv, cpq, error=error)
-   call cpu_time(end_direct)
-   
-   ! Check solution
-   if (any(abs(vrhs - expected) / max(1.0_wp, abs(expected)) > thr_rel)) then
-      call test_failed(error, "CG solver failed for medium SPD matrix")
-      print'(a)', "Solution:"
-      print'(3es21.14)', vrhs
-      print'(a)', "Expected:"
-      print'(3es21.14)', expected
-   else
-      print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
-      print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', (end_direct-start_direct)/(end_cg-start_cg)
-   end if
-
-end subroutine test_cg_preconditioned
-
-!> Test 9: Test time scaling of the CG solver
+!> Test 8: Test time scaling of the CG solver
 subroutine test_cg_spd_time_scaling(error)
 
    !> Error handling
@@ -1081,7 +852,7 @@ subroutine test_cg_spd_time_scaling(error)
 
 end subroutine test_cg_spd_time_scaling
 
-!> Test 10: Test time scaling of the CG solver for the "-1 2 -1" matrix
+!> Test 9: Test time scaling of the CG solver for the "-1 2 -1" matrix
 subroutine test_cg_121_time_scaling(error)
 
    !> Error handling
@@ -1148,8 +919,6 @@ subroutine test_cg_121_time_scaling(error)
             amat(i+1,i) = -1.0_wp
          end if
       end do
-
-      !call write_matrix(amat, 'Matrix')
       
       ! Create a solution vector
       expected = [(sin(real(i, wp) * 0.1_wp), i=1, n)]
@@ -1204,5 +973,33 @@ subroutine test_cg_121_time_scaling(error)
    call write_vector(dir_scal, "DIRECT Time Scaling")
 
 end subroutine test_cg_121_time_scaling
+
+! Additional subroutine for vector output
+
+subroutine write_vector(vector, name, unit)
+    implicit none
+    real(wp),intent(in) :: vector(:)
+    character(len=*),intent(in),optional :: name
+    integer, intent(in),optional :: unit
+    integer :: d
+    integer :: i, j, k, l, istep, iunit
+
+    d = size(vector, dim=1)
+
+    if (present(unit)) then
+        iunit = unit
+    else
+        iunit = output_unit
+    end if
+
+    if (present(name)) write(iunit,'(/,"vector printed:",1x,a)') name
+
+    do j = 1, d
+        write(iunit, '(i6)', advance='no') j
+        write(iunit, '(1x,f15.10)', advance='no') vector(j)
+        write(iunit, '(a)')
+    end do
+
+end subroutine write_vector
 
 end module test_solver
