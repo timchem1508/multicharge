@@ -13,20 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-subdir('model')
-subdir('param')
-subdir('solver')
 
 srcs += files(
-  'blas.F90',
-  'charge.f90',
-  'ewald.f90',
-  'lapack.F90',
-  'model.f90',
-  'output.f90',
-  'param.f90',
-  'version.f90',
-  'wignerseitz.f90',
-  'cache.f90',
-  'solver.f90',
+  'cg.f90',
+  'direct.f90',
+  'type.f90',
+  'cache.f90'
 )

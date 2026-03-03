@@ -27,6 +27,7 @@ module test_wignerseitz
    public :: collect_wignerseitz
 
    real(wp), parameter :: thr = 100 * epsilon(1.0_wp)
+   real(wp), parameter :: thr1 = 1.0e5_wp*epsilon(1.0_wp)
    real(wp), parameter :: thr2 = sqrt(epsilon(1.0_wp))
 
 contains

@@ -19,11 +19,14 @@ module multicharge_output
    use mctc_io_convert, only : autoaa
    use mctc_io_constants, only : pi
    use multicharge_model, only : mchrg_model_type
+   use cg_solver, only : mchrg_solver_cg
+   use direct_solver, only : mchrg_solver_direct
    use multicharge_version, only : get_multicharge_version
    implicit none
    private
 
-   public :: write_ascii_model, write_ascii_properties, write_ascii_results, json_results
+   public :: write_ascii_model, write_ascii_properties, write_ascii_results, json_results, &
+      write_cg_solver, write_direct_solver
 
 contains
 
@@ -53,6 +56,29 @@ subroutine write_ascii_model(unit, mol, model)
    write(unit, '(54("-"),/)')
 
 end subroutine write_ascii_model
+
+subroutine write_cg_solver(unit, solver)
+   integer, intent(in) :: unit
+   class(mchrg_solver_cg), intent(in) :: solver
+
+   write(unit, '(54("-"))')
+   write(unit, '(12x, a)') "Conjugate Gradient Solver Setup"
+   write(unit, '(54("-"))')
+   write(unit, '(a, 1x, i6)') "Max iterations : ", solver%cgmiter
+   write(unit, '(a, 1x, es10.2)') "Tolerance      : ", solver%cgtol
+   write(unit, '(a)') "Preconditioner : Jacobi (Diagonal)"
+
+end subroutine write_cg_solver
+
+subroutine write_direct_solver(unit, solver)
+   integer, intent(in) :: unit
+   class(mchrg_solver_direct), intent(in) :: solver
+
+   write(unit, '(54("-"))')
+   write(unit, '(18x, a)') "Direct Solver Setup"
+   write(unit, '(54("-"))')
+
+end subroutine write_direct_solver
 
 subroutine write_ascii_properties(unit, mol, model, cn, qvec)
 

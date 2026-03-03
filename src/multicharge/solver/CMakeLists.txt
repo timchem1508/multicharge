@@ -13,20 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-subdir('model')
-subdir('param')
-subdir('solver')
 
-srcs += files(
-  'blas.F90',
-  'charge.f90',
-  'ewald.f90',
-  'lapack.F90',
-  'model.f90',
-  'output.f90',
-  'param.f90',
-  'version.f90',
-  'wignerseitz.f90',
-  'cache.f90',
-  'solver.f90',
+set(dir "${CMAKE_CURRENT_SOURCE_DIR}")
+
+list(
+  APPEND srcs
+  "${dir}/direct.f90"
+  "${dir}/cg.f90"
+  "${dir}/type.f90"
+  "${dir}/cache.f90"
 )
+
+set(srcs "${srcs}" PARENT_SCOPE)

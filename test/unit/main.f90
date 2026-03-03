@@ -22,6 +22,7 @@ program tester
    use test_model, only : collect_model
    use test_pbc, only : collect_pbc
    use test_wignerseitz, only : collect_wignerseitz
+   use test_solver, only: collect_solver
    implicit none
    integer :: stat, is
    character(len=:), allocatable :: suite_name, test_name
@@ -31,6 +32,7 @@ program tester
    stat = 0
 
    testsuites = [ &
+      & new_testsuite("solver", collect_solver), &
       & new_testsuite("model", collect_model), &
       & new_testsuite("pbc", collect_pbc), &
       & new_testsuite("wignerseitz", collect_wignerseitz) &

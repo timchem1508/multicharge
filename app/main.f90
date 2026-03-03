@@ -15,13 +15,17 @@
 
 program main
    use, intrinsic :: iso_fortran_env, only: output_unit, error_unit, input_unit
-   use mctc_env, only: error_type, fatal_error, get_argument, wp
+   use mctc_env, only: error_type, fatal_error, get_argument, wp, timer_type, format_time
    use mctc_io, only: structure_type, read_structure, filetype, get_filetype
    use mctc_cutoff, only: get_lattice_points
    use multicharge, only: mchrg_model_type, mchrg_model, new_eeq2019_model, &
       & new_eeqbc2025_model, get_multicharge_version, &
       & write_ascii_model, write_ascii_properties, write_ascii_results
-   use multicharge_output, only: json_results
+   use multicharge_output, only: json_results, write_cg_solver, write_direct_solver
+   use multicharge_solver, only: new_mchrg_solver, mchrg_solver_type, mchrg_solver_direct, &
+      & mchrg_solver_cg, mchrg_solver_input, cg_input, direct_input
+
+
    implicit none
    character(len=*), parameter :: prog_name = "multicharge"
    character(len=*), parameter :: json_output = "multicharge.json"
@@ -32,6 +36,8 @@ program main
    type(error_type), allocatable :: error
    type(structure_type) :: mol
    class(mchrg_model_type), allocatable :: model
+   class(mchrg_solver_type), allocatable :: solver
+   class(mchrg_solver_input), allocatable :: solver_input
    logical :: grad, json, exist
    real(wp), parameter :: cn_max = 8.0_wp, cutoff = 25.0_wp
    real(wp), allocatable :: cn(:), rcov(:), trans(:, :)
@@ -42,12 +48,26 @@ program main
    real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: charge
 
-   call get_arguments(input, model_id, input_format, grad, charge, json, error)
+   ! Verbosity level
+   integer, allocatable :: verbose
+
+   ! Timer 
+   type(timer_type) :: timer
+
+   call timer%push("total")
+
+   ! 1. Parse Arguments
+   call get_arguments(input, model_id, input_format, grad, charge, json, &
+                      solver_input, verbose, error)
    if (allocated(error)) then
       write(error_unit, '(a)') error%message
       error stop
    end if
 
+   ! 2. Initialize Solver using the solver_input
+   call new_mchrg_solver(solver, solver_input,  error)
+
+   ! 3. Load Structure
    if (input == "-") then
       if (.not. allocated(input_format)) input_format = filetype%xyz
       call read_structure(mol, input_unit, input_format, error)
@@ -80,6 +100,7 @@ program main
       end if
    end if
 
+   ! 4. Initialize Model
    if (model_id == mchrg_model%eeq2019) then
       call new_eeq2019_model(mol, model, error)
    else if (model_id == mchrg_model%eeqbc2025) then
@@ -102,11 +123,9 @@ program main
       allocate(gradient(3, mol%nat), sigma(3, 3))
       gradient(:, :) = 0.0_wp
       sigma(:, :) = 0.0_wp
-
       allocate(dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat))
       dqdr(:, :, :) = 0.0_wp
       dqdL(:, :, :) = 0.0_wp
-
       allocate(dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat))
       allocate(dqlocdr(3, mol%nat, mol%nat), dqlocdL(3, 3, mol%nat))
    end if
@@ -114,8 +133,20 @@ program main
    call get_lattice_points(mol%periodic, mol%lattice, model%ncoord%cutoff, trans)
    call model%ncoord%get_coordination_number(mol, trans, cn, dcndr, dcndL)
    call model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
-   call model%solve(mol, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
-      & energy, gradient, sigma, qvec, dqdr, dqdL)
+   
+   ! 5. Run Solve (Solver instance passed implicitly via argument or model)
+
+   if (verbose > 0) then
+      select type (solver)
+      type is (mchrg_solver_cg)
+         call write_cg_solver(output_unit, solver)
+      type is (mchrg_solver_direct)
+         call write_direct_solver(output_unit, solver)
+      end select
+   end if 
+
+   call model%solve(mol, solver, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
+      & energy, gradient, sigma, qvec, dqdr, dqdL, verbose=verbose, new_unit=output_unit)
 
    if (allocated(error)) then
       write(error_unit, '(a)') error%message
@@ -133,6 +164,12 @@ program main
          "[Info] JSON dump of results written to '"//json_output//"'"
    end if
 
+   call timer%pop
+   if (verbose > 1) then
+      write(*, '(a, 1x, a)') "Total execution time : ", format_time(timer%get("total"))
+      write(*,*)
+   end if
+
 contains
 
 subroutine help(unit)
@@ -147,15 +184,18 @@ subroutine help(unit)
       "higher multipole moments", &
       ""
 
-   write(unit, '(2x, a, t35, a)') &
-      "-m, -model, --model <model>", "Choose the charge model", &
+   write(unit, '(2x, a, t45, a)') &
+      "-m, -model, --model <model>", "Choose the charge model (eeq or eeqbc)", &
       "-i, -input, --input <format>", "Hint for the format of the input file", &
-      "-c, -charge, --charge <value>", "Set the molecular charge", &
-      "-g, -grad, --grad", "Evaluate molecular gradient and virial", &
+      "-c, -charge, --charge <value>", "Provide the molecular charge", &
+      "-s, -solver, --solver <type>", "Provide the partial charge solver: 'CG' or 'DIRECT' (default)", &
+      "-it, -maxiter, --maxiter <int>", "Provide the maximal number of iterations", &
+      "-tol, -tolerance, --tolerance <real>", "Provide the tolerance of the solver", &
+      "-g, -grad, --grad", "Evaluate molecular gradient and virial. Only for the direct solver.", &
+      "-v, -verbosity, --verbosity <int>", "Provide verbosity level of output", &
       "-j, -json, --json", "Provide output in JSON format to the file 'multicharge.json'", &
-      "-v, -version, --version", "Print program version and exit", &
+      "-version, --version", "Print program version and exit", &
       "-h, -help, --help", "Show this help message"
-
    write(unit, '(a)')
 
 end subroutine help
@@ -171,37 +211,44 @@ subroutine version(unit)
 end subroutine version
 
 subroutine get_arguments(input, model_id, input_format, grad, charge, &
-   & json, error)
+   & json, solver_input, verbose, error)
 
    !> Input file name
    character(len=:), allocatable :: input
-
    !> ID of choosen model type
    integer, intent(out) :: model_id
-
    !> Input file format
    integer, allocatable, intent(out) :: input_format
-
    !> Evaluate gradient
    logical, intent(out) :: grad
-
    !> Provide JSON output
    logical, intent(out) :: json
-
    !> Charge
    real(wp), allocatable, intent(out) :: charge
-
+   !> Solver args
+   class(mchrg_solver_input), allocatable, intent(out) :: solver_input
+   !> Verbosity number
+   integer, allocatable :: verbose
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
    integer :: iarg, narg, iostat
    character(len=:), allocatable :: arg
 
+   ! Solver type: CG or DIRECT
+   character(len=:), allocatable :: solver_name
+   ! Maximal number of the cg solver iterations
+   integer, allocatable :: maxiter
+   ! CG solver tolerance
+   real(wp), allocatable :: tol
+
    model_id = mchrg_model%eeq2019
    grad = .false.
    json = .false.
    iarg = 0
+   verbose = 0
    narg = command_argument_count()
+
    do while(iarg < narg)
       iarg = iarg + 1
       call get_argument(iarg, arg)
@@ -209,9 +256,17 @@ subroutine get_arguments(input, model_id, input_format, grad, charge, &
       case("-h", "-help", "--help")
          call help(output_unit)
          stop
-      case("-v", "-version", "--version")
+      case("-version", "--version")
          call version(output_unit)
          stop
+      case("-v", "-verbosity", "--verbosity")
+         iarg = iarg + 1
+         call get_argument(iarg, arg)
+         read(arg, *, iostat=iostat) verbose
+         if (iostat >  1) then
+            call fatal_error(error, "Invalid verbosity level")
+            exit
+         end if
       case default
          if (.not. allocated(input)) then
             call move_alloc(arg, input)
@@ -259,9 +314,53 @@ subroutine get_arguments(input, model_id, input_format, grad, charge, &
          grad = .true.
       case("-j", "-json", "--json")
          json = .true.
+      case("-s", "-solver", "--solver")
+         if (allocated(solver_name)) then
+            call fatal_error(error, "Cannot use multiple solvers")
+            exit
+         end if
+         iarg = iarg + 1; call get_argument(iarg, solver_name)
+         if (solver_name == "DIRECT" .or. solver_name == "direct" .or. solver_name == "LAPACK" ) then
+            allocate(direct_input :: solver_input)
+         end if
+         if (solver_name == "CG" .or. solver_name == "cg" .or. solver_name == "iterative") then
+              allocate(cg_input :: solver_input)
+         end if
+      case("-it", "-maxiter", "--maxiter")
+         allocate(maxiter)
+         iarg = iarg + 1; call get_argument(iarg, arg)
+         read(arg, *, iostat=iostat) maxiter
+         if (iostat /= 0) call fatal_error(error, "Invalid maximal number of iterations")
+      case("-tol", "-tolerance", "--tolerance")
+         allocate(tol)
+         iarg = iarg + 1; call get_argument(iarg, arg)
+         read(arg, *, iostat=iostat) tol
+         if (iostat /= 0) call fatal_error(error, "Invalid tolerance")
       end select
    end do
 
+   if (.not. allocated(solver_name)) then
+      allocate(direct_input :: solver_input) ! Default solver is direct
+   end if
+
+   if (grad .eqv. .true.) then
+      if (allocated(solver_input)) deallocate(solver_input)
+      allocate(direct_input :: solver_input) ! Force direct solver for gradient evaluation
+   end if
+
+   select type(solver_input)
+   type is (cg_input)
+   if (allocated(maxiter)) then
+      solver_input%cgmiter = maxiter
+   end if
+   if (allocated(tol)) then
+      solver_input%cgtol = tol
+   end if
+   if (allocated(verbose)) then
+      solver_input%verbose = verbose
+   end if
+   end select
+   
    if (.not. allocated(input)) then
       if (.not. allocated(error)) then
          call help(output_unit)
