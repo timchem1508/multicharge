@@ -217,12 +217,9 @@ subroutine update(self, mol, cache, ndim, cn, qloc, dcndr, dcndL, dqlocdr, dqloc
       allocate(ptr%xtmp(ndim))
    end if
 
-   ! Allocate cmat (always size nat+1 because it includes the constraint row/col)
+   ! Allocate cmat 
    if (.not. allocated(ptr%cmat)) then
-      allocate(ptr%cmat(mol%nat + 1, mol%nat + 1))
-   else if (size(ptr%cmat, 1) /= mol%nat + 1) then
-      deallocate(ptr%cmat)
-      allocate(ptr%cmat(mol%nat + 1, mol%nat + 1))
+      allocate(ptr%cmat(ndim, ndim))
    end if
 
    if (any(mol%periodic)) then
@@ -233,10 +230,10 @@ subroutine update(self, mol, cache, ndim, cn, qloc, dcndr, dcndL, dqlocdr, dqloc
       call get_cmat_3d(self, mol, ptr%wsc, ptr%cmat)
       if (grad) then
          if (.not. allocated(ptr%dcdr)) then
-            allocate(ptr%dcdr(3, mol%nat, mol%nat + 1))
+            allocate(ptr%dcdr(3, mol%nat, ndim))
          end if
          if (.not. allocated(ptr%dcdL)) then
-            allocate(ptr%dcdL(3, 3, mol%nat + 1))
+            allocate(ptr%dcdL(3, 3, ndim))
          end if
          call get_dcmat_3d(self, mol, ptr%wsc, ptr%dcdr, ptr%dcdL)
       end if
@@ -246,10 +243,10 @@ subroutine update(self, mol, cache, ndim, cn, qloc, dcndr, dcndL, dqlocdr, dqloc
       ! cmat gradients
       if (grad) then
          if (.not. allocated(ptr%dcdr)) then
-            allocate(ptr%dcdr(3, mol%nat, mol%nat + 1))
+            allocate(ptr%dcdr(3, mol%nat, ndim))
          end if
          if (.not. allocated(ptr%dcdL)) then
-            allocate(ptr%dcdL(3, 3, mol%nat + 1))
+            allocate(ptr%dcdL(3, 3, ndim))
          end if
          call get_dcmat_0d(self, mol, ptr%dcdr, ptr%dcdL)
       end if
@@ -339,7 +336,11 @@ subroutine get_xvec_derivs(self, mol, cache, dxdr, dxdL)
    real(wp), allocatable :: dxdr_local(:, :, :), dxdL_local(:, :, :), dtmpdr_local(:, :, :), dtmpdL_local(:, :, :)
 
    call view(cache, ptr)
-   allocate(dtmpdr(3, mol%nat, mol%nat + 1), dtmpdL(3, 3, mol%nat + 1))
+   if (size(ptr%xtmp) > mol%nat) then
+      allocate(dtmpdr(3, mol%nat, mol%nat + 1), dtmpdL(3, 3, mol%nat + 1))
+   else
+      allocate(dtmpdr(3, mol%nat, mol%nat), dtmpdL(3, 3, mol%nat))
+   end if
 
    dxdr(:, :, :) = 0.0_wp
    dxdL(:, :, :) = 0.0_wp
@@ -1071,7 +1072,11 @@ subroutine get_cmat_0d(self, mol, cmat)
    deallocate(cmat_local)
    !$omp end parallel
 
-   cmat(mol%nat + 1, mol%nat + 1) = 1.0_wp
+   if (size(cmat, 1) == mol%nat + 1) then
+      cmat(mol%nat + 1, 1:mol%nat + 1) = 0.0_wp
+      cmat(1:mol%nat + 1, mol%nat + 1) = 0.0_wp
+      cmat(mol%nat + 1, mol%nat + 1) = 1.0_wp
+   end if
 
 end subroutine get_cmat_0d
 
@@ -1136,7 +1141,11 @@ subroutine get_cmat_3d(self, mol, wsc, cmat)
    deallocate(cmat_local)
    !$omp end parallel
    !
-   cmat(mol%nat + 1, mol%nat + 1) = 1.0_wp
+   if (size(cmat, 1) == mol%nat + 1) then
+      cmat(mol%nat + 1, 1:mol%nat + 1) = 0.0_wp
+      cmat(1:mol%nat + 1, mol%nat + 1) = 0.0_wp
+      cmat(mol%nat + 1, mol%nat + 1) = 1.0_wp
+   end if
 
 end subroutine get_cmat_3d
 

@@ -17,6 +17,7 @@
 !> Provides implementation of the direct solver using LAPACK for symmetric indefinite systems.
 
 module direct_solver
+    use iso_fortran_env, only: output_unit
     use mctc_env, only: error_type, fatal_error, wp
     use multicharge_blas, only: symv
     use multicharge_lapack, only: sytrf, sytrs, sytri
@@ -64,7 +65,7 @@ contains
     end subroutine update
 
     !> Solve method for direct solver
-    subroutine solve(self, amat, xvec, vrhs, ainv, cpq, error)
+    subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
         class(mchrg_solver_direct), intent(in) :: self
         ! A matrix of Ax=b system
         real(wp), intent(in)  :: amat(:, :)
@@ -76,6 +77,8 @@ contains
         real(wp), intent(out) :: ainv(:, :)
         ! Coupled-perturbed equations flag (optional)
         logical, intent(in), optional :: cpq
+        ! Output unit (optional)
+        integer, intent(in), optional :: new_unit
         !> Error handling
         type(error_type), allocatable, intent(out) :: error
     
@@ -83,7 +86,14 @@ contains
         integer :: ndim, ic, jc
         integer, allocatable :: ipiv(:)
         logical :: want_cpq
+        integer :: unit
         type(cache_container), allocatable :: cache
+
+        if (present(new_unit)) then
+            unit = new_unit
+        else
+            unit = output_unit
+        end if
     
         ! Dimensions match check
         ndim = size(xvec)

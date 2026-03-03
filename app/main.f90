@@ -146,7 +146,7 @@ program main
    end if 
 
    call model%solve(mol, solver, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
-      & energy, gradient, sigma, qvec, dqdr, dqdL, verbose=verbose)
+      & energy, gradient, sigma, qvec, dqdr, dqdL, verbose=verbose, new_unit=output_unit)
 
    if (allocated(error)) then
       write(error_unit, '(a)') error%message

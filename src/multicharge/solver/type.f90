@@ -36,7 +36,7 @@ module solver_type
     end type mchrg_solver_type
 
     abstract interface
-        subroutine solve(self, amat, xvec, vrhs, ainv, cpq, error)
+        subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
             import :: mchrg_solver_type, error_type, wp
             class(mchrg_solver_type), intent(in) :: self
             real(wp), intent(in)  :: amat(:, :)
@@ -44,6 +44,7 @@ module solver_type
             real(wp), intent(inout) :: vrhs(:)
             real(wp), intent(out) :: ainv(:, :)
             logical, intent(in), optional :: cpq
+            integer, intent(in), optional :: new_unit
             type(error_type), allocatable, intent(out) :: error
         end subroutine solve
 

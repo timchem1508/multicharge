@@ -111,7 +111,7 @@ subroutine test_cg_identity_2x2(error)
 
    ! Solve iteratively
    call cpu_time(start_cg)
-   call solver%solve(amat, xvec, vrhs, ainv, cpq, error=error)
+   call solver%solve(amat, xvec, vrhs, ainv, cpq, error=error, new_unit=output_unit)
    if (allocated(error)) return
    call cpu_time(end_cg)
 
@@ -127,7 +127,7 @@ subroutine test_cg_identity_2x2(error)
 
    expected = [0.0_wp, 0.0_wp]
    call cpu_time(start_direct)
-   call solver%solve(amat, xvec, expected, ainv, cpq, error=error)
+   call solver%solve(amat, xvec, expected, ainv, cpq, error=error, new_unit=output_unit)
    call cpu_time(end_direct)
    
    ! Check solution
@@ -201,7 +201,7 @@ subroutine test_cg_diagonal_5x5(error)
    
    ! Solve
    call cpu_time(start_cg)
-   call solver%solve(amat, xvec, vrhs, ainv, cpq, error=error)
+   call solver%solve(amat, xvec, vrhs, ainv, cpq, error=error, new_unit=output_unit)
    if (allocated(error)) return
    call cpu_time(end_cg)
 
@@ -285,7 +285,7 @@ subroutine test_cg_spd_small(error)
    
    ! Solve
    call cpu_time(start_cg)
-   call solver%solve(amat, xvec, vrhs, ainv, cpq, error=error)
+   call solver%solve(amat, xvec, vrhs, ainv, cpq, error=error, new_unit=output_unit)
    if (allocated(error)) return
    call cpu_time(end_cg)
 
@@ -388,7 +388,7 @@ subroutine test_cg_spd_large(error)
    
    ! Solve
    call cpu_time(start_cg)
-   call solver%solve(amat, xvec, vrhs, ainv, cpq, error=error)
+   call solver%solve(amat, xvec, vrhs, ainv, cpq, error=error, new_unit=output_unit)
    if (allocated(error)) return
    call cpu_time(end_cg)
 
@@ -481,7 +481,7 @@ subroutine test_cg_ill_conditioned(error)
    
    ! Solve
    call cpu_time(start_cg)
-   call solver%solve(amat, xvec, vrhs, ainv, cpq, error=error)
+   call solver%solve(amat, xvec, vrhs, ainv, cpq, error=error, new_unit=output_unit)
    if (allocated(error)) return
    call cpu_time(end_cg)
 
@@ -572,7 +572,7 @@ subroutine test_cg_zero_rhs(error)
    
    ! Solve
    call cpu_time(start_cg)
-   call solver%solve(amat, xvec, vrhs, ainv, cpq, error=error)
+   call solver%solve(amat, xvec, vrhs, ainv, cpq, error=error, new_unit=output_unit)
    if (allocated(error)) return
    call cpu_time(end_cg)
 
@@ -698,7 +698,7 @@ subroutine test_cg_random_spd(error)
    
    ! Solve
    call cpu_time(start_cg)
-   call solver%solve(amat, xvec, vrhs, ainv, cpq, error=error)
+   call solver%solve(amat, xvec, vrhs, ainv, cpq, error=error, new_unit=output_unit)
    if (allocated(error)) return
    call cpu_time(end_cg)
 

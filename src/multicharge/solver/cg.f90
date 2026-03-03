@@ -17,6 +17,7 @@
 !> Provides implementation of the conjugate gradient solver for linear systems of equations.
 
 module cg_solver
+    use iso_fortran_env, only : output_unit
     use mctc_env, only: error_type, fatal_error, wp, timer_type, format_time
     use multicharge_blas, only: symv, gemv
     use solver_type, only: mchrg_solver_type, mchrg_solver_input
@@ -84,7 +85,7 @@ contains
             else 
                 self%verbose = verbose_def
             end if
-            
+
         end select
 
     end subroutine new_cg_solver
@@ -101,7 +102,7 @@ contains
     end subroutine update
 
     !> Solve method for CG solver
-    subroutine solve(self, amat, xvec, vrhs, ainv, cpq, error)
+    subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
         class(mchrg_solver_cg), intent(in) :: self
         ! A matrix of Ax=b system
         real(wp), intent(in)  :: amat(:, :)
@@ -113,6 +114,8 @@ contains
         real(wp), intent(out) :: ainv(:, :)
         ! Flag for coupled-perturbed equations (should always be .false. for CG)
         logical, intent(in), optional :: cpq
+        ! Output unit
+        integer, intent(in), optional :: new_unit
         !> Error handling
         type(error_type), allocatable, intent(out) :: error
         
@@ -154,6 +157,13 @@ contains
 
         type(cache_container), allocatable :: cache
         type(timer_type) :: timer
+        integer :: unit
+
+        if (present(new_unit)) then
+            unit = new_unit
+        else
+            unit = output_unit
+        end if
 
         ainv = amat
 
@@ -210,15 +220,8 @@ contains
 
         if (self%verbose > 1) call timer%pop  ! initialization timer stop
 
-        if (self%verbose > 1) then
-            write(*, '(a, 1x, a)') "Initialisation time:", format_time(timer%get("initialization"))
-            write(*,*)
-            write(*,*) ' iter      |residual|        step      relative residual    Time / s'
-        end if
-        if (self%verbose == 1) then
-            write(*,*)
-            write(*,*) ' iter      |residual|        step      relative residual'
-        end if
+        ! Print header
+        call print_cg_header(unit, self%verbose, timer)
 
         ! Main CG iteration loop
         do it = 1, maxit
@@ -268,16 +271,13 @@ contains
 
             if (rel_res <= tol_square) then
                 if (self%verbose > 0) then
-                    write(*,*)
-                    write(*,'(a, i0, a, es15.5)') &
-                        "CG converged in ", it, &
-                        " iterations with residual norm ", sqrt(rnorm)
+                    call print_cg_convergence(unit, it, sqrt(rnorm), self%verbose)
                     call timer%pop
                 end if
                 exit
             end if
 
-            ! Preconditioned updatedresidual z = M^-1 * r
+            ! Preconditioned updated residual z = M^-1 * r
             !$omp parallel do default(none) shared(ndim,zres,residual,Mdiag) private(iat)
             do iat = 1, ndim
                 zres(iat) = residual(iat) * Mdiag(iat)
@@ -304,6 +304,9 @@ contains
 
             if (self%verbose > 1) call timer%pop ! iteration timer stop
 
+            ! Print iteration progress
+            call print_cg_iteration(unit, it, sqrt(rnorm), alpha, sqrt(rel_res), self%verbose, timer)
+
             if (it == maxit) then
                 if (self%verbose > 1) then
                     call timer%pop   ! pop "iteration"
@@ -313,23 +316,66 @@ contains
                 return
             end if
 
-
-            if (self%verbose == 1) then
-                write(*, '(i6,*(1x, es15.5))') it, sqrt(rnorm), alpha, sqrt(rel_res)
-            end if
-            if (self%verbose > 1) then
-                write(*, '(i6,*(1x, es15.5))') it, sqrt(rnorm), alpha, sqrt(rel_res), timer%get("iteration")
-            end if
-
         end do
 
-        if (self%verbose > 1) call timer%pop   
+        if (self%verbose > 1) call timer%pop   ! pop total
 
-        if (self%verbose > 1) then
-            write(*, '(a, 1x, a)') "CG total time : ", format_time(timer%get("total"))
-            write(*,*)
-        end if 
+        ! Print final summary
+        call print_cg_final(unit, timer, self%verbose)
     
     end subroutine solve
+
+    !> Print header for CG solver
+    subroutine print_cg_header(unit, verbose, timer)
+        integer, intent(in) :: unit, verbose
+        type(timer_type), intent(in), optional :: timer
+
+        if (verbose > 1) then
+            write(unit, '(a, 1x, a)') "Initialisation time:", format_time(timer%get("initialization"))
+            write(unit, '(a)') ''
+            write(unit, '(2X,A,6X,A,8X,A,6X,A,4X,A)') &
+                'iter', '|residual|', 'step', 'relative residual', 'Time / s'
+        else if (verbose == 1) then
+            write(unit, '(a)') ''
+            write(unit, '(2X,A,6X,A,8X,A,6X,A)') &
+                'iter', '|residual|', 'step', 'relative residual'
+        end if
+    end subroutine print_cg_header
+
+    !> Print convergence message
+    subroutine print_cg_convergence(unit, iter, res_norm, verbose)
+        integer, intent(in) :: unit, iter, verbose
+        real(wp), intent(in) :: res_norm
+
+        if (verbose > 0) then
+            write(unit, '(a)') ''
+            write(unit, '(a, i0, a, es15.5)') &
+                "CG converged in ", iter, " iterations with residual norm ", res_norm
+        end if
+    end subroutine print_cg_convergence
+
+    !> Print iteration progress
+    subroutine print_cg_iteration(unit, iter, res_norm, alpha, rel_res, verbose, timer)
+        integer, intent(in) :: unit, iter, verbose
+        real(wp), intent(in) :: res_norm, alpha, rel_res
+        type(timer_type), intent(in), optional :: timer
+
+        if (verbose == 1) then
+            write(unit, '(i6,*(1x, es15.5))') iter, res_norm, alpha, rel_res
+        else if (verbose > 1) then
+            write(unit, '(i6,*(1x, es15.5))') iter, res_norm, alpha, rel_res, timer%get("iteration")
+        end if
+    end subroutine print_cg_iteration
+
+    !> Print final summary
+    subroutine print_cg_final(unit, timer, verbose)
+        integer, intent(in) :: unit, verbose
+        type(timer_type), intent(in) :: timer
+
+        if (verbose > 1) then
+            write(unit, '(a, 1x, a)') "CG total time : ", format_time(timer%get("total"))
+            write(unit, '(a)') ''
+        end if
+    end subroutine print_cg_final
 
 end module cg_solver

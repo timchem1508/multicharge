@@ -19,6 +19,7 @@
 
 !> Interface to the charge models
 module multicharge_charge
+   use iso_fortran_env, only : output_unit
    use mctc_env, only : error_type, wp
    use mctc_io, only : structure_type
    use mctc_cutoff, only : get_lattice_points
@@ -90,7 +91,7 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL)
    call mchrg_model%ncoord%get_coordination_number(mol, trans, cn, dcndr, dcndL)
    call mchrg_model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
    call mchrg_model%solve(mol, solver, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
-      & qvec=qvec, dqdr=dqdr, dqdL=dqdL)
+      & qvec=qvec, dqdr=dqdr, dqdL=dqdL, new_unit=output_unit)
 
 end subroutine get_charges
 

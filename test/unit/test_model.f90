@@ -14,6 +14,7 @@
 ! limitations under the License.
 
 module test_model
+   use iso_fortran_env, only: output_unit
    use mctc_env, only: wp
    use mctc_env_testing, only: new_unittest, unittest_type, error_type, test_failed
    use mctc_io_structure, only: structure_type, new
@@ -145,7 +146,7 @@ subroutine test_dadr(error, mol, model)
    ! Obtain the vector of charges
    call model%ncoord%get_coordination_number(mol, trans, cn)
    call model%local_charge(mol, trans, qloc)
-   call model%solve(mol, slv,  error, cn, qloc, qvec=qvec)
+   call model%solve(mol, slv,  error, cn, qloc, qvec=qvec, new_unit=output_unit)
    if (allocated(error)) return
 
    numgrad = 0.0_wp
@@ -266,7 +267,7 @@ subroutine test_dadL(error, mol, model)
 
    call model%ncoord%get_coordination_number(mol, trans, cn)
    call model%local_charge(mol, trans, qloc)
-   call model%solve(mol, slv,  error, cn, qloc, qvec=qvec)
+   call model%solve(mol, slv,  error, cn, qloc, qvec=qvec, new_unit=output_unit)
    if (allocated(error)) return
 
    numsigma = 0.0_wp
@@ -353,8 +354,8 @@ subroutine test_dbdr(error, mol, model)
    
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
       & qloc(mol%nat), dqlocdr(3, mol%nat, mol%nat), dqlocdL(3, 3, mol%nat), &
-      & xvecr(mol%nat + 1), xvecl(mol%nat + 1), numgrad(3, mol%nat, mol%nat + 1), &
-      & dbdr(3, mol%nat, mol%nat + 1), dbdL(3, 3, mol%nat + 1))
+      & xvecr(mol%nat), xvecl(mol%nat), numgrad(3, mol%nat, mol%nat), &
+      & dbdr(3, mol%nat, mol%nat), dbdL(3, 3, mol%nat))
 
    lp: do iat = 1, mol%nat
       do ic = 1, 3
@@ -431,8 +432,8 @@ subroutine test_dbdL(error, mol, model)
 
    allocate (cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
       & qloc(mol%nat), dqlocdr(3, mol%nat, mol%nat), dqlocdL(3, 3, mol%nat), &
-      & xvecr(mol%nat + 1), xvecl(mol%nat + 1), numsigma(3, 3, mol%nat + 1), &
-      & dbdr(3, mol%nat, mol%nat + 1), dbdL(3, 3, mol%nat + 1), xyz(3, mol%nat))
+      & xvecr(mol%nat), xvecl(mol%nat), numsigma(3, 3, mol%nat), &
+      & dbdr(3, mol%nat, mol%nat), dbdL(3, 3, mol%nat), xyz(3, mol%nat))
 
    numsigma = 0.0_wp
 
@@ -536,7 +537,7 @@ subroutine gen_test(error, mol, model, qref, eref)
       allocate (qvec(mol%nat))
    end if
 
-   call model%solve(mol, slv,  error, cn, qloc, energy=energy, qvec=qvec)
+   call model%solve(mol, slv,  error, cn, qloc, energy=energy, qvec=qvec, new_unit=output_unit)
    if (allocated(error)) return
 
    if (present(qref)) then
@@ -602,7 +603,7 @@ subroutine test_numgrad(error, mol, model)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
-         call model%solve(mol, slv,  error, cn, qloc, energy=energy)
+         call model%solve(mol, slv,  error, cn, qloc, energy=energy, new_unit=output_unit)
          if (allocated(error)) exit lp
          er = sum(energy)
 
@@ -610,7 +611,7 @@ subroutine test_numgrad(error, mol, model)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - 2*step
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
-         call model%solve(mol, slv,  error, cn, qloc, energy=energy)
+         call model%solve(mol, slv,  error, cn, qloc, energy=energy, new_unit=output_unit)
          if (allocated(error)) exit lp
          el = sum(energy)
 
@@ -629,7 +630,7 @@ subroutine test_numgrad(error, mol, model)
    ! dqlocdL(:, :, :) = 0.0_wp
 
    call model%solve(mol, slv,  error, cn, qloc, dcndr, dcndL, &
-      & dqlocdr, dqlocdL, gradient=gradient, sigma=sigma)
+      & dqlocdr, dqlocdL, gradient=gradient, sigma=sigma, new_unit=output_unit)
    if (allocated(error)) return
 
    if (any(abs(gradient(:, :) - numgrad(:, :)) > thr2)) then
@@ -688,7 +689,7 @@ subroutine test_numsigma(error, mol, model)
          mol%xyz(:, :) = matmul(eps, xyz)
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
-         call model%solve(mol, slv,  error, cn, qloc, energy=energy)
+         call model%solve(mol, slv,  error, cn, qloc, energy=energy, new_unit=output_unit)
          if (allocated(error)) exit lp
          er = sum(energy)
 
@@ -697,7 +698,7 @@ subroutine test_numsigma(error, mol, model)
          mol%xyz(:, :) = matmul(eps, xyz)
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
-         call model%solve(mol, slv,  error, cn, qloc, energy=energy)
+         call model%solve(mol, slv,  error, cn, qloc, energy=energy, new_unit=output_unit)
          if (allocated(error)) exit lp
          el = sum(energy)
 
@@ -713,7 +714,7 @@ subroutine test_numsigma(error, mol, model)
 
    energy(:) = 0.0_wp
    call model%solve(mol, slv,  error, cn, qloc, dcndr, dcndL, &
-      & dqlocdr, dqlocdL, energy, gradient, sigma)
+      & dqlocdr, dqlocdL, energy, gradient, sigma, new_unit=output_unit)
    if (allocated(error)) return
 
    if (any(abs(sigma(:, :) - numsigma(:, :)) > thr2)) then
@@ -768,14 +769,14 @@ subroutine test_numdqdr(error, mol, model)
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
          ! Inserted slv as 2nd argument
-         call model%solve(mol, slv, error, cn, qloc, qvec=qr)
+         call model%solve(mol, slv, error, cn, qloc, qvec=qr, new_unit=output_unit)
          if (allocated(error)) exit lp
 
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - 2*step
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
          ! Inserted slv as 2nd argument
-         call model%solve(mol, slv, error, cn, qloc, qvec=ql)
+         call model%solve(mol, slv, error, cn, qloc, qvec=ql, new_unit=output_unit)
          if (allocated(error)) exit lp
 
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
@@ -788,7 +789,7 @@ subroutine test_numdqdr(error, mol, model)
    call model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
 
    call model%solve(mol, slv, error, cn, qloc, dcndr, dcndL, &
-      & dqlocdr, dqlocdL, dqdr=dqdr, dqdL=dqdL)
+      & dqlocdr, dqlocdL, dqdr=dqdr, dqdL=dqdL, new_unit=output_unit)
    if (allocated(error)) return
 
    if (any(abs(dqdr(:, :, :) - numdr(:, :, :)) > thr2)) then
@@ -847,7 +848,7 @@ subroutine test_numdqdL(error, mol, model)
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
          ! Fix 1: Pass 'slv' as 2nd argument
-         call model%solve(mol, slv, error, cn, qloc, qvec=qr)
+         call model%solve(mol, slv, error, cn, qloc, qvec=qr, new_unit=output_unit)
          if (allocated(error)) exit lp
 
          eps(jc, ic) = eps(jc, ic) - 2*step
@@ -856,7 +857,7 @@ subroutine test_numdqdL(error, mol, model)
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
          ! Fix 2: Pass 'slv' as 2nd argument
-         call model%solve(mol, slv, error, cn, qloc, qvec=ql)
+         call model%solve(mol, slv, error, cn, qloc, qvec=ql, new_unit=output_unit)
          if (allocated(error)) exit lp
 
          eps(jc, ic) = eps(jc, ic) + step
@@ -872,7 +873,7 @@ subroutine test_numdqdL(error, mol, model)
 
    ! Fix 3: Pass 'slv' as 2nd argument
    call model%solve(mol, slv, error, cn, qloc, dcndr, dcndL, &
-      & dqlocdr, dqlocdL, dqdr=dqdr, dqdL=dqdL)
+      & dqlocdr, dqlocdL, dqdr=dqdr, dqdL=dqdL, new_unit=output_unit)
    if (allocated(error)) return
 
    if (any(abs(dqdL(:, :, :) - numdL(:, :, :)) > thr2)) then
@@ -941,7 +942,7 @@ subroutine test_dfdr(error, mol, dfdq, model)
 
    ! Solve with direct solver to get dqdr
    call model%solve(mol, slv_dqdr, error, cn, qloc, dcndr, dcndL, &
-      & dqlocdr, dqlocdL, dqdr=dqdr, dqdL=dqdL)
+      & dqlocdr, dqlocdL, dqdr=dqdr, dqdL=dqdL, new_unit=output_unit)
    if (allocated(error)) return
 
    ! Compute direct product: dfdr = dfdq * dqdr
@@ -954,7 +955,7 @@ subroutine test_dfdr(error, mol, dfdq, model)
 
    ! Solve with CG solver to get gradient
    call model%solve(mol, slv_dfdr, error, cn, qloc, dcndr, dcndL, &
-      & dqlocdr, dqlocdL, dfdq=dfdq, gradient=gradient, sigma=sigma)
+      & dqlocdr, dqlocdL, dfdq=dfdq, gradient=gradient, sigma=sigma, new_unit=output_unit)
    if (allocated(error)) return
 
    ! Compare CG gradient with direct product
@@ -1668,6 +1669,8 @@ subroutine test_eeqbc_q_mb02(error)
    if (allocated(error)) return
    call gen_test(error, mol, model, qref=ref)
 
+   
+
 end subroutine test_eeqbc_q_mb02
 
 subroutine test_eeqbc_q_actinides(error)
@@ -1790,6 +1793,8 @@ subroutine test_eeqbc_g_mb06(error)
    call new_eeqbc2025_model(mol, model, error)
    if (allocated(error)) return
    call test_numgrad(error, mol, model)
+
+   
 
 end subroutine test_eeqbc_g_mb06
 

@@ -22,7 +22,7 @@
 
 !> General charge model
 module multicharge_model_type
-
+   use iso_fortran_env, only : output_unit
    use mctc_env, only: timer_type, format_time, error_type, fatal_error, wp,  ik => IK
    use mctc_io, only: structure_type
    use mctc_io_constants, only: pi
@@ -155,7 +155,7 @@ subroutine get_rec_trans(lattice, trans)
 end subroutine get_rec_trans
 
 subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
-   & energy, gradient, sigma, qvec, dqdr, dqdL, dfdq, verbose)
+   & energy, gradient, sigma, qvec, dqdr, dqdL, dfdq, verbose, new_unit)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in), target :: self
    !> Molecular structure data
@@ -192,6 +192,8 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    real(wp), intent(in), optional :: dfdq(:)
    ! Optional print verbossity number input flag
    integer, intent(in), optional :: verbose
+   ! Output unit
+   integer, intent(in), optional :: new_unit
 
    integer :: ic, jc, iat, ndim
    logical :: grad, cpq, dcn
@@ -199,6 +201,7 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
 
    ! Local variable for print verbosity
    integer :: verbose_solve
+   integer :: out
    ! Variables for solving ES equation
    real(wp), allocatable :: xvec(:), vrhs(:), amat(:, :)
    real(wp), allocatable :: ainv(:, :), jmat(:, :)
@@ -241,6 +244,12 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       verbose_solve = verbose
    end if 
 
+   if (present(new_unit)) then
+      out = new_unit
+   else
+      out = output_unit
+   end if
+
    ! The cg_solver requires postive definite system,
    ! so the Lagrangian constraint is handled separately.
    if (slv%need_pos_def .eqv. .true.) then
@@ -267,16 +276,8 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
 
    call timer%pop ! stop setup timer
 
-   if (verbose_solve > 0) then
-      write(*,*)
-      write(*,'( 54("-"))')
-      write(*,'(a)') "             Charge equilibration solver            "
-      write(*,'( 54("-"))')
-      write(*,*)
-      if (verbose_solve > 1) then
-         write(*, '(a, 1x, a)') "A-matrix and X-vector formation time : ", format_time(timer%get("setup"))
-      end if
-   end if
+   ! Print header
+   call print_solve_header(out, verbose_solve, timer)
 
    allocate(jmat(mol%nat, mol%nat))
 
@@ -286,7 +287,7 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       ainv = amat
 
       ! Solving the linear system
-      call slv%solve(amat, xvec, vrhs, ainv, cpq, error)
+      call slv%solve(amat, xvec, vrhs, ainv, cpq, new_unit=out, error=error)
 
       ! Partial charges
       if (present(qvec)) then
@@ -305,8 +306,8 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       ! Constrained system
       allocate(vvec(mol%nat))  
       allocate(uvec(mol%nat))
-      allocate(chivec(mol%nat))
       allocate(unitvec(mol%nat))
+      allocate(chivec(mol%nat))
       allocate(jinv(mol%nat, mol%nat))
 
       ! J matrix and chi vector for the constrained system
@@ -322,19 +323,13 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       !$omp end parallel do
       unitvec = 1.0_wp
 
-      if (verbose_solve > 0) then
-         write(*,*)
-         write(*,*) 'Solving constrained system: J*u = 1'
-      end if
+      call print_constrained_system_message(out, verbose_solve, 'u')
       ! Constrained response: J*u = 1
-      call slv%solve(amat=jmat, xvec=unitvec, vrhs=uvec, ainv=jinv, cpq=cpq, error=error)
+      call slv%solve(amat=jmat, xvec=unitvec, vrhs=uvec, ainv=jinv, cpq=cpq, new_unit=out, error=error)
 
-      if (verbose_solve > 0) then
-         write(*,*)
-         write(*,*) 'Solving constrained system: J*v = chi'
-      end if
+      call print_constrained_system_message(out, verbose_solve, 'v')
       ! Constrained response: J*u = chi
-      call slv%solve(amat=jmat, xvec=chivec, vrhs=vvec, ainv=jinv, cpq=cpq, error=error)
+      call slv%solve(amat=jmat, xvec=chivec, vrhs=vvec, ainv=jinv, cpq=cpq, new_unit=out, error=error)
 
       uvecsum = sum(uvec)
       vvecsum = sum(vvec)
@@ -376,10 +371,8 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    ! Calculate gradients if requested
    if (grad) then
       call timer%push("gradient")
-      if (verbose_solve > 0) then
-         write(*,*)
-         write(*,*) ' Calculating gradients'
-      end if
+      call print_gradient_message(out, verbose_solve)
+
       if (adj_grad) then
          ! Adjoint gradient calculation
          if (add_lagr .eqv. .true.) then
@@ -397,14 +390,11 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
             unitvec = 1.0_wp
             ! Constrained response: J*u = 1
             call slv%solve(amat=jmat, xvec=unitvec, vrhs=uvec, &
-               & ainv=jinv, cpq=cpq, error=error)
+               & ainv=jinv, cpq=cpq, new_unit=out, error=error)
             uvecsum = sum(uvec)
          end if 
 
-         if (verbose_solve > 0) then
-            write(*,*)
-            write(*,*) 'Solving adjoint system: J*y = dfdq'
-         end if
+         call print_adjoint_message(out, verbose_solve)
 
          ! Solving the adjoint system J*y = dfdq
          allocate(yvec(mol%nat))
@@ -417,7 +407,7 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
 
          ! Derivative response: J*y = dfdq
          call slv%solve(amat=jmat, xvec=dfdq, vrhs=yvec, &
-               & ainv=jinv, cpq=cpq, error=error)
+               & ainv=jinv, cpq=cpq, new_unit=out, error=error)
          yvecsum = sum(yvec)
 
          ! Project out the component of yvec along the constraint direction uvec
@@ -450,11 +440,7 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
       end if
 
       call timer%pop ! stop gradient timer
-      if (verbose_solve > 1) then
-         write(*,*)
-         write(*, '(a, 1x, a)') "Gradient calculation time : ", format_time(timer%get("gradient"))
-         write(*,*)
-      end if
+      call print_gradient_time(out, verbose_solve, timer)
    end if
 
    ! Calculate charge derivatives if requested
@@ -469,12 +455,11 @@ subroutine solve(self, mol, slv, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL
    
    call timer%pop ! stop total solve timer
 
-   if (verbose_solve > 1) then
-      write(*, '(a, 1x, a)') "Total solve time : ", format_time(timer%get("total"))
-      write(*,*)
-      write(*,*)
-   end if
+   call print_total_time(out, verbose_solve, timer)
+
 end subroutine solve
+
+!> Local charges calculation
 
 subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL)
    !> Electronegativity equilibration model
@@ -505,5 +490,84 @@ subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL)
    qloc = qloc + mol%charge / real(mol%nat, wp)
 
 end subroutine local_charge
+
+!> Print header for charge equilibration solver
+subroutine print_solve_header(unit, verbose, timer)
+   integer, intent(in) :: unit, verbose
+   type(timer_type), intent(in) :: timer
+
+   if (verbose > 0) then
+      write(unit, '(a)') ''
+      write(unit, '(54("-"))')
+      write(unit, '(a)') "             Charge equilibration solver            "
+      write(unit, '(54("-"))')
+      write(unit, '(a)') ''
+      if (verbose > 1) then
+         write(unit, '(a, 1x, a)') "A-matrix and X-vector formation time : ", &
+            format_time(timer%get("setup"))
+      end if
+   end if
+end subroutine print_solve_header
+
+!> Print message for constrained system solves
+subroutine print_constrained_system_message(unit, verbose, which)
+   integer, intent(in) :: unit, verbose
+   character, intent(in) :: which
+
+   if (verbose > 0) then
+      write(unit, '(a)') ''
+      if (which == 'u') then
+         write(unit, '(a)') 'Solving constrained system: J*u = 1'
+      else if (which == 'v') then
+         write(unit, '(a)') 'Solving constrained system: J*v = chi'
+      end if
+   end if
+end subroutine print_constrained_system_message
+
+!> Print message for gradient calculation start
+subroutine print_gradient_message(unit, verbose)
+   integer, intent(in) :: unit, verbose
+
+   if (verbose > 0) then
+      write(unit, '(a)') ''
+      write(unit, '(a)') 'Calculating gradients'
+   end if
+end subroutine print_gradient_message
+
+!> Print message for adjoint system solve
+subroutine print_adjoint_message(unit, verbose)
+   integer, intent(in) :: unit, verbose
+
+   if (verbose > 0) then
+      write(unit, '(a)') ''
+      write(unit, '(a)') 'Solving adjoint system: J*y = dfdq'
+   end if
+end subroutine print_adjoint_message
+
+!> Print gradient calculation time
+subroutine print_gradient_time(unit, verbose, timer)
+   integer, intent(in) :: unit, verbose
+   type(timer_type), intent(in) :: timer
+
+   if (verbose > 1) then
+      write(unit, '(a)') ''
+      write(unit, '(a, 1x, a)') "Gradient calculation time : ", &
+         format_time(timer%get("gradient"))
+      write(unit, '(a)') ''
+   end if
+end subroutine print_gradient_time
+
+!> Print total solve time
+subroutine print_total_time(unit, verbose, timer)
+   integer, intent(in) :: unit, verbose
+   type(timer_type), intent(in) :: timer
+
+   if (verbose > 1) then
+      write(unit, '(a, 1x, a)') "Total solve time : ", format_time(timer%get("total"))
+      write(unit, '(a)') ''
+      write(unit, '(a)') ''
+   end if
+end subroutine print_total_time
+
 
 end module multicharge_model_type

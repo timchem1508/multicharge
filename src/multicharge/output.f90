@@ -61,12 +61,12 @@ subroutine write_cg_solver(unit, solver)
    integer, intent(in) :: unit
    class(mchrg_solver_cg), intent(in) :: solver
 
-   write(*, '(54("-"))')
-   write(*,'(a)') "            Conjugate Gradient Solver Setup         "
-   write(*, '(54("-"))')
-   write(*,'(a, 1x, i6)') "Max iterations : ", solver%cgmiter
-   write(*,'(a, 1x, es10.2)') "Tolerance      : ", solver%cgtol
-   write(*,'(a)') "Preconditioner : Jacobi (Diagonal)"
+   write(unit, '(54("-"))')
+   write(unit, '(12x, a)') "Conjugate Gradient Solver Setup"
+   write(unit, '(54("-"))')
+   write(unit, '(a, 1x, i6)') "Max iterations : ", solver%cgmiter
+   write(unit, '(a, 1x, es10.2)') "Tolerance      : ", solver%cgtol
+   write(unit, '(a)') "Preconditioner : Jacobi (Diagonal)"
 
 end subroutine write_cg_solver
 
@@ -74,9 +74,9 @@ subroutine write_direct_solver(unit, solver)
    integer, intent(in) :: unit
    class(mchrg_solver_direct), intent(in) :: solver
 
-   write(*, '(54("-"))')
-   write(*,'(a)') "                  Direct Solver Setup         "
-   write(*, '(54("-"))')
+   write(unit, '(54("-"))')
+   write(unit, '(18x, a)') "Direct Solver Setup"
+   write(unit, '(54("-"))')
 
 end subroutine write_direct_solver
 
