@@ -32,6 +32,7 @@ tests = [
   'model',
   'pbc',
   'wignerseitz',
+  'solver',
 ]
 
 test_srcs = files(

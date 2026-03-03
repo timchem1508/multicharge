@@ -175,10 +175,11 @@ subroutine new_eeqbc_model(self, mol, error, chi, rad, &
 
 end subroutine new_eeqbc_model
 
-subroutine update(self, mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
+subroutine update(self, mol, cache, ndim, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
    class(eeqbc_model), intent(in) :: self
    type(structure_type), intent(in) :: mol
    type(cache_container), intent(inout) :: cache
+   integer, intent(in) :: ndim  
    real(wp), intent(in) :: cn(:)
    real(wp), intent(in), optional :: qloc(:)
    real(wp), intent(in), optional :: dcndr(:, :, :)
@@ -187,7 +188,6 @@ subroutine update(self, mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
    real(wp), intent(in), optional :: dqlocdL(:, :, :)
 
    logical :: grad
-
    type(eeqbc_cache), pointer :: ptr
 
    call taint(cache, ptr)
@@ -211,12 +211,15 @@ subroutine update(self, mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
 
    ! Allocate (for get_xvec and xvec_derivs)
    if (.not. allocated(ptr%xtmp)) then
-      allocate(ptr%xtmp(mol%nat + 1))
+      allocate(ptr%xtmp(ndim))
+   else if (size(ptr%xtmp) /= ndim) then
+      deallocate(ptr%xtmp)
+      allocate(ptr%xtmp(ndim))
    end if
 
    ! Allocate cmat
    if (.not. allocated(ptr%cmat)) then
-      allocate(ptr%cmat(mol%nat + 1, mol%nat + 1))
+      allocate(ptr%cmat(ndim, ndim))
    end if
 
    if (any(mol%periodic)) then
@@ -227,10 +230,10 @@ subroutine update(self, mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
       call get_cmat_3d(self, mol, ptr%wsc, ptr%cmat)
       if (grad) then
          if (.not. allocated(ptr%dcdr)) then
-            allocate(ptr%dcdr(3, mol%nat, mol%nat + 1))
+            allocate(ptr%dcdr(3, mol%nat, ndim))
          end if
          if (.not. allocated(ptr%dcdL)) then
-            allocate(ptr%dcdL(3, 3, mol%nat + 1))
+            allocate(ptr%dcdL(3, 3, ndim))
          end if
          call get_dcmat_3d(self, mol, ptr%wsc, ptr%dcdr, ptr%dcdL)
       end if
@@ -240,10 +243,10 @@ subroutine update(self, mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
       ! cmat gradients
       if (grad) then
          if (.not. allocated(ptr%dcdr)) then
-            allocate(ptr%dcdr(3, mol%nat, mol%nat + 1))
+            allocate(ptr%dcdr(3, mol%nat, ndim))
          end if
          if (.not. allocated(ptr%dcdL)) then
-            allocate(ptr%dcdL(3, 3, mol%nat + 1))
+            allocate(ptr%dcdL(3, 3, ndim))
          end if
          call get_dcmat_0d(self, mol, ptr%dcdr, ptr%dcdL)
       end if
@@ -277,7 +280,11 @@ subroutine get_xvec(self, mol, cache, xvec)
       ptr%xtmp(iat) = -self%chi(izp) + self%kcnchi(izp) * ptr%cn(iat) &
          & + self%kqchi(izp) * ptr%qloc(iat)
    end do
-   ptr%xtmp(mol%nat + 1) = mol%charge
+
+   ! Only write the extra element if xtmp has room for it (i.e., for constrained systems)
+   if (size(ptr%xtmp) > mol%nat) then
+      ptr%xtmp(mol%nat + 1) = mol%charge
+   end if
 
    call gemv(ptr%cmat, ptr%xtmp, xvec)
 
@@ -329,7 +336,11 @@ subroutine get_xvec_derivs(self, mol, cache, dxdr, dxdL)
    real(wp), allocatable :: dxdr_local(:, :, :), dxdL_local(:, :, :), dtmpdr_local(:, :, :), dtmpdL_local(:, :, :)
 
    call view(cache, ptr)
-   allocate(dtmpdr(3, mol%nat, mol%nat + 1), dtmpdL(3, 3, mol%nat + 1))
+   if (size(ptr%xtmp) > mol%nat) then
+      allocate(dtmpdr(3, mol%nat, mol%nat + 1), dtmpdL(3, 3, mol%nat + 1))
+   else
+      allocate(dtmpdr(3, mol%nat, mol%nat), dtmpdL(3, 3, mol%nat))
+   end if
 
    dxdr(:, :, :) = 0.0_wp
    dxdL(:, :, :) = 0.0_wp
@@ -440,7 +451,7 @@ subroutine get_xvec_derivs(self, mol, cache, dxdr, dxdL)
 
             vec = mol%xyz(:, iat) - mol%xyz(:, jat)
             dxdL_local(:, :, iat) = dxdL_local(:, :, iat) + ptr%xtmp(jat) * spread(ptr%dcdr(:, iat, jat), 1, 3) * spread(vec, 2, 3)
-         dxdL_local(:, :, jat) = dxdL_local(:, :, jat) + ptr%xtmp(iat) * spread(ptr%dcdr(:, jat, iat), 1, 3) * spread(-vec, 2, 3)
+            dxdL_local(:, :, jat) = dxdL_local(:, :, jat) + ptr%xtmp(iat) * spread(ptr%dcdr(:, jat, iat), 1, 3) * spread(-vec, 2, 3)
          end do
          dxdr_local(:, iat, iat) = dxdr_local(:, iat, iat) + ptr%xtmp(iat) * ptr%dcdr(:, iat, iat)
          dxdL_local(:, :, iat) = dxdL_local(:, :, iat) + ptr%xtmp(iat) * ptr%dcdL(:, :, iat)
@@ -523,9 +534,11 @@ subroutine get_amat_0d(self, mol, cn, qloc, cmat, amat)
    deallocate(amat_local)
    !$omp end parallel
 
-   amat(mol%nat + 1, 1:mol%nat + 1) = 1.0_wp
-   amat(1:mol%nat + 1, mol%nat + 1) = 1.0_wp
-   amat(mol%nat + 1, mol%nat + 1) = 0.0_wp
+   if (size(amat, 1) == mol%nat + 1) then
+      amat(mol%nat + 1, 1:mol%nat + 1) = 1.0_wp
+      amat(1:mol%nat + 1, mol%nat + 1) = 1.0_wp
+      amat(mol%nat + 1, mol%nat + 1) = 0.0_wp
+   end if
 
 end subroutine get_amat_0d
 
@@ -599,10 +612,11 @@ subroutine get_amat_3d(self, mol, wsc, cn, qloc, cmat, amat)
    deallocate(amat_local)
    !$omp end parallel
 
-   amat(mol%nat + 1, 1:mol%nat + 1) = 1.0_wp
-   amat(1:mol%nat + 1, mol%nat + 1) = 1.0_wp
-   amat(mol%nat + 1, mol%nat + 1) = 0.0_wp
-
+   if (size(amat, 1) == mol%nat + 1) then
+      amat(mol%nat + 1, 1:mol%nat + 1) = 1.0_wp
+      amat(1:mol%nat + 1, mol%nat + 1) = 1.0_wp
+      amat(mol%nat + 1, mol%nat + 1) = 0.0_wp
+   end if
 end subroutine get_amat_3d
 
 subroutine get_amat_dir_3d(rij, gam, trans, kbc, rvdw, capi, capj, amat)
@@ -1058,7 +1072,11 @@ subroutine get_cmat_0d(self, mol, cmat)
    deallocate(cmat_local)
    !$omp end parallel
 
-   cmat(mol%nat + 1, mol%nat + 1) = 1.0_wp
+   if (size(cmat, 1) == mol%nat + 1) then
+      cmat(mol%nat + 1, 1:mol%nat + 1) = 0.0_wp
+      cmat(1:mol%nat + 1, mol%nat + 1) = 0.0_wp
+      cmat(mol%nat + 1, mol%nat + 1) = 1.0_wp
+   end if
 
 end subroutine get_cmat_0d
 
@@ -1123,7 +1141,11 @@ subroutine get_cmat_3d(self, mol, wsc, cmat)
    deallocate(cmat_local)
    !$omp end parallel
    !
-   cmat(mol%nat + 1, mol%nat + 1) = 1.0_wp
+   if (size(cmat, 1) == mol%nat + 1) then
+      cmat(mol%nat + 1, 1:mol%nat + 1) = 0.0_wp
+      cmat(1:mol%nat + 1, mol%nat + 1) = 0.0_wp
+      cmat(mol%nat + 1, mol%nat + 1) = 1.0_wp
+   end if
 
 end subroutine get_cmat_3d
 

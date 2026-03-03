@@ -149,22 +149,20 @@ else
 endif
 
 # Create the tool chain library as subproject
-mctc_dep = dependency('mctc-lib', required: false)
-if not mctc_dep.found()
-  mctc_prj = subproject(
-    'mctc-lib',
-    version: '>=0.5.1',
-    default_options: [
-      'default_library=static',
-    ],
-  )
-  mctc_dep = mctc_prj.get_variable('mctc_dep')
+mctc_prj = subproject(
+  'mctc-lib',
+  version: '>=0.5.1',
+  default_options: [
+    'default_library=static',
+  ],
+)
+mctc_dep = mctc_prj.get_variable('mctc_dep')
 
-  if install
-    install_data(
-      mctc_prj.get_variable('mctc_lic'),
-      install_dir: get_option('datadir')/'licenses'/meson.project_name()/'mctc-lib'
-    )
-  endif
+if install
+  install_data(
+    mctc_prj.get_variable('mctc_lic'),
+    install_dir: get_option('datadir')/'licenses'/meson.project_name()/'mctc-lib'
+  )
 endif
+
 lib_deps += mctc_dep
