@@ -30,8 +30,6 @@ module multicharge_charge
    use solver_cache, only: mchrg_solver_cache
    use multicharge_param, only : new_eeq2019_model, new_eeqbc2025_model
 
-   use multicharge_output, only: json_results
-
    implicit none
    private
 
@@ -42,8 +40,10 @@ contains
 
 !> Classical electronegativity equilibration charges
 subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL)
-   !> Electronegativity equilibration model
+   
+   !> Multicharge model
    class(mchrg_model_type), intent(in) :: mchrg_model
+
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
 

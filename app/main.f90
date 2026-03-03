@@ -92,9 +92,9 @@ program main
             mol%charge = charge
             write(output_unit, '(a,/)') &
                "[Info] Molecular charge read from '"//chargeinput//"'"
-            else
-               write(output_unit, '(a,/)') &
-                  "[Warn] Could not read molecular charge read from '"//chargeinput//"'"
+         else
+            write(output_unit, '(a,/)') &
+               "[Warn] Could not read molecular charge read from '"//chargeinput//"'"
          end if
          close(unit)
       end if
@@ -124,8 +124,8 @@ program main
       gradient(:, :) = 0.0_wp
       sigma(:, :) = 0.0_wp
       allocate(dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat))
-      dqdr = 0.0_wp
-      dqdL = 0.0_wp
+      dqdr(:, :, :) = 0.0_wp
+      dqdL(:, :, :) = 0.0_wp
       allocate(dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat))
       allocate(dqlocdr(3, mol%nat, mol%nat), dqlocdL(3, 3, mol%nat))
    end if

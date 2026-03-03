@@ -209,7 +209,7 @@ subroutine update(self, mol, cache, ndim, cn, qloc, dcndr, dcndL, dqlocdr, dqloc
       ptr%dqlocdL = dqlocdL
    end if
 
-   ! Allocate temporary vector with correct size (depends on ndim)
+   ! Allocate (for get_xvec and xvec_derivs)
    if (.not. allocated(ptr%xtmp)) then
       allocate(ptr%xtmp(ndim))
    else if (size(ptr%xtmp) /= ndim) then
@@ -217,7 +217,7 @@ subroutine update(self, mol, cache, ndim, cn, qloc, dcndr, dcndL, dqlocdr, dqloc
       allocate(ptr%xtmp(ndim))
    end if
 
-   ! Allocate cmat 
+   ! Allocate cmat
    if (.not. allocated(ptr%cmat)) then
       allocate(ptr%cmat(ndim, ndim))
    end if
