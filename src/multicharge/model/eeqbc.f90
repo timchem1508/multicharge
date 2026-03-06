@@ -188,6 +188,7 @@ subroutine update(self, mol, cache, ndim, cn, qloc, dcndr, dcndL, dqlocdr, dqloc
    real(wp), intent(in), optional :: dqlocdL(:, :, :)
 
    logical :: grad
+
    type(eeqbc_cache), pointer :: ptr
 
    call taint(cache, ptr)
@@ -282,7 +283,7 @@ subroutine get_xvec(self, mol, cache, xvec)
    end do
 
    ! Only write the extra element if xtmp has room for it (i.e., for constrained systems)
-   if (size(ptr%xtmp) > mol%nat) then
+   if (size(ptr%xtmp) == mol%nat + 1) then
       ptr%xtmp(mol%nat + 1) = mol%charge
    end if
 
@@ -336,7 +337,7 @@ subroutine get_xvec_derivs(self, mol, cache, dxdr, dxdL)
    real(wp), allocatable :: dxdr_local(:, :, :), dxdL_local(:, :, :), dtmpdr_local(:, :, :), dtmpdL_local(:, :, :)
 
    call view(cache, ptr)
-   if (size(ptr%xtmp) > mol%nat) then
+   if (size(ptr%dcdr(3, mol%nat, :)) == mol%nat + 1 .and. size(ptr%dcdL(3, 3, :)) == size(ptr%dcdr(3, mol%nat, :))) then
       allocate(dtmpdr(3, mol%nat, mol%nat + 1), dtmpdL(3, 3, mol%nat + 1))
    else
       allocate(dtmpdr(3, mol%nat, mol%nat), dtmpdL(3, 3, mol%nat))
@@ -1073,8 +1074,6 @@ subroutine get_cmat_0d(self, mol, cmat)
    !$omp end parallel
 
    if (size(cmat, 1) == mol%nat + 1) then
-      cmat(mol%nat + 1, 1:mol%nat + 1) = 0.0_wp
-      cmat(1:mol%nat + 1, mol%nat + 1) = 0.0_wp
       cmat(mol%nat + 1, mol%nat + 1) = 1.0_wp
    end if
 
@@ -1142,8 +1141,6 @@ subroutine get_cmat_3d(self, mol, wsc, cmat)
    !$omp end parallel
    !
    if (size(cmat, 1) == mol%nat + 1) then
-      cmat(mol%nat + 1, 1:mol%nat + 1) = 0.0_wp
-      cmat(1:mol%nat + 1, mol%nat + 1) = 0.0_wp
       cmat(mol%nat + 1, mol%nat + 1) = 1.0_wp
    end if
 

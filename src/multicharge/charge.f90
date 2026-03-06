@@ -24,10 +24,10 @@ module multicharge_charge
    use mctc_io, only : structure_type
    use mctc_cutoff, only : get_lattice_points
    use multicharge_model_type, only : mchrg_model_type
-   use solver_type, only : mchrg_solver_type, mchrg_solver_input
-   use direct_solver, only : mchrg_solver_direct, new_direct_solver, direct_input, direct_cache
-   use cg_solver, only : mchrg_solver_cg, new_cg_solver, cg_input, cg_cache
-   use solver_cache, only: mchrg_solver_cache
+   use multicharge_solver_type, only : mchrg_solver_type, mchrg_solver_input
+   use multicharge_solver_direct, only : direct_solver, new_direct_solver, direct_input, direct_cache
+   use multicharge_solver_cg, only : cg_solver, new_cg_solver, cg_input, cg_cache
+   use multicharge_solver_cache, only: mchrg_solver_cache
    use multicharge_param, only : new_eeq2019_model, new_eeqbc2025_model
 
    implicit none
@@ -64,17 +64,16 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL)
    real(wp), allocatable :: qloc(:), dqlocdr(:, :, :), dqlocdL(:, :, :)
    real(wp), allocatable :: trans(:, :)
 
-   !> Solver variables
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
 
-   allocate(cg_input :: solver_input)
+   allocate(direct_input :: solver_input)
    select type(solver_input)
-   type is (cg_input)
+   type is (direct_input)
       block
-          class(mchrg_solver_cg), allocatable :: tmp
+          class(direct_solver), allocatable :: tmp
           allocate(tmp)
-          call new_cg_solver(tmp, solver_input)
+          call new_direct_solver(tmp, solver_input)
           call move_alloc(tmp, solver)
       end block
    end select
@@ -91,7 +90,7 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL)
    call mchrg_model%ncoord%get_coordination_number(mol, trans, cn, dcndr, dcndL)
    call mchrg_model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
    call mchrg_model%solve(mol, solver, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
-      & qvec=qvec, dqdr=dqdr, dqdL=dqdL, new_unit=output_unit)
+      & qvec=qvec, dqdr=dqdr, dqdL=dqdL, unit=output_unit)
 
 end subroutine get_charges
 
@@ -101,6 +100,7 @@ subroutine get_eeq_charges(mol, error, qvec, dqdr, dqdL)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
+   
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 

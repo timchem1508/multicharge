@@ -17,7 +17,7 @@
 !> Contains the cache baseclass for the linear equations solvers and a container for mutable cache data
 
 !> Cache for charge models
-module solver_cache
+module multicharge_solver_cache
    use mctc_env, only: wp
    
    implicit none
@@ -31,8 +31,6 @@ module solver_cache
    !> Cache for the solvers
    type, abstract, public :: mchrg_solver_cache 
       real(wp), allocatable :: vrhs(:)
-      real(wp), allocatable :: ainv(:, :)
-      logical, allocatable :: cpq
    end type mchrg_solver_cache
 
-end module solver_cache
+end module multicharge_solver_cache

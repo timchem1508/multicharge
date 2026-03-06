@@ -16,9 +16,9 @@
 !> @file multicharge/solver/type.f90
 !> Provides a general base class for the linear system solvers.
 
-module solver_type
+module multicharge_solver_type
     use mctc_env, only: error_type, wp
-    use solver_cache, only: cache_container
+    use multicharge_solver_cache, only: cache_container
     implicit none
     private
 
@@ -42,7 +42,7 @@ module solver_type
             real(wp), intent(in)  :: amat(:, :)
             real(wp), intent(in)  :: xvec(:)
             real(wp), intent(inout) :: vrhs(:)
-            real(wp), intent(out) :: ainv(:, :)
+            real(wp), intent(out), optional :: ainv(:, :)
             logical, intent(in), optional :: cpq
             integer, intent(in), optional :: new_unit
             type(error_type), allocatable, intent(out) :: error
@@ -53,7 +53,7 @@ module solver_type
             class(mchrg_solver_type), intent(in) :: self
             type(cache_container), intent(inout) :: cache
             real(wp), intent(inout) :: vrhs(:)
-            real(wp), intent(out) :: ainv(:, :)
+            real(wp), intent(out), optional :: ainv(:, :)
             logical, intent(in), optional :: cpq
         end subroutine update
     end interface
@@ -62,4 +62,4 @@ module solver_type
     type, abstract, public :: mchrg_solver_input
     end type mchrg_solver_input
 
-end module solver_type
+end module multicharge_solver_type

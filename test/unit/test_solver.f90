@@ -24,9 +24,9 @@ module test_solver
    use multicharge_param, only: new_eeq2019_model, new_eeqbc2025_model
    use multicharge_model_cache, only: cache_container
    use multicharge_charge, only: get_charges, get_eeq_charges, get_eeqbc_charges
-   use solver_type, only: mchrg_solver_type, mchrg_solver_input
-   use direct_solver, only : mchrg_solver_direct, new_direct_solver, direct_input
-   use cg_solver, only : mchrg_solver_cg, new_cg_solver, cg_input
+   use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
+   use multicharge_solver_direct, only : direct_solver, new_direct_solver, direct_input
+   use multicharge_solver_cg, only : cg_solver, new_cg_solver, cg_input
    implicit none
    private
 
@@ -49,24 +49,24 @@ subroutine collect_solver(testsuite)
       & new_unittest("cg-identity-2x2", test_cg_identity_2x2), &
       & new_unittest("cg-diagonal-5x5", test_cg_diagonal_5x5), &
       & new_unittest("cg-spd-small", test_cg_spd_small), &
+      & new_unittest("cg-spd-medium", test_cg_spd_medium), &
       & new_unittest("cg-spd-large", test_cg_spd_large), &
       & new_unittest("cg-ill-conditioned", test_cg_ill_conditioned), &
       & new_unittest("cg-zero-rhs", test_cg_zero_rhs), &
-      & new_unittest("cg-random-spd", test_cg_random_spd) &
-      !& new_unittest("time-scaling", test_cg_spd_time_scaling) &
-      !& new_unittest("time-scaling-tri-diag-matrix", test_cg_121_time_scaling) &
+      & new_unittest("cg-random-spd", test_cg_random_spd), &
+      & new_unittest("time-scaling", test_cg_spd_time_scaling), &
+      & new_unittest("time-scaling-tri-diag-matrix", test_cg_121_time_scaling) &
       & ]
 
 end subroutine collect_solver
 
-!> Test 1: Identity matrix 2x2
+!> Test: Identity matrix 2x2
 subroutine test_cg_identity_2x2(error)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
    integer, parameter :: n = 2
-   logical, parameter :: cpq = .false.
    real(wp) :: amat(n, n), xvec(n), vrhs(n), ainv(n, n)
    real(wp) :: expected(n), residual
 
@@ -90,7 +90,7 @@ subroutine test_cg_identity_2x2(error)
          solver_input%cgtol = tol
       end if
          block
-             class(mchrg_solver_cg), allocatable :: tmp
+             class(cg_solver), allocatable :: tmp
              allocate(tmp)
              call new_cg_solver(tmp, solver_input)
              call move_alloc(tmp, solver)
@@ -111,23 +111,27 @@ subroutine test_cg_identity_2x2(error)
 
    ! Solve iteratively
    call cpu_time(start_cg)
-   call solver%solve(amat, xvec, vrhs, ainv, cpq, error=error, new_unit=output_unit)
+   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
    if (allocated(error)) return
    call cpu_time(end_cg)
 
-   ! Reference solution
+   ! Reference direct solver
    deallocate(solver_input)
    deallocate(solver)
    allocate(direct_input :: solver_input)
-   allocate(mchrg_solver_direct :: solver)
-   select type (solver_input)
-   type is (direct_input)
-      call new_direct_solver(solver, solver_input)
+   select type(solver_input)
+      type is (direct_input)
+         block
+            class(direct_solver), allocatable :: tmp
+            allocate(tmp)
+            call new_direct_solver(tmp, solver_input)
+            call move_alloc(tmp, solver)
+         end block
    end select
 
    expected = [0.0_wp, 0.0_wp]
    call cpu_time(start_direct)
-   call solver%solve(amat, xvec, expected, ainv, cpq, error=error, new_unit=output_unit)
+   call solver%solve(amat=amat, xvec=xvec, vrhs=expected, ainv=ainv,  error=error)
    call cpu_time(end_direct)
    
    ! Check solution
@@ -145,15 +149,14 @@ subroutine test_cg_identity_2x2(error)
 
 end subroutine test_cg_identity_2x2
 
-!> Test 2: Diagonal matrix 5x5
+!> Test: Diagonal matrix 5x5
 subroutine test_cg_diagonal_5x5(error)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
    integer, parameter :: n = 5
-   logical, parameter :: cpq = .false.
-   real(wp) :: amat(n, n), xvec(n), vrhs(n), ainv(n, n)
+   real(wp) :: amat(n, n), xvec(n), vrhs(n), ainv(n,n)
    real(wp) :: expected(n), diag(n)
    integer :: i
 
@@ -176,7 +179,7 @@ subroutine test_cg_diagonal_5x5(error)
          solver_input%cgtol = tol
       end if
          block
-             class(mchrg_solver_cg), allocatable :: tmp
+             class(cg_solver), allocatable :: tmp
              allocate(tmp)
              call new_cg_solver(tmp, solver_input)
              call move_alloc(tmp, solver)
@@ -201,23 +204,27 @@ subroutine test_cg_diagonal_5x5(error)
    
    ! Solve
    call cpu_time(start_cg)
-   call solver%solve(amat, xvec, vrhs, ainv, cpq, error=error, new_unit=output_unit)
+   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
    if (allocated(error)) return
    call cpu_time(end_cg)
 
-   ! Reference solution
+   ! Reference direct solver
    deallocate(solver_input)
    deallocate(solver)
    allocate(direct_input :: solver_input)
-   allocate(mchrg_solver_direct :: solver)
-   select type (solver_input)
-   type is (direct_input)
-      call new_direct_solver(solver, solver_input)
+   select type(solver_input)
+      type is (direct_input)
+         block
+            class(direct_solver), allocatable :: tmp
+            allocate(tmp)
+            call new_direct_solver(tmp, solver_input)
+            call move_alloc(tmp, solver)
+         end block
    end select
 
    call cpu_time(start_direct)
    expected = [0.0_wp, 0.0_wp, 0.0_wp, 0.0_wp, 0.0_wp]
-   call solver%solve(amat, xvec, expected, ainv, cpq, error=error)
+   call solver%solve(amat=amat, xvec=xvec, vrhs=expected, ainv=ainv, error=error)
    call cpu_time(end_direct)
    
    ! Check solution
@@ -235,15 +242,14 @@ subroutine test_cg_diagonal_5x5(error)
 
 end subroutine test_cg_diagonal_5x5
 
-!> Test 3: Small SPD matrix
+!> Test: Small SPD matrix
 subroutine test_cg_spd_small(error)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
    integer, parameter :: n = 3
-   logical, parameter :: cpq = .false.
-   real(wp) :: amat(n, n), xvec(n), vrhs(n), ainv(n, n)
+   real(wp) :: amat(n, n), xvec(n), vrhs(n), ainv(n,n)
    real(wp) :: expected(n), residual
 
    ! Timer variables
@@ -265,7 +271,7 @@ subroutine test_cg_spd_small(error)
          solver_input%cgtol = tol
       end if
          block
-             class(mchrg_solver_cg), allocatable :: tmp
+             class(cg_solver), allocatable :: tmp
              allocate(tmp)
              call new_cg_solver(tmp, solver_input)
              call move_alloc(tmp, solver)
@@ -285,24 +291,28 @@ subroutine test_cg_spd_small(error)
    
    ! Solve
    call cpu_time(start_cg)
-   call solver%solve(amat, xvec, vrhs, ainv, cpq, error=error, new_unit=output_unit)
+   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
    if (allocated(error)) return
    call cpu_time(end_cg)
 
-   ! Reference solution
+   ! Reference direct solver
    deallocate(solver_input)
    deallocate(solver)
    allocate(direct_input :: solver_input)
-   allocate(mchrg_solver_direct :: solver)
-   select type (solver_input)
-   type is (direct_input)
-      call new_direct_solver(solver, solver_input)
+   select type(solver_input)
+      type is (direct_input)
+         block
+            class(direct_solver), allocatable :: tmp
+            allocate(tmp)
+            call new_direct_solver(tmp, solver_input)
+            call move_alloc(tmp, solver)
+         end block
    end select
 
    ! Expected solution (precomputed)
    expected = [1.0_wp, 1.0_wp, 1.0_wp]
    call cpu_time(start_direct)
-   call solver%solve(amat, xvec, expected, ainv, cpq, error=error)
+   call solver%solve(amat=amat, xvec=xvec, vrhs=expected, ainv=ainv, error=error)
    call cpu_time(end_direct)
    
    ! Check solution
@@ -320,14 +330,114 @@ subroutine test_cg_spd_small(error)
 
 end subroutine test_cg_spd_small
 
-!> Test 4: Large SPD matrix (1000x1000)
+!> Test: Medium SPD matrix
+subroutine test_cg_spd_medium(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   integer, parameter :: n = 20
+   real(wp) :: amat(n, n), xvec(n), vrhs(n), ainv(n,n)
+   real(wp) :: expected(n), b(n), residual
+   integer :: i, j
+
+  ! Timer variables
+   real(wp) :: start_cg, end_cg, start_direct, end_direct
+
+   !> Solver variables
+   real(wp), allocatable :: tol
+   integer, allocatable :: maxiter 
+   class(mchrg_solver_type), allocatable :: solver
+   class(mchrg_solver_input), allocatable :: solver_input
+
+   allocate(cg_input :: solver_input)
+   select type(solver_input)
+   type is (cg_input)
+      if (allocated(maxiter)) then
+         solver_input%cgmiter = maxiter
+      end if
+      if (allocated(tol)) then
+         solver_input%cgtol = tol
+      end if
+         block
+             class(cg_solver), allocatable :: tmp
+             allocate(tmp)
+             call new_cg_solver(tmp, solver_input)
+             call move_alloc(tmp, solver)
+         end block
+   end select
+
+   ! Create a simple SPD matrix: A = I + 0.1*E where E is matrix of ones
+   amat = 0.0_wp
+   do i = 1, n
+      amat(i,i) = 1.0_wp
+      do j = 1, n
+         if (i /= j) then
+            amat(i,j) = 0.1_wp
+         end if
+      end do
+   end do
+   
+   ! Compute RHS: b = A * expected
+   b = 0.0_wp
+   do i = 1, n
+      do j = 1, n
+         b(i) = b(i) + amat(i,j) * expected(j)
+      end do
+   end do
+   
+   ! Initial guess
+   vrhs = 0.0_wp
+   xvec = b
+   
+   ! Solve
+   call cpu_time(start_cg)
+   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
+   if (allocated(error)) return
+   call cpu_time(end_cg)
+
+   ! Reference direct solver
+   deallocate(solver_input)
+   deallocate(solver)
+   allocate(direct_input :: solver_input)
+   select type(solver_input)
+      type is (direct_input)
+         block
+            class(direct_solver), allocatable :: tmp
+            allocate(tmp)
+            call new_direct_solver(tmp, solver_input)
+            call move_alloc(tmp, solver)
+         end block
+   end select
+
+   ! Expected solution (precomputed)
+   expected = [(real(i, wp), i=1, n)]
+   call cpu_time(start_direct)
+   call solver%solve(amat=amat, xvec=xvec, vrhs=expected, ainv=ainv, error=error)
+   call cpu_time(end_direct)
+   
+   ! Check solution
+   if (any(abs(vrhs - expected) / max(1.0_wp, abs(expected)) > thr_rel)) then
+      call test_failed(error, "CG solver failed for medium SPD matrix")
+      print'(a)', "Solution:"
+      print'(3es21.14)', vrhs
+      print'(a)', "Expected:"
+      print'(3es21.14)', expected
+   else
+      print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
+      print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
+      print '("CG Solver ime profit : ",f6.3)', (end_direct-start_direct)/(end_cg-start_cg)
+   end if
+
+end subroutine test_cg_spd_medium
+
+!> Test: Large SPD matrix (1000x1000)
 subroutine test_cg_spd_large(error)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
    integer, parameter :: n = 1000
-   logical, parameter :: cpq = .false.
    real(wp), allocatable :: amat(:,:), xvec(:), vrhs(:), ainv(:,:)
    real(wp), allocatable :: expected(:), b(:)
    integer :: i, j
@@ -351,14 +461,14 @@ subroutine test_cg_spd_large(error)
          solver_input%cgtol = tol
       end if
          block
-             class(mchrg_solver_cg), allocatable :: tmp
+             class(cg_solver), allocatable :: tmp
              allocate(tmp)
              call new_cg_solver(tmp, solver_input)
              call move_alloc(tmp, solver)
          end block
    end select
 
-   allocate(amat(n,n), xvec(n), vrhs(n), ainv(n,n), expected(n), b(n))
+   allocate(amat(n,n), ainv(n,n), xvec(n), vrhs(n), expected(n), b(n))
 
    ! Create a diagonally dominant SPD matrix
    amat = 0.0_wp
@@ -388,23 +498,27 @@ subroutine test_cg_spd_large(error)
    
    ! Solve
    call cpu_time(start_cg)
-   call solver%solve(amat, xvec, vrhs, ainv, cpq, error=error, new_unit=output_unit)
+   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
    if (allocated(error)) return
    call cpu_time(end_cg)
 
-   ! Reference solution
+   ! Reference direct solver
    deallocate(solver_input)
    deallocate(solver)
    allocate(direct_input :: solver_input)
-   allocate(mchrg_solver_direct :: solver)
-   select type (solver_input)
-   type is (direct_input)
-      call new_direct_solver(solver, solver_input)
+   select type(solver_input)
+      type is (direct_input)
+         block
+            class(direct_solver), allocatable :: tmp
+            allocate(tmp)
+            call new_direct_solver(tmp, solver_input)
+            call move_alloc(tmp, solver)
+         end block
    end select
 
    ! Reference solution
    call cpu_time(start_direct)
-   call solver%solve(amat, xvec, expected, ainv, cpq, error=error)
+   call solver%solve(amat=amat, xvec=xvec, vrhs=expected, ainv=ainv, error=error)
    call cpu_time(end_direct)
    
    ! Check solution
@@ -422,15 +536,14 @@ subroutine test_cg_spd_large(error)
 
 end subroutine test_cg_spd_large
 
-!> Test 5: Ill-conditioned matrix
+!> Test: Ill-conditioned matrix
 subroutine test_cg_ill_conditioned(error)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
    integer, parameter :: n = 8
-   logical, parameter :: cpq = .false.
-   real(wp) :: amat(n, n), xvec(n), vrhs(n), ainv(n, n)
+   real(wp) :: amat(n, n), xvec(n), vrhs(n), ainv(n,n)
    real(wp) :: expected(n), b(n), residual
    integer :: i
 
@@ -453,7 +566,7 @@ subroutine test_cg_ill_conditioned(error)
          solver_input%cgtol = tol
       end if
          block
-             class(mchrg_solver_cg), allocatable :: tmp
+             class(cg_solver), allocatable :: tmp
              allocate(tmp)
              call new_cg_solver(tmp, solver_input)
              call move_alloc(tmp, solver)
@@ -481,23 +594,27 @@ subroutine test_cg_ill_conditioned(error)
    
    ! Solve
    call cpu_time(start_cg)
-   call solver%solve(amat, xvec, vrhs, ainv, cpq, error=error, new_unit=output_unit)
+   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
    if (allocated(error)) return
    call cpu_time(end_cg)
 
-   ! Reference solution
+   ! Reference direct solver
    deallocate(solver_input)
    deallocate(solver)
    allocate(direct_input :: solver_input)
-   allocate(mchrg_solver_direct :: solver)
-   select type (solver_input)
-   type is (direct_input)
-      call new_direct_solver(solver, solver_input)
+   select type(solver_input)
+      type is (direct_input)
+         block
+            class(direct_solver), allocatable :: tmp
+            allocate(tmp)
+            call new_direct_solver(tmp, solver_input)
+            call move_alloc(tmp, solver)
+         end block
    end select
 
    ! Reference solution
    call cpu_time(start_direct)
-   call solver%solve(amat, xvec, expected, ainv, cpq, error=error)
+   call solver%solve(amat=amat, xvec=xvec, vrhs=expected, ainv=ainv, error=error)
    call cpu_time(end_direct)
    
    ! Check solution
@@ -515,15 +632,14 @@ subroutine test_cg_ill_conditioned(error)
 
 end subroutine test_cg_ill_conditioned
 
-!> Test 6: Zero RHS vector
+!> Test: Zero RHS vector
 subroutine test_cg_zero_rhs(error)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
    integer, parameter :: n = 5
-   logical, parameter :: cpq = .false.
-   real(wp) :: amat(n, n), xvec(n), vrhs(n), ainv(n, n)
+   real(wp) :: amat(n, n), xvec(n), vrhs(n), ainv(n,n)
    real(wp) :: expected(n)
    integer :: i
 
@@ -546,7 +662,7 @@ subroutine test_cg_zero_rhs(error)
          solver_input%cgtol = tol
       end if
          block
-             class(mchrg_solver_cg), allocatable :: tmp
+             class(cg_solver), allocatable :: tmp
              allocate(tmp)
              call new_cg_solver(tmp, solver_input)
              call move_alloc(tmp, solver)
@@ -572,23 +688,27 @@ subroutine test_cg_zero_rhs(error)
    
    ! Solve
    call cpu_time(start_cg)
-   call solver%solve(amat, xvec, vrhs, ainv, cpq, error=error, new_unit=output_unit)
+   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
    if (allocated(error)) return
    call cpu_time(end_cg)
 
-   ! Reference solution
+   ! Reference direct solver
    deallocate(solver_input)
    deallocate(solver)
    allocate(direct_input :: solver_input)
-   allocate(mchrg_solver_direct :: solver)
-   select type (solver_input)
-   type is (direct_input)
-      call new_direct_solver(solver, solver_input)
+   select type(solver_input)
+      type is (direct_input)
+         block
+            class(direct_solver), allocatable :: tmp
+            allocate(tmp)
+            call new_direct_solver(tmp, solver_input)
+            call move_alloc(tmp, solver)
+         end block
    end select
 
    ! Reference solution
    call cpu_time(start_direct)
-   call solver%solve(amat, xvec, expected, ainv, cpq, error=error)
+   call solver%solve(amat=amat, xvec=xvec, vrhs=expected, ainv=ainv, error=error)
    call cpu_time(end_direct)
    
    ! Check solution
@@ -606,14 +726,13 @@ subroutine test_cg_zero_rhs(error)
 
 end subroutine test_cg_zero_rhs
 
-!> Test 7: Random SPD matrix
+!> Test: Random SPD matrix
 subroutine test_cg_random_spd(error)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
    integer, parameter :: n = 100
-   logical, parameter :: cpq = .false.
    real(wp), allocatable :: amat(:,:), xvec(:), vrhs(:), ainv(:,:)
    real(wp), allocatable :: expected(:), b(:), temp(:,:)
    integer :: i, j, k, seed_size
@@ -639,14 +758,14 @@ subroutine test_cg_random_spd(error)
          solver_input%cgtol = tol
       end if
          block
-             class(mchrg_solver_cg), allocatable :: tmp
+             class(cg_solver), allocatable :: tmp
              allocate(tmp)
              call new_cg_solver(tmp, solver_input)
              call move_alloc(tmp, solver)
          end block
    end select
 
-   allocate(amat(n,n), xvec(n), vrhs(n), ainv(n,n), expected(n), b(n), temp(n,n))
+   allocate(amat(n,n), ainv(n,n), xvec(n), vrhs(n), expected(n), b(n), temp(n,n))
 
    ! Initialize random seed
    call random_seed(size=seed_size)
@@ -698,23 +817,27 @@ subroutine test_cg_random_spd(error)
    
    ! Solve
    call cpu_time(start_cg)
-   call solver%solve(amat, xvec, vrhs, ainv, cpq, error=error, new_unit=output_unit)
+   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
    if (allocated(error)) return
    call cpu_time(end_cg)
 
-   ! Reference solution
+   ! Reference direct solver
    deallocate(solver_input)
    deallocate(solver)
    allocate(direct_input :: solver_input)
-   allocate(mchrg_solver_direct :: solver)
-   select type (solver_input)
-   type is (direct_input)
-      call new_direct_solver(solver, solver_input)
+   select type(solver_input)
+      type is (direct_input)
+         block
+            class(direct_solver), allocatable :: tmp
+            allocate(tmp)
+            call new_direct_solver(tmp, solver_input)
+            call move_alloc(tmp, solver)
+         end block
    end select
 
    ! Reference solution
    call cpu_time(start_direct)
-   call solver%solve(amat, xvec, expected, ainv, cpq, error=error)
+   call solver%solve(amat=amat, xvec=xvec, vrhs=expected, ainv=ainv, error=error)
    call cpu_time(end_direct)
    
    ! Check solution
@@ -732,7 +855,7 @@ subroutine test_cg_random_spd(error)
 
 end subroutine test_cg_random_spd
 
-!> Test 8: Test time scaling of the CG solver
+!> Test: Test time scaling of the CG solver
 subroutine test_cg_spd_time_scaling(error)
 
    !> Error handling
@@ -740,7 +863,6 @@ subroutine test_cg_spd_time_scaling(error)
 
    integer :: n 
    integer, parameter :: max_size=13
-   logical, parameter :: cpq = .false.
    real(wp), allocatable :: amat(:,:), xvec(:), vrhs(:), ainv(:,:)
    real(wp), allocatable :: expected(:), b(:)
    integer :: i, j, length
@@ -767,7 +889,7 @@ subroutine test_cg_spd_time_scaling(error)
          solver_test_input%cgtol = tol
       end if
          block
-             class(mchrg_solver_cg), allocatable :: tmp
+             class(cg_solver), allocatable :: tmp
              allocate(tmp)
              call new_cg_solver(tmp, solver_test_input)
              call move_alloc(tmp, solver_test)
@@ -776,15 +898,19 @@ subroutine test_cg_spd_time_scaling(error)
 
    ! Reference solution
    allocate(direct_input :: solver_ref_input)
-   allocate(mchrg_solver_direct :: solver_ref)
-   select type (solver_ref_input)
-   type is (direct_input)
-      call new_direct_solver(solver_ref, solver_ref_input)
+   select type(solver_ref_input)
+      type is (direct_input)
+         block
+            class(direct_solver), allocatable :: tmp
+            allocate(tmp)
+            call new_direct_solver(tmp, solver_ref_input)
+            call move_alloc(tmp, solver_ref)
+         end block
    end select
 
    do length = 1, max_size
       n = 2**length
-      allocate(amat(n,n), xvec(n), vrhs(n), ainv(n,n), expected(n), b(n))
+      allocate(amat(n,n), ainv(n,n), xvec(n), vrhs(n), expected(n), b(n))
       write(*,*) "Size of the vector", n
 
       ! Create a diagonally dominant SPD matrix
@@ -815,13 +941,13 @@ subroutine test_cg_spd_time_scaling(error)
       
       ! Solve
       call cpu_time(start_cg)
-      call solver_test%solve(amat, xvec, vrhs, ainv, cpq, error=error)
+      call solver_test%solve(amat, xvec, vrhs, error=error)
       if (allocated(error)) return
       call cpu_time(end_cg)
       
       ! Reference solution
       call cpu_time(start_direct)
-      call solver_ref%solve(amat, xvec, expected, ainv, cpq, error=error)
+      call solver_ref%solve(amat, xvec, expected, ainv, error=error)
       call cpu_time(end_direct)
 
       ! Scaling save
@@ -844,7 +970,7 @@ subroutine test_cg_spd_time_scaling(error)
          end if
       end if
 
-      deallocate(amat, xvec, vrhs, ainv, expected, b)
+      deallocate(amat, ainv, xvec, vrhs, expected, b)
    enddo
 
    call write_vector(iter_scal, "CG Time Scaling")
@@ -852,7 +978,7 @@ subroutine test_cg_spd_time_scaling(error)
 
 end subroutine test_cg_spd_time_scaling
 
-!> Test 9: Test time scaling of the CG solver for the "-1 2 -1" matrix
+!> Test: Test time scaling of the CG solver for the "-1 2 -1" matrix
 subroutine test_cg_121_time_scaling(error)
 
    !> Error handling
@@ -860,7 +986,6 @@ subroutine test_cg_121_time_scaling(error)
 
    integer :: n 
    integer, parameter :: max_size=12
-   logical, parameter :: cpq = .false.
    real(wp), allocatable :: amat(:,:), xvec(:), vrhs(:), ainv(:,:)
    real(wp), allocatable :: expected(:), b(:)
    integer :: i, j, length
@@ -888,7 +1013,7 @@ subroutine test_cg_121_time_scaling(error)
          solver_test_input%cgtol = tol
       end if
          block
-             class(mchrg_solver_cg), allocatable :: tmp
+             class(cg_solver), allocatable :: tmp
              allocate(tmp)
              call new_cg_solver(tmp, solver_test_input)
              call move_alloc(tmp, solver_test)
@@ -897,15 +1022,19 @@ subroutine test_cg_121_time_scaling(error)
 
    ! Reference solution
    allocate(direct_input :: solver_ref_input)
-   allocate(mchrg_solver_direct :: solver_ref)
-   select type (solver_ref_input)
-   type is (direct_input)
-      call new_direct_solver(solver_ref, solver_ref_input)
+   select type(solver_ref_input)
+      type is (direct_input)
+         block
+            class(direct_solver), allocatable :: tmp
+            allocate(tmp)
+            call new_direct_solver(tmp, solver_ref_input)
+            call move_alloc(tmp, solver_ref)
+         end block
    end select
 
    do length = 1, max_size
       n = 2**length
-      allocate(amat(n,n), xvec(n), vrhs(n), ainv(n,n), expected(n), b(n))
+      allocate(amat(n,n), ainv(n,n), xvec(n), vrhs(n), expected(n), b(n))
       write(*,*) "Size of the vector", n
 
       ! Create a diagonally dominant (-1 2 -1) matrix
@@ -937,13 +1066,13 @@ subroutine test_cg_121_time_scaling(error)
       
       ! Solve
       call cpu_time(start_cg)
-      call solver_test%solve(amat, xvec, vrhs, ainv, cpq, error=error)
+      call solver_test%solve(amat, xvec, vrhs, error=error)
       if (allocated(error)) return
       call cpu_time(end_cg)
       
       ! Reference solution
       call cpu_time(start_direct)
-      call solver_ref%solve(amat, xvec, expected, ainv, cpq, error=error)
+      call solver_ref%solve(amat, xvec, expected, ainv, error=error)
       call cpu_time(end_direct)
 
       ! Scaling save
@@ -966,7 +1095,7 @@ subroutine test_cg_121_time_scaling(error)
          end if
       end if
 
-      deallocate(amat, xvec, vrhs, ainv, expected, b)
+      deallocate(amat, ainv, xvec, vrhs, expected, b)
    enddo
 
    call write_vector(iter_scal, "CG Time Scaling")

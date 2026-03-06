@@ -16,18 +16,18 @@
 !> @file multicharge/solver/direct.f90
 !> Provides implementation of the direct solver using LAPACK for symmetric indefinite systems.
 
-module direct_solver
+module multicharge_solver_direct
     use iso_fortran_env, only: output_unit
     use mctc_env, only: error_type, fatal_error, wp
     use multicharge_blas, only: symv
     use multicharge_lapack, only: sytrf, sytrs, sytri
-    use solver_type, only: mchrg_solver_type, mchrg_solver_input
-    use solver_cache, only: cache_container, mchrg_solver_cache
+    use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
+    use multicharge_solver_cache, only: cache_container, mchrg_solver_cache
 
     implicit none
     private
 
-    public :: mchrg_solver_direct, direct_input, new_direct_solver
+    public :: direct_solver, direct_input, new_direct_solver
     type, extends(mchrg_solver_cache), public :: direct_cache
     end type direct_cache
 
@@ -35,38 +35,47 @@ module direct_solver
     type, extends(mchrg_solver_input) :: direct_input
         ! Use Direct solver
         logical :: direct = .true.
+        ! Verbosity
+        integer, allocatable :: verbosity
     end type direct_input
 
     !> Direct solver using LAPACK
-    type, extends(mchrg_solver_type) :: mchrg_solver_direct
+    type, extends(mchrg_solver_type) :: direct_solver
+        integer, allocatable :: verbosity
     contains
-       procedure :: solve
-       procedure :: update 
-    end type mchrg_solver_direct
+        procedure :: solve
+        procedure :: update 
+    end type direct_solver
 
 contains
 
     subroutine new_direct_solver(self, input)
-        class(mchrg_solver_type), intent(out) :: self
+        class(direct_solver), intent(out) :: self
         type(direct_input), intent(in) :: input 
+        integer, parameter :: verbosity_def = 0
 
         self%need_pos_def = .false.
+        if (allocated(input%verbosity)) then
+            self%verbosity = input%verbosity
+        else 
+            self%verbosity = verbosity_def
+        end if
 
     end subroutine new_direct_solver
 
     !> Update method for direct solver
     subroutine update(self, cache, vrhs, ainv, cpq)
-        class(mchrg_solver_direct), intent(in) :: self
+        class(direct_solver), intent(in) :: self
         type(cache_container), intent(inout) :: cache
         real(wp), intent(inout) :: vrhs(:)
-        real(wp), intent(out) :: ainv(:, :)
+        real(wp), intent(out), optional :: ainv(:, :)
         logical, intent(in), optional :: cpq
         
     end subroutine update
 
     !> Solve method for direct solver
     subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
-        class(mchrg_solver_direct), intent(in) :: self
+        class(direct_solver), intent(in) :: self
         ! A matrix of Ax=b system
         real(wp), intent(in)  :: amat(:, :)
         ! Initial search direction (b)
@@ -74,7 +83,7 @@ contains
         ! Initial guess and solution
         real(wp), intent(inout) :: vrhs(:)
         ! Inverse A-matrix and coupled perturbed logical
-        real(wp), intent(out) :: ainv(:, :)
+        real(wp), intent(out), optional :: ainv(:, :)
         ! Coupled-perturbed equations flag (optional)
         logical, intent(in), optional :: cpq
         ! Output unit (optional)
@@ -94,6 +103,10 @@ contains
         else
             unit = output_unit
         end if
+
+        if (self%verbosity > 0) then
+            call write_direct_solver(unit, self)
+        end if 
     
         ! Dimensions match check
         ndim = size(xvec)
@@ -102,7 +115,7 @@ contains
             return
         end if
 
-        ainv = amat
+        if (present(ainv)) ainv = amat
         vrhs = xvec
         
         ! Update cache and prepare vrhs and ainv
@@ -120,7 +133,7 @@ contains
             return
         end if
     
-        if (want_cpq) then
+        if (want_cpq .and. present(ainv)) then
             call sytri(ainv, ipiv, info=local_info, uplo='l')
             if (local_info /= 0) then
                 call fatal_error(error, "solve_direct: Inversion of factorized matrix failed.")
@@ -142,4 +155,13 @@ contains
     
     end subroutine solve
 
-end module direct_solver
+subroutine write_direct_solver(unit, solver)
+   integer, intent(in) :: unit
+   class(direct_solver), intent(in) :: solver
+
+   write(unit, '(a)') "Using Direct Solver"
+   write(unit, '(a)')
+
+end subroutine write_direct_solver
+
+end module multicharge_solver_direct
