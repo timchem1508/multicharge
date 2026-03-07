@@ -22,14 +22,10 @@ module multicharge_solver_direct
     use multicharge_blas, only: symv
     use multicharge_lapack, only: sytrf, sytrs, sytri
     use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
-    use multicharge_solver_cache, only: cache_container, mchrg_solver_cache
-
     implicit none
     private
 
     public :: direct_solver, direct_input, new_direct_solver
-    type, extends(mchrg_solver_cache), public :: direct_cache
-    end type direct_cache
 
     !> Input for Direct solver
     type, extends(mchrg_solver_input) :: direct_input
@@ -44,16 +40,17 @@ module multicharge_solver_direct
         integer, allocatable :: verbosity
     contains
         procedure :: solve
-        procedure :: update 
     end type direct_solver
+
+    !> Default verbosity level
+    integer, parameter :: verbosity_def = 0
 
 contains
 
     subroutine new_direct_solver(self, input)
         class(direct_solver), intent(out) :: self
         type(direct_input), intent(in) :: input 
-        integer, parameter :: verbosity_def = 0
-
+        
         self%need_pos_def = .false.
         if (allocated(input%verbosity)) then
             self%verbosity = input%verbosity
@@ -63,40 +60,31 @@ contains
 
     end subroutine new_direct_solver
 
-    !> Update method for direct solver
-    subroutine update(self, cache, vrhs, ainv, cpq)
-        class(direct_solver), intent(in) :: self
-        type(cache_container), intent(inout) :: cache
-        real(wp), intent(inout) :: vrhs(:)
-        real(wp), intent(out), optional :: ainv(:, :)
-        logical, intent(in), optional :: cpq
-        
-    end subroutine update
-
     !> Solve method for direct solver
     subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
         class(direct_solver), intent(in) :: self
-        ! A matrix of Ax=b system
+        !> A matrix of Ax=b system
         real(wp), intent(in)  :: amat(:, :)
-        ! Initial search direction (b)
+        !> Initial search direction (b)
         real(wp), intent(in)  :: xvec(:)
-        ! Initial guess and solution
+        !> Initial guess and solution
         real(wp), intent(inout) :: vrhs(:)
-        ! Inverse A-matrix and coupled perturbed logical
+        !> Inverse A-matrix and coupled perturbed logical
         real(wp), intent(out), optional :: ainv(:, :)
-        ! Coupled-perturbed equations flag (optional)
+        !> Coupled-perturbed equations flag (optional)
         logical, intent(in), optional :: cpq
-        ! Output unit (optional)
+        !> Output unit (optional)
         integer, intent(in), optional :: new_unit
         !> Error handling
         type(error_type), allocatable, intent(out) :: error
     
+        ! Local inverse matrix required for calculations
+        real(wp), allocatable :: invmat(:,:)
         integer  :: local_info
         integer :: ndim, ic, jc
         integer, allocatable :: ipiv(:)
         logical :: want_cpq
         integer :: unit
-        type(cache_container), allocatable :: cache
 
         if (present(new_unit)) then
             unit = new_unit
@@ -115,43 +103,47 @@ contains
             return
         end if
 
-        if (present(ainv)) ainv = amat
+        allocate(invmat(ndim, ndim))
+        invmat = amat
         vrhs = xvec
-        
-        ! Update cache and prepare vrhs and ainv
-        allocate(cache)
-        call self%update(cache, vrhs, ainv, cpq)
     
         ! Logical: solve coupled-perturbed equations flag
         want_cpq = .false.
         if (present(cpq)) want_cpq = cpq
     
+        ! Factorize the Coulomb matrix
         allocate(ipiv(ndim))
-        call sytrf(ainv, ipiv, info=local_info, uplo='l')
+        call sytrf(invmat, ipiv, info=local_info, uplo='l')
         if (local_info /= 0) then
-            call fatal_error(error, "solve_direct: Bunch-Kaufman factorization failed.")
-            return
+           call fatal_error(error, "Bunch-Kaufman factorization failed.")
+           return
         end if
-    
-        if (want_cpq .and. present(ainv)) then
-            call sytri(ainv, ipiv, info=local_info, uplo='l')
-            if (local_info /= 0) then
-                call fatal_error(error, "solve_direct: Inversion of factorized matrix failed.")
-                return
-            end if
-            call symv(ainv, xvec, vrhs, uplo='l')
-            do ic = 1, ndim
-                do jc = ic + 1, ndim
-                    ainv(ic, jc) = ainv(jc, ic)
-                end do
-            end do
+
+        if (want_cpq) then
+           ! Inverted matrix is needed for coupled-perturbed equations
+           call sytri(invmat, ipiv, info=local_info, uplo='l')
+           if (local_info /= 0) then
+              call fatal_error(error, "Inversion of factorized matrix failed.")
+              return
+           end if
+           ! Solve the linear system
+           call symv(invmat, xvec, vrhs, uplo='l')
+           do ic = 1, ndim
+              do jc = ic + 1, ndim
+                 invmat(ic, jc) = invmat(jc, ic)
+              end do
+           end do
         else
-            call sytrs(ainv, vrhs, ipiv, info=local_info, uplo='l')
-            if (local_info /= 0) then
-                call fatal_error(error, "solve_direct: Solving factorized system failed.")
-                return
-            end if
+           ! Solve the linear system
+           call sytrs(invmat, vrhs, ipiv, info=local_info, uplo='l')
+           if (local_info /= 0) then
+              call fatal_error(error, "Solution of linear system failed.")
+              return
+           end if
+
         end if
+
+        if (present(ainv)) ainv=invmat
     
     end subroutine solve
 

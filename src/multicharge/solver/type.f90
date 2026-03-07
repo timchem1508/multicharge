@@ -18,7 +18,6 @@
 
 module multicharge_solver_type
     use mctc_env, only: error_type, wp
-    use multicharge_solver_cache, only: cache_container
     implicit none
     private
 
@@ -32,7 +31,6 @@ module multicharge_solver_type
         logical, allocatable :: need_pos_def
     contains
        procedure(solve), deferred :: solve
-       procedure(update), deferred :: update
     end type mchrg_solver_type
 
     abstract interface
@@ -48,14 +46,6 @@ module multicharge_solver_type
             type(error_type), allocatable, intent(out) :: error
         end subroutine solve
 
-        subroutine update(self, cache, vrhs, ainv, cpq)
-            import :: mchrg_solver_type, cache_container, wp
-            class(mchrg_solver_type), intent(in) :: self
-            type(cache_container), intent(inout) :: cache
-            real(wp), intent(inout) :: vrhs(:)
-            real(wp), intent(out), optional :: ainv(:, :)
-            logical, intent(in), optional :: cpq
-        end subroutine update
     end interface
 
     !> Solver input abstract type

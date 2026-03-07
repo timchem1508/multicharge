@@ -21,23 +21,19 @@ module multicharge_solver_cg
     use mctc_env, only: error_type, fatal_error, wp, timer_type, format_time
     use multicharge_blas, only: symv, gemv
     use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
-    use multicharge_solver_cache, only: cache_container, mchrg_solver_cache
     implicit none
     private
 
     public :: cg_solver, new_cg_solver, cg_input
 
-    type, extends(mchrg_solver_cache), public :: cg_cache
-    end type cg_cache
-
     !> Input for CG solver
     type, extends(mchrg_solver_input) :: cg_input
         !> Maximal number of iterations
-        integer, allocatable :: cgmiter
+        integer, allocatable :: cgmiter 
         !> Convergence tolerance
         real(wp), allocatable :: cgtol 
         !> Output verbosity
-        integer, allocatable :: verbosity 
+        integer, allocatable :: verbosity
         !> Use iterative CG solver
         logical :: cg = .true.
    end type cg_input
@@ -49,19 +45,18 @@ module multicharge_solver_cg
         integer, allocatable :: verbosity
     contains
         procedure :: solve
-        procedure :: update
     end type cg_solver
+
+    ! Default values        
+    integer, parameter :: cgmiter_def = 1000
+    real(wp), parameter :: cgtol_def = 1.0e-15_wp
+    integer, parameter :: verbosity_def = 0
 
 contains
 
     subroutine new_cg_solver(self, input)
         class(cg_solver), intent(out) :: self
         type(cg_input), intent(in) :: input     
-
-        ! Default values        
-        integer, parameter :: cgmiter_def = 1000
-        real(wp), parameter :: cgtol_def = 1.0e-15_wp
-        integer, parameter :: verbosity_def = 0
 
         self%need_pos_def = .true.
         if (allocated(input%cgmiter)) then
@@ -83,15 +78,6 @@ contains
 
 
     end subroutine new_cg_solver
-
-    !> Update method for CG solver (not used, but required by interface)
-    subroutine update(self, cache, vrhs, ainv, cpq)
-        class(cg_solver), intent(in) :: self
-        type(cache_container), intent(inout) :: cache
-        real(wp), intent(inout) :: vrhs(:)
-        real(wp), intent(out), optional :: ainv(:, :)
-        logical, intent(in), optional :: cpq
-    end subroutine update
 
     !> Solve method for CG solver
     subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
@@ -121,33 +107,33 @@ contains
         ! Size of the system
         integer :: ndim
 
-        ! Search direction (p)
-        real(wp), allocatable :: direction(:)
+        ! Search direction
+        real(wp), allocatable :: dir(:)
         ! Norm of the RHS
-        real(wp) :: bnorm
+        real(wp) :: xvecnorm
         ! Residual 
-        real(wp), allocatable :: residual(:)
+        real(wp), allocatable :: res(:)
         ! Residual norm 
-        real(wp) :: rnorm
+        real(wp) :: resnorm
         ! Diagonal preconditioner 
-        real(wp), allocatable :: Mdiag(:)
+        real(wp), allocatable :: prec(:)
         ! Preconditioned residual 
-        real(wp), allocatable ::  zres(:)
+        real(wp), allocatable ::  precres(:)
 
-        ! Matrix-vector product 
-        real(wp), allocatable :: Ap(:)
+        ! amat-dir product 
+        real(wp), allocatable :: Adir(:)
         ! Denominator of the step length
         real(wp) :: denom
         ! Step length
-        real(wp) :: alpha
+        real(wp) :: step
 
         ! Update factor for search direction
-        real(wp) :: beta
-        real(wp) :: rz_old, rz_new
-        ! Relative residual norm (|r| / |b|)
-        real(wp) :: rel_res
+        real(wp) :: updfact
+        ! Dot product of reconditioned and original residuals
+        real(wp) :: resdot_old, resdot_new
+        ! Relative residual norm (|resnorm| / |vrhs|)
+        real(wp) :: rel_resnorm
 
-        type(cache_container), allocatable :: cache
         type(timer_type) :: timer
         integer :: unit
 
@@ -170,42 +156,39 @@ contains
             return
         end if
 
-        allocate(cache)
-        call self%update(cache, vrhs)
-
         tol = self%cgtol
         tol_square = tol**2
         maxit = self%cgmiter
     
-        allocate(residual(ndim), direction(ndim), zres(ndim), Ap(ndim), Mdiag(ndim))
+        allocate(res(ndim), dir(ndim), precres(ndim), Adir(ndim), prec(ndim))
 
         if (self%verbosity > 1) call timer%push("total")
         if (self%verbosity > 1) call timer%push("initialization")
 
-        ! Diagonal preconditioner M^-1 (Jacobi preconditioner)
-        !$omp parallel do default(none) shared(Mdiag, amat, ndim, tol_square) private(iat)
+        ! Diagonal preconditioner prec (Jacobi preconditioner)
+        !$omp parallel do default(none) shared(prec, amat, ndim, tol_square) private(iat)
         do iat = 1, ndim
-            Mdiag(iat) = amat(iat,iat)
-            if (abs(Mdiag(iat)) < tol_square) Mdiag(iat) = tol_square
-            Mdiag(iat) = 1.0_wp / Mdiag(iat)
+            prec(iat) = amat(iat,iat)
+            if (abs(prec(iat)) < tol_square) prec(iat) = tol_square
+            prec(iat) = 1.0_wp / prec(iat)
         end do
         !$omp end parallel do
     
-        ! Initial residual r = b - A*x
-        call symv(amat, vrhs, Ap, alpha=1.0_wp, beta=0.0_wp)   
-        residual = xvec - Ap                                    
+        ! Initial residual res = xvec - amat*vrhs
+        call symv(amat, vrhs, Adir, alpha=1.0_wp, beta=0.0_wp)   
+        res(:) = xvec(:) - Adir(:)                                    
         
-        ! Initial preconditioned residual z = M^-1 * r
-        zres = residual * Mdiag                                 
-        direction = zres                                    
+        ! Initial preconditioned residual precres = M^-1 * r
+        precres = res * prec                                 
+        dir = precres                                    
         
-        ! Initial norm of the right-hand side (b)
-        bnorm = dot_product(xvec, xvec)
-        if (bnorm < tol_square) bnorm = 1.0_wp
+        ! Initial norm xvecnorm
+        xvecnorm = dot_product(xvec, xvec)
+        if (xvecnorm < tol_square) xvecnorm = 1.0_wp
 
-        ! Initial residual norm and r^T * z
-        rnorm = dot_product(residual, residual)                
-        rz_old = dot_product(residual, zres)                    
+        ! Initial resnorm and res^T * precres
+        resnorm = dot_product(res, res)                
+        resdot_old = dot_product(res, precres)                    
 
         if (self%verbosity > 1) call timer%pop 
 
@@ -217,14 +200,14 @@ contains
 
             if (self%verbosity > 1) call timer%push("iteration")
 
-            ! Matrix-vector product Ap = A * p
-            call symv(amat, direction, Ap, alpha=1.0_wp, beta=0.0_wp)
+            ! Matrix-vector product Adir = amat * dir
+            call symv(amat, dir, Adir, alpha=1.0_wp, beta=0.0_wp)
 
             denom = 0.0_wp
             !$omp parallel do reduction(+:denom) default(none) &
-            !$omp shared(ndim,direction,Ap) private(iat)
+            !$omp shared(ndim,dir,Adir) private(iat)
             do iat = 1, ndim
-                denom = denom + direction(iat) * Ap(iat)
+                denom = denom + dir(iat) * Adir(iat)
             end do
             !$omp end parallel do
 
@@ -235,79 +218,83 @@ contains
                 exit
             end if
 
-            ! Step length alpha = (r^T * z) / (p^T * A * p)
-            alpha = rz_old / denom
+            ! Step length step = (res^T * precres) / (dir^T * amat * dir)
+            step = resdot_old / denom
 
-            ! Update solution x = x + alpha * p and residual r = r - alpha * A*p
-            !$omp parallel do default(none) shared(ndim,vrhs,residual,alpha,direction,Ap) private(iat)
+            ! Update solution and residual
+            !$omp parallel do default(none) shared(ndim,vrhs,res,step,dir,Adir) private(iat)
             do iat = 1, ndim
-                vrhs(iat)     = vrhs(iat)     + alpha * direction(iat)
-                residual(iat) = residual(iat) - alpha * Ap(iat)
+                vrhs(iat)     = vrhs(iat)     + step * dir(iat)
+                res(iat) = res(iat) - step * Adir(iat)
             end do
             !$omp end parallel do
 
             ! Compute the new residual norm
-            rnorm = 0.0_wp
-            !$omp parallel do reduction(+:rnorm) default(none) &
-            !$omp shared(ndim,residual) private(iat)
+            resnorm = 0.0_wp
+            !$omp parallel do reduction(+:resnorm) default(none) &
+            !$omp shared(ndim,res) private(iat)
             do iat = 1, ndim
-                rnorm = rnorm + residual(iat) * residual(iat)
+                resnorm = resnorm + res(iat) * res(iat)
             end do
             !$omp end parallel do
 
             ! Relative residual norm to check convergence
-            rel_res = rnorm / bnorm
+            rel_resnorm = resnorm / xvecnorm
 
-            if (rel_res <= tol_square) then
+            if (rel_resnorm <= tol_square) then
                 if (self%verbosity > 0) then
-                    call print_cg_convergence(unit, it, sqrt(rnorm), self%verbosity)
+                    call print_cg_convergence(unit, it, sqrt(resnorm), self%verbosity)
                     call timer%pop
                 end if
                 exit
             end if
 
-            ! Preconditioned updated residual z = M^-1 * r
-            !$omp parallel do default(none) shared(ndim,zres,residual,Mdiag) private(iat)
+            ! Preconditioned updated residual precres = prec * res
+            !$omp parallel do default(none) shared(ndim,precres,res,prec) private(iat)
             do iat = 1, ndim
-                zres(iat) = residual(iat) * Mdiag(iat)
+                precres(iat) = res(iat) * prec(iat)
             end do
             !$omp end parallel do
 
-            rz_new = 0.0_wp
-            !$omp parallel do reduction(+:rz_new) default(none) &
-            !$omp shared(ndim,residual,zres) private(iat)
+            resdot_new = 0.0_wp
+            !$omp parallel do reduction(+:resdot_new) default(none) &
+            !$omp shared(ndim,res,precres) private(iat)
             do iat = 1, ndim
-                rz_new = rz_new + residual(iat) * zres(iat)
+                resdot_new = resdot_new + res(iat) * precres(iat)
             end do
             !$omp end parallel do
 
-            ! Update search direction p = z + beta * p
-            beta   = rz_new / rz_old
-            rz_old = rz_new
+            ! Update search direction p = z + updfact * p
+            updfact   = resdot_new / resdot_old
+            resdot_old = resdot_new
 
-            !$omp parallel do default(none) shared(ndim,direction,zres,beta) private(iat)
+            !$omp parallel do default(none) shared(ndim,dir,precres,updfact) private(iat)
             do iat = 1, ndim
-                direction(iat) = zres(iat) + beta * direction(iat)
+                dir(iat) = precres(iat) + updfact * dir(iat)
             end do
             !$omp end parallel do
 
-            if (self%verbosity > 1) call timer%pop ! iteration timer stop
+            ! iteration timer pop
+            if (self%verbosity > 1) call timer%pop 
 
             ! Print iteration progress
-            call print_cg_iteration(unit, it, sqrt(rnorm), alpha, sqrt(rel_res), self%verbosity, timer)
+            call print_cg_iteration(unit, it, sqrt(resnorm), step, sqrt(rel_resnorm), self%verbosity, timer)
 
             if (it == maxit) then
                 if (self%verbosity > 1) then
-                    call timer%pop   ! pop "iteration"
-                    call timer%pop   ! pop "total"
+                    ! pop "iteration"
+                    call timer%pop
+                    ! pop "total"
+                    call timer%pop   
                 end if
-                call fatal_error(error, "solve_cg: CG did not converge within max iterations.")
+                call fatal_error(error, "CG did not converge within max iterations.")
                 return
             end if
 
         end do
 
-        if (self%verbosity > 1) call timer%pop   ! pop total
+        ! pop total
+        if (self%verbosity > 1) call timer%pop   
 
         ! Print final summary
         call print_cg_final(unit, timer, self%verbosity)
@@ -356,15 +343,15 @@ contains
     end subroutine print_cg_convergence
 
     !> Print iteration progress
-    subroutine print_cg_iteration(unit, iter, res_norm, alpha, rel_res, verbosity, timer)
+    subroutine print_cg_iteration(unit, iter, res_norm, step, rel_resnorm, verbosity, timer)
         integer, intent(in) :: unit, iter, verbosity
-        real(wp), intent(in) :: res_norm, alpha, rel_res
+        real(wp), intent(in) :: res_norm, step, rel_resnorm
         type(timer_type), intent(in), optional :: timer
 
         if (verbosity == 1) then
-            write(unit, '(i6,*(1x, es15.5))') iter, res_norm, alpha, rel_res
+            write(unit, '(i6,*(1x, es15.5))') iter, res_norm, step, rel_resnorm
         else if (verbosity > 1) then
-            write(unit, '(i6,*(1x, es15.5))') iter, res_norm, alpha, rel_res, timer%get("iteration")
+            write(unit, '(i6,*(1x, es15.5))') iter, res_norm, step, rel_resnorm, timer%get("iteration")
         end if
     end subroutine print_cg_iteration
 

@@ -18,5 +18,4 @@ srcs += files(
   'cg.f90',
   'direct.f90',
   'type.f90',
-  'cache.f90'
 )

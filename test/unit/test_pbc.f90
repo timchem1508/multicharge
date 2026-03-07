@@ -21,6 +21,7 @@ module test_pbc
    use mctc_io_structure, only: structure_type
    use mctc_cutoff, only: get_lattice_points
    use mstore, only: get_structure
+   use multicharge_blas, only: gemv, symv, gemm
    use multicharge_model_type, only: mchrg_model_type
    use multicharge_model_eeqbc, only: eeqbc_model
    use multicharge_param, only: new_eeq2019_model, new_eeqbc2025_model
@@ -85,7 +86,7 @@ subroutine gen_test(error, mol, model, qref, eref)
    !> Reference energies
    real(wp), intent(in), optional :: eref(:)
 
-   !> Solver variables
+   ! Solver variables
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
@@ -116,7 +117,7 @@ subroutine gen_test(error, mol, model, qref, eref)
    if (allocated(error)) return
 
    if (present(qref)) then
-      if (any(abs(qvec - qref) > thr1)) then
+      if (any(abs(qvec - qref) > thr)) then
          call test_failed(error, "Partial charges do not match")
          print'(a)', "Charges:"
          print'(3es21.14)', qvec
@@ -129,7 +130,7 @@ subroutine gen_test(error, mol, model, qref, eref)
    if (allocated(error)) return
 
    if (present(eref)) then
-      if (any(abs(energy - eref) > thr1)) then
+      if (any(abs(energy - eref) > thr)) then
          call test_failed(error, "Energies do not match")
          print'(a)', "Energy:"
          print'(3es21.14)', energy
@@ -153,7 +154,7 @@ subroutine test_numgrad(error, mol, model)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   !> Solver variables
+   ! Solver variables
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
@@ -245,7 +246,7 @@ subroutine test_numsigma(error, mol, model)
    real(wp), allocatable :: lattr(:, :), xyz(:, :)
    real(wp) :: er, el, eps(3, 3), numsigma(3, 3), sigma(3, 3), lattice(3, 3)
 
-   !> Solver variables
+   ! Solver variables
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
   
@@ -329,7 +330,7 @@ subroutine test_dbdr(error, mol, model)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   !> Solver variables
+   ! Solver variables
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
@@ -383,7 +384,7 @@ subroutine test_dbdr(error, mol, model)
    call model%ncoord%get_coordination_number(mol, trans, cn, dcndr, dcndL)
    call model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
    call model%update(mol, cache, mol%nat, cn,  qloc, dcndr, dcndL, dqlocdr, dqlocdL)
-   call model%get_xvec(mol, cache, xvecl) ! need to call this for xtmp in cache (eeqbc)
+   call model%get_xvec(mol, cache, xvecl)
    call model%get_xvec_derivs(mol, cache, dbdr, dbdL)
 
    if (any(abs(dbdr(:, :, :) - numgrad(:, :, :)) > thr2)) then
@@ -409,7 +410,7 @@ subroutine test_dbdL(error, mol, model)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   !> Solver variables
+   ! Solver variables
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
@@ -482,7 +483,7 @@ subroutine test_dbdL(error, mol, model)
    call model%ncoord%get_coordination_number(mol, trans, cn, dcndr, dcndL)
    call model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
    call model%update(mol, cache, mol%nat, cn,  qloc, dcndr, dcndL, dqlocdr, dqlocdL)
-   call model%get_xvec(mol, cache, xvecl) ! need to call this for xtmp in cache (eeqbc)
+   call model%get_xvec(mol, cache, xvecl)
    call model%get_xvec_derivs(mol, cache, dbdr, dbdL)
 
    if (any(abs(dbdL(:, :, :) - numsigma(:, :, :)) > thr2)) then
@@ -508,7 +509,7 @@ subroutine test_dadr(error, mol, model)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   !> Solver variables
+   ! Solver variables
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
@@ -617,7 +618,7 @@ subroutine test_dadL(error, mol, model)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   !> Solver variables
+   ! Solver variables
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
@@ -724,7 +725,7 @@ subroutine test_numdqdr(error, mol, model)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   !> Solver variables
+   ! Solver variables
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
@@ -797,7 +798,7 @@ subroutine test_numdqdL(error, mol, model)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   !> Solver variables
+   ! Solver variables
    class(mchrg_solver_type), allocatable :: slv
    class(mchrg_solver_input), allocatable :: solver_input
 
@@ -889,7 +890,7 @@ subroutine test_dfdr(error, mol, dfdq, model)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   !> Solver variables
+   ! Solver variables
    class(mchrg_solver_type), allocatable :: slv_dqdr, slv_dfdr
    class(mchrg_solver_input), allocatable :: solver_dqdr_input, solver_dfdr_input
 
@@ -919,15 +920,13 @@ subroutine test_dfdr(error, mol, dfdq, model)
       & ql(mol%nat), qr(mol%nat), dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat), &
       & gradient(3, mol%nat), sigma(3, mol%nat), dfdr(3, mol%nat))
 
-   gradient = 0.0_wp
-   
    if (size(dfdq) /= mol%nat) then
       call test_failed(error, "Size of dfdq does not match number of atoms")
       return
    end if
 
    call model%ncoord%get_coordination_number(mol, trans, cn, dcndr, dcndL)
-   call model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
+   call model%local_charge(mol, trans, qloc)
 
    ! Solve with direct solver to get dqdr
    call model%solve(mol, slv_dqdr, error, cn, qloc, dcndr, dcndL, &
@@ -935,16 +934,12 @@ subroutine test_dfdr(error, mol, dfdq, model)
    if (allocated(error)) return
 
    ! Compute direct product: dfdr = dfdq * dqdr
-   dfdr = 0.0_wp
-   do iat = 1, mol%nat
-      do ic = 1, mol%nat
-         dfdr(:, iat) = dfdr(:, iat) + dfdq(ic) * dqdr(:, ic, iat)
-      end do
-   end do
+   call gemv(dqdr(:, :, :), dfdq(:), dfdr(:,:), alpha=1.0_wp)
 
+   gradient = 0.0_wp
    ! Solve with CG solver to get gradient
    call model%solve(mol, slv_dfdr, error, cn, qloc, dcndr, dcndL, &
-      & dqlocdr, dqlocdL, dfdq=dfdq, gradient=gradient, sigma=sigma, unit=output_unit)
+      & dqlocdr, dqlocdL, dfdq=dfdq, gradient=gradient)
    if (allocated(error)) return
 
    ! Compare CG gradient with direct product
@@ -1132,7 +1127,7 @@ subroutine test_eeq_dfdr_urea(error)
    call new_eeq2019_model(mol, model, error)
    if (allocated(error)) return
    allocate(dfdq(mol%nat))
-   dfdq = 0.1_wp
+   dfdq(:) = 0.1_wp
    call test_dfdr(error, mol, dfdq, model)
 
 end subroutine test_eeq_dfdr_urea
@@ -1285,7 +1280,7 @@ subroutine test_eeqbc_dfdr_urea(error)
    call new_eeqbc2025_model(mol, model, error)
    if (allocated(error)) return
    allocate(dfdq(mol%nat))
-   dfdq = 0.1_wp
+   dfdq(:) = 0.1_wp
    call test_dfdr(error, mol, dfdq, model)
 
 end subroutine test_eeqbc_dfdr_urea
