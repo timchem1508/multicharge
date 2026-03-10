@@ -130,6 +130,7 @@ module multicharge_model_type
    end interface
 
    real(wp), parameter :: twopi = 2 * pi
+   real(wp), parameter :: eps = tiny(1.0_wp)
 
 contains
 
@@ -194,7 +195,7 @@ subroutine solve(self, mol, solver, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlo
    ! Output unit
    integer, intent(in), optional :: unit
 
-   integer :: ic, jc, iat, ndim
+   integer :: ic, jc, iat, jat, ndim
    logical :: grad, cpq, dcn
    logical :: add_lagr = .true.   
 
@@ -205,6 +206,7 @@ subroutine solve(self, mol, solver, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlo
    real(wp), allocatable :: xvec(:), vrhs(:), amat(:, :)
    real(wp), allocatable :: ainv(:, :), jmat(:, :)
    ! Gradients
+   ! dadr, dadl and atrace already includes multiplication by q
    real(wp), allocatable :: dadr(:, :, :), dadL(:, :, :), atrace(:, :)
    real(wp), allocatable :: dxdr(:, :, :), dxdL(:, :, :)
    type(cache_container), allocatable :: cache
@@ -224,18 +226,24 @@ subroutine solve(self, mol, solver, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlo
    logical :: adj_grad
    ! Derivative response J*y=dfdq
    real(wp), allocatable :: yvec(:)
-   real(wp) :: yvecsum
+   real(wp) :: yvecsum, factor
    ! Adjoint vector p
    real(wp), allocatable :: padj(:)
+   ! -dA/dr*q + db/dr :: dxdr - dadr 
+   real(wp), allocatable :: derivsum(:,:,:)
 
-   !> Timer
+   ! Temporary arrays for dqdr and dqdL solution
+   real(wp), allocatable :: rhs(:), sol(:), diag(:)
+   real(wp) :: scale
+
+   ! Timer
    type(timer_type) :: timer
 
    ! Calculate gradient if the respective arrays are present
    dcn = present(dcndr) .and. present(dcndL)
    grad = present(gradient) .and. present(sigma) .and. dcn .and. .not. present(dfdq)
    cpq = present(dqdr) .and. present(dqdL) .and. dcn .and. .not. present(dfdq)
-   adj_grad = present(dfdq) .and. solver%need_pos_def .eqv. .true. 
+   adj_grad = present(dfdq)
 
    if (.not. present(verbosity)) then
       verbosity_solve = 0
@@ -273,7 +281,8 @@ subroutine solve(self, mol, solver, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlo
    allocate(xvec(ndim))
    call self%get_xvec(mol, cache, xvec)
 
-   call timer%pop ! stop setup timer
+   ! stop setup timer
+   call timer%pop 
 
    ! Print header
    call print_solve_header(print_unit, verbosity_solve, timer)
@@ -289,7 +298,6 @@ subroutine solve(self, mol, solver, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlo
       call solver%solve(amat, xvec, vrhs, ainv=ainv, cpq=cpq, new_unit=print_unit, error=error)
 
       jmat = amat(:mol%nat, :mol%nat)
-      jinv = ainv(:mol%nat, :mol%nat)
 
    else
       ! Constrained system
@@ -298,12 +306,10 @@ subroutine solve(self, mol, solver, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlo
       allocate(unitvec(mol%nat))
 
       ! Initial guess for vvec: v = chi / diag(J)
-      !$omp parallel do default(none) shared(mol,amat,uvec,vvec,xvec)
       do ic = 1, mol%nat
-         uvec(ic)= 1.0_wp/(amat(ic, ic) + tiny(1.0_wp))
-         vvec(ic)= -xvec(ic)/(amat(ic, ic) + tiny(1.0_wp))
+         uvec(ic)= 1.0_wp/(amat(ic, ic) + eps)
+         vvec(ic)= -xvec(ic)/(amat(ic, ic) + eps)
       end do
-      !$omp end parallel do
       unitvec = 1.0_wp
       ainv = amat
 
@@ -319,7 +325,7 @@ subroutine solve(self, mol, solver, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlo
       vvecsum = sum(vvec)
 
       ! Lagrangian multiplier
-      lambda = - (mol%charge + vvecsum) / (uvecsum + tiny(1.0_wp))
+      lambda = - (mol%charge + vvecsum) / (uvecsum + eps)
 
       ! Reconstruct the full VRHS for gradient calculations
       allocate(vrhs(mol%nat+1))
@@ -356,70 +362,55 @@ subroutine solve(self, mol, solver, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlo
 
    if (adj_grad) then
       ! Adjoint gradient calculation
+      call print_adjoint_message(print_unit, verbosity_solve)
       call timer%push("gradient") 
+      allocate(yvec(mol%nat))
+      allocate(padj(mol%nat))
+      allocate(derivsum(3, mol%nat, mol%nat), source=0.0_wp)
 
-      if (add_lagr .eqv. .true.) then
-         unitvec = 1.0_wp
+      if (solver%need_pos_def .eqv. .false.) then
          ! Constrained response: J*u = 1
+         allocate(uvec(mol%nat))
+         allocate(unitvec(mol%nat))
+         unitvec = 1.0_wp
          call solver%solve(amat=jmat, xvec=unitvec, vrhs=uvec, &
-            & ainv=jinv, cpq=cpq, new_unit=print_unit, error=error)
+            & new_unit=print_unit, error=error)
          uvecsum = sum(uvec)
-         call print_adjoint_message(print_unit, verbosity_solve)
-         ! Solving the adjoint system J*y = dfdq
-         allocate(yvec(mol%nat))
-         allocate(padj(mol%nat))
+
          yvec = dfdq
          ! Derivative response: J*y = dfdq
-         call solver%solve(amat=amat, xvec=dfdq, vrhs=yvec, &
-               & ainv=ainv, new_unit=print_unit, error=error)
+         call solver%solve(amat=jmat, xvec=dfdq, vrhs=yvec, &
+               & new_unit=print_unit, error=error)
          yvecsum = sum(yvec)
          ! Project out the component of yvec along the constraint direction uvec
-         padj = yvec - (yvecsum / (uvecsum + tiny(1.0_wp))) * uvec
-         ! Gradient: df/dr = -padj^T * (dA/dr * q + dx/dr)
-         !$omp parallel do collapse(2) default(none) &
-         !$omp shared(mol,gradient,dadr,dxdr,vrhs,padj) private(iat,ic) schedule(static)
+         padj = yvec - (yvecsum / (uvecsum + eps)) * uvec
+
+         ! Gradient: df/dr = padj^T * (- dA/dr * q + dx/dr)
          do iat = 1, mol%nat
-            do ic = 1, mol%nat
-               gradient(1,iat) = gradient(1,iat) &
-                  - padj(ic) * (dadr(1,iat,ic) * vrhs(ic) + dxdr(1,iat,ic))
-               gradient(2,iat) = gradient(2,iat) &
-                  - padj(ic) * (dadr(2,iat,ic) * vrhs(ic) + dxdr(2,iat,ic))
-               gradient(3,iat) = gradient(3,iat) &
-                  - padj(ic) * (dadr(3,iat,ic) * vrhs(ic) + dxdr(3,iat,ic))
-            end do
+            derivsum(:, :, iat) = dxdr(:, :, iat) - dadr(:, :, iat)
          end do
-         !$omp end parallel do
+         call gemv(derivsum(:, :, :mol%nat), padj(:mol%nat), gradient, beta=0.0_wp, alpha=1.0_wp)
+
       else 
-         call print_adjoint_message(print_unit, verbosity_solve)
-         ! Solving the adjoint system J*y = dfdq
-         allocate(yvec(mol%nat))
-         allocate(padj(mol%nat))
          ! Initial guess for yvec: y = dfdq / diag(J)
-         !$omp parallel do default(none) shared(mol,amat,yvec,dfdq)
          do ic = 1, mol%nat
-            yvec(ic)= dfdq(ic)/(amat(ic, ic) + tiny(1.0_wp))
+            yvec(ic)= dfdq(ic)/(amat(ic, ic) + eps)
          end do
-         !$omp end parallel do
+
          ! Derivative response: J*y = dfdq
          call solver%solve(amat=amat, xvec=dfdq, vrhs=yvec, &
                & new_unit=print_unit, error=error)
          yvecsum = sum(yvec)
+
          ! Project out the component of yvec along the constraint direction uvec
-         padj = yvec - (yvecsum / (uvecsum + tiny(1.0_wp))) * uvec
-         ! Gradient: df/dr = -padj^T * (dA/dr * q + dx/dr)
-         !$omp parallel do collapse(2) default(none) &
-         !$omp shared(mol,gradient,dadr,dxdr,vrhs,padj) private(iat,ic) schedule(static)
+         padj = yvec - (yvecsum / (uvecsum + eps)) * uvec
+
+         ! Gradient: df/dr = padj^T * (- dA/dr * q + dx/dr)
          do iat = 1, mol%nat
-            do ic = 1, mol%nat
-               gradient(1,iat) = gradient(1,iat) &
-                  - padj(ic) * (dadr(1,iat,ic) * vrhs(ic) + dxdr(1,iat,ic))
-               gradient(2,iat) = gradient(2,iat) &
-                  - padj(ic) * (dadr(2,iat,ic) * vrhs(ic) + dxdr(2,iat,ic))
-               gradient(3,iat) = gradient(3,iat) &
-                  - padj(ic) * (dadr(3,iat,ic) * vrhs(ic) + dxdr(3,iat,ic))
-            end do
+            derivsum(:, :, iat) = dxdr(:, :, iat) - dadr(:, :, iat)
          end do
-         !$omp end parallel do
+         call gemv(derivsum(:, :, :mol%nat), padj(:mol%nat), gradient, beta=0.0_wp, alpha=1.0_wp)
+
       end if
 
       ! Stop gradient timer
@@ -443,15 +434,70 @@ subroutine solve(self, mol, solver, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlo
 
    ! Calculate charge derivatives if requested
    if (cpq) then
-      do iat = 1, mol%nat
-         dadr(:, :, iat) = -dxdr(:, :, iat) + dadr(:, :, iat)
-         dadL(:, :, iat) = -dxdL(:, :, iat) + dadL(:, :, iat)
-      end do
-      call gemm(dadr, ainv(:, :mol%nat), dqdr, alpha=-1.0_wp)
-      call gemm(dadL, ainv(:, :mol%nat), dqdL, alpha=-1.0_wp)
-   end if     
+      call timer%push("gradient") 
+      if (solver%need_pos_def) then
+         ! Diagonal for initial guess
+         allocate(diag(mol%nat))
+         do iat = 1, mol%nat
+            diag(iat) = amat(iat, iat)
+         end do
+
+         !$omp parallel default(none) &
+         !$omp shared(mol, solver, dqdr, dqdL, amat, dadr, dxdr, dadL, dxdL, &
+         !$omp        uvec, uvecsum, diag, print_unit, error) &
+         !$omp private(iat, ic, jc, rhs, sol, scale)
+         allocate(rhs(mol%nat), sol(mol%nat))
+         ! Position derivatives (dq/dR) 
+         !$omp do schedule(runtime)
+         do iat = 1, mol%nat
+            do ic = 1, 3
+               ! RHS = db/dR - dA/dR * q
+               rhs(:) = dxdr(ic, iat, :) - dadr(ic, iat, :)
+               ! Initial guess: rhs / diag
+               sol(:) = rhs(:) / diag(:)
+               ! Solve J * m = rhs
+               call solver%solve(amat=amat, xvec=rhs, vrhs=sol, &
+                  & new_unit=print_unit, error=error)
+               ! Projection factor
+               scale = sum(sol) / uvecsum
+               ! dq/dR = m - scale * u
+               dqdr(ic, iat, :) = sol(:) - scale * uvec(:)
+            end do
+         end do
+         !$omp end do
+         ! Charge virial (dq/dL) 
+         !$omp do schedule(runtime)
+         do ic = 1, 3
+            do jc = 1, 3
+               rhs(:) = dxdL(ic, jc, :) - dadL(ic, jc, :)
+               sol(:) = rhs(:) / diag(:)
+               call solver%solve(amat=amat, xvec=rhs, vrhs=sol, &
+                  & new_unit=print_unit, error=error)
+               scale = sum(sol) / uvecsum
+               dqdL(ic, jc, :) = sol(:) - scale * uvec(:)
+            end do
+         end do
+         !$omp end do
+         deallocate(rhs, sol)
+         !$omp end parallel
+      else
+         ! Original inverse‑based method for augmented matrix
+         do iat = 1, mol%nat
+            dadr(:, :, iat) = -dxdr(:, :, iat) + dadr(:, :, iat)
+            dadL(:, :, iat) = -dxdL(:, :, iat) + dadL(:, :, iat)
+         end do
+         call gemm(dadr, ainv(:, :mol%nat), dqdr, alpha=-1.0_wp)
+         call gemm(dadL, ainv(:, :mol%nat), dqdL, alpha=-1.0_wp)
+      end if
+      
+      ! Stop gradient timer
+      call timer%pop 
+      call print_gradient_time(print_unit, verbosity_solve, timer)
+   end if
+
+   ! stop total solve timer
    
-   call timer%pop ! stop total solve timer
+   call timer%pop 
 
    call print_total_time(print_unit, verbosity_solve, timer)
 

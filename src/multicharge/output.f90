@@ -169,6 +169,7 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL)
       write(unit, '(a6,1x,a4,3x,a9,1x,*(1x, a10))')  "#", "Z", "component", "x", "y", "z"
       write(unit, '(58("-"))')
       do iat = 1, mol%nat
+         isp = mol%id(iat)
          do jat = 1, 3
             write(unit, '(i6,1x,i3,1x,a2, 2x, a4, 5x,*(es11.3))') &
                & iat, mol%num(isp), mol%sym(isp), comp(jat), dqdL(:, jat, iat)

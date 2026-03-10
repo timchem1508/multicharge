@@ -354,14 +354,6 @@ subroutine get_arguments(input, model_id, input_format, grad, qgrad, charge, &
       allocate(direct_input :: solver_input) 
    end if
 
-   ! Charge gradient cannot be evaluated using cg solver.
-   if (qgrad) then
-      select type (solver_input)
-      type is (cg_input)
-         call fatal_error(error, "Charge gradient cannot be evaluated using cg solver.")
-      end select
-   end if 
-
    select type(solver_input)
    type is (cg_input)
    if (allocated(maxiter)) then

@@ -68,7 +68,7 @@ contains
         !> Initial search direction (b)
         real(wp), intent(in)  :: xvec(:)
         !> Initial guess and solution
-        real(wp), intent(inout) :: vrhs(:)
+        real(wp), intent(inout), contiguous :: vrhs(:)
         !> Inverse A-matrix and coupled perturbed logical
         real(wp), intent(out), optional :: ainv(:, :)
         !> Coupled-perturbed equations flag (optional)
@@ -130,7 +130,7 @@ contains
            call symv(invmat, xvec, vrhs, uplo='l')
            do ic = 1, ndim
               do jc = ic + 1, ndim
-                 invmat(ic, jc) = invmat(jc, ic)
+                invmat(ic, jc) = invmat(jc, ic)
               end do
            end do
         else

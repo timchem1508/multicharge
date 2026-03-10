@@ -39,7 +39,7 @@ module multicharge_solver_type
             class(mchrg_solver_type), intent(in) :: self
             real(wp), intent(in)  :: amat(:, :)
             real(wp), intent(in)  :: xvec(:)
-            real(wp), intent(inout) :: vrhs(:)
+            real(wp), intent(inout), contiguous :: vrhs(:)
             real(wp), intent(out), optional :: ainv(:, :)
             logical, intent(in), optional :: cpq
             integer, intent(in), optional :: new_unit

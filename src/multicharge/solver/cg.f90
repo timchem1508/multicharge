@@ -19,7 +19,7 @@
 module multicharge_solver_cg
     use iso_fortran_env, only : output_unit
     use mctc_env, only: error_type, fatal_error, wp, timer_type, format_time
-    use multicharge_blas, only: symv, gemv
+    use multicharge_blas, only: axpy, scal, dot, symv, gemv
     use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
     implicit none
     private
@@ -46,6 +46,8 @@ module multicharge_solver_cg
     contains
         procedure :: solve
     end type cg_solver
+
+    real(wp), parameter :: eps = tiny(1.0_wp)
 
     ! Default values        
     integer, parameter :: cgmiter_def = 1000
@@ -87,7 +89,7 @@ contains
         !> Right-hand side vector (b)
         real(wp), intent(in)  :: xvec(:)
         !> On input: initial guess; on output: solution
-        real(wp), intent(inout) :: vrhs(:)
+        real(wp), intent(inout), contiguous :: vrhs(:)
         !> Inverse matrix – not computed by CG, but required by interface
         real(wp), intent(out), optional :: ainv(:, :)
         !> Flag for coupled-perturbed equations (should always be .false. for CG)
@@ -144,7 +146,7 @@ contains
         end if
 
         ! CG cannot compute the inverse matrix
-        if (present(cpq)) then
+        if (present(cpq) .or. present(ainv)) then
             call fatal_error(error, "The inverse matrix cannot be calculated using an iterative solver.")
             return
         end if 
@@ -166,29 +168,25 @@ contains
         if (self%verbosity > 1) call timer%push("initialization")
 
         ! Diagonal preconditioner prec (Jacobi preconditioner)
-        !$omp parallel do default(none) shared(prec, amat, ndim, tol_square) private(iat)
         do iat = 1, ndim
-            prec(iat) = amat(iat,iat)
-            if (abs(prec(iat)) < tol_square) prec(iat) = tol_square
-            prec(iat) = 1.0_wp / prec(iat)
+            prec(iat) = 1.0_wp / (amat(iat,iat) + eps)
         end do
-        !$omp end parallel do
     
         ! Initial residual res = xvec - amat*vrhs
         call symv(amat, vrhs, Adir, alpha=1.0_wp, beta=0.0_wp)   
         res(:) = xvec(:) - Adir(:)                                    
         
         ! Initial preconditioned residual precres = M^-1 * r
-        precres = res * prec                                 
-        dir = precres                                    
+        precres(:) = res(:) * prec(:)                                 
+        dir(:) = precres(:)                                    
         
         ! Initial norm xvecnorm
-        xvecnorm = dot_product(xvec, xvec)
+        xvecnorm = dot(xvec, xvec)
         if (xvecnorm < tol_square) xvecnorm = 1.0_wp
 
         ! Initial resnorm and res^T * precres
-        resnorm = dot_product(res, res)                
-        resdot_old = dot_product(res, precres)                    
+        resnorm = dot(res, res)                
+        resdot_old = dot(res, precres)                    
 
         if (self%verbosity > 1) call timer%pop 
 
@@ -196,6 +194,7 @@ contains
         call print_cg_header(unit, self%verbosity, maxit, tol, timer)
 
         ! Main CG iteration loop
+
         do it = 1, maxit
 
             if (self%verbosity > 1) call timer%push("iteration")
@@ -203,40 +202,21 @@ contains
             ! Matrix-vector product Adir = amat * dir
             call symv(amat, dir, Adir, alpha=1.0_wp, beta=0.0_wp)
 
-            denom = 0.0_wp
-            !$omp parallel do reduction(+:denom) default(none) &
-            !$omp shared(ndim,dir,Adir) private(iat)
-            do iat = 1, ndim
-                denom = denom + dir(iat) * Adir(iat)
-            end do
-            !$omp end parallel do
-
-            denom = denom + tiny(1.0_wp)
-
+            denom = dot(dir, Adir)
             if (abs(denom) < tol_square) then
                 if (self%verbosity > 0) call timer%pop
                 exit
             end if
 
             ! Step length step = (res^T * precres) / (dir^T * amat * dir)
-            step = resdot_old / denom
+            step = resdot_old / (denom + eps)
 
             ! Update solution and residual
-            !$omp parallel do default(none) shared(ndim,vrhs,res,step,dir,Adir) private(iat)
-            do iat = 1, ndim
-                vrhs(iat)     = vrhs(iat)     + step * dir(iat)
-                res(iat) = res(iat) - step * Adir(iat)
-            end do
-            !$omp end parallel do
+            call axpy(xvec=dir, yvec=vrhs, alpha=step)
+            call axpy(xvec=Adir, yvec=res, alpha=-step)
 
             ! Compute the new residual norm
-            resnorm = 0.0_wp
-            !$omp parallel do reduction(+:resnorm) default(none) &
-            !$omp shared(ndim,res) private(iat)
-            do iat = 1, ndim
-                resnorm = resnorm + res(iat) * res(iat)
-            end do
-            !$omp end parallel do
+            resnorm = dot(res, res)
 
             ! Relative residual norm to check convergence
             rel_resnorm = resnorm / xvecnorm
@@ -256,23 +236,14 @@ contains
             end do
             !$omp end parallel do
 
-            resdot_new = 0.0_wp
-            !$omp parallel do reduction(+:resdot_new) default(none) &
-            !$omp shared(ndim,res,precres) private(iat)
-            do iat = 1, ndim
-                resdot_new = resdot_new + res(iat) * precres(iat)
-            end do
-            !$omp end parallel do
+            resdot_new = dot(res, precres)
 
             ! Update search direction p = z + updfact * p
-            updfact   = resdot_new / resdot_old
+            updfact   = resdot_new / (resdot_old + eps)
             resdot_old = resdot_new
 
-            !$omp parallel do default(none) shared(ndim,dir,precres,updfact) private(iat)
-            do iat = 1, ndim
-                dir(iat) = precres(iat) + updfact * dir(iat)
-            end do
-            !$omp end parallel do
+            call scal(alpha=updfact, xvec=dir)
+            call axpy(xvec=precres, yvec=dir, alpha=1.0_wp)
 
             ! iteration timer pop
             if (self%verbosity > 1) call timer%pop 
