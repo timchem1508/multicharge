@@ -18,7 +18,7 @@
 
 module multicharge_solver_direct
     use iso_fortran_env, only: output_unit
-    use mctc_env, only: error_type, fatal_error, wp
+    use mctc_env, only: error_type, fatal_error, wp, timer_type, timer_type, format_time
     use multicharge_blas, only: symv
     use multicharge_lapack, only: sytrf, sytrs, sytri
     use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
@@ -85,6 +85,9 @@ contains
         integer, allocatable :: ipiv(:)
         logical :: want_cpq
         integer :: unit
+        type(timer_type) :: timer
+
+        if (self%verbosity > 1) call timer%push("total")
 
         if (present(new_unit)) then
             unit = new_unit
@@ -93,7 +96,7 @@ contains
         end if
 
         if (self%verbosity > 0) then
-            call write_direct_solver(unit, self)
+            call write_direct_solver(unit)
         end if 
     
         ! Dimensions match check
@@ -106,8 +109,7 @@ contains
         allocate(invmat(ndim, ndim))
         invmat = amat
         vrhs = xvec
-    
-        ! Logical: solve coupled-perturbed equations flag
+
         want_cpq = .false.
         if (present(cpq)) want_cpq = cpq
     
@@ -144,16 +146,31 @@ contains
         end if
 
         if (present(ainv)) ainv=invmat
-    
+
+        ! pop solve timer
+        call timer%pop
+
+        call print_direct_final(unit, timer, self%verbosity)
+
     end subroutine solve
 
-subroutine write_direct_solver(unit, solver)
-   integer, intent(in) :: unit
-   class(direct_solver), intent(in) :: solver
+    subroutine write_direct_solver(unit)
+    integer, intent(in) :: unit
 
-   write(unit, '(a)') "Using Direct Solver"
-   write(unit, '(a)')
+    write(unit, '(a)') "Using Direct Solver"
+    write(unit, '(a)')
 
-end subroutine write_direct_solver
+    end subroutine write_direct_solver
+
+    !> Print final summary
+    subroutine print_direct_final(unit, timer, verbosity)
+        integer, intent(in) :: unit, verbosity
+        type(timer_type), intent(in) :: timer
+
+        if (verbosity > 1) then
+            write(unit, '(a, 1x, a)') "Direct solver time : ", format_time(timer%get("total"))
+            write(unit, '(a)') ''
+        end if
+    end subroutine print_direct_final
 
 end module multicharge_solver_direct

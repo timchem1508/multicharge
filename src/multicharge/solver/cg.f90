@@ -20,6 +20,7 @@ module multicharge_solver_cg
     use iso_fortran_env, only : output_unit
     use mctc_env, only: error_type, fatal_error, wp, timer_type, format_time
     use multicharge_blas, only: axpy, scal, dot, symv, gemv
+    use multicharge_lapack, only: sytrf, sytrs
     use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
     implicit none
     private
@@ -81,7 +82,8 @@ contains
 
     end subroutine new_cg_solver
 
-    !> Solve method for CG solver
+    !> Solve procedure for the classical cg and block-cg
+
     subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
         class(cg_solver), intent(in) :: self
         !> A matrix of Ax=b system
@@ -92,7 +94,7 @@ contains
         real(wp), intent(inout), contiguous :: vrhs(:)
         !> Inverse matrix – not computed by CG, but required by interface
         real(wp), intent(out), optional :: ainv(:, :)
-        !> Flag for coupled-perturbed equations (should always be .false. for CG)
+        !> Flag for coupled-perturbed equations
         logical, intent(in), optional :: cpq
         !> Output unit
         integer, intent(in), optional :: new_unit
@@ -103,12 +105,10 @@ contains
         integer :: maxit
         ! Tolerance of the solver
         real(wp) :: tol, tol_square
-        
         ! Counters
         integer :: it, iat
         ! Size of the system
         integer :: ndim
-
         ! Search direction
         real(wp), allocatable :: dir(:)
         ! Norm of the RHS
@@ -121,14 +121,12 @@ contains
         real(wp), allocatable :: prec(:)
         ! Preconditioned residual 
         real(wp), allocatable ::  precres(:)
-
         ! amat-dir product 
         real(wp), allocatable :: Adir(:)
         ! Denominator of the step length
         real(wp) :: denom
         ! Step length
         real(wp) :: step
-
         ! Update factor for search direction
         real(wp) :: updfact
         ! Dot product of reconditioned and original residuals
@@ -139,17 +137,17 @@ contains
         type(timer_type) :: timer
         integer :: unit
 
+        ! CG cannot compute the inverse matrix
+        if (present(ainv)) then
+            call fatal_error(error, "The inverse matrix cannot be calculated using an iterative solver.")
+            return
+        end if 
+
         if (present(new_unit)) then
             unit = new_unit
         else
             unit = output_unit
         end if
-
-        ! CG cannot compute the inverse matrix
-        if (present(cpq) .or. present(ainv)) then
-            call fatal_error(error, "The inverse matrix cannot be calculated using an iterative solver.")
-            return
-        end if 
 
         ! Dimensions check
         ndim = size(xvec)
@@ -167,20 +165,20 @@ contains
         if (self%verbosity > 1) call timer%push("total")
         if (self%verbosity > 1) call timer%push("initialization")
 
-        ! Diagonal preconditioner prec (Jacobi preconditioner)
+        ! Diagonal preconditioner 
         do iat = 1, ndim
             prec(iat) = 1.0_wp / (amat(iat,iat) + eps)
         end do
     
-        ! Initial residual res = xvec - amat*vrhs
+        ! Initial residual
         call symv(amat, vrhs, Adir, alpha=1.0_wp, beta=0.0_wp)   
-        res(:) = xvec(:) - Adir(:)                                    
+        res(:) = xvec(:) - Adir(:)                                                                
         
-        ! Initial preconditioned residual precres = M^-1 * r
+        ! Initial preconditioned residual 
         precres(:) = res(:) * prec(:)                                 
         dir(:) = precres(:)                                    
         
-        ! Initial norm xvecnorm
+        ! Initial norm 
         xvecnorm = dot(xvec, xvec)
         if (xvecnorm < tol_square) xvecnorm = 1.0_wp
 
@@ -199,7 +197,7 @@ contains
 
             if (self%verbosity > 1) call timer%push("iteration")
 
-            ! Matrix-vector product Adir = amat * dir
+            ! Matrix-vector product
             call symv(amat, dir, Adir, alpha=1.0_wp, beta=0.0_wp)
 
             denom = dot(dir, Adir)
@@ -208,7 +206,7 @@ contains
                 exit
             end if
 
-            ! Step length step = (res^T * precres) / (dir^T * amat * dir)
+            ! Step length
             step = resdot_old / (denom + eps)
 
             ! Update solution and residual
@@ -229,16 +227,12 @@ contains
                 exit
             end if
 
-            ! Preconditioned updated residual precres = prec * res
-            !$omp parallel do default(none) shared(ndim,precres,res,prec) private(iat)
-            do iat = 1, ndim
-                precres(iat) = res(iat) * prec(iat)
-            end do
-            !$omp end parallel do
+            ! Updated preconditioned residual
+            precres(:) = prec(:) * res(:)
 
             resdot_new = dot(res, precres)
 
-            ! Update search direction p = z + updfact * p
+            ! Update search direction
             updfact   = resdot_new / (resdot_old + eps)
             resdot_old = resdot_new
 
@@ -271,6 +265,7 @@ contains
         call print_cg_final(unit, timer, self%verbosity)
     
     end subroutine solve
+
 
     !> Print header for CG solver
     subroutine print_cg_header(unit, verbosity, maxit, tol, timer)

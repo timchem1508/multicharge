@@ -33,20 +33,20 @@ module multicharge_solver_type
        procedure(solve), deferred :: solve
     end type mchrg_solver_type
 
-    abstract interface
-        subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
-            import :: mchrg_solver_type, error_type, wp
-            class(mchrg_solver_type), intent(in) :: self
-            real(wp), intent(in)  :: amat(:, :)
-            real(wp), intent(in)  :: xvec(:)
-            real(wp), intent(inout), contiguous :: vrhs(:)
-            real(wp), intent(out), optional :: ainv(:, :)
-            logical, intent(in), optional :: cpq
-            integer, intent(in), optional :: new_unit
-            type(error_type), allocatable, intent(out) :: error
-        end subroutine solve
 
-    end interface
+abstract interface
+    subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
+        import :: mchrg_solver_type, error_type, wp
+        class(mchrg_solver_type), intent(in) :: self
+        real(wp), intent(in)  :: amat(:, :)
+        real(wp), intent(in)  :: xvec(:)
+        real(wp), intent(inout), contiguous :: vrhs(:)
+        real(wp), intent(out), optional :: ainv(:, :)
+        logical, intent(in), optional :: cpq
+        integer, intent(in), optional :: new_unit
+        type(error_type), allocatable, intent(out) :: error
+    end subroutine solve
+end interface
 
     !> Solver input abstract type
     type, abstract, public :: mchrg_solver_input

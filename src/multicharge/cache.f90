@@ -27,6 +27,9 @@ module multicharge_model_cache
    type, public :: cache_container
       !> Mutable data attribute
       class(*), allocatable :: raw
+      real(wp), allocatable :: amat(:, :)      
+      real(wp), allocatable :: derivsum(:, :, :)  
+      real(wp), allocatable :: uvec(:) 
    end type cache_container
 
    !> Cache for the charge model

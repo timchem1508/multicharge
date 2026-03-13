@@ -264,9 +264,9 @@ subroutine get_arguments(input, model_id, input_format, grad, qgrad, charge, &
       case("-version", "--version")
          call version(output_unit)
          stop
-      case("-v", "-vv", "-verbose", "--verbose")
+      case("-v",  "-verbose", "--verbose")
          verbosity = verbosity + 1
-      case("-s", "-ss", "-silent", "--silent")
+      case("-s",  "-silent", "--silent")
          verbosity = verbosity - 1   
       case default
          if (.not. allocated(input)) then
@@ -324,10 +324,10 @@ subroutine get_arguments(input, model_id, input_format, grad, qgrad, charge, &
          end if
          iarg = iarg + 1
          call get_argument(iarg, solver_name)
-         if (solver_name == "DIRECT" .or. solver_name == "direct" .or. solver_name == "LAPACK" ) then
+         if (solver_name == "DIRECT" .or. solver_name == "direct") then
             allocate(direct_input :: solver_input)
          end if
-         if (solver_name == "CG" .or. solver_name == "cg" .or. solver_name == "iterative") then
+         if (solver_name == "CG" .or. solver_name == "cg") then
             allocate(cg_input :: solver_input)
          end if
       case("-it", "-maxiter", "--maxiter")
@@ -348,6 +348,14 @@ subroutine get_arguments(input, model_id, input_format, grad, qgrad, charge, &
          end if 
          end select
    end do
+
+   ! Charge gradient cannot be evaluated using cg solver.
+   if (qgrad) then
+      select type (solver_input)
+      type is (cg_input)
+         call fatal_error(error, "Charge gradient cannot be evaluated using cg solver.")
+      end select
+   end if 
 
    ! Default solver is direct
    if (.not. allocated(solver_name)) then
