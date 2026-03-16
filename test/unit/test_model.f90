@@ -989,6 +989,9 @@ subroutine test_dfdr(error, mol, dfdq, model)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
+   ! Model cache (required for the get_dfdr)
+   type(cache_container), allocatable :: cache
+
    ! Solver variables
    class(mchrg_solver_type), allocatable :: solver_dqdr, solver_dfdr
    class(mchrg_solver_input), allocatable :: solver_dqdr_input, solver_dfdr_input
@@ -1048,11 +1051,14 @@ subroutine test_dfdr(error, mol, dfdq, model)
    dfdr = 0.0_wp
    call gemv(dqdr(:,:,:mol%nat), dfdq(:), dfdr(:,:), alpha=1.0_wp, beta=0.0_wp)
 
-   gradient = 0.0_wp
-   ! Solve with CG solver to get gradient
-   
+   allocate(cache)
+   ! Main solve using the direct solver to check consiestency
    call model%solve(mol, solver_dfdr, error, cn, qloc, dcndr, dcndL, &
-      & dqlocdr, dqlocdL, dfdq=dfdq, gradient=gradient)
+      & dqlocdr, dqlocdL, cache=cache)
+   if (allocated(error)) return
+   gradient = 0.0_wp
+   ! dfdr solve with CG solve
+   call model%get_dfdr(mol, solver_dfdr, cache, error,  dfdq, gradient)
    if (allocated(error)) return
 
    ! Compare CG gradient with direct product

@@ -27,13 +27,13 @@ module multicharge_model_cache
    type, public :: cache_container
       !> Mutable data attribute
       class(*), allocatable :: raw
-      real(wp), allocatable :: amat(:, :)      
-      real(wp), allocatable :: derivsum(:, :, :)  
-      real(wp), allocatable :: uvec(:) 
    end type cache_container
 
    !> Cache for the charge model
    type, abstract, public :: model_cache
+      real(wp), allocatable :: jmat(:, :)      
+      real(wp), allocatable :: derivsum(:, :, :)  
+      real(wp), allocatable :: uvec(:) 
       !> Coordination number array
       real(wp), allocatable :: cn(:)
       !> Coordination number gradient w.r.t the positions
