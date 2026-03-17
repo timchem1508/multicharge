@@ -18,7 +18,7 @@ program main
    use mctc_env, only: error_type, fatal_error, get_argument, wp, timer_type, format_time
    use mctc_io, only: structure_type, read_structure, filetype, get_filetype
    use mctc_cutoff, only: get_lattice_points
-   use multicharge, only: mchrg_model_type, mchrg_model, new_eeq2019_model, &
+   use multicharge, only: mchrg_model_type, mchrg_model, mchrg_cache, new_eeq2019_model, &
       & new_eeqbc2025_model, get_multicharge_version, &
       & write_ascii_model, write_ascii_properties, write_ascii_results
    use multicharge_output, only: json_results
@@ -36,6 +36,7 @@ program main
    type(error_type), allocatable :: error
    type(structure_type) :: mol
    class(mchrg_model_type), allocatable :: model
+   type(mchrg_cache), allocatable :: cache
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
    logical :: grad, qgrad, json, exist
@@ -138,8 +139,9 @@ program main
    call model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
    
    ! 5. Run Solve (Solver instance passed implicitly via argument or model)
-
-   call model%solve(mol, solver, error, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL, &
+   allocate(cache)
+   call model%update(mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
+   call model%solve(mol, solver, cache, error,  &
       & energy, gradient, sigma, qvec, dqdr, dqdL, verbosity=verbosity, unit=output_unit)
 
    if (allocated(error)) then
