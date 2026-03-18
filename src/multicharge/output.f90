@@ -19,14 +19,11 @@ module multicharge_output
    use mctc_io_convert, only : autoaa
    use mctc_io_constants, only : pi
    use multicharge_model, only : mchrg_model_type
-   use cg_solver, only : mchrg_solver_cg
-   use direct_solver, only : mchrg_solver_direct
    use multicharge_version, only : get_multicharge_version
    implicit none
    private
 
-   public :: write_ascii_model, write_ascii_properties, write_ascii_results, json_results, &
-      write_cg_solver, write_direct_solver
+   public :: write_ascii_model, write_ascii_properties, write_ascii_results, json_results
 
 contains
 
@@ -57,29 +54,6 @@ subroutine write_ascii_model(unit, mol, model)
 
 end subroutine write_ascii_model
 
-subroutine write_cg_solver(unit, solver)
-   integer, intent(in) :: unit
-   class(mchrg_solver_cg), intent(in) :: solver
-
-   write(unit, '(54("-"))')
-   write(unit, '(12x, a)') "Conjugate Gradient Solver Setup"
-   write(unit, '(54("-"))')
-   write(unit, '(a, 1x, i6)') "Max iterations : ", solver%cgmiter
-   write(unit, '(a, 1x, es10.2)') "Tolerance      : ", solver%cgtol
-   write(unit, '(a)') "Preconditioner : Jacobi (Diagonal)"
-
-end subroutine write_cg_solver
-
-subroutine write_direct_solver(unit, solver)
-   integer, intent(in) :: unit
-   class(mchrg_solver_direct), intent(in) :: solver
-
-   write(unit, '(54("-"))')
-   write(unit, '(18x, a)') "Direct Solver Setup"
-   write(unit, '(54("-"))')
-
-end subroutine write_direct_solver
-
 subroutine write_ascii_properties(unit, mol, model, cn, qvec)
 
    !> Unit for output
@@ -98,7 +72,11 @@ subroutine write_ascii_properties(unit, mol, model, cn, qvec)
    real(wp), intent(in) :: qvec(:)
 
    integer :: iat, isp
-
+   
+   write(unit, '(54("-"))')
+   write(unit, '(24x,a)') "Results"
+   write(unit, '(54("-"))')
+   write(unit, '(a)') ''
    write(unit, '(a,":")') "Electrostatic properties (in atomic units)"
    write(unit, '(50("-"))')
    write(unit, '(a6,1x,a4,5x,*(1x,a10))') "#", "Z", "CN", "q", "chi"
@@ -116,7 +94,7 @@ subroutine write_ascii_properties(unit, mol, model, cn, qvec)
 
 end subroutine write_ascii_properties
 
-subroutine write_ascii_results(unit, mol, energy, gradient, sigma)
+subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL)
 
    !> Unit for output
    integer, intent(in) :: unit
@@ -127,19 +105,23 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma)
    real(wp), intent(in) :: energy(:)
    real(wp), intent(in), optional :: gradient(:, :)
    real(wp), intent(in), optional :: sigma(:, :)
+   real(wp), intent(in), optional :: dqdr(:,:,:)
+   real(wp), intent(in), optional :: dqdL(:,:,:)
 
-   integer :: iat, isp
-   logical :: grad
+   integer :: iat, jat, isp, jsp
+   logical :: grad, qgrad
    character(len=1), parameter :: comp(3) = ["x", "y", "z"]
 
    grad = present(gradient) .and. present(sigma)
+   qgrad = present(dqdr) .and. present(dqdL)
 
    write(unit, '(a,":", t25, es20.13, 1x, a)') &
       & "Electrostatic energy", sum(energy), "Eh"
    write(unit, '(a)')
+
    if (grad) then
       write(unit, '(a,":", t25, es20.13, 1x, a)') &
-         & "Gradient norm", norm2(gradient), "Eh/a0"
+         & "Energy gradient norm", norm2(gradient), "Eh/a0"
       write(unit, '(50("-"))')
       write(unit, '(a6,1x,a4,5x,*(1x,a10))') "#", "Z", "dE/dx", "dE/dy", "dE/dz"
       write(unit, '(50("-"))')
@@ -152,7 +134,7 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma)
       write(unit, '(a)')
 
       write(unit, '(a,":")') &
-         & "Virial"
+         & "Energy virial"
       write(unit, '(50("-"))')
       write(unit, '(a15,1x,*(1x,a10))') "component", "x", "y", "z"
       write(unit, '(50("-"))')
@@ -164,13 +146,47 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma)
       write(unit, '(a)')
    end if
 
+   if (qgrad) then
+      write(unit, '(a,":", t25, es20.13, 1x, a)') &
+         & "Charge gradient norm", norm2(dqdr), "a.u./a0"
+      write(unit, '(68("-"))')
+      write(unit, '(a6,1x,a4,3x,a6,1x,a4,3x,*(1x,a12))') "#", "Z", "#", "A", "dQ(Z)/dx(A)", "dQ(Z)/dy(A)", "dQ(Z)/dz(A)"
+      write(unit, '(68("-"))')
+      do iat = 1, mol%nat
+         isp = mol%id(iat)
+         do jat = 1, mol%nat
+            jsp = mol%id(jat)
+            write(unit, '(i6,1x,i3,1x,a2,1x,i6,1x,i3,1x,a2,*(2x ,es11.3))') &
+               & iat, mol%num(isp), mol%sym(isp), jat, mol%num(jsp), mol%sym(jsp), dqdr(:, jat, iat)
+         end do
+      end do
+      write(unit, '(68("-"))')
+      write(unit, '(a)')
+
+      write(unit, '(a,":")') &
+         & "Charge virial"
+      write(unit, '(58("-"))')
+      write(unit, '(a6,1x,a4,3x,a9,1x,*(1x, a10))')  "#", "Z", "component", "x", "y", "z"
+      write(unit, '(58("-"))')
+      do iat = 1, mol%nat
+         isp = mol%id(iat)
+         do jat = 1, 3
+            write(unit, '(i6,1x,i3,1x,a2, 2x, a4, 5x,*(es11.3))') &
+               & iat, mol%num(isp), mol%sym(isp), comp(jat), dqdL(:, jat, iat)
+         end do
+      end do
+      write(unit, '(58("-"))')
+      write(unit, '(a)')
+   end if
+
 end subroutine write_ascii_results
 
-subroutine json_results(unit, indentation, energy, gradient, charges, cn)
+subroutine json_results(unit, indentation, energy, gradient, dqdr, charges, cn)
    integer, intent(in) :: unit
    character(len=*), intent(in), optional :: indentation
    real(wp), intent(in), optional :: energy
    real(wp), intent(in), optional :: gradient(:, :)
+   real(wp), intent(in), optional :: dqdr(:, :, :)
    real(wp), intent(in), optional :: charges(:)
    real(wp), intent(in), optional :: cn(:)
    character(len=:), allocatable :: indent, version_string
@@ -200,6 +216,13 @@ subroutine json_results(unit, indentation, energy, gradient, charges, cn)
       if (allocated(indent)) write(unit, '(/,a)', advance='no') repeat(indent, 1)
       write(unit, jsonkey, advance='no') 'gradient'
       array = reshape(gradient, [size(gradient)])
+      call write_json_array(unit, array, indent)
+   end if
+   if (present(dqdr)) then
+      write(unit, '(",")', advance='no')
+      if (allocated(indent)) write(unit, '(/,a)', advance='no') repeat(indent, 1)
+      write(unit, jsonkey, advance='no') 'dq/dr'
+      array = reshape(dqdr, [size(dqdr)])
       call write_json_array(unit, array, indent)
    end if
    if (present(charges)) then

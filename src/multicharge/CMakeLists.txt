@@ -30,7 +30,6 @@ list(
   "${dir}/param.f90"
   "${dir}/version.f90"
   "${dir}/wignerseitz.f90"
-  "${dir}/cache.f90"
   "${dir}/solver.f90"
 )
 

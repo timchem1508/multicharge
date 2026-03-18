@@ -15,14 +15,14 @@
 
 set(_lib "mctc-lib")
 set(_pkg "MCTCLIB")
-set(_url "https://github.com/timchem1508/mctc-lib_timer.git")
+set(_url "https://github.com/grimme-lab/mctc-lib")
 set(_rev "main")
 
 if(NOT DEFINED "${_pkg}_FIND_METHOD")
   if(DEFINED "${PROJECT_NAME}-dependency-method")
     set("${_pkg}_FIND_METHOD" "${${PROJECT_NAME}-dependency-method}")
   else()
-    set("${_pkg}_FIND_METHOD" "fetch")
+    set("${_pkg}_FIND_METHOD" "cmake" "pkgconf" "subproject" "fetch")
   endif()
   set("_${_pkg}_FIND_METHOD")
 endif()
