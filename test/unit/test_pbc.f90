@@ -373,7 +373,7 @@ subroutine test_numsigma(error, mol, model)
 
    energy(:) = 0.0_wp
    call model%update(mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
-   call model%allocate_arguments(mol, ndim, cache)
+   call model%get_capacitance_matrix(mol, ndim, cache)
    call model%solve(mol, solver, cache, error, &
       & gradient=gradient, sigma=sigma, unit=output_unit)
    if (allocated(error)) return
@@ -444,8 +444,8 @@ subroutine test_dbdr(error, mol, model)
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
          call model%update(mol, cache, cn, qloc)
-         call model%allocate_arguments(mol, ndim, cache)
-         call model%get_xvec(mol, cache)
+         call model%get_capacitance_matrix(mol, ndim, cache)
+         call model%get_xvec(mol, ndim, cache)
          xvecr = cache%xvec
 
          ! Left-hand side
@@ -454,8 +454,8 @@ subroutine test_dbdr(error, mol, model)
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
          call model%update(mol, cache, cn, qloc)
-         call model%allocate_arguments(mol, ndim, cache)
-         call model%get_xvec(mol, cache)
+         call model%get_capacitance_matrix(mol, ndim, cache)
+         call model%get_xvec(mol, ndim, cache)
          xvecl = cache%xvec
 
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
@@ -467,9 +467,9 @@ subroutine test_dbdr(error, mol, model)
    call model%ncoord%get_coordination_number(mol, trans, cn, dcndr, dcndL)
    call model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
    call model%update(mol, cache, cn,  qloc, dcndr, dcndL, dqlocdr, dqlocdL)
-   call model%allocate_arguments(mol, ndim, cache)
-   call model%get_xvec(mol, cache) ! need to call this for xtmp in cache (eeqbc)
-   call model%get_xvec_derivs(mol, cache)
+   call model%get_capacitance_matrix(mol, ndim, cache)
+   call model%get_xvec(mol, ndim, cache) ! need to call this for xtmp in cache (eeqbc)
+   call model%get_xvec_derivs(mol, ndim, cache)
 
    dbdr = cache%dxdr
 
@@ -551,8 +551,8 @@ subroutine test_dbdL(error, mol, model)
          call model%ncoord%get_coordination_number(mol, lattr, cn)
          call model%local_charge(mol, lattr, qloc)
          call model%update(mol, cache, cn, qloc)
-         call model%allocate_arguments(mol, ndim, cache)
-         call model%get_xvec(mol, cache)
+         call model%get_capacitance_matrix(mol, ndim, cache)
+         call model%get_xvec(mol, ndim, cache)
          xvecr = cache%xvec
 
          ! Left-hand side
@@ -564,8 +564,8 @@ subroutine test_dbdL(error, mol, model)
          call model%ncoord%get_coordination_number(mol, lattr, cn)
          call model%local_charge(mol, lattr, qloc)
          call model%update(mol, cache, cn, qloc)
-         call model%allocate_arguments(mol, ndim, cache)
-         call model%get_xvec(mol, cache)
+         call model%get_capacitance_matrix(mol, ndim, cache)
+         call model%get_xvec(mol, ndim, cache)
          xvecl = cache%xvec
 
          eps(jc, ic) = eps(jc, ic) + step
@@ -582,9 +582,9 @@ subroutine test_dbdL(error, mol, model)
    call model%ncoord%get_coordination_number(mol, trans, cn, dcndr, dcndL)
    call model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
    call model%update(mol, cache, cn,  qloc, dcndr, dcndL, dqlocdr, dqlocdL)
-   call model%allocate_arguments(mol, ndim, cache)
-   call model%get_xvec(mol, cache) ! need to call this for xtmp in cache (eeqbc)
-   call model%get_xvec_derivs(mol, cache)
+   call model%get_capacitance_matrix(mol, ndim, cache)
+   call model%get_xvec(mol, ndim, cache) ! need to call this for xtmp in cache (eeqbc)
+   call model%get_xvec_derivs(mol, ndim, cache)
 
    dbdL = cache%dxdL
 
@@ -680,8 +680,8 @@ subroutine test_dadr(error, mol, model)
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
          call model%update(mol, cache, cn, qloc)
-         call model%allocate_arguments(mol, ndim, cache)
-         call model%get_coulomb_matrix(mol, cache)
+         call model%get_capacitance_matrix(mol, ndim, cache)
+         call model%get_coulomb_matrix(mol, ndim, cache)
          amatr1 = cache%amat
 
          ! Second right-hand side (x+2h)
@@ -689,8 +689,8 @@ subroutine test_dadr(error, mol, model)
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
          call model%update(mol, cache, cn, qloc)
-         call model%allocate_arguments(mol, ndim, cache)        
-         call model%get_coulomb_matrix(mol, cache)
+         call model%get_capacitance_matrix(mol, ndim, cache)        
+         call model%get_coulomb_matrix(mol, ndim, cache)
          amatr2 = cache%amat
 
          ! Return to original position before calculating left sides
@@ -701,8 +701,8 @@ subroutine test_dadr(error, mol, model)
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
          call model%update(mol, cache, cn, qloc)
-         call model%allocate_arguments(mol, ndim, cache)
-         call model%get_coulomb_matrix(mol, cache)
+         call model%get_capacitance_matrix(mol, ndim, cache)
+         call model%get_coulomb_matrix(mol, ndim, cache)
          amatl1 = cache%amat
 
          ! Second left-hand side (x-2h)
@@ -710,8 +710,8 @@ subroutine test_dadr(error, mol, model)
          call model%ncoord%get_coordination_number(mol, trans, cn)
          call model%local_charge(mol, trans, qloc)
          call model%update(mol, cache, cn, qloc)
-         call model%allocate_arguments(mol, ndim, cache)
-         call model%get_coulomb_matrix(mol, cache)
+         call model%get_capacitance_matrix(mol, ndim, cache)
+         call model%get_coulomb_matrix(mol, ndim, cache)
          amatl2 = cache%amat
 
          ! Return to original position
@@ -733,8 +733,8 @@ subroutine test_dadr(error, mol, model)
    call model%ncoord%get_coordination_number(mol, trans, cn, dcndr, dcndL)
    call model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
    call model%update(mol, cache, cn,  qloc, dcndr, dcndL, dqlocdr, dqlocdL)
-   call model%allocate_arguments(mol, ndim, cache)
-   call model%get_coulomb_derivs(mol, cache)
+   call model%get_capacitance_matrix(mol, ndim, cache)
+   call model%get_coulomb_derivs(mol, ndim, cache)
 
    if (any(abs(cache%dadr(:, :, :) - numgrad(:, :, :)) > thr2_local)) then
       call test_failed(error, "Derivative of the A matrix does not match")
@@ -820,8 +820,8 @@ subroutine test_dadL(error, mol, model)
          call model%ncoord%get_coordination_number(mol, lattr, cn)
          call model%local_charge(mol, lattr, qloc)
          call model%update(mol, cache, cn, qloc)
-         call model%allocate_arguments(mol, ndim, cache)
-         call model%get_coulomb_matrix(mol, cache)
+         call model%get_capacitance_matrix(mol, ndim, cache)
+         call model%get_coulomb_matrix(mol, ndim, cache)
          if (allocated(error)) exit lp
          amatr = cache%amat
 
@@ -833,8 +833,8 @@ subroutine test_dadL(error, mol, model)
          call model%ncoord%get_coordination_number(mol, lattr, cn)
          call model%local_charge(mol, lattr, qloc)
          call model%update(mol, cache, cn, qloc)
-         call model%allocate_arguments(mol, ndim, cache)
-         call model%get_coulomb_matrix(mol, cache)
+         call model%get_capacitance_matrix(mol, ndim, cache)
+         call model%get_coulomb_matrix(mol, ndim, cache)
          if (allocated(error)) exit lp
          amatl = cache%amat
 
@@ -854,8 +854,8 @@ subroutine test_dadL(error, mol, model)
    call model%ncoord%get_coordination_number(mol, trans, cn, dcndr, dcndL)
    call model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
    call model%update(mol, cache, cn,  qloc, dcndr, dcndL, dqlocdr, dqlocdL)
-   call model%allocate_arguments(mol, ndim, cache)
-   call model%get_coulomb_derivs(mol, cache)
+   call model%get_capacitance_matrix(mol, ndim, cache)
+   call model%get_coulomb_derivs(mol, ndim, cache)
    if (allocated(error)) return
 
    if (any(abs(cache%dadL(:, :, :) - numsigma(:, :, :)) > thr2)) then
@@ -1137,6 +1137,8 @@ subroutine test_dfdr(error, mol, dfdq, model)
    call gemv(dqdr(:,:,:mol%nat), dfdq(:), dfdr(:,:), alpha=1.0_wp, beta=0.0_wp)
 
    ! Main solve using the direct solver to check consistency
+   deallocate(cache)
+   allocate(cache)
    call model%update(mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
    call model%solve(mol, solver_dfdr, cache, error)
    if (allocated(error)) return

@@ -73,9 +73,9 @@ subroutine write_ascii_properties(unit, mol, model, cn, qvec)
 
    integer :: iat, isp
    
-   write(unit, '(50("-"))')
-   write(unit, '(20x,a)') "Results"
-   write(unit, '(50("-"))')
+   write(unit, '(54("-"))')
+   write(unit, '(24x,a)') "Results"
+   write(unit, '(54("-"))')
    write(unit, '(a)') ''
    write(unit, '(a,":")') "Electrostatic properties (in atomic units)"
    write(unit, '(50("-"))')

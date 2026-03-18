@@ -50,7 +50,7 @@ module multicharge_model_eeqbc
       !> Update and allocate cache
       procedure :: update
       !> Calculate capacitance matrix
-      procedure :: allocate_arguments
+      procedure :: get_capacitance_matrix
       !> Calculate Coulomb matrix
       procedure :: get_coulomb_matrix
       !> Calculate derivatives of Coulomb matrix
@@ -189,9 +189,14 @@ subroutine update(self, mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
       cache%dqlocdL = dqlocdL
    end if
 
+   if (any(mol%periodic)) then
+      ! Create WSC
+      call new_wignerseitz_cell(cache%wsc, mol)
+   end if
+
 end subroutine update
 
-subroutine allocate_arguments(self, mol, ndim, cache)
+subroutine get_capacitance_matrix(self, mol, ndim, cache)
    class(eeqbc_model), intent(in) :: self
    type(structure_type), intent(in) :: mol
    integer, intent(in) :: ndim
@@ -202,7 +207,50 @@ subroutine allocate_arguments(self, mol, ndim, cache)
    grad = allocated(cache%dcndr) .and. allocated(cache%dcndL) .and. &
       & allocated(cache%dqlocdr) .and. allocated(cache%dqlocdL)
 
-   ! Allocate (for get_xvec and xvec_derivs)
+
+   ! Allocate cmat
+   if (.not. allocated(cache%cmat)) then
+      allocate(cache%cmat(ndim, ndim))
+   end if
+
+   if (grad) then 
+      if (.not. allocated(cache%dcdr)) then
+         allocate(cache%dcdr(3, mol%nat, ndim))
+      end if
+      if (.not. allocated(cache%dcdL)) then
+         allocate(cache%dcdL(3, 3, ndim))
+      end if
+   end if
+
+   if (any(mol%periodic)) then
+      ! Get full cmat sum over all WSC images (for get_xvec and xvec_derivs)
+      call get_cmat_3d(self, mol, cache%wsc, cache%cmat)
+      if (grad) then
+         call get_dcmat_3d(self, mol, cache%wsc, cache%dcdr, cache%dcdL)
+      end if
+   else
+      call get_cmat_0d(self, mol, cache%cmat)
+      ! cmat gradients
+      if (grad) then
+         call get_dcmat_0d(self, mol, cache%dcdr, cache%dcdL)
+      end if
+   end if
+
+end subroutine get_capacitance_matrix
+
+subroutine get_xvec(self, mol, ndim, cache)
+   class(eeqbc_model), intent(in) :: self
+   type(structure_type), intent(in) :: mol
+   integer, intent(in) :: ndim
+   type(mchrg_cache), intent(inout) :: cache
+
+   integer :: iat, izp, img
+   real(wp) :: ctmp, vec(3), rvdw, capi, wsw
+   real(wp), allocatable :: dtrans(:, :)
+
+   ! Thread-private array for reduction
+   real(wp), allocatable :: xvec_local(:)
+
    if (.not. allocated(cache%xtmp)) then
       allocate(cache%xtmp(ndim))
    else if (size(cache%xtmp) /= ndim) then
@@ -217,84 +265,13 @@ subroutine allocate_arguments(self, mol, ndim, cache)
       allocate(cache%xvec(ndim))
    end if
 
-   ! Allocate cmat
-   if (.not. allocated(cache%cmat)) then
-      allocate(cache%cmat(ndim, ndim))
+   if (.not. allocated(cache%vrhs)) then
+      allocate(cache%vrhs(mol%nat + 1))
    end if
 
-   if (.not. allocated(cache%amat)) then
-      allocate(cache%amat(ndim, ndim))
-   else if (size(cache%amat, 1) /= ndim) then
-      deallocate(cache%amat)
-      allocate(cache%amat(ndim, ndim))
-   end if
-
-   if (grad) then 
-      if (.not. allocated(cache%dcdr)) then
-         allocate(cache%dcdr(3, mol%nat, ndim))
-      end if
-      if (.not. allocated(cache%dcdL)) then
-         allocate(cache%dcdL(3, 3, ndim))
-      end if
-      if (.not. allocated(cache%dxdr)) then
-         allocate(cache%dxdr(3, mol%nat, ndim))
-      end if
-      if (.not. allocated(cache%dxdL)) then
-         allocate(cache%dxdL(3, 3, ndim))
-      end if
-      if (.not. allocated(cache%dadr)) then
-         allocate(cache%dadr(3, mol%nat, ndim))
-      end if
-      if (.not. allocated(cache%dadL)) then
-         allocate(cache%dadL(3, 3, ndim))
-      end if
-      if (.not. allocated(cache%atrace)) then
-         allocate(cache%atrace(3, mol%nat))
-      end if
-   end if
-
-   if (any(mol%periodic)) then
-      ! Create WSC
-      call new_wignerseitz_cell(cache%wsc, mol)
-
-      ! Get full cmat sum over all WSC images (for get_xvec and xvec_derivs)
-      call get_cmat_3d(self, mol, cache%wsc, cache%cmat)
-      if (grad) then
-
-         call get_dcmat_3d(self, mol, cache%wsc, cache%dcdr, cache%dcdL)
-
-      end if
-   else
-      call get_cmat_0d(self, mol, cache%cmat)
-
-      ! cmat gradients
-      if (grad) then
-
-         call get_dcmat_0d(self, mol, cache%dcdr, cache%dcdL)
-
-      end if
-   end if
-
-end subroutine allocate_arguments
-
-subroutine get_xvec(self, mol, cache)
-   class(eeqbc_model), intent(in) :: self
-   type(structure_type), intent(in) :: mol
-   type(mchrg_cache), intent(inout) :: cache
-   real(wp), allocatable :: xvec(:)
-
-   integer :: iat, izp, img
-   real(wp) :: ctmp, vec(3), rvdw, capi, wsw
-   real(wp), allocatable :: dtrans(:, :)
-
-   ! Thread-private array for reduction
-   real(wp), allocatable :: xvec_local(:)
-
-   allocate(xvec(size(cache%xvec)))
-
-   xvec(:) = 0.0_wp
+   cache%xvec(:) = 0.0_wp
    !$omp parallel do default(none) schedule(runtime) &
-   !$omp shared(mol, self, cache, xvec) &
+   !$omp shared(mol, self, cache) &
    !$omp private(iat, izp)
    do iat = 1, mol%nat
       izp = mol%id(iat)
@@ -307,14 +284,14 @@ subroutine get_xvec(self, mol, cache)
       cache%xtmp(mol%nat + 1) = mol%charge
    end if
 
-   call gemv(cache%cmat, cache%xtmp, xvec)
+   call gemv(cache%cmat, cache%xtmp, cache%xvec)
 
    if (any(mol%periodic)) then
       call get_dir_trans(mol%lattice, dtrans)
       !$omp parallel default(none) &
-      !$omp shared(mol, self, cache, xvec, dtrans) private(iat, izp, img, wsw) &
+      !$omp shared(mol, self, cache, dtrans) private(iat, izp, img, wsw) &
       !$omp private(capi, vec, rvdw, ctmp, xvec_local)
-      allocate(xvec_local, mold=xvec)
+      allocate(xvec_local, mold=cache%xvec)
       xvec_local(:) = 0.0_wp
       !$omp do schedule(runtime)
       do iat = 1, mol%nat
@@ -332,21 +309,19 @@ subroutine get_xvec(self, mol, cache)
       end do
       !$omp end do
       !$omp critical (get_xvec_)
-      xvec(:) = xvec + xvec_local
+      cache%xvec(:) = cache%xvec + xvec_local
       !$omp end critical (get_xvec_)
       deallocate(xvec_local)
       !$omp end parallel
    end if
 
-   cache%xvec = xvec
 end subroutine get_xvec
 
-subroutine get_xvec_derivs(self, mol, cache)
+subroutine get_xvec_derivs(self, mol, ndim, cache)
    class(eeqbc_model), intent(in) :: self
    type(structure_type), intent(in) :: mol
+   integer, intent(in) :: ndim
    type(mchrg_cache), intent(inout) :: cache
-   real(wp), allocatable :: dxdr(:, :, :)
-   real(wp), allocatable :: dxdL(:, :, :)
 
    integer :: iat, izp, jat, jzp, img
    real(wp) :: capi, capj, wsw, vec(3), ctmp, rvdw, dG(3), dS(3, 3)
@@ -356,17 +331,16 @@ subroutine get_xvec_derivs(self, mol, cache)
    ! Thread-private arrays for reduction
    real(wp), allocatable :: dxdr_local(:, :, :), dxdL_local(:, :, :), dtmpdr_local(:, :, :), dtmpdL_local(:, :, :)
 
-   if (size(cache%dcdr(3, mol%nat, :)) == mol%nat + 1 .and. &
-      & size(cache%dcdL(3, 3, :)) == size(cache%dcdr(3, mol%nat, :))) then
-      allocate(dtmpdr(3, mol%nat, mol%nat + 1), dtmpdL(3, 3, mol%nat + 1))
-      allocate(dxdr(3, mol%nat, mol%nat + 1), dxdL(3, 3, mol%nat + 1))
-   else
-      allocate(dtmpdr(3, mol%nat, mol%nat), dtmpdL(3, 3, mol%nat))
-      allocate(dxdr(3, mol%nat, mol%nat), dxdL(3, 3, mol%nat))
+   if (.not. allocated(cache%dxdr)) then
+      allocate(cache%dxdr(3, mol%nat, ndim))
    end if
+   if (.not. allocated(cache%dxdL)) then
+      allocate(cache%dxdL(3, 3, ndim))
+   end if
+   allocate(dtmpdr(3, mol%nat, ndim), dtmpdL(3, 3, ndim))
 
-   dxdr(:, :, :) = 0.0_wp
-   dxdL(:, :, :) = 0.0_wp
+   cache%dxdr(:, :, :) = 0.0_wp
+   cache%dxdL(:, :, :) = 0.0_wp
    dtmpdr(:, :, :) = 0.0_wp
    dtmpdL(:, :, :) = 0.0_wp
 
@@ -392,18 +366,18 @@ subroutine get_xvec_derivs(self, mol, cache)
    deallocate(dtmpdL_local, dtmpdr_local)
    !$omp end parallel
 
-   call gemm(dtmpdr, cache%cmat, dxdr)
-   call gemm(dtmpdL, cache%cmat, dxdL)
+   call gemm(dtmpdr, cache%cmat, cache%dxdr)
+   call gemm(dtmpdL, cache%cmat, cache%dxdL)
 
    if (any(mol%periodic)) then
       call get_dir_trans(mol%lattice, dtrans)
       !$omp parallel default(none) &
-      !$omp shared(mol, self, cache, dxdr, dxdL, dtrans) &
+      !$omp shared(mol, self, cache, dtrans) &
       !$omp private(iat, izp, jat, jzp, img, wsw) &
       !$omp private(capi, capj, vec, rvdw, ctmp, dG, dS) &
       !$omp private(dxdr_local, dxdL_local)
-      allocate(dxdr_local, mold=dxdr)
-      allocate(dxdL_local, mold=dxdL)
+      allocate(dxdr_local, mold=cache%dxdr)
+      allocate(dxdL_local, mold=cache%dxdL)
       dxdr_local(:, :, :) = 0.0_wp
       dxdL_local(:, :, :) = 0.0_wp
       !$omp do schedule(runtime)
@@ -448,17 +422,17 @@ subroutine get_xvec_derivs(self, mol, cache)
       end do
       !$omp end do
       !$omp critical (get_xvec_derivs_update)
-      dxdr(:, :, :) = dxdr + dxdr_local
-      dxdL(:, :, :) = dxdL + dxdL_local
+      cache%dxdr(:, :, :) = cache%dxdr + dxdr_local
+      cache%dxdL(:, :, :) = cache%dxdL + dxdL_local
       !$omp end critical (get_xvec_derivs_update)
       deallocate(dxdL_local, dxdr_local)
       !$omp end parallel
    else
       !$omp parallel default(none) &
-      !$omp shared(mol, self, cache, dxdr, dxdL) &
+      !$omp shared(mol, self, cache) &
       !$omp private(iat, izp, jat, jzp, vec, dxdr_local, dxdL_local)
-      allocate(dxdr_local, mold=dxdr)
-      allocate(dxdL_local, mold=dxdL)
+      allocate(dxdr_local, mold=cache%dxdr)
+      allocate(dxdL_local, mold=cache%dxdL)
       dxdr_local(:, :, :) = 0.0_wp
       dxdL_local(:, :, :) = 0.0_wp
       !$omp do schedule(runtime)
@@ -483,22 +457,40 @@ subroutine get_xvec_derivs(self, mol, cache)
       end do
       !$omp end do
       !$omp critical (get_xvec_derivs_)
-      dxdr(:, :, :) = dxdr + dxdr_local
-      dxdL(:, :, :) = dxdL + dxdL_local
+      cache%dxdr(:, :, :) = cache%dxdr + dxdr_local
+      cache%dxdL(:, :, :) = cache%dxdL + dxdL_local
       !$omp end critical (get_xvec_derivs_)
       deallocate(dxdL_local, dxdr_local)
       !$omp end parallel
    end if
 
-   cache%dxdr = dxdr
-   cache%dxdL = dxdL
-
 end subroutine get_xvec_derivs
 
-subroutine get_coulomb_matrix(self, mol, cache)
+subroutine get_coulomb_matrix(self, mol, ndim, cache)
    class(eeqbc_model), intent(in) :: self
    type(structure_type), intent(in) :: mol
+   integer, intent(in) :: ndim
    type(mchrg_cache), intent(inout) :: cache
+
+   if (.not. allocated(cache%amat)) then
+      allocate(cache%amat(ndim, ndim))
+   else if (size(cache%amat, 1) /= ndim) then
+      deallocate(cache%amat)
+      allocate(cache%amat(ndim, ndim))
+   end if
+
+   if (ndim == mol%nat + 1) then
+      if (.not. allocated(cache%ainv)) then
+         allocate(cache%ainv(ndim, ndim))
+      else if (size(cache%ainv, 1) /= ndim) then
+         deallocate(cache%ainv)
+         allocate(cache%ainv(ndim, ndim))
+      end if
+   else 
+      if (.not. allocated(cache%uvec)) then
+         allocate(cache%uvec(mol%nat))
+      end if
+   end if
 
    if (any(mol%periodic)) then
       call get_amat_3d(self, mol, cache%wsc, cache%cn, cache%qloc, cache%cmat, cache%amat)
@@ -669,12 +661,23 @@ subroutine get_amat_dir_3d(rij, gam, trans, kbc, rvdw, capi, capj, amat)
 
 end subroutine get_amat_dir_3d
 
-subroutine get_coulomb_derivs(self, mol, cache)
+subroutine get_coulomb_derivs(self, mol, ndim, cache)
    class(eeqbc_model), intent(in) :: self
    type(structure_type), intent(in) :: mol
+   integer, intent(in) :: ndim
    type(mchrg_cache), intent(inout) :: cache
 
    integer :: iat
+
+   if (.not. allocated(cache%dadr)) then
+      allocate(cache%dadr(3, mol%nat, ndim))
+   end if
+   if (.not. allocated(cache%dadL)) then
+      allocate(cache%dadL(3, 3, ndim))
+   end if
+   if (.not. allocated(cache%atrace)) then
+      allocate(cache%atrace(3, mol%nat))
+   end if
 
    if (any(mol%periodic)) then
       call get_damat_3d(self, mol, cache%wsc, cache%cn, &

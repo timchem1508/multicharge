@@ -138,7 +138,7 @@ contains
         integer :: unit
 
         ! CG cannot compute the inverse matrix
-        if (present(ainv)) then
+        if (present(ainv) .or. present(cpq)) then
             call fatal_error(error, "The inverse matrix cannot be calculated using an iterative solver.")
             return
         end if 
