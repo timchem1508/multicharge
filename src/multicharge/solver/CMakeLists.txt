@@ -21,7 +21,6 @@ list(
   "${dir}/direct.f90"
   "${dir}/cg.f90"
   "${dir}/type.f90"
-  "${dir}/cache.f90"
 )
 
 set(srcs "${srcs}" PARENT_SCOPE)

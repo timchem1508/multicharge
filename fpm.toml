@@ -9,17 +9,9 @@ copyright = "Copyright 2021 Sebastian Ehlert"
 link = ["lapack", "blas"]
 
 [dependencies]
-mctc-lib.git = "https://github.com/timchem1508/mctc-lib_timer.git"
+mctc-lib.git = "https://github.com/grimme-lab/mctc-lib.git"
+mctc-lib.tag = "main"
 
 [dev-dependencies]
 mstore.git = "https://github.com/grimme-lab/mstore.git"
-mstore.tag = "v0.4.0"
-
-[extra.fortitude.check]
-ignore = [
-  "C002",  # interface without implicit none
-  "C003",  # implicit none(external)
-]
-per-file-ignores."src/multicharge/blas.F90" = ["C071"]
-per-file-ignores."src/multicharge/lapack.F90" = ["C071"]
-line-length = 132
+mstore.tag = "v0.3.0"
