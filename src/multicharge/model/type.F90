@@ -301,7 +301,7 @@ subroutine solve(self, mol, solver, cache, error, &
       call symv(cache%amat, cache%vrhs, cache%xvec(:mol%nat), &
          & alpha=0.5_wp, beta=-1.0_wp, uplo='l')
       if (ndim > mol%nat) then
-         ! Reconstructing xvec for a proper energy calculation
+         ! Correct xvec to exclude constraint term
          cache%xvec(:mol%nat) = cache%xvec(:mol%nat) - 0.5_wp * cache%vrhs(mol%nat + 1)
       end if
       energy(:) = energy(:) + cache%vrhs(:mol%nat) * cache%xvec(:mol%nat)
@@ -355,7 +355,11 @@ subroutine solve(self, mol, solver, cache, error, &
 
 end subroutine solve
 
-!> Adjoint gradient calculation using cached data
+!> Adjoint external gradient calculation using cached data
+!! 
+!! This routine evaluates dF/dR and dF/dL from the derivative of the
+!! objective w.r.t. charges (dF/dq), avoiding explicit differentiation
+!! of the charge solution by solving an adjoint system.
 subroutine get_external_gradient(self, mol, solver, cache, error, dfdq, dfdr, dfdL, unit, verbosity)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: self
@@ -454,7 +458,7 @@ subroutine get_external_gradient(self, mol, solver, cache, error, dfdq, dfdr, df
       allocate(padj(mol%nat))
       padj = yvec - scale * cache%uvec
       
-      ! Calculation of external derivatives using the adjoint method
+      ! Evaluate external gradients via adjoint contraction:
       ! dfdr = p^T * (db/dr - dA/dr X q)
       call gemv(daqxdr, padj, dfdr, alpha=1.0_wp, beta=0.0_wp)
       ! dfdL = p^T * (db/dL - dA/dL X q)
@@ -468,7 +472,7 @@ subroutine get_external_gradient(self, mol, solver, cache, error, dfdq, dfdr, df
       call solver%solve(cache%amat, dfdq_loc, padj, new_unit=print_unit, error=error)
       if (allocated(error)) return
 
-      ! Calculation of external derivatives using the adjoint method
+      ! Evaluate external gradients via adjoint contraction:
       ! dfdr = p^T * (db/dr - dA/dr X q)
       call gemv(daqxdr, padj, dfdr, alpha=1.0_wp, beta=0.0_wp)
       ! dfdL = p^T * (db/dL - dA/dL X q)

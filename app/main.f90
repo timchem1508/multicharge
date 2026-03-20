@@ -53,7 +53,6 @@ program main
 
    call timer%push("total")
 
-   ! 1. Parse Arguments
    call get_arguments(input, model_id, input_format, grad, qgrad, charge, json, &
                       solver_input, verbosity, error)
    if (allocated(error)) then
@@ -61,10 +60,8 @@ program main
       error stop
    end if
 
-   ! 2. Initialize Solver using the solver_input
    call new_mchrg_solver(solver, solver_input, error)
 
-   ! 3. Load Structure
    if (input == "-") then
       if (.not. allocated(input_format)) input_format = filetype%xyz
       call read_structure(mol, input_unit, input_format, error)
@@ -97,7 +94,6 @@ program main
       end if
    end if
 
-   ! 4. Initialize Model
    if (model_id == mchrg_model%eeq2019) then
       call new_eeq2019_model(mol, model, error)
    else if (model_id == mchrg_model%eeqbc2025) then
@@ -136,7 +132,6 @@ program main
 
    call get_lattice_points(mol%periodic, mol%lattice, model%ncoord%cutoff, trans)
 
-   ! 5. Run Solve (Solver instance passed implicitly via argument or model)
    allocate(cache)
    call model%update(mol, cache, trans, dcndr, dcndL)
    call model%solve(mol, solver, cache, error, &
@@ -337,6 +332,7 @@ subroutine get_arguments(input, model_id, input_format, grad, qgrad, charge, &
          read(arg, *, iostat=iostat) maxiter
          if (iostat /= 0) then
             call fatal_error(error, "Invalid maximal number of iterations")
+            exit
          end if
       case("-tol", "-tolerance", "--tolerance")
          allocate(tol)
@@ -345,6 +341,7 @@ subroutine get_arguments(input, model_id, input_format, grad, qgrad, charge, &
          read(arg, *, iostat=iostat) tol
          if (iostat /= 0) then 
             call fatal_error(error, "Invalid tolerance")
+            exit
          end if 
          end select
    end do
@@ -354,11 +351,12 @@ subroutine get_arguments(input, model_id, input_format, grad, qgrad, charge, &
       select type (solver_input)
       type is (cg_input)
          call fatal_error(error, "Charge gradient cannot be evaluated using cg solver.")
+         return
       end select
    end if 
 
    ! Default solver is direct
-   if (.not. allocated(solver_name)) then
+   if (.not. allocated(solver_input)) then
       allocate(direct_input :: solver_input) 
    end if
 

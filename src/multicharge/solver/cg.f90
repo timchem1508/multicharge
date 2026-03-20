@@ -174,7 +174,7 @@ contains
         call symv(amat, vrhs, Adir, alpha=1.0_wp, beta=0.0_wp)   
         res(:) = xvec(:) - Adir(:)                                                                
         
-        ! Initial preconditioned residual 
+        ! Initial preconditioned residual precres = M^-1 * res
         precres(:) = res(:) * prec(:)                                 
         dir(:) = precres(:)                                    
         
@@ -206,11 +206,12 @@ contains
                 exit
             end if
 
-            ! Step length
+            ! Step length step = (res^T * precres) / (dir^T * amat * dir)
             step = resdot_old / (denom + eps)
 
-            ! Update solution and residual
+            ! Update solution vrhs = vrhs + step * dir 
             call axpy(xvec=dir, yvec=vrhs, alpha=step)
+            !Update residual res = res - step * amat * dir
             call axpy(xvec=Adir, yvec=res, alpha=-step)
 
             ! Compute the new residual norm
@@ -230,12 +231,10 @@ contains
             ! Updated preconditioned residual
             precres(:) = prec(:) * res(:)
 
-            resdot_new = dot(res, precres)
-
             ! Update search direction
+            resdot_new = dot(res, precres)           
             updfact = resdot_new / (resdot_old + eps)
             resdot_old = resdot_new
-
             call scal(alpha=updfact, xvec=dir)
             call axpy(xvec=precres, yvec=dir, alpha=1.0_wp)
 
