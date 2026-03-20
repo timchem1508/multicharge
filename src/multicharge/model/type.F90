@@ -249,7 +249,7 @@ subroutine solve(self, mol, solver, cache, error, &
    call timer%pop 
 
    ! Print header
-   call print_solve_header(print_unit, verbosity_solve, timer)
+   call print_solve_header(print_unit, verbosity_solve, timer%get("setup"))
 
    if (add_lagr .eqv. .true.) then
       if (.not. allocated(cache%ainv)) then
@@ -309,19 +309,19 @@ subroutine solve(self, mol, solver, cache, error, &
 
    ! Allocate and get amat derivatives
    if (dcn) then
-      call timer%push("setup")
+      call timer%push("setup_gradient")
       call self%get_xvec_derivs(mol, ndim, cache)
       call self%get_coulomb_derivs(mol, ndim, cache)
+      allocate(daqxdr(3, mol%nat, ndim), source=0.0_wp)
+      allocate(daqxdL(3, 3, ndim), source=0.0_wp)
       ! pop gradient setup
       call timer%pop
-      call print_gradient_header(print_unit, verbosity_solve, timer)
+      call print_gradient_header(print_unit, verbosity_solve, timer%get("setup_gradient"))
    end if
 
    ! Calculate gradients if requested
    if (grad) then
       call timer%push("gradient") 
-      allocate(daqxdr(3, mol%nat, ndim), source=0.0_wp)
-      allocate(daqxdL(3, 3, ndim), source=0.0_wp)
       do iat = 1, mol%nat
          daqxdr(:, :, iat) = - cache%dxdr(:, :, iat) + 0.5_wp * cache%dadr(:, :, iat)
          daqxdL(:, :, iat) = - cache%dxdL(:, :, iat) + 0.5_wp * cache%dadL(:, :, iat)
@@ -330,36 +330,34 @@ subroutine solve(self, mol, solver, cache, error, &
       call gemv(daqxdL, cache%vrhs, sigma, beta=1.0_wp, alpha=1.0_wp)
       ! pop gradient timer
       call timer%pop 
-      call print_gradient_time(print_unit, verbosity_solve, timer)
+      call print_gradient_time(print_unit, verbosity_solve, timer%get("gradient"))
    end if
 
    ! Calculate charge derivatives if requested
    if (cpq) then
-      call timer%push("gradient")
-      allocate(daqxdr(3, mol%nat, ndim), source=0.0_wp)
-      allocate(daqxdL(3, 3, ndim), source=0.0_wp)
+      call timer%push("cpq")
       do iat = 1, mol%nat
          daqxdr(:, :, iat) = cache%dxdr(:, :, iat) - cache%dadr(:, :, iat)
          daqxdL(:, :, iat) = cache%dxdL(:, :, iat) - cache%dadL(:, :, iat)
       end do
       call gemm(daqxdr, cache%ainv(:, :mol%nat), dqdr, alpha=1.0_wp)
       call gemm(daqxdL, cache%ainv(:, :mol%nat), dqdL, alpha=1.0_wp)
-      ! pop gradient timer
+      ! pop cpq timer
       call timer%pop 
-      call print_gradient_time(print_unit, verbosity_solve, timer)
+      call print_gradient_time(print_unit, verbosity_solve, timer%get("cpq"))
    end if
 
    ! pop total solve timer
    call timer%pop 
-   call print_total_time(print_unit, verbosity_solve, timer)
+   call print_total_time(print_unit, verbosity_solve, timer%get("total"))
 
 end subroutine solve
 
 !> Adjoint external gradient calculation using cached data
-!! 
-!! This routine evaluates dF/dR and dF/dL from the derivative of the
-!! objective w.r.t. charges (dF/dq), avoiding explicit differentiation
-!! of the charge solution by solving an adjoint system.
+! 
+! This routine evaluates dF/dR and dF/dL from the derivative of the
+! objective w.r.t. charges (dF/dq), avoiding explicit differentiation
+! of the charge solution by solving an adjoint system.
 subroutine get_external_gradient(self, mol, solver, cache, error, dfdq, dfdr, dfdL, unit, verbosity)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: self
@@ -414,11 +412,11 @@ subroutine get_external_gradient(self, mol, solver, cache, error, dfdq, dfdr, df
       dfdq_loc(:mol%nat) = dfdq
    end if  
 
-   call timer%push("setup")
+   call timer%push("setup_external")
    call timer%pop
 
-   call print_gradient_header(print_unit, verbosity_solve, timer)
-   call timer%push("gradient")
+   call print_gradient_header(print_unit, verbosity_solve, timer%get("setup_external"))
+   call timer%push("external_gradient")
 
    ! Get variables from the model cache
    if (allocated(cache%dadr) .and. allocated(cache%dadL) &
@@ -480,9 +478,9 @@ subroutine get_external_gradient(self, mol, solver, cache, error, dfdq, dfdr, df
 
    end if
 
-   ! pop dfdr
+   ! pop dfdr timer
    call timer%pop
-   call print_gradient_time(print_unit, verbosity_solve, timer)
+   call print_gradient_time(print_unit, verbosity_solve, timer%get("external_gradient"))
 
 end subroutine get_external_gradient
 
@@ -520,7 +518,7 @@ end subroutine local_charge
 !> Print header for charge equilibration solver
 subroutine print_solve_header(unit, verbosity, timer)
    integer, intent(in) :: unit, verbosity
-   type(timer_type), intent(in) :: timer
+   real(wp):: timer
 
    if (verbosity > 0) then
       write(unit, '(54("-"))')
@@ -528,8 +526,7 @@ subroutine print_solve_header(unit, verbosity, timer)
       write(unit, '(54("-"))')
       write(unit, '(a)') ''
       if (verbosity > 1) then
-         write(unit, '(a, 1x, a)') "Setup time : ", &
-            format_time(timer%get("setup"))
+         write(unit, '(a, 1x, a)') "Setup time : ", format_time(timer)
          write(unit, '(a)') ''
       end if
    end if
@@ -538,7 +535,7 @@ end subroutine print_solve_header
 !> Print header for gradient calculations
 subroutine print_gradient_header(unit, verbosity, timer)
    integer, intent(in) :: unit, verbosity
-   type(timer_type), intent(in) :: timer
+   real(wp):: timer
 
    if (verbosity > 0) then
       write(unit, '(54("-"))')
@@ -546,8 +543,7 @@ subroutine print_gradient_header(unit, verbosity, timer)
       write(unit, '(54("-"))')
       write(unit, '(a)') ''
       if (verbosity > 1) then
-         write(unit, '(a, 1x, a)') "Setup time : ", &
-            format_time(timer%get("setup"))
+         write(unit, '(a, 1x, a)') "Setup time : ", format_time(timer)
          write(unit, '(a)') ''
       end if
    end if
@@ -583,11 +579,10 @@ end subroutine print_adjoint_message
 !> Print gradient calculation time
 subroutine print_gradient_time(unit, verbosity, timer)
    integer, intent(in) :: unit, verbosity
-   type(timer_type), intent(in) :: timer
+   real(wp):: timer
 
    if (verbosity > 1) then
-      write(unit, '(a, 1x, a)') "Gradient calculation time : ", &
-         format_time(timer%get("gradient"))
+      write(unit, '(a, 1x, a)') "Gradient calculation time : ", format_time(timer)
       write(unit, '(a)') ''
    end if
 end subroutine print_gradient_time
@@ -595,10 +590,10 @@ end subroutine print_gradient_time
 !> Print total solve time
 subroutine print_total_time(unit, verbosity, timer)
    integer, intent(in) :: unit, verbosity
-   type(timer_type), intent(in) :: timer
+   real(wp):: timer
 
    if (verbosity > 1) then
-      write(unit, '(a, 1x, a)') "Total solve time : ", format_time(timer%get("total"))
+      write(unit, '(a, 1x, a)') "Total solve time : ", format_time(timer)
       write(unit, '(a)') ''
    end if
 end subroutine print_total_time
