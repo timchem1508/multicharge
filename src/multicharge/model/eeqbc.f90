@@ -53,7 +53,7 @@ module multicharge_model_eeqbc
       procedure :: get_capacitance_matrix
       !> Calculate Coulomb matrix
       procedure :: get_coulomb_matrix
-      !> Calculate derivatives of Coulomb matrix
+      !> Calculate derivatives of Coulomb matrix multiplied by charge
       procedure :: get_coulomb_derivs
       !> Calculate right-hand side (electronegativity vector)
       procedure :: get_xvec
@@ -159,34 +159,40 @@ subroutine new_eeqbc_model(self, mol, error, chi, rad, &
 
 end subroutine new_eeqbc_model
 
-subroutine update(self, mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
+subroutine update(self, mol, cache, trans, dcndr, dcndL)
    class(eeqbc_model), intent(in) :: self
    type(structure_type), intent(in) :: mol
    type(mchrg_cache), intent(inout) :: cache
-   real(wp), intent(in) :: cn(:)
-   real(wp), intent(in), optional :: qloc(:)
-   real(wp), intent(in), optional :: dcndr(:, :, :)
-   real(wp), intent(in), optional :: dcndL(:, :, :)
-   real(wp), intent(in), optional :: dqlocdr(:, :, :)
-   real(wp), intent(in), optional :: dqlocdL(:, :, :)
+   real(wp), intent(in) :: trans(:, :)
+   real(wp), intent(inout), contiguous, optional :: dcndr(:, :, :)
+   real(wp), intent(inout), contiguous, optional :: dcndL(:, :, :)
 
    logical :: grad
 
-   grad = present(dcndr) .and. present(dcndL) .and. present(dqlocdr) .and. present(dqlocdL)
+   grad = present(dcndr) .and. present(dcndL) 
 
    ! Refer CN and local charge arrays in cache
-   cache%cn = cn
-   if (present(qloc)) then
-      cache%qloc = qloc
-   else
-      error stop "qloc required for eeqbc"
+   if (.not. allocated(cache%cn)) then
+      allocate(cache%cn(mol%nat))
+   end if
+   if (.not. allocated(cache%qloc)) then
+      allocate(cache%qloc(mol%nat))
    end if
 
    if (grad) then
       cache%dcndr = dcndr
       cache%dcndL = dcndL
-      cache%dqlocdr = dqlocdr
-      cache%dqlocdL = dqlocdL
+      if (.not. allocated(cache%dqlocdr)) then
+         allocate(cache%dqlocdr(3, mol%nat, mol%nat))
+      end if
+      if (.not. allocated(cache%dqlocdL)) then
+         allocate(cache%dqlocdL(3, 3, mol%nat))
+      end if
+      call self%ncoord%get_coordination_number(mol, trans, cache%cn, cache%dcndr, cache%dcndL)
+      call self%local_charge(mol, trans, cache%qloc, cache%dqlocdr, cache%dqlocdL)
+   else
+      call self%ncoord%get_coordination_number(mol, trans, cache%cn)
+      call self%local_charge(mol, trans, cache%qloc)
    end if
 
    if (any(mol%periodic)) then
@@ -263,10 +269,6 @@ subroutine get_xvec(self, mol, ndim, cache)
    else if (size(cache%xvec) /= ndim) then
       deallocate(cache%xvec)
       allocate(cache%xvec(ndim))
-   end if
-
-   if (.not. allocated(cache%vrhs)) then
-      allocate(cache%vrhs(mol%nat + 1))
    end if
 
    cache%xvec(:) = 0.0_wp
@@ -479,19 +481,6 @@ subroutine get_coulomb_matrix(self, mol, ndim, cache)
       allocate(cache%amat(ndim, ndim))
    end if
 
-   if (ndim == mol%nat + 1) then
-      if (.not. allocated(cache%ainv)) then
-         allocate(cache%ainv(ndim, ndim))
-      else if (size(cache%ainv, 1) /= ndim) then
-         deallocate(cache%ainv)
-         allocate(cache%ainv(ndim, ndim))
-      end if
-   else 
-      if (.not. allocated(cache%uvec)) then
-         allocate(cache%uvec(mol%nat))
-      end if
-   end if
-
    if (any(mol%periodic)) then
       call get_amat_3d(self, mol, cache%wsc, cache%cn, cache%qloc, cache%cmat, cache%amat)
    else
@@ -667,7 +656,11 @@ subroutine get_coulomb_derivs(self, mol, ndim, cache)
    integer, intent(in) :: ndim
    type(mchrg_cache), intent(inout) :: cache
 
+   real(wp), allocatable :: atrace(:,:)
+
    integer :: iat
+
+   allocate(atrace(3, mol%nat))
 
    if (.not. allocated(cache%dadr)) then
       allocate(cache%dadr(3, mol%nat, ndim))
@@ -675,23 +668,20 @@ subroutine get_coulomb_derivs(self, mol, ndim, cache)
    if (.not. allocated(cache%dadL)) then
       allocate(cache%dadL(3, 3, ndim))
    end if
-   if (.not. allocated(cache%atrace)) then
-      allocate(cache%atrace(3, mol%nat))
-   end if
 
    if (any(mol%periodic)) then
       call get_damat_3d(self, mol, cache%wsc, cache%cn, &
       & cache%qloc, cache%vrhs, cache%dcndr, cache%dcndL, cache%dqlocdr, &
-      & cache%dqlocdL, cache%cmat, cache%dcdr, cache%dcdL, cache%dadr, cache%dadL, cache%atrace)
+      & cache%dqlocdL, cache%cmat, cache%dcdr, cache%dcdL, cache%dadr, cache%dadL, atrace)
 
    else
       call get_damat_0d(self, mol, cache%cn, &
       & cache%qloc, cache%vrhs, cache%dcndr, cache%dcndL, cache%dqlocdr, &
-      & cache%dqlocdL, cache%cmat, cache%dcdr, cache%dcdL, cache%dadr, cache%dadL, cache%atrace)
+      & cache%dqlocdL, cache%cmat, cache%dcdr, cache%dcdL, cache%dadr, cache%dadL, atrace)
    end if
 
    do iat = 1, mol%nat
-      cache%dadr(:, iat, iat) = cache%atrace(:, iat) + cache%dadr(:, iat, iat)
+      cache%dadr(:, iat, iat) = atrace(:, iat) + cache%dadr(:, iat, iat)
    end do
    
 end subroutine get_coulomb_derivs

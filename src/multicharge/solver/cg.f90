@@ -129,7 +129,7 @@ contains
         real(wp) :: step
         ! Update factor for search direction
         real(wp) :: updfact
-        ! Dot product of reconditioned and original residuals
+        ! Profection of preconditioned residual and an original one
         real(wp) :: resdot_old, resdot_new
         ! Relative residual norm (|resnorm| / |vrhs|)
         real(wp) :: rel_resnorm
@@ -233,7 +233,7 @@ contains
             resdot_new = dot(res, precres)
 
             ! Update search direction
-            updfact   = resdot_new / (resdot_old + eps)
+            updfact = resdot_new / (resdot_old + eps)
             resdot_old = resdot_new
 
             call scal(alpha=updfact, xvec=dir)

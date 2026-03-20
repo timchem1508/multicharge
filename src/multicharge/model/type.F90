@@ -23,7 +23,7 @@
 !> General charge model
 module multicharge_model_type
    use iso_fortran_env, only : output_unit
-   use mctc_env, only: timer_type, format_time, error_type, fatal_error, wp,  ik => IK
+   use mctc_env, only: timer_type, format_time, error_type, fatal_error, wp, ik => IK
    use mctc_io, only: structure_type
    use mctc_io_constants, only: pi
    use mctc_io_math, only: matinv_3x3
@@ -64,7 +64,7 @@ module multicharge_model_type
       !> Solve linear equations for the charge model
       procedure :: solve
       !> Get external gradient
-      procedure :: get_dfdr
+      procedure :: get_external_gradient
       !> Calculate local charges from electronegativity weighted CN
       procedure :: local_charge
       !> Update cache
@@ -82,18 +82,16 @@ module multicharge_model_type
    end type mchrg_model_type
 
    abstract interface
-      subroutine update(self, mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
+      subroutine update(self, mol, cache, trans, dcndr, dcndL)
          import :: mchrg_model_type, structure_type, mchrg_cache, wp
          class(mchrg_model_type), intent(in) :: self
          type(structure_type), intent(in) :: mol
          type(mchrg_cache), intent(inout) :: cache
-         real(wp), intent(in) :: cn(:)
-         real(wp), intent(in), optional :: qloc(:)
-         real(wp), intent(in), optional :: dcndr(:, :, :)
-         real(wp), intent(in), optional :: dcndL(:, :, :)
-         real(wp), intent(in), optional :: dqlocdr(:, :, :)
-         real(wp), intent(in), optional :: dqlocdL(:, :, :)
+         real(wp), intent(in) :: trans(:, :)
+         real(wp), intent(inout), contiguous, optional :: dcndr(:, :, :)
+         real(wp), intent(inout), contiguous, optional :: dcndL(:, :, :)
       end subroutine update
+
       subroutine get_capacitance_matrix(self, mol, ndim, cache)
          import :: mchrg_model_type, structure_type, mchrg_cache, wp
          class(mchrg_model_type), intent(in) :: self
@@ -162,7 +160,7 @@ subroutine get_rec_trans(lattice, trans)
 end subroutine get_rec_trans
 
 !> Top-level solve routine with optional persistent cache
-subroutine solve(self, mol, solver, cache, error,  &
+subroutine solve(self, mol, solver, cache, error, &
    & energy, gradient, sigma, qvec, dqdr, dqdL, verbosity, unit)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in):: self
@@ -191,16 +189,16 @@ subroutine solve(self, mol, solver, cache, error,  &
    !> Output unit
    integer, intent(in), optional :: unit
 
-   real(wp), allocatable :: diag(:)
-   real(wp), allocatable :: jmat(:, :)
+   integer :: iat, ndim
+
    real(wp), allocatable :: unitvec(:)
    real(wp), allocatable :: vvec(:)
-   real(wp) :: uvecsum, vvecsum
+   real(wp) :: uvecsum
+   real(wp) :: vvecsum
    real(wp) :: lambda 
+   real(wp), allocatable :: daqxdr(:,:,:)
+   real(wp), allocatable :: daqxdL(:,:,:)
 
-   real(wp), allocatable :: dxdr_minus_dadr(:,:,:), dxdL_minus_dadL(:,:,:)
-
-   integer :: iat, ndim
    logical :: grad, cpq, dcn
    logical :: add_lagr = .true.  
    type(timer_type) :: timer
@@ -243,6 +241,9 @@ subroutine solve(self, mol, solver, cache, error,  &
 
    ! Get RHS of ES equation
    call self%get_xvec(mol, ndim, cache)
+   if (.not. allocated(cache%vrhs)) then
+      allocate(cache%vrhs(mol%nat + 1))
+   end if
 
    ! pop setup timer
    call timer%pop 
@@ -250,25 +251,27 @@ subroutine solve(self, mol, solver, cache, error,  &
    ! Print header
    call print_solve_header(print_unit, verbosity_solve, timer)
 
-   allocate(jmat(mol%nat, mol%nat))
-
    if (add_lagr .eqv. .true.) then
+      if (.not. allocated(cache%ainv)) then
+         allocate(cache%ainv(ndim, ndim))
+      end if
       cache%vrhs = cache%xvec
       cache%ainv = cache%amat
       call solver%solve(cache%amat, cache%xvec, cache%vrhs, ainv=cache%ainv, &
          & cpq=cpq, new_unit=print_unit, error=error)
-      jmat = cache%amat(:mol%nat, :mol%nat)
+
    else
-      allocate(vvec(mol%nat))  
+      if (.not. allocated(cache%uvec)) then
+         allocate(cache%uvec(mol%nat))  
+      end if
       allocate(unitvec(mol%nat))
-      allocate(diag(mol%nat))
+      allocate(vvec(mol%nat))
+      ! Initial guess
       do iat = 1, mol%nat
-         diag(iat) = cache%amat(iat, iat)
+         cache%uvec(iat) = 1.0_wp / (cache%amat(iat, iat) + eps)
+         vvec(iat) = - cache%xvec(iat) / (cache%amat(iat, iat) + eps)
       end do
 
-      ! Initial guess
-      cache%uvec(:) = 1.0_wp / (diag(:) + eps)
-      vvec(:) = -cache%xvec(:) / (diag(:) + eps)
       unitvec = 1.0_wp
 
       call print_constrained_system_message(print_unit, verbosity_solve, 'u')
@@ -284,8 +287,8 @@ subroutine solve(self, mol, solver, cache, error,  &
 
       ! Reconstruct the full VRHS and JMAT
       cache%vrhs(:mol%nat) = -vvec - lambda * cache%uvec
-      cache%vrhs(mol%nat+1) = lambda
-      jmat = cache%amat(:mol%nat, :mol%nat)
+      cache%vrhs(mol%nat + 1) = lambda
+
    end if
 
    ! Partial charges if present
@@ -295,8 +298,12 @@ subroutine solve(self, mol, solver, cache, error,  &
 
    ! Electrostatic energy if present
    if (present(energy)) then
-      call symv(jmat, cache%vrhs(:mol%nat), cache%xvec(:mol%nat), &
+      call symv(cache%amat, cache%vrhs, cache%xvec(:mol%nat), &
          & alpha=0.5_wp, beta=-1.0_wp, uplo='l')
+      if (ndim > mol%nat) then
+         ! Reconstructing xvec for a proper energy calculation
+         cache%xvec(:mol%nat) = cache%xvec(:mol%nat) - 0.5_wp * cache%vrhs(mol%nat + 1)
+      end if
       energy(:) = energy(:) + cache%vrhs(:mol%nat) * cache%xvec(:mol%nat)
    end if
 
@@ -313,10 +320,14 @@ subroutine solve(self, mol, solver, cache, error,  &
    ! Calculate gradients if requested
    if (grad) then
       call timer%push("gradient") 
-      call gemv(cache%dadr(:, :, :mol%nat), cache%vrhs(:mol%nat), gradient, beta=1.0_wp, alpha=0.5_wp)
-      call gemv(cache%dxdr(:, :, :mol%nat), cache%vrhs(:mol%nat), gradient, beta=1.0_wp, alpha=-1.0_wp)
-      call gemv(cache%dadL, cache%vrhs, sigma, beta=1.0_wp, alpha=0.5_wp)
-      call gemv(cache%dxdL, cache%vrhs, sigma, beta=1.0_wp, alpha=-1.0_wp)
+      allocate(daqxdr(3, mol%nat, ndim), source=0.0_wp)
+      allocate(daqxdL(3, 3, ndim), source=0.0_wp)
+      do iat = 1, mol%nat
+         daqxdr(:, :, iat) = - cache%dxdr(:, :, iat) + 0.5_wp * cache%dadr(:, :, iat)
+         daqxdL(:, :, iat) = - cache%dxdL(:, :, iat) + 0.5_wp * cache%dadL(:, :, iat)
+      end do
+      call gemv(daqxdr(:, :, :mol%nat), cache%vrhs(:mol%nat), gradient, beta=1.0_wp, alpha=1.0_wp)
+      call gemv(daqxdL, cache%vrhs, sigma, beta=1.0_wp, alpha=1.0_wp)
       ! pop gradient timer
       call timer%pop 
       call print_gradient_time(print_unit, verbosity_solve, timer)
@@ -325,14 +336,14 @@ subroutine solve(self, mol, solver, cache, error,  &
    ! Calculate charge derivatives if requested
    if (cpq) then
       call timer%push("gradient")
-      allocate(dxdr_minus_dadr(3, mol%nat, ndim), source=0.0_wp)
-      allocate(dxdL_minus_dadL(3, 3, ndim), source=0.0_wp)
+      allocate(daqxdr(3, mol%nat, ndim), source=0.0_wp)
+      allocate(daqxdL(3, 3, ndim), source=0.0_wp)
       do iat = 1, mol%nat
-         dxdr_minus_dadr(:, :, iat) = cache%dxdr(:, :, iat) - cache%dadr(:, :, iat)
-         dxdL_minus_dadL(:, :, iat) = cache%dxdL(:, :, iat) - cache%dadL(:, :, iat)
+         daqxdr(:, :, iat) = cache%dxdr(:, :, iat) - cache%dadr(:, :, iat)
+         daqxdL(:, :, iat) = cache%dxdL(:, :, iat) - cache%dadL(:, :, iat)
       end do
-      call gemm(dxdr_minus_dadr, cache%ainv(:, :mol%nat), dqdr, alpha=1.0_wp)
-      call gemm(dxdL_minus_dadL, cache%ainv(:, :mol%nat), dqdL, alpha=1.0_wp)
+      call gemm(daqxdr, cache%ainv(:, :mol%nat), dqdr, alpha=1.0_wp)
+      call gemm(daqxdL, cache%ainv(:, :mol%nat), dqdL, alpha=1.0_wp)
       ! pop gradient timer
       call timer%pop 
       call print_gradient_time(print_unit, verbosity_solve, timer)
@@ -345,7 +356,7 @@ subroutine solve(self, mol, solver, cache, error,  &
 end subroutine solve
 
 !> Adjoint gradient calculation using cached data
-subroutine get_dfdr(self, mol, solver, cache, error, dfdq, dfdr, dfdL, unit, verbosity)
+subroutine get_external_gradient(self, mol, solver, cache, error, dfdq, dfdr, dfdL, unit, verbosity)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: self
    !> Molecular structure data
@@ -358,18 +369,26 @@ subroutine get_dfdr(self, mol, solver, cache, error, dfdq, dfdr, dfdL, unit, ver
    type(error_type), allocatable, intent(out) :: error
    !> Derivative of the objective w.r.t. atomic partial charges
    real(wp), intent(in) :: dfdq(:)
-   !> dfdr of the objective (incremented)
-   real(wp), intent(inout) :: dfdr(:, :), dfdL(:,:)
+   !> External gradient w.r.t. positions
+   real(wp), intent(inout) :: dfdr(:, :)
+   !> External gradient w.r.t. lattice vectors
+   real(wp), intent(inout) :: dfdL(:,:)
    !> Output unit
    integer, intent(in), optional :: unit
    !> Verbosity level
    integer, intent(in), optional :: verbosity
 
    integer :: iat
-   real(wp), allocatable :: uvec(:), jmat(:, :)
-   real(wp), allocatable :: dxdr_minus_dadr(:,:,:), dxdL_minus_dadL(:,:,:)
-   real(wp), allocatable :: diag(:), yvec(:),  unitvec(:), padj(:)
-   real(wp) :: uvecsum, yvecsum, scale
+   integer :: ndim
+   real(wp), allocatable :: daqxdr(:,:,:)
+   real(wp), allocatable :: daqxdL(:,:,:)
+   real(wp), allocatable :: yvec(:)
+   real(wp), allocatable :: unitvec(:)
+   real(wp), allocatable :: padj(:)
+   real(wp), allocatable :: dfdq_loc(:)
+   real(wp) :: uvecsum
+   real(wp) :: yvecsum
+   real(wp) :: scale
    integer :: print_unit, verbosity_solve
    type(timer_type) :: timer
 
@@ -377,6 +396,19 @@ subroutine get_dfdr(self, mol, solver, cache, error, dfdq, dfdr, dfdL, unit, ver
    if (present(verbosity)) verbosity_solve = verbosity
    print_unit = output_unit
    if (present(unit)) print_unit = unit
+
+   if (size(dfdq) > mol%nat) then
+      call fatal_error(error, "External partial derivative is wrong size")
+      return
+   end if
+
+   if (solver%need_pos_def) then 
+      ndim = mol%nat
+   else
+      ndim = mol%nat + 1
+      allocate(dfdq_loc(ndim), source=0.0_wp)
+      dfdq_loc(:mol%nat) = dfdq
+   end if  
 
    call timer%push("setup")
    call timer%pop
@@ -387,84 +419,68 @@ subroutine get_dfdr(self, mol, solver, cache, error, dfdq, dfdr, dfdL, unit, ver
    ! Get variables from the model cache
    if (allocated(cache%dadr) .and. allocated(cache%dadL) &
    & .and. allocated(cache%dxdr) .and. allocated(cache%dxdL)) then
-      allocate(dxdr_minus_dadr(3, mol%nat, mol%nat), source=cache%dxdr(:,:,:mol%nat)-cache%dadr(:,:,:mol%nat))
-      allocate(dxdL_minus_dadL(3, 3, mol%nat), source=cache%dxdL(:,:,:mol%nat)-cache%dadL(:,:,:mol%nat))
+      allocate(daqxdr(3, mol%nat, mol%nat), &
+         & source=cache%dxdr(:, :, :mol%nat) - cache%dadr(:, :, :mol%nat))
+      allocate(daqxdL(3, 3, mol%nat), &
+         & source=cache%dxdL(:, :, :mol%nat) - cache%dadL(:, :, :mol%nat))
    else
       call fatal_error(error, "J-matrix and electronegativity derivatives are not allocated")
+      return
    end if
-   if (allocated(cache%amat)) then
-      allocate(jmat(mol%nat, mol%nat), source=cache%amat(:mol%nat, :mol%nat))
-   else
+   if (.not. allocated(cache%amat)) then
       call fatal_error(error, "J-matrix is not allocated")
+      return
    end if
-   if (allocated(cache%uvec)) then
-      uvec = cache%uvec
+   if (.not. allocated(cache%uvec) .and. solver%need_pos_def) then
+      call fatal_error(error, "Constraint response J*uvec = 1 is not allocated")
+      return
    end if
 
    if (solver%need_pos_def) then
-      allocate(diag(mol%nat))
+      allocate(yvec(ndim))
       do iat = 1, mol%nat
-         diag(iat) = jmat(iat, iat)
+         yvec(iat) = dfdq(iat) / cache%amat(iat, iat)
       end do
 
-      if (.not. allocated(uvec)) then
-         if (verbosity_solve > 0) write(print_unit, '(a)') &
-            "[WARN] Cache does not have unit vector response => calculate on-the-fly."
-         allocate(unitvec(mol%nat), source=1.0_wp)
-         allocate(uvec(mol%nat), source=1.0_wp / (diag + eps))
-         call solver%solve(jmat, unitvec, uvec, new_unit=print_unit, error=error)
-         if (allocated(error)) return
-         cache%uvec = uvec
-      end if
-
       ! Constrained response: J*yvec = dfdq
-      allocate(yvec(mol%nat))
-      yvec = dfdq
       call print_adjoint_message(print_unit, verbosity_solve)
-      call solver%solve(jmat, dfdq, yvec, error=error)
+      call solver%solve(cache%amat, dfdq, yvec, error=error)
       if (allocated(error)) return
 
-      ! Projection
+      ! Projection of 
       yvecsum = sum(yvec)
-      uvecsum = sum(uvec)
+      uvecsum = sum(cache%uvec)
       scale = yvecsum / (uvecsum + eps)
       allocate(padj(mol%nat))
-      padj = yvec - scale * uvec
+      padj = yvec - scale * cache%uvec
       
-      call gemv(dxdr_minus_dadr, padj, dfdr, alpha=1.0_wp, beta=0.0_wp)
-      call gemv(dxdL_minus_dadL, padj, dfdL, alpha=1.0_wp, beta=0.0_wp)
+      ! Calculation of external derivatives using the adjoint method
+      ! dfdr = p^T * (db/dr - dA/dr X q)
+      call gemv(daqxdr, padj, dfdr, alpha=1.0_wp, beta=0.0_wp)
+      ! dfdL = p^T * (db/dL - dA/dL X q)
+      call gemv(daqxdL, padj, dfdL, alpha=1.0_wp, beta=0.0_wp)
+
    else
-      if (.not. allocated(uvec)) then
-         if (verbosity_solve > 0) write(print_unit, '(a)') &
-            "[WARN] Cache does not have unit vector response, calculating on-the-fly."
-         allocate(unitvec(mol%nat), source=1.0_wp)
-         allocate(uvec(mol%nat), source=unitvec)
-         call solver%solve(jmat, unitvec, uvec, new_unit=print_unit, error=error)
-         if (allocated(error)) return
-      end if 
-      uvecsum = sum(uvec)
+      allocate(padj(ndim))
 
-      ! Constrained response: J*yvec = dfdq
-      yvec = dfdq
+      ! Direct solution: J*yvec = dfdq
       call print_adjoint_message(print_unit, verbosity_solve)
-      call solver%solve(jmat, dfdq, yvec, new_unit=print_unit, error=error)
+      call solver%solve(cache%amat, dfdq_loc, padj, new_unit=print_unit, error=error)
       if (allocated(error)) return
-      yvecsum = sum(yvec)
 
-      ! Projection
-      scale = yvecsum / (uvecsum + eps)
-      allocate(padj(mol%nat))
-      padj = yvec - scale * uvec
+      ! Calculation of external derivatives using the adjoint method
+      ! dfdr = p^T * (db/dr - dA/dr X q)
+      call gemv(daqxdr, padj, dfdr, alpha=1.0_wp, beta=0.0_wp)
+      ! dfdL = p^T * (db/dL - dA/dL X q)
+      call gemv(daqxdL, padj, dfdL, alpha=1.0_wp, beta=0.0_wp)
 
-      call gemv(dxdr_minus_dadr, padj, dfdr, alpha=1.0_wp, beta=0.0_wp)
-      call gemv(dxdL_minus_dadL, padj, dfdL, alpha=1.0_wp, beta=0.0_wp)
    end if
 
    ! pop dfdr
    call timer%pop
    call print_gradient_time(print_unit, verbosity_solve, timer)
 
-end subroutine get_dfdr
+end subroutine get_external_gradient
 
 !> Local charges calculation
 subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL)

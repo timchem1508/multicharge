@@ -62,7 +62,7 @@ program main
    end if
 
    ! 2. Initialize Solver using the solver_input
-   call new_mchrg_solver(solver, solver_input,  error)
+   call new_mchrg_solver(solver, solver_input, error)
 
    ! 3. Load Structure
    if (input == "-") then
@@ -135,13 +135,11 @@ program main
    end if
 
    call get_lattice_points(mol%periodic, mol%lattice, model%ncoord%cutoff, trans)
-   call model%ncoord%get_coordination_number(mol, trans, cn, dcndr, dcndL)
-   call model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
-   
+
    ! 5. Run Solve (Solver instance passed implicitly via argument or model)
    allocate(cache)
-   call model%update(mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
-   call model%solve(mol, solver, cache, error,  &
+   call model%update(mol, cache, trans, dcndr, dcndL)
+   call model%solve(mol, solver, cache, error, &
       & energy, gradient, sigma, qvec, dqdr, dqdL, verbosity=verbosity, unit=output_unit)
 
    if (allocated(error)) then
@@ -266,9 +264,9 @@ subroutine get_arguments(input, model_id, input_format, grad, qgrad, charge, &
       case("-version", "--version")
          call version(output_unit)
          stop
-      case("-v",  "-verbose", "--verbose")
+      case("-v", "-verbose", "--verbose")
          verbosity = verbosity + 1
-      case("-s",  "-silent", "--silent")
+      case("-s", "-silent", "--silent")
          verbosity = verbosity - 1   
       case default
          if (.not. allocated(input)) then

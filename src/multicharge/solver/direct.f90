@@ -78,11 +78,10 @@ contains
         !> Error handling
         type(error_type), allocatable, intent(out) :: error
     
-        ! Local inverse matrix required for calculations
         real(wp), allocatable :: invmat(:,:)
+        integer, allocatable :: ipiv(:)
         integer  :: local_info
         integer :: ndim, ic, jc
-        integer, allocatable :: ipiv(:)
         logical :: want_cpq
         integer :: unit
         type(timer_type) :: timer
@@ -145,7 +144,7 @@ contains
 
         end if
 
-        if (present(ainv)) ainv=invmat
+        if (present(ainv)) ainv = invmat
 
         ! pop solve timer
         call timer%pop
