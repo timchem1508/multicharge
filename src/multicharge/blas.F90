@@ -17,7 +17,7 @@
 #define IK i4
 #endif
 
-!> Interface to BLAS library for linear vector, matrix-vector and matrix-matrix operations
+!> Interface to BLAS library for scalar vector, matrix-vector and matrix-matrix operations
 module multicharge_blas
    use mctc_env, only : sp, dp, ik => IK
    implicit none
@@ -25,157 +25,40 @@ module multicharge_blas
 
    public :: dot, scal, axpy, symv, gemv, gemm
 
-   !> Constant times a vector plus a vector.
+   !> Constant times a vector plus a vector: y := a*x + y
    interface axpy
-      pure subroutine saxpy(n, a, x, incx, y, incy)
-         import :: ik, sp
-         integer, parameter :: wp = sp
-         integer(ik), intent(in) :: n
-         real(wp), intent(in) :: a
-         real(wp), intent(in) :: x(*)
-         integer(ik), intent(in) :: incx
-         real(wp), intent(inout) :: y(*)
-         integer(ik), intent(in) :: incy
-      end subroutine saxpy
-      pure subroutine daxpy(n, a, x, incx, y, incy)
-         import :: ik, dp
-         integer, parameter :: wp = dp
-         integer(ik), intent(in) :: n
-         real(wp), intent(in) :: a
-         real(wp), intent(in) :: x(*)
-         integer(ik), intent(in) :: incx
-         real(wp), intent(inout) :: y(*)
-         integer(ik), intent(in) :: incy
-      end subroutine daxpy
-
-      pure subroutine caxpy(n, a, x, incx, y, incy)
-         import :: ik, sp
-         integer, parameter :: wp = sp
-         integer(ik), intent(in) :: n
-         complex(wp), intent(in) :: a
-         complex(wp), intent(in) :: x(*)
-         integer(ik), intent(in) :: incx
-         complex(wp), intent(inout) :: y(*)
-         integer(ik), intent(in) :: incy
-      end subroutine caxpy
-      pure subroutine zaxpy(n, a, x, incx, y, incy)
-         import :: ik, dp
-         integer, parameter :: wp = dp
-         integer(ik), intent(in) :: n
-         complex(wp), intent(in) :: a
-         complex(wp), intent(in) :: x(*)
-         integer(ik), intent(in) :: incx
-         complex(wp), intent(inout) :: y(*)
-         integer(ik), intent(in) :: incy
-      end subroutine zaxpy
-
-      module procedure :: blas_axpy_rsp
-      module procedure :: blas_axpy_csp
-      module procedure :: blas_axpy_rdp
-      module procedure :: blas_axpy_cdp
+      module procedure :: mchrg_axpy_rsp
+      module procedure :: mchrg_axpy_csp
+      module procedure :: mchrg_axpy_rdp
+      module procedure :: mchrg_axpy_cdp
    end interface axpy
 
-   !> Scales a vector by a constant.
+   !> Scales a vector by a constant: x := a*x
    interface scal
-      pure subroutine sscal(n, a, x, incx)
-         import :: ik, sp
-         integer, parameter :: wp = sp
-         integer(ik), intent(in) :: n
-         real(wp), intent(in) :: a
-         real(wp), intent(inout) :: x(*)
-         integer(ik), intent(in) :: incx
-      end subroutine sscal
-      pure subroutine dscal(n, a, x, incx)
-         import :: ik, dp
-         integer, parameter :: wp = dp
-         integer(ik), intent(in) :: n
-         real(wp), intent(in) :: a
-         real(wp), intent(inout) :: x(*)
-         integer(ik), intent(in) :: incx
-      end subroutine dscal
-
-      pure subroutine cscal(n, a, x, incx)
-         import :: ik, sp
-         integer, parameter :: wp = sp
-         integer(ik), intent(in) :: n
-         complex(wp), intent(in) :: a
-         complex(wp), intent(inout) :: x(*)
-         integer(ik), intent(in) :: incx
-      end subroutine cscal
-      pure subroutine zscal(n, a, x, incx)
-         import :: ik, dp
-         integer, parameter :: wp = dp
-         integer(ik), intent(in) :: n
-         complex(wp), intent(in) :: a
-         complex(wp), intent(inout) :: x(*)
-         integer(ik), intent(in) :: incx
-      end subroutine zscal
-
-      pure subroutine csscal(n, a, x, incx)
-         import :: ik, sp
-         integer, parameter :: wp = sp
-         integer(ik), intent(in) :: n
-         real(wp), intent(in) :: a
-         complex(wp), intent(inout) :: x(*)
-         integer(ik), intent(in) :: incx
-      end subroutine csscal
-      pure subroutine zdscal(n, a, x, incx)
-         import :: ik, dp
-         integer, parameter :: wp = dp
-         integer(ik), intent(in) :: n
-         real(wp), intent(in) :: a
-         complex(wp), intent(inout) :: x(*)
-         integer(ik), intent(in) :: incx
-      end subroutine zdscal
-
-      module procedure :: blas_scal_rsp
-      module procedure :: blas_scal_csp
-      module procedure :: blas_scal_rcsp
-      module procedure :: blas_scal_rdp
-      module procedure :: blas_scal_cdp
-      module procedure :: blas_scal_rcdp
+      module procedure :: mchrg_scal_rsp
+      module procedure :: mchrg_scal_csp
+      module procedure :: mchrg_scal_rcsp
+      module procedure :: mchrg_scal_rdp
+      module procedure :: mchrg_scal_cdp
+      module procedure :: mchrg_scal_rcdp
    end interface scal
 
-  !> Forms the dot product of two vectors.
+   !> Computes the dot product of two vectors.
+   !> Returns: sum_i x_i * y_i
    interface dot
-      module procedure :: wrap_sdot
-      module procedure :: wrap_ddot
-      module procedure :: wrap_sdot12
-      module procedure :: wrap_sdot21
-      module procedure :: wrap_sdot22
-      module procedure :: wrap_ddot12
-      module procedure :: wrap_ddot21
-      module procedure :: wrap_ddot22
+      module procedure :: mchrg_sdot
+      module procedure :: mchrg_ddot
+      module procedure :: mchrg_sdot12
+      module procedure :: mchrg_sdot21
+      module procedure :: mchrg_sdot22
+      module procedure :: mchrg_ddot12
+      module procedure :: mchrg_ddot21
+      module procedure :: mchrg_ddot22
    end interface dot
-
-
-   !> Forms the dot product of two vectors.
-   !> Uses unrolled loops for increments equal to one.
-   interface blas_dot
-      pure function sdot(n, x, incx, y, incy)
-         import :: sp
-         real(sp) :: sdot
-         real(sp), intent(in) :: x(*)
-         real(sp), intent(in) :: y(*)
-         integer, intent(in) :: incx
-         integer, intent(in) :: incy
-         integer, intent(in) :: n
-      end function sdot
-      pure function ddot(n, x, incx, y, incy)
-         import :: dp
-         real(dp) :: ddot
-         real(dp), intent(in) :: x(*)
-         real(dp), intent(in) :: y(*)
-         integer, intent(in) :: incx
-         integer, intent(in) :: incy
-         integer, intent(in) :: n
-      end function ddot
-   end interface blas_dot
-
 
    !> Performs one of the matrix-vector operations
    !>
-   !>    y := alpha*A*x + beta*y,   or   y := alpha*A**T*x + beta*y,
+   !>    y := alpha*A*x + beta*y,  or   y := alpha*A**T*x + beta*y,
    !>
    !> where alpha and beta are scalars, x and y are vectors and A is an
    !> m by n matrix.
@@ -207,7 +90,7 @@ module multicharge_blas
    !>
    !>    C := alpha*B*A + beta*C,
    !>
-   !> where alpha and beta are scalars,  A is a symmetric matrix and  B and
+   !> where alpha and beta are scalars, A is a symmetric matrix and  B and
    !> C are  m by n matrices.
    interface gemm
       module procedure :: mchrg_sgemm
@@ -221,12 +104,125 @@ module multicharge_blas
    end interface gemm
 
 
-   !> Performs one of the matrix-vector operations
-   !>
-   !>    y := alpha*A*x + beta*y,   or   y := alpha*A**T*x + beta*y,
-   !>
-   !> where alpha and beta are scalars, x and y are vectors and A is an
-   !> m by n matrix.
+   !> Constant times a vector plus a vector (BLAS level 1).
+   interface blas_axpy
+      pure subroutine saxpy(n, a, x, incx, y, incy)
+         import :: ik, sp
+         integer, parameter :: wp = sp
+         integer(ik), intent(in) :: n
+         real(wp), intent(in) :: a
+         real(wp), intent(in) :: x(*)
+         integer(ik), intent(in) :: incx
+         real(wp), intent(inout) :: y(*)
+         integer(ik), intent(in) :: incy
+      end subroutine saxpy
+      pure subroutine daxpy(n, a, x, incx, y, incy)
+         import :: ik, dp
+         integer, parameter :: wp = dp
+         integer(ik), intent(in) :: n
+         real(wp), intent(in) :: a
+         real(wp), intent(in) :: x(*)
+         integer(ik), intent(in) :: incx
+         real(wp), intent(inout) :: y(*)
+         integer(ik), intent(in) :: incy
+      end subroutine daxpy
+      pure subroutine caxpy(n, a, x, incx, y, incy)
+         import :: ik, sp
+         integer, parameter :: wp = sp
+         integer(ik), intent(in) :: n
+         complex(wp), intent(in) :: a
+         complex(wp), intent(in) :: x(*)
+         integer(ik), intent(in) :: incx
+         complex(wp), intent(inout) :: y(*)
+         integer(ik), intent(in) :: incy
+      end subroutine caxpy
+      pure subroutine zaxpy(n, a, x, incx, y, incy)
+         import :: ik, dp
+         integer, parameter :: wp = dp
+         integer(ik), intent(in) :: n
+         complex(wp), intent(in) :: a
+         complex(wp), intent(in) :: x(*)
+         integer(ik), intent(in) :: incx
+         complex(wp), intent(inout) :: y(*)
+         integer(ik), intent(in) :: incy
+      end subroutine zaxpy
+   end interface blas_axpy
+
+   !> Scales a vector by a constant (BLAS level 1).
+   interface blas_scal
+      pure subroutine sscal(n, a, x, incx)
+         import :: ik, sp
+         integer, parameter :: wp = sp
+         integer(ik), intent(in) :: n
+         real(wp), intent(in) :: a
+         real(wp), intent(inout) :: x(*)
+         integer(ik), intent(in) :: incx
+      end subroutine sscal
+      pure subroutine dscal(n, a, x, incx)
+         import :: ik, dp
+         integer, parameter :: wp = dp
+         integer(ik), intent(in) :: n
+         real(wp), intent(in) :: a
+         real(wp), intent(inout) :: x(*)
+         integer(ik), intent(in) :: incx
+      end subroutine dscal
+      pure subroutine cscal(n, a, x, incx)
+         import :: ik, sp
+         integer, parameter :: wp = sp
+         integer(ik), intent(in) :: n
+         complex(wp), intent(in) :: a
+         complex(wp), intent(inout) :: x(*)
+         integer(ik), intent(in) :: incx
+      end subroutine cscal
+      pure subroutine zscal(n, a, x, incx)
+         import :: ik, dp
+         integer, parameter :: wp = dp
+         integer(ik), intent(in) :: n
+         complex(wp), intent(in) :: a
+         complex(wp), intent(inout) :: x(*)
+         integer(ik), intent(in) :: incx
+      end subroutine zscal
+      pure subroutine csscal(n, a, x, incx)
+         import :: ik, sp
+         integer, parameter :: wp = sp
+         integer(ik), intent(in) :: n
+         real(wp), intent(in) :: a
+         complex(wp), intent(inout) :: x(*)
+         integer(ik), intent(in) :: incx
+      end subroutine csscal
+      pure subroutine zdscal(n, a, x, incx)
+         import :: ik, dp
+         integer, parameter :: wp = dp
+         integer(ik), intent(in) :: n
+         real(wp), intent(in) :: a
+         complex(wp), intent(inout) :: x(*)
+         integer(ik), intent(in) :: incx
+      end subroutine zdscal
+   end interface blas_scal
+
+   !> Forms the dot product of two vectors (BLAS level 1).
+   interface blas_dot
+      pure function sdot(n, x, incx, y, incy)
+         import :: sp, ik
+         real(sp) :: sdot
+         real(sp), intent(in) :: x(*)
+         real(sp), intent(in) :: y(*)
+         integer(ik), intent(in) :: incx
+         integer(ik), intent(in) :: incy
+         integer(ik), intent(in) :: n
+      end function sdot
+      pure function ddot(n, x, incx, y, incy)
+         import :: dp, ik
+         real(dp) :: ddot
+         real(dp), intent(in) :: x(*)
+         real(dp), intent(in) :: y(*)
+         integer(ik), intent(in) :: incx
+         integer(ik), intent(in) :: incy
+         integer(ik), intent(in) :: n
+      end function ddot
+   end interface blas_dot
+
+   !> Performs one of the matrix-vector operations (BLAS level 2).
    interface blas_gemv
       pure subroutine sgemv(trans, m, n, alpha, a, lda, x, incx, beta, y, incy)
          import :: sp, ik
@@ -258,12 +254,7 @@ module multicharge_blas
       end subroutine dgemv
    end interface blas_gemv
 
-   !> Performs the matrix-vector  operation
-   !>
-   !>    y := alpha*A*x + beta*y,
-   !>
-   !> where alpha and beta are scalars, x and y are n element vectors and
-   !> A is an n by n symmetric matrix.
+   !> Performs the symmetric matrix-vector operation (BLAS level 2).
    interface blas_symv
       pure subroutine ssymv(uplo, n, alpha, a, lda, x, incx, beta, y, incy)
          import :: sp, ik
@@ -293,16 +284,7 @@ module multicharge_blas
       end subroutine dsymv
    end interface blas_symv
 
-   !> Performs one of the matrix-matrix operations
-   !>
-   !>    C := alpha*op( A )*op( B ) + beta*C,
-   !>
-   !> where  op( X ) is one of
-   !>
-   !>    op( X ) = X   or   op( X ) = X**T,
-   !>
-   !> alpha and beta are scalars, and A, B and C are matrices, with op( A )
-   !> an m by k matrix,  op( B )  a  k by n matrix and  C an m by n matrix.
+   !> Performs one of the matrix-matrix operations (BLAS level 3).
    interface blas_gemm
       pure subroutine sgemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, &
             & beta, c, ldc)
@@ -343,8 +325,8 @@ module multicharge_blas
 
 contains
 
-
-pure subroutine blas_axpy_rsp(xvec, yvec, alpha)
+! implementation of axpy wrappers
+pure subroutine mchrg_axpy_rsp(xvec, yvec, alpha)
    integer, parameter :: wp = sp
    real(wp), contiguous, intent(in) :: xvec(:)
    real(wp), contiguous, intent(inout) :: yvec(:)
@@ -354,10 +336,10 @@ pure subroutine blas_axpy_rsp(xvec, yvec, alpha)
    n = size(xvec)
    a = 1.0_wp
    if (present(alpha)) a = alpha
-   call axpy(n, a, xvec, 1, yvec, 1)
-end subroutine blas_axpy_rsp
+   call blas_axpy(n, a, xvec, 1_ik, yvec, 1_ik)
+end subroutine mchrg_axpy_rsp
 
-pure subroutine blas_axpy_csp(xvec, yvec, alpha)
+pure subroutine mchrg_axpy_csp(xvec, yvec, alpha)
    integer, parameter :: wp = sp
    complex(wp), contiguous, intent(in) :: xvec(:)
    complex(wp), contiguous, intent(inout) :: yvec(:)
@@ -367,10 +349,10 @@ pure subroutine blas_axpy_csp(xvec, yvec, alpha)
    n = size(xvec)
    a = 1.0_wp
    if (present(alpha)) a = alpha
-   call axpy(n, a, xvec, 1, yvec, 1)
-end subroutine blas_axpy_csp
+   call blas_axpy(n, a, xvec, 1_ik, yvec, 1_ik)
+end subroutine mchrg_axpy_csp
 
-pure subroutine blas_axpy_rdp(xvec, yvec, alpha)
+pure subroutine mchrg_axpy_rdp(xvec, yvec, alpha)
    integer, parameter :: wp = dp
    real(wp), contiguous, intent(in) :: xvec(:)
    real(wp), contiguous, intent(inout) :: yvec(:)
@@ -380,10 +362,10 @@ pure subroutine blas_axpy_rdp(xvec, yvec, alpha)
    n = size(xvec)
    a = 1.0_wp
    if (present(alpha)) a = alpha
-   call axpy(n, a, xvec, 1, yvec, 1)
-end subroutine blas_axpy_rdp
+   call blas_axpy(n, a, xvec, 1_ik, yvec, 1_ik)
+end subroutine mchrg_axpy_rdp
 
-pure subroutine blas_axpy_cdp(xvec, yvec, alpha)
+pure subroutine mchrg_axpy_cdp(xvec, yvec, alpha)
    integer, parameter :: wp = dp
    complex(wp), contiguous, intent(in) :: xvec(:)
    complex(wp), contiguous, intent(inout) :: yvec(:)
@@ -393,109 +375,106 @@ pure subroutine blas_axpy_cdp(xvec, yvec, alpha)
    n = size(xvec)
    a = 1.0_wp
    if (present(alpha)) a = alpha
-   call axpy(n, a, xvec, 1, yvec, 1)
-end subroutine blas_axpy_cdp
+   call blas_axpy(n, a, xvec, 1_ik, yvec, 1_ik)
+end subroutine mchrg_axpy_cdp
 
-pure subroutine blas_scal_rsp(alpha, xvec)
+! implementation of scal wrappers
+pure subroutine mchrg_scal_rsp(alpha, xvec)
    integer, parameter :: wp = sp
    real(wp), intent(in) :: alpha
    real(wp), contiguous, intent(inout) :: xvec(:)
    integer(ik) :: n
    n = size(xvec)
-   call scal(n, alpha, xvec, 1)
-end subroutine blas_scal_rsp
+   call blas_scal(n, alpha, xvec, 1_ik)
+end subroutine mchrg_scal_rsp
 
-pure subroutine blas_scal_rcsp(alpha, xvec)
+pure subroutine mchrg_scal_rcsp(alpha, xvec)
    integer, parameter :: wp = sp
    real(wp), intent(in) :: alpha
    complex(wp), contiguous, intent(inout) :: xvec(:)
    integer(ik) :: n
    n = size(xvec)
-   call scal(n, alpha, xvec, 1)
-end subroutine blas_scal_rcsp
+   call blas_scal(n, alpha, xvec, 1_ik)
+end subroutine mchrg_scal_rcsp
 
-pure subroutine blas_scal_csp(alpha, xvec)
+pure subroutine mchrg_scal_csp(alpha, xvec)
    integer, parameter :: wp = sp
    complex(wp), intent(in) :: alpha
    complex(wp), contiguous, intent(inout) :: xvec(:)
    integer(ik) :: n
    n = size(xvec)
-   call scal(n, alpha, xvec, 1)
-end subroutine blas_scal_csp
+   call blas_scal(n, alpha, xvec, 1_ik)
+end subroutine mchrg_scal_csp
 
-pure subroutine blas_scal_rdp(alpha, xvec)
+pure subroutine mchrg_scal_rdp(alpha, xvec)
    integer, parameter :: wp = dp
    real(wp), intent(in) :: alpha
    real(wp), contiguous, intent(inout) :: xvec(:)
    integer(ik) :: n
    n = size(xvec)
-   call scal(n, alpha, xvec, 1)
-end subroutine blas_scal_rdp
+   call blas_scal(n, alpha, xvec, 1_ik)
+end subroutine mchrg_scal_rdp
 
-pure subroutine blas_scal_rcdp(alpha, xvec)
+pure subroutine mchrg_scal_rcdp(alpha, xvec)
    integer, parameter :: wp = dp
    real(wp), intent(in) :: alpha
    complex(wp), contiguous, intent(inout) :: xvec(:)
    integer(ik) :: n
    n = size(xvec)
-   call scal(n, alpha, xvec, 1)
-end subroutine blas_scal_rcdp
+   call blas_scal(n, alpha, xvec, 1_ik)
+end subroutine mchrg_scal_rcdp
 
-pure subroutine blas_scal_cdp(alpha, xvec)
+pure subroutine mchrg_scal_cdp(alpha, xvec)
    integer, parameter :: wp = dp
    complex(wp), intent(in) :: alpha
    complex(wp), contiguous, intent(inout) :: xvec(:)
    integer(ik) :: n
    n = size(xvec)
-   call scal(n, alpha, xvec, 1)
-end subroutine blas_scal_cdp
+   call blas_scal(n, alpha, xvec, 1_ik)
+end subroutine mchrg_scal_cdp
 
-
-function wrap_sdot(xvec, yvec) result(dot_prod)
+! implementation of dot wrappers
+function mchrg_sdot(xvec, yvec) result(dot_prod)
    real(sp) :: dot_prod
    real(sp), intent(in) :: xvec(:)
    real(sp), intent(in) :: yvec(:)
-   integer :: incx, incy, n
-   incx = 1
-   incy = 1
+   integer(ik) :: incx, incy, n
+   incx = 1_ik
+   incy = 1_ik
    n = size(xvec)
    dot_prod = blas_dot(n, xvec, incx, yvec, incy)
-end function wrap_sdot
+end function mchrg_sdot
 
-
-function wrap_ddot(xvec, yvec) result(dot_prod)
+function mchrg_ddot(xvec, yvec) result(dot_prod)
    real(dp) :: dot_prod
    real(dp), intent(in) :: xvec(:)
    real(dp), intent(in) :: yvec(:)
-   integer :: incx, incy, n
-   incx = 1
-   incy = 1
+   integer(ik) :: incx, incy, n
+   incx = 1_ik
+   incy = 1_ik
    n = size(xvec)
    dot_prod = blas_dot(n, xvec, incx, yvec, incy)
-end function wrap_ddot
+end function mchrg_ddot
 
-
-function wrap_sdot12(xvec, yvec) result(dot_prod)
+function mchrg_sdot12(xvec, yvec) result(dot_prod)
    real(sp) :: dot_prod
    real(sp), intent(in) :: xvec(:)
    real(sp), intent(in), contiguous, target :: yvec(:, :)
    real(sp), pointer :: yptr(:)
    yptr(1:size(yvec)) => yvec
    dot_prod = dot(xvec, yptr)
-end function wrap_sdot12
+end function mchrg_sdot12
 
-
-function wrap_sdot21(xvec, yvec) result(dot_prod)
+function mchrg_sdot21(xvec, yvec) result(dot_prod)
    real(sp) :: dot_prod
    real(sp), intent(in), contiguous, target :: xvec(:, :)
    real(sp), intent(in) :: yvec(:)
    real(sp), pointer :: xptr(:)
    xptr(1:size(xvec)) => xvec
    dot_prod = dot(xptr, yvec)
-end function wrap_sdot21
+end function mchrg_sdot21
 
-
-function wrap_sdot22(xvec, yvec) result(dot_prod)
+function mchrg_sdot22(xvec, yvec) result(dot_prod)
    real(sp) :: dot_prod
    real(sp), intent(in), contiguous, target :: xvec(:, :)
    real(sp), intent(in), contiguous, target :: yvec(:, :)
@@ -503,30 +482,27 @@ function wrap_sdot22(xvec, yvec) result(dot_prod)
    xptr(1:size(xvec)) => xvec
    yptr(1:size(yvec)) => yvec
    dot_prod = dot(xptr, yptr)
-end function wrap_sdot22
+end function mchrg_sdot22
 
-
-function wrap_ddot12(xvec, yvec) result(dot_prod)
+function mchrg_ddot12(xvec, yvec) result(dot_prod)
    real(dp) :: dot_prod
    real(dp), intent(in) :: xvec(:)
    real(dp), intent(in), contiguous, target :: yvec(:, :)
    real(dp), pointer :: yptr(:)
    yptr(1:size(yvec)) => yvec
    dot_prod = dot(xvec, yptr)
-end function wrap_ddot12
+end function mchrg_ddot12
 
-
-function wrap_ddot21(xvec, yvec) result(dot_prod)
+function mchrg_ddot21(xvec, yvec) result(dot_prod)
    real(dp) :: dot_prod
    real(dp), intent(in), contiguous, target :: xvec(:, :)
    real(dp), intent(in) :: yvec(:)
    real(dp), pointer :: xptr(:)
    xptr(1:size(xvec)) => xvec
    dot_prod = dot(xptr, yvec)
-end function wrap_ddot21
+end function mchrg_ddot21
 
-
-function wrap_ddot22(xvec, yvec) result(dot_prod)
+function mchrg_ddot22(xvec, yvec) result(dot_prod)
    real(dp) :: dot_prod
    real(dp), intent(in), contiguous, target :: xvec(:, :)
    real(dp), intent(in), contiguous, target :: yvec(:, :)
@@ -534,9 +510,9 @@ function wrap_ddot22(xvec, yvec) result(dot_prod)
    xptr(1:size(xvec)) => xvec
    yptr(1:size(yvec)) => yvec
    dot_prod = dot(xptr, yptr)
-end function wrap_ddot22
+end function mchrg_ddot22
 
-
+! implementation of gemv wrappers
 subroutine mchrg_sgemv312(amat, xvec, yvec, alpha, beta, trans)
    real(sp), intent(in), contiguous, target :: amat(:, :, :)
    real(sp), intent(in) :: xvec(:)
@@ -560,7 +536,6 @@ subroutine mchrg_sgemv312(amat, xvec, yvec, alpha, beta, trans)
    end if
    call gemv(aptr, xvec, yptr, alpha, beta, tra)
 end subroutine mchrg_sgemv312
-
 
 subroutine mchrg_sgemv321(amat, xvec, yvec, alpha, beta, trans)
    real(sp), intent(in), contiguous, target :: amat(:, :, :)
@@ -586,7 +561,6 @@ subroutine mchrg_sgemv321(amat, xvec, yvec, alpha, beta, trans)
    call gemv(aptr, xptr, yvec, alpha, beta, tra)
 end subroutine mchrg_sgemv321
 
-
 subroutine mchrg_dgemv312(amat, xvec, yvec, alpha, beta, trans)
    real(dp), intent(in), contiguous, target :: amat(:, :, :)
    real(dp), intent(in) :: xvec(:)
@@ -611,7 +585,6 @@ subroutine mchrg_dgemv312(amat, xvec, yvec, alpha, beta, trans)
    call gemv(aptr, xvec, yptr, alpha, beta, tra)
 end subroutine mchrg_dgemv312
 
-
 subroutine mchrg_dgemv321(amat, xvec, yvec, alpha, beta, trans)
    real(dp), intent(in), contiguous, target :: amat(:, :, :)
    real(dp), intent(in), contiguous, target :: xvec(:, :)
@@ -635,7 +608,6 @@ subroutine mchrg_dgemv321(amat, xvec, yvec, alpha, beta, trans)
    end if
    call gemv(aptr, xptr, yvec, alpha, beta, tra)
 end subroutine mchrg_dgemv321
-
 
 pure subroutine mchrg_sgemv(amat, xvec, yvec, alpha, beta, trans)
    real(sp), intent(in) :: amat(:, :)
@@ -670,7 +642,6 @@ pure subroutine mchrg_sgemv(amat, xvec, yvec, alpha, beta, trans)
    call blas_gemv(tra, m, n, a, amat, lda, xvec, incx, b, yvec, incy)
 end subroutine mchrg_sgemv
 
-
 pure subroutine mchrg_dgemv(amat, xvec, yvec, alpha, beta, trans)
    real(dp), intent(in) :: amat(:, :)
    real(dp), intent(in) :: xvec(:)
@@ -704,7 +675,7 @@ pure subroutine mchrg_dgemv(amat, xvec, yvec, alpha, beta, trans)
    call blas_gemv(tra, m, n, a, amat, lda, xvec, incx, b, yvec, incy)
 end subroutine mchrg_dgemv
 
-
+! implementation of symv wrappers
 pure subroutine mchrg_ssymv(amat, xvec, yvec, uplo, alpha, beta)
    real(sp), intent(in) :: amat(:, :)
    real(sp), intent(in) :: xvec(:)
@@ -736,7 +707,6 @@ pure subroutine mchrg_ssymv(amat, xvec, yvec, uplo, alpha, beta)
    n = size(amat, 2)
    call blas_symv(ula, n, a, amat, lda, xvec, incx, b, yvec, incy)
 end subroutine mchrg_ssymv
-
 
 pure subroutine mchrg_dsymv(amat, xvec, yvec, uplo, alpha, beta)
    real(dp), intent(in) :: amat(:, :)
@@ -770,7 +740,7 @@ pure subroutine mchrg_dsymv(amat, xvec, yvec, uplo, alpha, beta)
    call blas_symv(ula, n, a, amat, lda, xvec, incx, b, yvec, incy)
 end subroutine mchrg_dsymv
 
-
+! implementation of gemm wrappers
 pure subroutine mchrg_sgemm(amat, bmat, cmat, transa, transb, alpha, beta)
    real(sp), intent(in) :: amat(:, :)
    real(sp), intent(in) :: bmat(:, :)
@@ -814,7 +784,6 @@ pure subroutine mchrg_sgemm(amat, bmat, cmat, transa, transb, alpha, beta)
    n = size(cmat, 2)
    call blas_gemm(tra, trb, m, n, k, a, amat, lda, bmat, ldb, b, cmat, ldc)
 end subroutine mchrg_sgemm
-
 
 pure subroutine mchrg_dgemm(amat, bmat, cmat, transa, transb, alpha, beta)
    real(dp), intent(in) :: amat(:, :)
@@ -860,7 +829,6 @@ pure subroutine mchrg_dgemm(amat, bmat, cmat, transa, transb, alpha, beta)
    call blas_gemm(tra, trb, m, n, k, a, amat, lda, bmat, ldb, b, cmat, ldc)
 end subroutine mchrg_dgemm
 
-
 subroutine mchrg_sgemm323(amat, bmat, cmat, transa, transb, alpha, beta)
    real(sp), intent(in), contiguous, target :: amat(:, :, :)
    real(sp), intent(in) :: bmat(:, :)
@@ -885,7 +853,6 @@ subroutine mchrg_sgemm323(amat, bmat, cmat, transa, transb, alpha, beta)
    call gemm(aptr, bmat, cptr, tra, transb, alpha, beta)
 end subroutine mchrg_sgemm323
 
-
 subroutine mchrg_sgemm233(amat, bmat, cmat, transa, transb, alpha, beta)
    real(sp), intent(in) :: amat(:, :)
    real(sp), intent(in), contiguous, target :: bmat(:, :, :)
@@ -909,7 +876,6 @@ subroutine mchrg_sgemm233(amat, bmat, cmat, transa, transb, alpha, beta)
    cptr(1:size(cmat, 1), 1:size(cmat, 2)*size(cmat, 3)) => cmat
    call gemm(amat, bptr, cptr, transa, trb, alpha, beta)
 end subroutine mchrg_sgemm233
-
 
 subroutine mchrg_sgemm332(amat, bmat, cmat, transa, transb, alpha, beta)
    real(sp), intent(in), contiguous, target :: amat(:, :, :)
@@ -944,7 +910,6 @@ subroutine mchrg_sgemm332(amat, bmat, cmat, transa, transb, alpha, beta)
    call gemm(aptr, bptr, cmat, tra, trb, alpha, beta)
 end subroutine mchrg_sgemm332
 
-
 subroutine mchrg_dgemm323(amat, bmat, cmat, transa, transb, alpha, beta)
    real(dp), intent(in), contiguous, target :: amat(:, :, :)
    real(dp), intent(in) :: bmat(:, :)
@@ -969,7 +934,6 @@ subroutine mchrg_dgemm323(amat, bmat, cmat, transa, transb, alpha, beta)
    call gemm(aptr, bmat, cptr, tra, transb, alpha, beta)
 end subroutine mchrg_dgemm323
 
-
 subroutine mchrg_dgemm233(amat, bmat, cmat, transa, transb, alpha, beta)
    real(dp), intent(in) :: amat(:, :)
    real(dp), intent(in), contiguous, target :: bmat(:, :, :)
@@ -993,7 +957,6 @@ subroutine mchrg_dgemm233(amat, bmat, cmat, transa, transb, alpha, beta)
    cptr(1:size(cmat, 1), 1:size(cmat, 2)*size(cmat, 3)) => cmat
    call gemm(amat, bptr, cptr, transa, trb, alpha, beta)
 end subroutine mchrg_dgemm233
-
 
 subroutine mchrg_dgemm332(amat, bmat, cmat, transa, transb, alpha, beta)
    real(dp), intent(in), contiguous, target :: amat(:, :, :)
@@ -1027,6 +990,5 @@ subroutine mchrg_dgemm332(amat, bmat, cmat, transa, transb, alpha, beta)
    end if
    call gemm(aptr, bptr, cmat, tra, trb, alpha, beta)
 end subroutine mchrg_dgemm332
-
 
 end module multicharge_blas

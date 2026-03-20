@@ -44,7 +44,7 @@ module multicharge_model_eeq
       procedure :: get_capacitance_matrix
       !> Calculate Coulomb matrix
       procedure :: get_coulomb_matrix
-      !> Calculate derivatives of Coulomb matrix
+      !> Calculate derivatives of Coulomb matrix multiplied by charge
       procedure :: get_coulomb_derivs
       !> Calculate right-hand side (electronegativity vector)
       procedure :: get_xvec
@@ -84,6 +84,7 @@ subroutine new_eeq_model(self, mol, error, chi, rad, eta, kcnchi, &
    !> Maximum CN cutoff for CN
    real(wp), intent(in), optional :: cn_max
 
+
    self%chi = chi
    self%rad = rad
    self%eta = eta
@@ -94,22 +95,29 @@ subroutine new_eeq_model(self, mol, error, chi, rad, eta, kcnchi, &
 
 end subroutine new_eeq_model
 
-subroutine update(self, mol, cache,  cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
+subroutine update(self, mol, cache, trans, dcndr, dcndL)
    class(eeq_model), intent(in) :: self
    type(structure_type), intent(in) :: mol
-   type(mchrg_cache), intent(inout) :: cache 
-   real(wp), intent(in) :: cn(:)
-   real(wp), intent(in), optional :: qloc(:)
-   real(wp), intent(in), optional :: dcndr(:, :, :)
-   real(wp), intent(in), optional :: dcndL(:, :, :)
-   real(wp), intent(in), optional :: dqlocdr(:, :, :)
-   real(wp), intent(in), optional :: dqlocdL(:, :, :)
+   type(mchrg_cache), intent(inout) :: cache
+   real(wp), intent(in) :: trans(:,:)
+   real(wp), intent(inout), contiguous, optional :: dcndr(:, :, :)
+   real(wp), intent(inout), contiguous, optional :: dcndL(:, :, :)
+
+   logical :: grad
+
+   grad = present(dcndr) .and. present(dcndL) 
+
+   if (.not. allocated(cache%cn)) then
+      allocate(cache%cn(mol%nat))
+   end if
 
    ! Refer CN arrays in cache
-   cache%cn = cn
-   if (present(dcndr) .and. present(dcndL)) then
+   if (grad) then
       cache%dcndr = dcndr
       cache%dcndL = dcndL
+      call self%ncoord%get_coordination_number(mol, trans, cache%cn, cache%dcndr, cache%dcndL)
+   else 
+      call self%ncoord%get_coordination_number(mol, trans, cache%cn)
    end if
 
    if (any(mol%periodic)) then
@@ -144,10 +152,6 @@ subroutine get_xvec(self, mol, ndim, cache)
       allocate(cache%xvec(ndim))
    end if
 
-   if (.not. allocated(cache%vrhs)) then
-      allocate(cache%vrhs(mol%nat + 1))
-   end if
-
    !$omp parallel do default(none) schedule(runtime) &
    !$omp shared(mol, self, cache) private(iat, izp, tmp)
    do iat = 1, mol%nat
@@ -155,7 +159,7 @@ subroutine get_xvec(self, mol, ndim, cache)
       tmp = self%kcnchi(izp) / sqrt(cache%cn(iat) + reg)
       cache%xvec(iat) = -self%chi(izp) + tmp * cache%cn(iat)
    end do
-   if (size(cache%xvec) == mol%nat + 1) then
+   if (ndim == mol%nat + 1) then
       cache%xvec(mol%nat + 1) = mol%charge
    end if
    
@@ -204,19 +208,6 @@ subroutine get_coulomb_matrix(self, mol, ndim, cache)
    else if (size(cache%amat, 1) /= ndim) then
       deallocate(cache%amat)
       allocate(cache%amat(ndim, ndim))
-   end if
-
-   if (ndim == mol%nat + 1) then
-      if (.not. allocated(cache%ainv)) then
-         allocate(cache%ainv(ndim, ndim))
-      else if (size(cache%ainv, 1) /= ndim) then
-         deallocate(cache%ainv)
-         allocate(cache%ainv(ndim, ndim))
-      end if
-   else 
-      if (.not. allocated(cache%uvec)) then
-         allocate(cache%uvec(mol%nat))
-      end if
    end if
 
    if (any(mol%periodic)) then
@@ -391,7 +382,11 @@ subroutine get_coulomb_derivs(self, mol, ndim, cache)
    integer, intent(in) :: ndim
    type(mchrg_cache), intent(inout) :: cache
 
+   real(wp), allocatable :: atrace(:,:)
+
    integer :: iat
+
+   allocate(atrace(3, mol%nat))
 
    if (.not. allocated(cache%dadr)) then
       allocate(cache%dadr(3, mol%nat, ndim))
@@ -399,19 +394,16 @@ subroutine get_coulomb_derivs(self, mol, ndim, cache)
    if (.not. allocated(cache%dadL)) then
       allocate(cache%dadL(3, 3, ndim))
    end if
-   if (.not. allocated(cache%atrace)) then
-      allocate(cache%atrace(3, mol%nat))
-   end if
 
    if (any(mol%periodic)) then
       call get_damat_3d(self, mol, cache%wsc, cache%alpha, &
-         & cache%vrhs, cache%dadr, cache%dadL, cache%atrace)
+         & cache%vrhs, cache%dadr, cache%dadL, atrace)
    else
-      call get_damat_0d(self, mol, cache%vrhs, cache%dadr, cache%dadL, cache%atrace)
+      call get_damat_0d(self, mol, cache%vrhs, cache%dadr, cache%dadL, atrace)
    end if
 
    do iat = 1, mol%nat
-      cache%dadr(:, iat, iat) = cache%atrace(:, iat) + cache%dadr(:, iat, iat)
+      cache%dadr(:, iat, iat) = atrace(:, iat) + cache%dadr(:, iat, iat)
    end do
 end subroutine get_coulomb_derivs
 

@@ -46,7 +46,6 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
-
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
@@ -61,38 +60,26 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL)
 
    type(mchrg_cache), allocatable :: cache
    logical :: grad
-   real(wp), allocatable :: cn(:), dcndr(:, :, :), dcndL(:, :, :)
-   real(wp), allocatable :: qloc(:), dqlocdr(:, :, :), dqlocdL(:, :, :)
+   real(wp), allocatable :: dcndr(:, :, :), dcndL(:, :, :)
    real(wp), allocatable :: trans(:, :)
 
-   class(mchrg_solver_type), allocatable :: solver
-   class(mchrg_solver_input), allocatable :: solver_input
+   class(direct_solver), allocatable :: solver
+   class(direct_input), allocatable :: solver_input
 
-   allocate(direct_input :: solver_input)
-   select type(solver_input)
-   type is (direct_input)
-      block
-          class(direct_solver), allocatable :: tmp
-          allocate(tmp)
-          call new_direct_solver(tmp, solver_input)
-          call move_alloc(tmp, solver)
-      end block
-   end select
+   allocate(solver_input)
+   allocate(solver)
+   call new_direct_solver(solver, solver_input)
 
    grad = present(dqdr) .and. present(dqdL)
 
-   allocate(cn(mol%nat), qloc(mol%nat))
    if (grad) then
       allocate(dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat))
-      allocate (dqlocdr(3, mol%nat, mol%nat), dqlocdL(3, 3, mol%nat))
    end if
 
    allocate(cache)
    call get_lattice_points(mol%periodic, mol%lattice, mchrg_model%ncoord%cutoff, trans)
-   call mchrg_model%ncoord%get_coordination_number(mol, trans, cn, dcndr, dcndL)
-   call mchrg_model%local_charge(mol, trans, qloc, dqlocdr, dqlocdL)
-   call mchrg_model%update(mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
-   call mchrg_model%solve(mol, solver, cache, error,  &
+   call mchrg_model%update(mol, cache, trans, dcndr, dcndL)
+   call mchrg_model%solve(mol, solver, cache, error, &
       & qvec=qvec, dqdr=dqdr, dqdL=dqdL, unit=output_unit)
 
 end subroutine get_charges
