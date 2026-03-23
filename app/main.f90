@@ -39,11 +39,8 @@ program main
    type(mchrg_cache), allocatable :: cache
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
-   logical :: grad, qgrad, json, exist
-   real(wp), parameter :: cn_max = 8.0_wp, cutoff = 25.0_wp
-   real(wp), allocatable :: cn(:), rcov(:), trans(:, :)
-   real(wp), allocatable :: qloc(:)
-   real(wp), allocatable :: dcndr(:, :, :), dcndL(:, :, :), dqlocdr(:, :, :), dqlocdL(:, :, :)
+   logical :: grad, egrad, qgrad, json, exist
+   real(wp), allocatable :: trans(:, :)
    real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
    real(wp), allocatable :: qvec(:)
    real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
@@ -53,7 +50,7 @@ program main
 
    call timer%push("total")
 
-   call get_arguments(input, model_id, input_format, grad, qgrad, charge, json, &
+   call get_arguments(input, model_id, input_format, egrad, qgrad, charge, json, &
                       solver_input, verbosity, error)
    if (allocated(error)) then
       write(error_unit, '(a)') error%message
@@ -110,15 +107,9 @@ program main
 
    allocate(energy(mol%nat), qvec(mol%nat))
    energy(:) = 0.0_wp
+   qvec(:) = 0.0_wp
 
-   allocate(cn(mol%nat), qloc(mol%nat))
-
-   if (grad .or. qgrad) then
-      allocate(dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat))
-      allocate(dqlocdr(3, mol%nat, mol%nat), dqlocdL(3, 3, mol%nat))
-   end if 
-
-   if (grad) then
+   if (egrad) then
       allocate(gradient(3, mol%nat), sigma(3, 3))
       gradient(:, :) = 0.0_wp
       sigma(:, :) = 0.0_wp
@@ -130,10 +121,12 @@ program main
       dqdL(:, :, :) = 0.0_wp
    end if
 
+   grad = egrad .or. qgrad
+
    call get_lattice_points(mol%periodic, mol%lattice, model%ncoord%cutoff, trans)
 
    allocate(cache)
-   call model%update(mol, cache, trans, dcndr, dcndL)
+   call model%update(mol, cache, trans, grad)
    call model%solve(mol, solver, cache, error, &
       & energy, gradient, sigma, qvec, dqdr, dqdL, verbosity=verbosity, unit=output_unit)
 
@@ -142,7 +135,7 @@ program main
       error stop
    end if
 
-   call write_ascii_properties(output_unit, mol, model, cn, qvec)
+   call write_ascii_properties(output_unit, mol, model, cache%cn, qvec)
    call write_ascii_results(output_unit, mol, energy, gradient, sigma, dqdr, dqdL)
 
    call timer%pop
@@ -152,7 +145,7 @@ program main
 
    if (json) then
       open(file=json_output, newunit=unit)
-      call json_results(unit, "  ", energy=sum(energy), gradient=gradient, dqdr=dqdr, charges=qvec, cn=cn)
+      call json_results(unit, "  ", energy=sum(energy), gradient=gradient, dqdr=dqdr, charges=qvec, cn=cache%cn)
       close(unit)
       write(output_unit, '(a)') &
          "[Info] JSON dump of results written to '"//json_output//"'"
@@ -201,7 +194,7 @@ subroutine version(unit)
 
 end subroutine version
 
-subroutine get_arguments(input, model_id, input_format, grad, qgrad, charge, &
+subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
    & json, solver_input, verbosity, error)
 
    !> Input file name
@@ -214,7 +207,7 @@ subroutine get_arguments(input, model_id, input_format, grad, qgrad, charge, &
    integer, allocatable, intent(out) :: input_format
 
    !> Evaluate energy gradient
-   logical, intent(out) :: grad
+   logical, intent(out) :: egrad
 
    !> Evaluate charge gradient
    logical, intent(out) :: qgrad
@@ -242,7 +235,7 @@ subroutine get_arguments(input, model_id, input_format, grad, qgrad, charge, &
    real(wp), allocatable :: tol
 
    model_id = mchrg_model%eeq2019
-   grad = .false.
+   egrad = .false.
    qgrad = .false.
    json = .false.
    iarg = 0
@@ -307,7 +300,7 @@ subroutine get_arguments(input, model_id, input_format, grad, qgrad, charge, &
             exit
          end if
       case("-g", "-eg", "-grad", "--grad", "-egrad", "--egrad")
-         grad = .true.
+         egrad = .true.
       case("-qg", "-qgrad", "--qgrad")
          qgrad = .true.
       case("-j", "-json", "--json")

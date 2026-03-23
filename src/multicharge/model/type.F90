@@ -82,53 +82,91 @@ module multicharge_model_type
    end type mchrg_model_type
 
    abstract interface
-      subroutine update(self, mol, cache, trans, dcndr, dcndL)
+      !> Update model-dependent quantities and cache
+      subroutine update(self, mol, cache, trans, grad)
          import :: mchrg_model_type, structure_type, mchrg_cache, wp
+         !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
+         !> Structure type
          type(structure_type), intent(in) :: mol
+         !> Multicharge cache 
+         !> Allocation: cn, qloc, wsc
          type(mchrg_cache), intent(inout) :: cache
+         !> Lattice vectors
          real(wp), intent(in) :: trans(:, :)
-         real(wp), intent(inout), contiguous, optional :: dcndr(:, :, :)
-         real(wp), intent(inout), contiguous, optional :: dcndL(:, :, :)
+         !> Flag to compute derivatives (dcndr, dcndL, dqlocdr, dqlocdL)
+         logical, intent(in) :: grad
       end subroutine update
 
+      !> Capacitance matrix construction using cached CN/charge data (only for the EEQBC model)
       subroutine get_capacitance_matrix(self, mol, ndim, cache)
          import :: mchrg_model_type, structure_type, mchrg_cache, wp
+         !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
+         !> Structure type
          type(structure_type), intent(in) :: mol
+         !> System size
          integer, intent(in) :: ndim
+         !> Multicharge cache 
+         !> Allocation: cmat, (dcdr, dcdL if cache%dcndr/L and cache%dqlocdr/L allocated)
          type(mchrg_cache), intent(inout) :: cache
       end subroutine get_capacitance_matrix
 
+      !> Coulomb interaction matrix (A-matrix) construction
       subroutine get_coulomb_matrix(self, mol, ndim, cache)
          import :: mchrg_model_type, structure_type, mchrg_cache, wp
+         !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
+         !> Structure type
          type(structure_type), intent(in) :: mol
+         !> System size
          integer, intent(in) :: ndim
+         !> Multicharge cache 
+         !> Allocation: amat
          type(mchrg_cache), intent(inout) :: cache
       end subroutine get_coulomb_matrix
 
+
+      !> Coulomb matrix derivatives contracted with charges
       subroutine get_coulomb_derivs(self, mol, ndim, cache)
          import :: mchrg_model_type, structure_type, mchrg_cache, wp
+         !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
+         !> Structure type
          type(structure_type), intent(in) :: mol
+         !> System size
          integer, intent(in) :: ndim
+         !> Multicharge cache 
+         !> Allocation: dadr, dadL
          type(mchrg_cache), intent(inout) :: cache
       end subroutine get_coulomb_derivs
 
+      !> Electronegativity vector construction
+
       subroutine get_xvec(self, mol, ndim, cache)
          import :: mchrg_model_type, mchrg_cache, structure_type, wp
+         !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
+         !> Structure type
          type(structure_type), intent(in) :: mol
+         !> System size
          integer, intent(in) :: ndim
+         !> Multicharge cache 
+         !> Allocation: xvec, xtmp
          type(mchrg_cache), intent(inout) :: cache
       end subroutine get_xvec
 
+      !> Derivatives of electronegativity vector
       subroutine get_xvec_derivs(self, mol, ndim, cache)
          import :: mchrg_model_type, structure_type, mchrg_cache, wp
+         !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
+         !> Structure type
          type(structure_type), intent(in) :: mol
+         !> System size
          integer, intent(in) :: ndim
+         !> Multicharge cache 
+         !> Allocation: dxdr, dxdL
          type(mchrg_cache), intent(inout) :: cache
       end subroutine get_xvec_derivs    
    end interface
@@ -139,8 +177,11 @@ module multicharge_model_type
 
 contains
 
+!> Generate direct lattice translation vectors within a supercell of 2×2×2 repetitions.
 subroutine get_dir_trans(lattice, trans)
+   !> Lattice parameters (3×3 matrix)
    real(wp), intent(in) :: lattice(:, :)
+   !> Output translation vectors (3 × N) where N = 2×2×2 = 8
    real(wp), allocatable, intent(out) :: trans(:, :)
    integer, parameter :: rep(3) = [2, 2, 2]
 
@@ -148,8 +189,11 @@ subroutine get_dir_trans(lattice, trans)
 
 end subroutine get_dir_trans
 
+!> Generate reciprocal lattice translation vectors within a supercell of 2×2×2 repetitions.
 subroutine get_rec_trans(lattice, trans)
+   !> Lattice parameters (3×3 matrix)
    real(wp), intent(in) :: lattice(:, :)
+   !> Output translation vectors in reciprocal space (3 × N) where N = 2×2×2 = 8
    real(wp), allocatable, intent(out) :: trans(:, :)
    integer, parameter :: rep(3) = [2, 2, 2]
    real(wp) :: rec_lat(3, 3)
@@ -285,7 +329,7 @@ subroutine solve(self, mol, solver, cache, error, &
       ! Lagrangian multiplier
       lambda = - (mol%charge + vvecsum) / (uvecsum + eps)
 
-      ! Reconstruct the full VRHS and JMAT
+      ! Projection of uvec on vvec
       cache%vrhs(:mol%nat) = -vvec - lambda * cache%uvec
       cache%vrhs(mol%nat + 1) = lambda
 
@@ -353,11 +397,11 @@ subroutine solve(self, mol, solver, cache, error, &
 
 end subroutine solve
 
-!> Adjoint external gradient calculation using cached data
-! 
-! This routine evaluates dF/dR and dF/dL from the derivative of the
-! objective w.r.t. charges (dF/dq), avoiding explicit differentiation
-! of the charge solution by solving an adjoint system.
+!> Adjoint external gradient calculation using cached data 
+!
+!> This routine evaluates dF/dR and dF/dL from the derivative of the
+!> objective w.r.t. charges (dF/dq), avoiding explicit differentiation
+!> of the charge solution by solving an adjoint system.
 subroutine get_external_gradient(self, mol, solver, cache, error, dfdq, dfdr, dfdL, unit, verbosity)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: self
@@ -449,7 +493,7 @@ subroutine get_external_gradient(self, mol, solver, cache, error, dfdq, dfdr, df
       call solver%solve(cache%amat, dfdq, yvec, error=error)
       if (allocated(error)) return
 
-      ! Projection of 
+      ! Projection of uvec on yvec
       yvecsum = sum(yvec)
       uvecsum = sum(cache%uvec)
       scale = yvecsum / (uvecsum + eps)

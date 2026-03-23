@@ -21,6 +21,8 @@
 !> Thomas Froitzheim, Marcel Müller, Andreas Hansen, and Stefan Grimme,
 !> *J. Chem. Phys.*, **2025**, 162, 214109.
 !> DOI: [10.1063/5.0268978](https://dx.doi.org/10.1063/5.0268978)
+!> Bond-capacitor electronegativity equilibration (EEQBC) model.
+!> Extends the standard EEQ model by including bond capacitance contributions.
 module multicharge_model_eeqbc
    use mctc_env, only: error_type, wp
    use mctc_io, only: structure_type
@@ -35,16 +37,17 @@ module multicharge_model_eeqbc
 
    public :: eeqbc_model, new_eeqbc_model
 
+   !> EEQBC model type, extends base mchrg_model_type.
    type, extends(mchrg_model_type) :: eeqbc_model
-      !> Bond capacitance
+      !> Bond capacitance parameters for each element
       real(wp), allocatable :: cap(:)
-      !> Average coordination number
+      !> Average coordination number for each element
       real(wp), allocatable :: avg_cn(:)
       !> Exponent of error function in bond capacitance
       real(wp) :: kbc
       !> Exponent of the distance/CN normalization
       real(wp) :: norm_exp
-      !> vdW radii
+      !> Van der Waals radii matrix (nat × nat)
       real(wp), allocatable :: rvdw(:, :)
    contains
       !> Update and allocate cache
@@ -81,6 +84,7 @@ module multicharge_model_eeqbc
 
 contains
 
+!> Constructor for the EEQBC model.
 subroutine new_eeqbc_model(self, mol, error, chi, rad, &
    & eta, kcnchi, kqchi, kqeta, kcnrad, cap, avg_cn, rvdw, &
    & kbc, cutoff, cn_exp, rcov, en, cn_max, norm_exp)
@@ -159,17 +163,18 @@ subroutine new_eeqbc_model(self, mol, error, chi, rad, &
 
 end subroutine new_eeqbc_model
 
-subroutine update(self, mol, cache, trans, dcndr, dcndL)
+!> Update coordination numbers and local charges, and set up Wigner–Seitz cell if periodic.
+subroutine update(self, mol, cache, trans, grad)
+   !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
+   !> Structure type
    type(structure_type), intent(in) :: mol
+   !> Multicharge cache 
    type(mchrg_cache), intent(inout) :: cache
+   !> Lattice vectors
    real(wp), intent(in) :: trans(:, :)
-   real(wp), intent(inout), contiguous, optional :: dcndr(:, :, :)
-   real(wp), intent(inout), contiguous, optional :: dcndL(:, :, :)
-
-   logical :: grad
-
-   grad = present(dcndr) .and. present(dcndL) 
+   !> Flag to compute derivatives
+   logical, intent(in) :: grad
 
    ! Refer CN and local charge arrays in cache
    if (.not. allocated(cache%cn)) then
@@ -180,8 +185,12 @@ subroutine update(self, mol, cache, trans, dcndr, dcndL)
    end if
 
    if (grad) then
-      cache%dcndr = dcndr
-      cache%dcndL = dcndL
+      if (.not. allocated(cache%dcndr)) then
+         allocate(cache%dcndr(3, mol%nat, mol%nat))
+      end if
+      if (.not. allocated(cache%dcndL)) then
+         allocate(cache%dcndL(3, 3, mol%nat))
+      end if
       if (.not. allocated(cache%dqlocdr)) then
          allocate(cache%dqlocdr(3, mol%nat, mol%nat))
       end if
@@ -202,17 +211,21 @@ subroutine update(self, mol, cache, trans, dcndr, dcndL)
 
 end subroutine update
 
+!> Compute the capacitance matrix (and its derivatives if needed).
 subroutine get_capacitance_matrix(self, mol, ndim, cache)
+   !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
+   !> Structure type
    type(structure_type), intent(in) :: mol
+   !> System size
    integer, intent(in) :: ndim
+   !> Multicharge cache 
    type(mchrg_cache), intent(inout) :: cache
 
    logical :: grad
 
    grad = allocated(cache%dcndr) .and. allocated(cache%dcndL) .and. &
       & allocated(cache%dqlocdr) .and. allocated(cache%dqlocdL)
-
 
    ! Allocate cmat
    if (.not. allocated(cache%cmat)) then
@@ -244,10 +257,15 @@ subroutine get_capacitance_matrix(self, mol, ndim, cache)
 
 end subroutine get_capacitance_matrix
 
+!> Compute the electronegativity vector plus CN and local charge corrections.
 subroutine get_xvec(self, mol, ndim, cache)
+   !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
+   !> Structure type
    type(structure_type), intent(in) :: mol
+   !> System size (number of atoms or atoms+1 if Lagrange multiplier used)
    integer, intent(in) :: ndim
+   !> Multicharge cache 
    type(mchrg_cache), intent(inout) :: cache
 
    integer :: iat, izp, img
@@ -319,10 +337,15 @@ subroutine get_xvec(self, mol, ndim, cache)
 
 end subroutine get_xvec
 
+!> Compute derivatives of the electronegativity vector with respect to atomic positions and lattice parameters.
 subroutine get_xvec_derivs(self, mol, ndim, cache)
+   !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
+   !> Structure type
    type(structure_type), intent(in) :: mol
+   !> System size
    integer, intent(in) :: ndim
+   !> Multicharge cache 
    type(mchrg_cache), intent(inout) :: cache
 
    integer :: iat, izp, jat, jzp, img
@@ -331,7 +354,8 @@ subroutine get_xvec_derivs(self, mol, ndim, cache)
    real(wp), allocatable :: dtrans(:, :)
 
    ! Thread-private arrays for reduction
-   real(wp), allocatable :: dxdr_local(:, :, :), dxdL_local(:, :, :), dtmpdr_local(:, :, :), dtmpdL_local(:, :, :)
+   real(wp), allocatable :: dxdr_local(:, :, :), dxdL_local(:, :, :)
+   real(wp), allocatable :: dtmpdr_local(:, :, :), dtmpdL_local(:, :, :)
 
    if (.not. allocated(cache%dxdr)) then
       allocate(cache%dxdr(3, mol%nat, ndim))
@@ -468,10 +492,15 @@ subroutine get_xvec_derivs(self, mol, ndim, cache)
 
 end subroutine get_xvec_derivs
 
+!> Assemble the Coulomb matrix (periodic or non‑periodic) including bond capacitance contributions.
 subroutine get_coulomb_matrix(self, mol, ndim, cache)
+   !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
+   !> Structure type
    type(structure_type), intent(in) :: mol
+   !> System size
    integer, intent(in) :: ndim
+   !> Multicharge cache 
    type(mchrg_cache), intent(inout) :: cache
 
    if (.not. allocated(cache%amat)) then
@@ -488,12 +517,19 @@ subroutine get_coulomb_matrix(self, mol, ndim, cache)
    end if
 end subroutine get_coulomb_matrix
 
+!> Build the Coulomb matrix for a non‑periodic system (0D).
 subroutine get_amat_0d(self, mol, cn, qloc, cmat, amat)
+   !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
+   !> Molecular structure data
    type(structure_type), intent(in) :: mol
+   !> Coordination numbers
    real(wp), intent(in) :: cn(:)
+   !> Local charges
    real(wp), intent(in) :: qloc(:)
+   !> Bond capacitance matrix
    real(wp), intent(in) :: cmat(:, :)
+   !> Output Coulomb matrix (size ndim × ndim)
    real(wp), intent(out) :: amat(:, :)
 
    integer :: iat, jat, izp, jzp
@@ -547,11 +583,17 @@ subroutine get_amat_0d(self, mol, cn, qloc, cmat, amat)
 
 end subroutine get_amat_0d
 
+!> Build the Coulomb matrix for a periodic system (3D) using Ewald summation and bond capacitance.
 subroutine get_amat_3d(self, mol, wsc, cn, qloc, cmat, amat)
+   !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
+   !> Molecular structure data
    type(structure_type), intent(in) :: mol
+   !> Wigner–Seitz cell
    type(wignerseitz_cell_type), intent(in) :: wsc
+   !> Coordination numbers
    real(wp), intent(in) :: cn(:), qloc(:), cmat(:, :)
+   !> Output Coulomb matrix (size ndim × ndim)
    real(wp), intent(out) :: amat(:, :)
 
    integer :: iat, jat, izp, jzp, img
@@ -624,14 +666,23 @@ subroutine get_amat_3d(self, mol, wsc, cn, qloc, cmat, amat)
    end if
 end subroutine get_amat_3d
 
+!> Real-space contribution to the Coulomb matrix for the EEQBC model.
 subroutine get_amat_dir_3d(rij, gam, trans, kbc, rvdw, capi, capj, amat)
+   !> Distance vector between two atoms (including lattice translation)
    real(wp), intent(in) :: rij(3)
+   !> Gaussian width parameter
    real(wp), intent(in) :: gam
-   real(wp), intent(in) :: kbc
-   real(wp), intent(in) :: rvdw
-   real(wp), intent(in) :: capi
-   real(wp), intent(in) :: capj
+   !> Direct lattice translation vectors (3 × N)
    real(wp), intent(in) :: trans(:, :)
+   !> Bond capacitance exponent
+   real(wp), intent(in) :: kbc
+   !> Van der Waals distance
+   real(wp), intent(in) :: rvdw
+   !> Bond capacitance of atom i
+   real(wp), intent(in) :: capi
+   !> Bond capacitance of atom j
+   real(wp), intent(in) :: capj
+   !> Output contribution to the Coulomb matrix
    real(wp), intent(out) :: amat
 
    integer :: itr
@@ -650,10 +701,15 @@ subroutine get_amat_dir_3d(rij, gam, trans, kbc, rvdw, capi, capj, amat)
 
 end subroutine get_amat_dir_3d
 
+!> Compute derivatives of the Coulomb matrix (multiplied by the charge vector) for the EEQBC model.
 subroutine get_coulomb_derivs(self, mol, ndim, cache)
+   !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
+   !> Structure type
    type(structure_type), intent(in) :: mol
+   !> System size
    integer, intent(in) :: ndim
+   !> Multicharge cache 
    type(mchrg_cache), intent(inout) :: cache
 
    real(wp), allocatable :: atrace(:,:)
@@ -686,22 +742,38 @@ subroutine get_coulomb_derivs(self, mol, ndim, cache)
    
 end subroutine get_coulomb_derivs
 
+!> Build derivatives of the Coulomb matrix for a non‑periodic system.
 subroutine get_damat_0d(self, mol, cn, qloc, qvec, dcndr, dcndL, &
       & dqlocdr, dqlocdL, cmat, dcdr, dcdL, dadr, dadL, atrace)
+   !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
+   !> Molecular structure data
    type(structure_type), intent(in) :: mol
+   !> Coordination numbers
    real(wp), intent(in) :: cn(:)
+   !> Local charges
    real(wp), intent(in) :: qloc(:)
+   !> Charge vector (right‑hand side)
    real(wp), intent(in) :: qvec(:)
+   !> Derivative of coordination number w.r.t. atomic positions (3 × nat × nat)
    real(wp), intent(in) :: dcndr(:, :, :)
+   !> Derivative of coordination number w.r.t. lattice parameters (3 × 3 × nat)
    real(wp), intent(in) :: dcndL(:, :, :)
+   !> Derivative of local charge w.r.t. atomic positions (3 × nat × nat)
    real(wp), intent(in) :: dqlocdr(:, :, :)
+   !> Derivative of local charge w.r.t. lattice parameters (3 × 3 × nat)
    real(wp), intent(in) :: dqlocdL(:, :, :)
+   !> Bond capacitance matrix
    real(wp), intent(in) :: cmat(:, :)
+   !> Derivative of bond capacitance matrix w.r.t. atomic positions (3 × nat × ndim)
    real(wp), intent(in) :: dcdr(:, :, :)
+   !> Derivative of bond capacitance matrix w.r.t. lattice parameters (3 × 3 × ndim)
    real(wp), intent(in) :: dcdL(:, :, :)
+   !> Output derivative of Coulomb matrix w.r.t. atomic positions (3 × nat × ndim)
    real(wp), intent(out) :: dadr(:, :, :)
+   !> Output derivative of Coulomb matrix w.r.t. lattice parameters (3 × 3 × ndim)
    real(wp), intent(out) :: dadL(:, :, :)
+   !> Trace-like array for diagonal contributions
    real(wp), intent(out) :: atrace(:, :)
 
    integer :: iat, jat, izp, jzp
@@ -819,23 +891,40 @@ subroutine get_damat_0d(self, mol, cn, qloc, qvec, dcndr, dcndL, &
 
 end subroutine get_damat_0d
 
+!> Build derivatives of the Coulomb matrix for a periodic system.
 subroutine get_damat_3d(self, mol, wsc, cn, qloc, qvec, dcndr, dcndL, dqlocdr, &
    & dqlocdL, cmat, dcdr, dcdL, dadr, dadL, atrace)
+   !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
+   !> Molecular structure data
    type(structure_type), intent(in) :: mol
+   !> Wigner–Seitz cell
    type(wignerseitz_cell_type), intent(in) :: wsc
+   !> Coordination numbers
    real(wp), intent(in) :: cn(:)
+   !> Local charges
    real(wp), intent(in) :: qloc(:)
+   !> Charge vector (right‑hand side)
    real(wp), intent(in) :: qvec(:)
+   !> Derivative of coordination number w.r.t. atomic positions (3 × nat × nat)
    real(wp), intent(in) :: dcndr(:, :, :)
+   !> Derivative of coordination number w.r.t. lattice parameters (3 × 3 × nat)
    real(wp), intent(in) :: dcndL(:, :, :)
+   !> Derivative of local charge w.r.t. atomic positions (3 × nat × nat)
    real(wp), intent(in) :: dqlocdr(:, :, :)
+   !> Derivative of local charge w.r.t. lattice parameters (3 × 3 × nat)
    real(wp), intent(in) :: dqlocdL(:, :, :)
+   !> Bond capacitance matrix
    real(wp), intent(in) :: cmat(:, :)
+   !> Derivative of bond capacitance matrix w.r.t. atomic positions (3 × nat × ndim)
    real(wp), intent(in) :: dcdr(:, :, :)
+   !> Derivative of bond capacitance matrix w.r.t. lattice parameters (3 × 3 × ndim)
    real(wp), intent(in) :: dcdL(:, :, :)
+   !> Output derivative of Coulomb matrix w.r.t. atomic positions (3 × nat × ndim)
    real(wp), intent(out) :: dadr(:, :, :)
+   !> Output derivative of Coulomb matrix w.r.t. lattice parameters (3 × 3 × ndim)
    real(wp), intent(out) :: dadL(:, :, :)
+   !> Trace-like array for diagonal contributions
    real(wp), intent(out) :: atrace(:, :)
 
    integer :: iat, jat, izp, jzp, img
@@ -987,13 +1076,27 @@ subroutine get_damat_3d(self, mol, wsc, cn, qloc, qvec, dcndr, dcndL, dqlocdr, &
 
 end subroutine get_damat_3d
 
+!> Real-space contribution to the derivative of the Coulomb matrix for the EEQBC model.
 subroutine get_damat_dir(rij, trans, capi, capj, rvdw, kbc, gam, dG, dS, dgam)
+   !> Distance vector between two atoms (including lattice translation)
    real(wp), intent(in) :: rij(3)
+   !> Direct lattice translation vectors (3 × N)
    real(wp), intent(in) :: trans(:, :)
+   !> Bond capacitance of atom i
+   real(wp), intent(in) :: capi
+   !> Bond capacitance of atom j
+   real(wp), intent(in) :: capj
+   !> Van der Waals distance
+   real(wp), intent(in) :: rvdw
+   !> Bond capacitance exponent
+   real(wp), intent(in) :: kbc
+   !> Gaussian width parameter 
    real(wp), intent(in) :: gam
-   real(wp), intent(in) :: capi, capj, rvdw, kbc
+   !> Derivative of Coulomb matrix element w.r.t. atomic position (3)
    real(wp), intent(out) :: dG(3)
+   !> Derivative of Coulomb matrix element w.r.t. lattice parameters (3×3)
    real(wp), intent(out) :: dS(3, 3)
+   !> Contribution to the derivative w.r.t. gam
    real(wp), intent(out) :: dgam
 
    integer :: itr
@@ -1019,12 +1122,25 @@ subroutine get_damat_dir(rij, trans, capi, capj, rvdw, kbc, gam, dG, dS, dgam)
 
 end subroutine get_damat_dir
 
+!> Contribution to the derivative of the Coulomb matrix from the derivative of the bond capacitance (direct part).
 subroutine get_damat_dc_dir(rij, trans, capi, capj, rvdw, kbc, gam, dG, dS)
+   !> Distance vector between two atoms (including lattice translation)
    real(wp), intent(in) :: rij(3)
+   !> Direct lattice translation vectors (3 × N)
    real(wp), intent(in) :: trans(:, :)
+   !> Bond capacitance of atom i
+   real(wp), intent(in) :: capi
+   !> Bond capacitance of atom j
+   real(wp), intent(in) :: capj
+   !> Van der Waals distance
+   real(wp), intent(in) :: rvdw
+   !> Bond capacitance exponent
+   real(wp), intent(in) :: kbc
+   !> Gaussian width parameter 
    real(wp), intent(in) :: gam
-   real(wp), intent(in) :: capi, capj, rvdw, kbc
+   !> Derivative of Coulomb matrix element w.r.t. atomic position (3)
    real(wp), intent(out) :: dG(3)
+   !> Derivative of Coulomb matrix element w.r.t. lattice parameters (3×3)
    real(wp), intent(out) :: dS(3, 3)
 
    integer :: itr
@@ -1045,9 +1161,13 @@ subroutine get_damat_dc_dir(rij, trans, capi, capj, rvdw, kbc, gam, dG, dS)
 
 end subroutine get_damat_dc_dir
 
+!> Build the bond capacitance matrix for a non‑periodic system.
 subroutine get_cmat_0d(self, mol, cmat)
+   !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
+   !> Molecular structure data
    type(structure_type), intent(in) :: mol
+   !> Output capacitance matrix (size ndim × ndim)
    real(wp), intent(out) :: cmat(:, :)
 
    integer :: iat, jat, izp, jzp
@@ -1097,10 +1217,15 @@ subroutine get_cmat_0d(self, mol, cmat)
 
 end subroutine get_cmat_0d
 
+!> Build the bond capacitance matrix for a periodic system.
 subroutine get_cmat_3d(self, mol, wsc, cmat)
+   !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
+   !> Molecular structure data
    type(structure_type), intent(in) :: mol
+   !> Wigner–Seitz cell
    type(wignerseitz_cell_type), intent(in) :: wsc
+   !> Output capacitance matrix (size ndim × ndim)
    real(wp), intent(out) :: cmat(:, :)
 
    integer :: iat, jat, izp, jzp, img
@@ -1164,12 +1289,19 @@ subroutine get_cmat_3d(self, mol, wsc, cmat)
 
 end subroutine get_cmat_3d
 
+!> Compute the bond capacitance between two atoms based on distance.
 subroutine get_cpair(kbc, cpair, r1, rvdw, capi, capj)
+   !> Bond capacitance exponent
    real(wp), intent(in) :: kbc
+   !> Distance between atoms
    real(wp), intent(in) :: r1
+   !> Bond capacitance of atom i
    real(wp), intent(in) :: capi
+   !> Bond capacitance of atom j
    real(wp), intent(in) :: capj
+   !> Van der Waals distance
    real(wp), intent(in) :: rvdw
+   !> Output bond capacitance value
    real(wp), intent(out) :: cpair
 
    real(wp) :: arg
@@ -1179,13 +1311,21 @@ subroutine get_cpair(kbc, cpair, r1, rvdw, capi, capj)
    cpair = sqrt(capi * capj) * 0.5_wp * (1.0_wp + erf(arg))
 end subroutine get_cpair
 
+!> Sum the bond capacitance contributions over all lattice translations.
 subroutine get_cpair_dir(kbc, rij, trans, rvdw, capi, capj, cpair)
+   !> Bond capacitance exponent
    real(wp), intent(in) :: kbc
+   !> Distance vector between atoms
    real(wp), intent(in) :: rij(3)
+   !> Direct lattice translation vectors (3 × N)
    real(wp), intent(in) :: trans(:, :)
+   !> Van der Waals distance
    real(wp), intent(in) :: rvdw
+   !> Bond capacitance of atom i
    real(wp), intent(in) :: capi
+   !> Bond capacitance of atom j
    real(wp), intent(in) :: capj
+   !> Output total bond capacitance
    real(wp), intent(out) :: cpair
 
    integer :: itr
@@ -1201,13 +1341,21 @@ subroutine get_cpair_dir(kbc, rij, trans, rvdw, capi, capj, cpair)
    end do
 end subroutine get_cpair_dir
 
+!> Compute the derivative of the bond capacitance with respect to atomic positions and lattice parameters.
 subroutine get_dcpair(kbc, vec, rvdw, capi, capj, dgpair, dspair)
+   !> Bond capacitance exponent
    real(wp), intent(in) :: kbc
+   !> Vector between atoms
    real(wp), intent(in) :: vec(3)
+   !> Van der Waals distance
    real(wp), intent(in) :: rvdw
+   !> Bond capacitance of atom i
    real(wp), intent(in) :: capi
+   !> Bond capacitance of atom j
    real(wp), intent(in) :: capj
+   !> Derivative w.r.t. atomic position (3)
    real(wp), intent(out) :: dgpair(3)
+   !> Derivative w.r.t. lattice parameters (3×3)
    real(wp), intent(out) :: dspair(3, 3)
 
    real(wp) :: r1, arg, dtmp
@@ -1223,10 +1371,15 @@ subroutine get_dcpair(kbc, vec, rvdw, capi, capj, dgpair, dspair)
    dspair = spread(dgpair, 1, 3) * spread(vec, 2, 3)
 end subroutine get_dcpair
 
+!> Build the derivative of the bond capacitance matrix for a non‑periodic system.
 subroutine get_dcmat_0d(self, mol, dcdr, dcdL)
+   !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
+   !> Molecular structure data
    type(structure_type), intent(in) :: mol
+   !> Derivative of capacitance matrix w.r.t. atomic positions (3 × nat × ndim)
    real(wp), intent(out) :: dcdr(:, :, :)
+   !> Derivative of capacitance matrix w.r.t. lattice parameters (3 × 3 × ndim)
    real(wp), intent(out) :: dcdL(:, :, :)
 
    integer :: iat, jat, izp, jzp
@@ -1277,11 +1430,17 @@ subroutine get_dcmat_0d(self, mol, dcdr, dcdL)
 
 end subroutine get_dcmat_0d
 
+!> Build the derivative of the bond capacitance matrix for a periodic system.
 subroutine get_dcmat_3d(self, mol, wsc, dcdr, dcdL)
+   !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
+   !> Molecular structure data
    type(structure_type), intent(in) :: mol
+   !> Wigner–Seitz cell
    type(wignerseitz_cell_type), intent(in) :: wsc
+   !> Derivative of capacitance matrix w.r.t. atomic positions (3 × nat × ndim)
    real(wp), intent(out) :: dcdr(:, :, :)
+   !> Derivative of capacitance matrix w.r.t. lattice parameters (3 × 3 × ndim)
    real(wp), intent(out) :: dcdL(:, :, :)
 
    integer :: iat, jat, izp, jzp, img
@@ -1349,9 +1508,23 @@ subroutine get_dcmat_3d(self, mol, wsc, dcdr, dcdL)
 
 end subroutine get_dcmat_3d
 
+!> Sum the derivative of bond capacitance over lattice translations.
 subroutine get_dcpair_dir(kbc, rij, trans, rvdw, capi, capj, dgpair, dspair)
-   real(wp), intent(in) :: rij(3), capi, capj, rvdw, kbc, trans(:, :)
+   !> Bond capacitance exponent
+   real(wp), intent(in) :: kbc
+   !> Distance vector between atoms
+   real(wp), intent(in) :: rij(3)
+   !> Direct lattice translation vectors (3 × N)
+   real(wp), intent(in) :: trans(:, :)
+   !> Van der Waals distance
+   real(wp), intent(in) :: rvdw
+   !> Bond capacitance of atom i
+   real(wp), intent(in) :: capi
+   !> Bond capacitance of atom j
+   real(wp), intent(in) :: capj
+   !> Summed derivative w.r.t. atomic position (3)
    real(wp), intent(out) :: dgpair(3)
+   !> Summed derivative w.r.t. lattice parameters (3×3)
    real(wp), intent(out) :: dspair(3, 3)
 
    integer :: itr
