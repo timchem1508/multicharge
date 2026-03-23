@@ -91,7 +91,7 @@ module multicharge_blas
    !>    C := alpha*B*A + beta*C,
    !>
    !> where alpha and beta are scalars, A is a symmetric matrix and  B and
-   !> C are  m by n matrices.
+   !> C are m by n matrices.
    interface gemm
       module procedure :: mchrg_sgemm
       module procedure :: mchrg_dgemm
@@ -339,6 +339,7 @@ pure subroutine mchrg_axpy_rsp(xvec, yvec, alpha)
    call blas_axpy(n, a, xvec, 1_ik, yvec, 1_ik)
 end subroutine mchrg_axpy_rsp
 
+
 pure subroutine mchrg_axpy_csp(xvec, yvec, alpha)
    integer, parameter :: wp = sp
    complex(wp), contiguous, intent(in) :: xvec(:)
@@ -351,6 +352,7 @@ pure subroutine mchrg_axpy_csp(xvec, yvec, alpha)
    if (present(alpha)) a = alpha
    call blas_axpy(n, a, xvec, 1_ik, yvec, 1_ik)
 end subroutine mchrg_axpy_csp
+
 
 pure subroutine mchrg_axpy_rdp(xvec, yvec, alpha)
    integer, parameter :: wp = dp
@@ -365,6 +367,7 @@ pure subroutine mchrg_axpy_rdp(xvec, yvec, alpha)
    call blas_axpy(n, a, xvec, 1_ik, yvec, 1_ik)
 end subroutine mchrg_axpy_rdp
 
+
 pure subroutine mchrg_axpy_cdp(xvec, yvec, alpha)
    integer, parameter :: wp = dp
    complex(wp), contiguous, intent(in) :: xvec(:)
@@ -378,6 +381,7 @@ pure subroutine mchrg_axpy_cdp(xvec, yvec, alpha)
    call blas_axpy(n, a, xvec, 1_ik, yvec, 1_ik)
 end subroutine mchrg_axpy_cdp
 
+
 ! implementation of scal wrappers
 pure subroutine mchrg_scal_rsp(alpha, xvec)
    integer, parameter :: wp = sp
@@ -388,6 +392,7 @@ pure subroutine mchrg_scal_rsp(alpha, xvec)
    call blas_scal(n, alpha, xvec, 1_ik)
 end subroutine mchrg_scal_rsp
 
+
 pure subroutine mchrg_scal_rcsp(alpha, xvec)
    integer, parameter :: wp = sp
    real(wp), intent(in) :: alpha
@@ -396,6 +401,7 @@ pure subroutine mchrg_scal_rcsp(alpha, xvec)
    n = size(xvec)
    call blas_scal(n, alpha, xvec, 1_ik)
 end subroutine mchrg_scal_rcsp
+
 
 pure subroutine mchrg_scal_csp(alpha, xvec)
    integer, parameter :: wp = sp
@@ -406,6 +412,7 @@ pure subroutine mchrg_scal_csp(alpha, xvec)
    call blas_scal(n, alpha, xvec, 1_ik)
 end subroutine mchrg_scal_csp
 
+
 pure subroutine mchrg_scal_rdp(alpha, xvec)
    integer, parameter :: wp = dp
    real(wp), intent(in) :: alpha
@@ -414,6 +421,7 @@ pure subroutine mchrg_scal_rdp(alpha, xvec)
    n = size(xvec)
    call blas_scal(n, alpha, xvec, 1_ik)
 end subroutine mchrg_scal_rdp
+
 
 pure subroutine mchrg_scal_rcdp(alpha, xvec)
    integer, parameter :: wp = dp
@@ -424,6 +432,7 @@ pure subroutine mchrg_scal_rcdp(alpha, xvec)
    call blas_scal(n, alpha, xvec, 1_ik)
 end subroutine mchrg_scal_rcdp
 
+
 pure subroutine mchrg_scal_cdp(alpha, xvec)
    integer, parameter :: wp = dp
    complex(wp), intent(in) :: alpha
@@ -432,6 +441,7 @@ pure subroutine mchrg_scal_cdp(alpha, xvec)
    n = size(xvec)
    call blas_scal(n, alpha, xvec, 1_ik)
 end subroutine mchrg_scal_cdp
+
 
 ! implementation of dot wrappers
 function mchrg_sdot(xvec, yvec) result(dot_prod)
@@ -445,6 +455,7 @@ function mchrg_sdot(xvec, yvec) result(dot_prod)
    dot_prod = blas_dot(n, xvec, incx, yvec, incy)
 end function mchrg_sdot
 
+
 function mchrg_ddot(xvec, yvec) result(dot_prod)
    real(dp) :: dot_prod
    real(dp), intent(in) :: xvec(:)
@@ -456,6 +467,7 @@ function mchrg_ddot(xvec, yvec) result(dot_prod)
    dot_prod = blas_dot(n, xvec, incx, yvec, incy)
 end function mchrg_ddot
 
+
 function mchrg_sdot12(xvec, yvec) result(dot_prod)
    real(sp) :: dot_prod
    real(sp), intent(in) :: xvec(:)
@@ -465,6 +477,7 @@ function mchrg_sdot12(xvec, yvec) result(dot_prod)
    dot_prod = dot(xvec, yptr)
 end function mchrg_sdot12
 
+
 function mchrg_sdot21(xvec, yvec) result(dot_prod)
    real(sp) :: dot_prod
    real(sp), intent(in), contiguous, target :: xvec(:, :)
@@ -473,6 +486,7 @@ function mchrg_sdot21(xvec, yvec) result(dot_prod)
    xptr(1:size(xvec)) => xvec
    dot_prod = dot(xptr, yvec)
 end function mchrg_sdot21
+
 
 function mchrg_sdot22(xvec, yvec) result(dot_prod)
    real(sp) :: dot_prod
@@ -484,6 +498,7 @@ function mchrg_sdot22(xvec, yvec) result(dot_prod)
    dot_prod = dot(xptr, yptr)
 end function mchrg_sdot22
 
+
 function mchrg_ddot12(xvec, yvec) result(dot_prod)
    real(dp) :: dot_prod
    real(dp), intent(in) :: xvec(:)
@@ -492,6 +507,7 @@ function mchrg_ddot12(xvec, yvec) result(dot_prod)
    yptr(1:size(yvec)) => yvec
    dot_prod = dot(xvec, yptr)
 end function mchrg_ddot12
+
 
 function mchrg_ddot21(xvec, yvec) result(dot_prod)
    real(dp) :: dot_prod
@@ -502,6 +518,7 @@ function mchrg_ddot21(xvec, yvec) result(dot_prod)
    dot_prod = dot(xptr, yvec)
 end function mchrg_ddot21
 
+
 function mchrg_ddot22(xvec, yvec) result(dot_prod)
    real(dp) :: dot_prod
    real(dp), intent(in), contiguous, target :: xvec(:, :)
@@ -511,6 +528,7 @@ function mchrg_ddot22(xvec, yvec) result(dot_prod)
    yptr(1:size(yvec)) => yvec
    dot_prod = dot(xptr, yptr)
 end function mchrg_ddot22
+
 
 ! implementation of gemv wrappers
 subroutine mchrg_sgemv312(amat, xvec, yvec, alpha, beta, trans)
@@ -537,6 +555,7 @@ subroutine mchrg_sgemv312(amat, xvec, yvec, alpha, beta, trans)
    call gemv(aptr, xvec, yptr, alpha, beta, tra)
 end subroutine mchrg_sgemv312
 
+
 subroutine mchrg_sgemv321(amat, xvec, yvec, alpha, beta, trans)
    real(sp), intent(in), contiguous, target :: amat(:, :, :)
    real(sp), intent(in), contiguous, target :: xvec(:, :)
@@ -561,6 +580,7 @@ subroutine mchrg_sgemv321(amat, xvec, yvec, alpha, beta, trans)
    call gemv(aptr, xptr, yvec, alpha, beta, tra)
 end subroutine mchrg_sgemv321
 
+
 subroutine mchrg_dgemv312(amat, xvec, yvec, alpha, beta, trans)
    real(dp), intent(in), contiguous, target :: amat(:, :, :)
    real(dp), intent(in) :: xvec(:)
@@ -583,7 +603,8 @@ subroutine mchrg_dgemv312(amat, xvec, yvec, alpha, beta, trans)
       yptr(1:size(yvec, 1) * size(yvec, 2)) => yvec
    end if
    call gemv(aptr, xvec, yptr, alpha, beta, tra)
-end subroutine mchrg_dgemv312
+end subroutine 
+
 
 subroutine mchrg_dgemv321(amat, xvec, yvec, alpha, beta, trans)
    real(dp), intent(in), contiguous, target :: amat(:, :, :)
@@ -608,6 +629,7 @@ subroutine mchrg_dgemv321(amat, xvec, yvec, alpha, beta, trans)
    end if
    call gemv(aptr, xptr, yvec, alpha, beta, tra)
 end subroutine mchrg_dgemv321
+
 
 pure subroutine mchrg_sgemv(amat, xvec, yvec, alpha, beta, trans)
    real(sp), intent(in) :: amat(:, :)
@@ -642,6 +664,7 @@ pure subroutine mchrg_sgemv(amat, xvec, yvec, alpha, beta, trans)
    call blas_gemv(tra, m, n, a, amat, lda, xvec, incx, b, yvec, incy)
 end subroutine mchrg_sgemv
 
+
 pure subroutine mchrg_dgemv(amat, xvec, yvec, alpha, beta, trans)
    real(dp), intent(in) :: amat(:, :)
    real(dp), intent(in) :: xvec(:)
@@ -674,6 +697,7 @@ pure subroutine mchrg_dgemv(amat, xvec, yvec, alpha, beta, trans)
    n = size(amat, 2)
    call blas_gemv(tra, m, n, a, amat, lda, xvec, incx, b, yvec, incy)
 end subroutine mchrg_dgemv
+
 
 ! implementation of symv wrappers
 pure subroutine mchrg_ssymv(amat, xvec, yvec, uplo, alpha, beta)
@@ -708,6 +732,7 @@ pure subroutine mchrg_ssymv(amat, xvec, yvec, uplo, alpha, beta)
    call blas_symv(ula, n, a, amat, lda, xvec, incx, b, yvec, incy)
 end subroutine mchrg_ssymv
 
+
 pure subroutine mchrg_dsymv(amat, xvec, yvec, uplo, alpha, beta)
    real(dp), intent(in) :: amat(:, :)
    real(dp), intent(in) :: xvec(:)
@@ -739,6 +764,7 @@ pure subroutine mchrg_dsymv(amat, xvec, yvec, uplo, alpha, beta)
    n = size(amat, 2)
    call blas_symv(ula, n, a, amat, lda, xvec, incx, b, yvec, incy)
 end subroutine mchrg_dsymv
+
 
 ! implementation of gemm wrappers
 pure subroutine mchrg_sgemm(amat, bmat, cmat, transa, transb, alpha, beta)
@@ -785,6 +811,7 @@ pure subroutine mchrg_sgemm(amat, bmat, cmat, transa, transb, alpha, beta)
    call blas_gemm(tra, trb, m, n, k, a, amat, lda, bmat, ldb, b, cmat, ldc)
 end subroutine mchrg_sgemm
 
+
 pure subroutine mchrg_dgemm(amat, bmat, cmat, transa, transb, alpha, beta)
    real(dp), intent(in) :: amat(:, :)
    real(dp), intent(in) :: bmat(:, :)
@@ -829,6 +856,7 @@ pure subroutine mchrg_dgemm(amat, bmat, cmat, transa, transb, alpha, beta)
    call blas_gemm(tra, trb, m, n, k, a, amat, lda, bmat, ldb, b, cmat, ldc)
 end subroutine mchrg_dgemm
 
+
 subroutine mchrg_sgemm323(amat, bmat, cmat, transa, transb, alpha, beta)
    real(sp), intent(in), contiguous, target :: amat(:, :, :)
    real(sp), intent(in) :: bmat(:, :)
@@ -853,6 +881,7 @@ subroutine mchrg_sgemm323(amat, bmat, cmat, transa, transb, alpha, beta)
    call gemm(aptr, bmat, cptr, tra, transb, alpha, beta)
 end subroutine mchrg_sgemm323
 
+
 subroutine mchrg_sgemm233(amat, bmat, cmat, transa, transb, alpha, beta)
    real(sp), intent(in) :: amat(:, :)
    real(sp), intent(in), contiguous, target :: bmat(:, :, :)
@@ -876,6 +905,7 @@ subroutine mchrg_sgemm233(amat, bmat, cmat, transa, transb, alpha, beta)
    cptr(1:size(cmat, 1), 1:size(cmat, 2)*size(cmat, 3)) => cmat
    call gemm(amat, bptr, cptr, transa, trb, alpha, beta)
 end subroutine mchrg_sgemm233
+
 
 subroutine mchrg_sgemm332(amat, bmat, cmat, transa, transb, alpha, beta)
    real(sp), intent(in), contiguous, target :: amat(:, :, :)
@@ -910,6 +940,7 @@ subroutine mchrg_sgemm332(amat, bmat, cmat, transa, transb, alpha, beta)
    call gemm(aptr, bptr, cmat, tra, trb, alpha, beta)
 end subroutine mchrg_sgemm332
 
+
 subroutine mchrg_dgemm323(amat, bmat, cmat, transa, transb, alpha, beta)
    real(dp), intent(in), contiguous, target :: amat(:, :, :)
    real(dp), intent(in) :: bmat(:, :)
@@ -934,6 +965,7 @@ subroutine mchrg_dgemm323(amat, bmat, cmat, transa, transb, alpha, beta)
    call gemm(aptr, bmat, cptr, tra, transb, alpha, beta)
 end subroutine mchrg_dgemm323
 
+
 subroutine mchrg_dgemm233(amat, bmat, cmat, transa, transb, alpha, beta)
    real(dp), intent(in) :: amat(:, :)
    real(dp), intent(in), contiguous, target :: bmat(:, :, :)
@@ -957,6 +989,7 @@ subroutine mchrg_dgemm233(amat, bmat, cmat, transa, transb, alpha, beta)
    cptr(1:size(cmat, 1), 1:size(cmat, 2)*size(cmat, 3)) => cmat
    call gemm(amat, bptr, cptr, transa, trb, alpha, beta)
 end subroutine mchrg_dgemm233
+
 
 subroutine mchrg_dgemm332(amat, bmat, cmat, transa, transb, alpha, beta)
    real(dp), intent(in), contiguous, target :: amat(:, :, :)
@@ -990,5 +1023,6 @@ subroutine mchrg_dgemm332(amat, bmat, cmat, transa, transb, alpha, beta)
    end if
    call gemm(aptr, bptr, cmat, tra, trb, alpha, beta)
 end subroutine mchrg_dgemm332
+
 
 end module multicharge_blas
