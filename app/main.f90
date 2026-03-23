@@ -212,11 +212,11 @@ subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
    !> Evaluate charge gradient
    logical, intent(out) :: qgrad
 
-   !> Provide JSON output
-   logical, intent(out) :: json
-
    !> Charge
    real(wp), allocatable, intent(out) :: charge
+
+   !> Provide JSON output
+   logical, intent(out) :: json
 
    !> Solver args
    class(mchrg_solver_input), allocatable, intent(out) :: solver_input

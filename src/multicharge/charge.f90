@@ -40,7 +40,7 @@ contains
 
 !> Classical electronegativity equilibration charges
 subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL)
-   
+
    !> Multicharge model
    class(mchrg_model_type), intent(in) :: mchrg_model
 
@@ -85,7 +85,7 @@ subroutine get_eeq_charges(mol, error, qvec, dqdr, dqdL)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
-   
+
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 

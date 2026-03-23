@@ -21,8 +21,6 @@
 !> Thomas Froitzheim, Marcel Müller, Andreas Hansen, and Stefan Grimme,
 !> *J. Chem. Phys.*, **2025**, 162, 214109.
 !> DOI: [10.1063/5.0268978](https://dx.doi.org/10.1063/5.0268978)
-!> Bond-capacitor electronegativity equilibration (EEQBC) model.
-!> Extends the standard EEQ model by including bond capacitance contributions.
 module multicharge_model_eeqbc
    use mctc_env, only: error_type, wp
    use mctc_io, only: structure_type
@@ -39,9 +37,9 @@ module multicharge_model_eeqbc
 
    !> EEQBC model type, extends base mchrg_model_type.
    type, extends(mchrg_model_type) :: eeqbc_model
-      !> Bond capacitance parameters for each element
+      !> Bond capacitance parameters
       real(wp), allocatable :: cap(:)
-      !> Average coordination number for each element
+      !> Average coordination number
       real(wp), allocatable :: avg_cn(:)
       !> Exponent of error function in bond capacitance
       real(wp) :: kbc

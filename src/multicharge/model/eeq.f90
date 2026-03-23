@@ -135,7 +135,7 @@ subroutine update(self, mol, cache, trans, grad)
 
 end subroutine update
 
-!> Compute the capacitance matrix (here a stub – actual implementation may follow).
+!> Compute the capacitance matrix (required for the EEQBC model).
 subroutine get_capacitance_matrix(self, mol, ndim, cache)
    !> EEQ model type
    class(eeq_model), intent(in) :: self
