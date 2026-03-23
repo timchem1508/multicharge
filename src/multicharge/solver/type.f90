@@ -18,6 +18,7 @@
 
 module multicharge_solver_type
     use mctc_env, only: error_type, wp
+    use multicharge_adjlist, only: adjacency_list
     implicit none
     private
 
@@ -35,14 +36,15 @@ module multicharge_solver_type
 
 
 abstract interface
-    subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
-        import :: mchrg_solver_type, error_type, wp
+    subroutine solve(self, amat, xvec, vrhs, ainv, cpq, list, new_unit, error)
+        import :: mchrg_solver_type, error_type, wp, adjacency_list
         class(mchrg_solver_type), intent(in) :: self
         real(wp), intent(in)  :: amat(:, :)
         real(wp), intent(in)  :: xvec(:)
         real(wp), intent(inout), contiguous :: vrhs(:)
         real(wp), intent(out), optional :: ainv(:, :)
         logical, intent(in), optional :: cpq
+        type(adjacency_list), intent(in), optional :: list
         integer, intent(in), optional :: new_unit
         type(error_type), allocatable, intent(out) :: error
     end subroutine solve

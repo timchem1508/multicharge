@@ -19,6 +19,7 @@
 module multicharge_solver_direct
     use iso_fortran_env, only: output_unit
     use mctc_env, only: error_type, fatal_error, wp, timer_type, timer_type, format_time
+    use multicharge_adjlist, only: adjacency_list
     use multicharge_blas, only: symv
     use multicharge_lapack, only: sytrf, sytrs, sytri
     use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
@@ -64,18 +65,20 @@ contains
     end subroutine new_direct_solver
 
     !> Solve method for direct solver
-    subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
+    subroutine solve(self, amat, xvec, vrhs, ainv, cpq, list, new_unit, error)
         class(direct_solver), intent(in) :: self
         !> A matrix of Ax=b system
         real(wp), intent(in)  :: amat(:, :)
-        !> Initial search direction (b)
+        !> Right-hand side vector 
         real(wp), intent(in)  :: xvec(:)
-        !> Initial guess and solution
+        !> On input: initial guess; on output: solution
         real(wp), intent(inout), contiguous :: vrhs(:)
-        !> Inverse A-matrix and coupled perturbed logical
+        !> Inverse matrix – not computed by CG, but required by interface
         real(wp), intent(out), optional :: ainv(:, :)
-        !> Coupled-perturbed equations flag (optional)
+        !> Flag for coupled-perturbed equations
         logical, intent(in), optional :: cpq
+        !> Neighbour list optional type
+        type(adjacency_list), intent(in), optional :: list
         !> Output unit (optional)
         integer, intent(in), optional :: new_unit
         !> Error handling

@@ -19,6 +19,7 @@
 module multicharge_solver_cg
     use iso_fortran_env, only : output_unit
     use mctc_env, only: error_type, fatal_error, wp, timer_type, format_time
+    use multicharge_adjlist, only: adjacency_list, symv_sparse
     use multicharge_blas, only: axpy, scal, dot, symv, gemv
     use multicharge_lapack, only: sytrf, sytrs
     use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
@@ -35,6 +36,8 @@ module multicharge_solver_cg
         real(wp), allocatable :: cgtol 
         !> Output verbosity
         integer, allocatable :: verbosity
+        !> Flag for neighbour list usage
+        logical, allocatable :: use_nlist
         !> Use iterative CG solver
         logical :: cg = .true.
    end type cg_input
@@ -44,6 +47,7 @@ module multicharge_solver_cg
         integer, allocatable :: cgmiter
         real(wp), allocatable :: cgtol
         integer, allocatable :: verbosity
+        logical, allocatable :: use_nlist
     contains
         procedure :: solve
     end type cg_solver
@@ -54,6 +58,7 @@ module multicharge_solver_cg
     integer, parameter :: cgmiter_def = 1000
     real(wp), parameter :: cgtol_def = 1.0e-15_wp
     integer, parameter :: verbosity_def = 0
+    logical, parameter :: use_nlist_def = .false.
 
 contains
 
@@ -81,12 +86,17 @@ contains
         else 
             self%verbosity = verbosity_def
         end if
+        if (allocated(input%use_nlist)) then
+            self%use_nlist = input%use_nlist
+        else 
+            self%use_nlist = use_nlist_def
+        end if
 
 
     end subroutine new_cg_solver
 
     !> Conjugate gradient solver procedure with diagonal preconditioner
-    subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
+    subroutine solve(self, amat, xvec, vrhs, ainv, cpq, list, new_unit, error)
         class(cg_solver), intent(in) :: self
         !> A matrix of Ax=b system
         real(wp), intent(in)  :: amat(:, :)
@@ -98,6 +108,8 @@ contains
         real(wp), intent(out), optional :: ainv(:, :)
         !> Flag for coupled-perturbed equations
         logical, intent(in), optional :: cpq
+        !> Neighbour list optional type
+        type(adjacency_list), intent(in), optional :: list
         !> Output unit
         integer, intent(in), optional :: new_unit
         !> Error handling
@@ -173,7 +185,11 @@ contains
         end do
     
         ! Initial residual
-        call symv(amat, vrhs, Adir, alpha=1.0_wp, beta=0.0_wp)   
+        if (self%use_nlist .and. present(list)) then
+            call symv_sparse(list, amat, vrhs, Adir, alpha=1.0_wp, beta=0.0_wp)
+        else
+            call symv(amat, vrhs, Adir, alpha=1.0_wp, beta=0.0_wp)  
+        end if 
         res(:) = xvec(:) - Adir(:)                                                                
         
         ! Initial preconditioned residual precres = M^-1 * res
@@ -200,7 +216,11 @@ contains
             if (self%verbosity > 1) call timer%push("iteration")
 
             ! Matrix-vector product
-            call symv(amat, dir, Adir, alpha=1.0_wp, beta=0.0_wp)
+            if (self%use_nlist .and. present(list)) then
+                call symv_sparse(list, amat, dir, Adir, alpha=1.0_wp, beta=0.0_wp)
+            else
+                call symv(amat, dir, Adir, alpha=1.0_wp, beta=0.0_wp)  
+            end if
 
             denom = dot(dir, Adir)
             if (abs(denom) < tol_square) then
