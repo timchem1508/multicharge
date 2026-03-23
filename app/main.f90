@@ -18,6 +18,7 @@ program main
    use mctc_env, only: error_type, fatal_error, get_argument, wp, timer_type, format_time
    use mctc_io, only: structure_type, read_structure, filetype, get_filetype
    use mctc_cutoff, only: get_lattice_points
+   use multicharge_adjlist, only: new_adjacency_list, adjacency_list
    use multicharge, only: mchrg_model_type, mchrg_model, mchrg_cache, new_eeq2019_model, &
       & new_eeqbc2025_model, get_multicharge_version, &
       & write_ascii_model, write_ascii_properties, write_ascii_results
@@ -35,22 +36,24 @@ program main
    integer :: stat, unit, model_id
    type(error_type), allocatable :: error
    type(structure_type) :: mol
+   type(adjacency_list), allocatable :: list
    class(mchrg_model_type), allocatable :: model
    type(mchrg_cache), allocatable :: cache
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
-   logical :: grad, egrad, qgrad, json, exist
+   logical :: grad, egrad, qgrad, json, exist, use_nlist
    real(wp), allocatable :: trans(:, :)
    real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
    real(wp), allocatable :: qvec(:)
    real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: charge
    integer, allocatable :: verbosity
+   real(wp), parameter :: cn_max = 8.0_wp, cutoff = 10000.0_wp
    type(timer_type) :: timer
 
    call timer%push("total")
 
-   call get_arguments(input, model_id, input_format, egrad, qgrad, charge, json, &
+   call get_arguments(input, model_id, use_nlist, input_format, egrad, qgrad, charge, json, &
                       solver_input, verbosity, error)
    if (allocated(error)) then
       write(error_unit, '(a)') error%message
@@ -125,10 +128,20 @@ program main
 
    call get_lattice_points(mol%periodic, mol%lattice, model%ncoord%cutoff, trans)
 
+   ! Create neighbour list if requested
+   if (use_nlist) then
+      allocate(list)
+      if (model_id == mchrg_model%eeq2019) then
+         call new_adjacency_list(list, mol, trans, cutoff)
+      else if (model_id == mchrg_model%eeqbc2025) then
+         call new_adjacency_list(list, mol, trans, model%ncoord%cutoff)
+      end if
+   end if
+
    allocate(cache)
    call model%update(mol, cache, trans, grad)
    call model%solve(mol, solver, cache, error, &
-      & energy, gradient, sigma, qvec, dqdr, dqdL, verbosity=verbosity, unit=output_unit)
+      & energy, gradient, sigma, qvec, dqdr, dqdL, list, verbosity=verbosity, unit=output_unit)
 
    if (allocated(error)) then
       write(error_unit, '(a)') error%message
@@ -194,7 +207,7 @@ subroutine version(unit)
 
 end subroutine version
 
-subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
+subroutine get_arguments(input, model_id, use_nlist, input_format, egrad, qgrad, charge, &
    & json, solver_input, verbosity, error)
 
    !> Input file name
@@ -202,6 +215,9 @@ subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
 
    !> ID of choosen model type
    integer, intent(out) :: model_id
+
+   !> Flag for neighbour list creation
+   logical, intent(out) :: use_nlist
 
    !> Input file format
    integer, allocatable, intent(out) :: input_format
@@ -235,6 +251,7 @@ subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
    real(wp), allocatable :: tol
 
    model_id = mchrg_model%eeq2019
+   use_nlist = .false.
    egrad = .false.
    qgrad = .false.
    json = .false.
@@ -336,7 +353,9 @@ subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
             call fatal_error(error, "Invalid tolerance")
             exit
          end if 
-         end select
+      case("-nlist", "-use-list", "--nlist")
+         use_nlist = .true.
+      end select
    end do
 
    ! Charge gradient cannot be evaluated using cg solver.
@@ -364,6 +383,7 @@ subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
    if (allocated(verbosity)) then
       solver_input%verbosity = verbosity
    end if
+   solver_input%use_nlist = use_nlist
    type is (direct_input)
    if (allocated(verbosity)) then
       solver_input%verbosity = verbosity

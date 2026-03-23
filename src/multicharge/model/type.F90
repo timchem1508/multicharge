@@ -29,6 +29,7 @@ module multicharge_model_type
    use mctc_io_math, only: matinv_3x3
    use mctc_cutoff, only: get_lattice_points
    use mctc_ncoord, only: ncoord_type
+   use multicharge_adjlist, only: adjacency_list
    use multicharge_blas, only: gemv, symv, gemm
    use multicharge_lapack, only: sytrf, sytrs
    use multicharge_wignerseitz, only: wignerseitz_cell_type, new_wignerseitz_cell
@@ -205,7 +206,7 @@ end subroutine get_rec_trans
 
 !> Top-level solve routine with optional persistent cache
 subroutine solve(self, mol, solver, cache, error, &
-   & energy, gradient, sigma, qvec, dqdr, dqdL, verbosity, unit)
+   & energy, gradient, sigma, qvec, dqdr, dqdL, list, verbosity, unit)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in):: self
    !> Molecular structure data
@@ -228,6 +229,8 @@ subroutine solve(self, mol, solver, cache, error, &
    real(wp), intent(out), contiguous, optional :: dqdr(:, :, :)
    !> Optional derivative of the atomic partial charges w.r.t. lattice vectors
    real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
+   !> Neighbour list optional type
+   type(adjacency_list), intent(in), optional :: list
    !> Optional print verbossity number input flag
    integer, intent(in), optional :: verbosity
    !> Output unit
@@ -320,10 +323,10 @@ subroutine solve(self, mol, solver, cache, error, &
 
       call print_constrained_system_message(print_unit, verbosity_solve, 'u')
       ! Constrained response: A*uvec = 1
-      call solver%solve(amat=cache%amat, xvec=unitvec, vrhs=cache%uvec, new_unit=print_unit, error=error)
+      call solver%solve(amat=cache%amat, xvec=unitvec, vrhs=cache%uvec, list=list, new_unit=print_unit, error=error)
       call print_constrained_system_message(print_unit, verbosity_solve, 'v')
       ! Constrained response: A*uvec = chi
-      call solver%solve(amat=cache%amat, xvec=-cache%xvec, vrhs=vvec, new_unit=print_unit, error=error)
+      call solver%solve(amat=cache%amat, xvec=-cache%xvec, vrhs=vvec, list=list, new_unit=print_unit, error=error)
       uvecsum = sum(cache%uvec)
       vvecsum = sum(vvec)
       ! Lagrangian multiplier
@@ -402,7 +405,7 @@ end subroutine solve
 !> This routine evaluates dF/dR and dF/dL from the derivative of the
 !> objective w.r.t. charges (dF/dq), avoiding explicit differentiation
 !> of the charge solution by solving an adjoint system.
-subroutine get_external_gradient(self, mol, solver, cache, error, dfdq, dfdr, dfdL, unit, verbosity)
+subroutine get_external_gradient(self, mol, solver, cache, error, dfdq, dfdr, dfdL, list, unit, verbosity)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: self
    !> Molecular structure data
@@ -419,6 +422,8 @@ subroutine get_external_gradient(self, mol, solver, cache, error, dfdq, dfdr, df
    real(wp), intent(inout) :: dfdr(:, :)
    !> External gradient w.r.t. lattice vectors
    real(wp), intent(inout) :: dfdL(:,:)
+   !> Neighbour list optional type
+   type(adjacency_list), intent(in), optional :: list
    !> Output unit
    integer, intent(in), optional :: unit
    !> Verbosity level
@@ -490,7 +495,7 @@ subroutine get_external_gradient(self, mol, solver, cache, error, dfdq, dfdr, df
 
       ! Constrained response: J*yvec = dfdq
       call print_adjoint_message(print_unit, verbosity_solve)
-      call solver%solve(cache%amat, dfdq, yvec, error=error)
+      call solver%solve(cache%amat, dfdq, yvec, list=list, error=error)
       if (allocated(error)) return
 
       ! Projection of uvec on yvec
