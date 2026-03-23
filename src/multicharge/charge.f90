@@ -60,7 +60,6 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL)
 
    type(mchrg_cache), allocatable :: cache
    logical :: grad
-   real(wp), allocatable :: dcndr(:, :, :), dcndL(:, :, :)
    real(wp), allocatable :: trans(:, :)
 
    class(direct_solver), allocatable :: solver
@@ -72,13 +71,9 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL)
 
    grad = present(dqdr) .and. present(dqdL)
 
-   if (grad) then
-      allocate(dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat))
-   end if
-
    allocate(cache)
    call get_lattice_points(mol%periodic, mol%lattice, mchrg_model%ncoord%cutoff, trans)
-   call mchrg_model%update(mol, cache, trans, dcndr, dcndL)
+   call mchrg_model%update(mol, cache, trans, grad)
    call mchrg_model%solve(mol, solver, cache, error, &
       & qvec=qvec, dqdr=dqdr, dqdL=dqdL, unit=output_unit)
 

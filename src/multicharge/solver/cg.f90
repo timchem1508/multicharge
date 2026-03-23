@@ -57,8 +57,11 @@ module multicharge_solver_cg
 
 contains
 
+    !> Creation a new CG solver based on the input
     subroutine new_cg_solver(self, input)
+        !> CG solver type
         class(cg_solver), intent(out) :: self
+        !> CG input type
         type(cg_input), intent(in) :: input     
 
         self%need_pos_def = .true.
@@ -82,13 +85,12 @@ contains
 
     end subroutine new_cg_solver
 
-    !> Solve procedure for the classical cg and block-cg
-
+    !> Conjugate gradient solver procedure with diagonal preconditioner
     subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
         class(cg_solver), intent(in) :: self
         !> A matrix of Ax=b system
         real(wp), intent(in)  :: amat(:, :)
-        !> Right-hand side vector (b)
+        !> Right-hand side vector 
         real(wp), intent(in)  :: xvec(:)
         !> On input: initial guess; on output: solution
         real(wp), intent(inout), contiguous :: vrhs(:)

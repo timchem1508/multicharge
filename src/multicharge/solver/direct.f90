@@ -47,8 +47,11 @@ module multicharge_solver_direct
 
 contains
 
+    !> New direct solver construction
     subroutine new_direct_solver(self, input)
+        !> Direct solver type
         class(direct_solver), intent(out) :: self
+        !> Direct input type
         type(direct_input), intent(in) :: input 
         
         self%need_pos_def = .false.

@@ -155,7 +155,7 @@ subroutine gen_test(error, mol, model, qref, eref)
       allocate (qvec(mol%nat))
    end if
 
-   call model%update(mol, cache, trans)
+   call model%update(mol, cache, trans, grad=.false.)
    call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, unit=output_unit)
    if (allocated(error)) return
 
@@ -205,10 +205,11 @@ subroutine test_numgrad(error, mol, model)
    integer :: iat, ic, ndim
    real(wp), parameter :: cutoff = 25.0_wp
    real(wp), parameter :: step = 1.0e-6_wp
-   real(wp), allocatable :: dcndr(:, :, :), dcndL(:, :, :), trans(:, :)
+   real(wp), allocatable :: trans(:, :)
    real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
    real(wp), allocatable :: numgrad(:, :)
    real(wp) :: er, el
+   logical :: grad = .true.
 
    allocate(cg_input :: solver_input)
    select type (solver_input)
@@ -222,8 +223,7 @@ subroutine test_numgrad(error, mol, model)
    
    allocate(cache)
 
-   allocate (dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
-      & energy(mol%nat), gradient(3, mol%nat), sigma(3, 3), numgrad(3, mol%nat))
+   allocate (energy(mol%nat), gradient(3, mol%nat), sigma(3, 3), numgrad(3, mol%nat))
    energy(:) = 0.0_wp
    gradient(:, :) = 0.0_wp
    sigma(:, :) = 0.0_wp
@@ -234,14 +234,14 @@ subroutine test_numgrad(error, mol, model)
       do ic = 1, 3
          energy(:) = 0.0_wp
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
-         call model%update(mol, cache, trans)
+         call model%update(mol, cache, trans, grad=.false.)
          call model%solve(mol, solver, cache, error,energy=energy, unit=output_unit)
          if (allocated(error)) exit lp
          er = sum(energy)
 
          energy(:) = 0.0_wp
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - 2*step
-         call model%update(mol, cache, trans)
+         call model%update(mol, cache, trans, grad=.false.)
          call model%solve(mol, solver, cache, error, energy=energy, unit=output_unit)
          if (allocated(error)) exit lp
          el = sum(energy)
@@ -252,7 +252,7 @@ subroutine test_numgrad(error, mol, model)
    end do lp
    if (allocated(error)) return
 
-   call model%update(mol, cache, trans, dcndr, dcndL)
+   call model%update(mol, cache, trans, grad)
    call model%solve(mol, solver, cache, error, &
       & gradient=gradient, sigma=sigma, unit=output_unit)
    if (allocated(error)) return
@@ -291,10 +291,11 @@ subroutine test_numsigma(error, mol, model)
    real(wp), parameter :: cutoff = 25.0_wp
    real(wp), parameter :: step = 1.0e-6_wp, unity(3, 3) = reshape(&
       & [1, 0, 0, 0, 1, 0, 0, 0, 1], [3, 3])
-   real(wp), allocatable :: dcndr(:, :, :), dcndL(:, :, :), trans(:, :)
+   real(wp), allocatable :: trans(:, :)
    real(wp), allocatable :: energy(:), gradient(:, :), lattr(:, :)
    real(wp), allocatable :: xyz(:, :), lattice(:, :)
    real(wp) :: er, el, eps(3, 3), numsigma(3, 3), sigma(3, 3)
+   logical :: grad = .true.
 
    allocate(direct_input :: solver_input)
    select type (solver_input)
@@ -306,8 +307,7 @@ subroutine test_numsigma(error, mol, model)
 
    allocate(cache)
 
-   allocate (dcndr(3, mol%nat, ndim), dcndL(3, 3, ndim), &
-      & energy(mol%nat), gradient(3, mol%nat), xyz(3, mol%nat), lattice(3, 3))
+   allocate (energy(mol%nat), gradient(3, mol%nat), xyz(3, mol%nat), lattice(3, 3))
    energy(:) = 0.0_wp
    gradient(:, :) = 0.0_wp
    sigma(:, :) = 0.0_wp
@@ -325,7 +325,7 @@ subroutine test_numsigma(error, mol, model)
          mol%xyz(:, :) = matmul(eps, xyz)
          mol%lattice(:, :) = matmul(eps, lattice)
          lattr(:, :) = matmul(eps, trans)
-         call model%update(mol, cache, lattr)
+         call model%update(mol, cache, lattr, grad=.false.)
          call model%solve(mol, solver, cache, error, energy=energy, unit=output_unit)
          if (allocated(error)) exit lp
          er = sum(energy)
@@ -335,7 +335,7 @@ subroutine test_numsigma(error, mol, model)
          mol%xyz(:, :) = matmul(eps, xyz)
          mol%lattice(:, :) = matmul(eps, lattice)
          lattr(:, :) = matmul(eps, trans)
-         call model%update(mol, cache, lattr)
+         call model%update(mol, cache, lattr, grad=.false.)
          call model%solve(mol, solver, cache, error, energy=energy, unit=output_unit)
          if (allocated(error)) exit lp
          el = sum(energy)
@@ -350,7 +350,7 @@ subroutine test_numsigma(error, mol, model)
    if (allocated(error)) return
 
    energy(:) = 0.0_wp
-   call model%update(mol, cache, trans, dcndr, dcndL)
+   call model%update(mol, cache, trans, grad)
    call model%get_capacitance_matrix(mol, ndim, cache)
    call model%solve(mol, solver, cache, error, &
       & gradient=gradient, sigma=sigma, unit=output_unit)
@@ -389,10 +389,11 @@ subroutine test_dbdr(error, mol, model)
    integer :: iat, ic, ndim
    real(wp), parameter :: cutoff = 25.0_wp
    real(wp), parameter :: step = 1.0e-6_wp
-   real(wp), allocatable :: dcndr(:, :, :), dcndL(:, :, :), trans(:, :)
+   real(wp), allocatable :: trans(:, :)
    real(wp), allocatable :: dbdr(:, :, :), dbdL(:, :, :)
    real(wp), allocatable :: numgrad(:, :, :), xvecr(:), xvecl(:)
    type(mchrg_cache), allocatable :: cache
+   logical :: grad = .true.
 
    allocate(cg_input :: solver_input)
    select type (solver_input)
@@ -406,8 +407,7 @@ subroutine test_dbdr(error, mol, model)
 
    allocate (cache)
    
-   allocate (dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
-      & xvecr(mol%nat), xvecl(mol%nat), numgrad(3, mol%nat, mol%nat), &
+   allocate (xvecr(mol%nat), xvecl(mol%nat), numgrad(3, mol%nat, mol%nat), &
       & dbdr(3, mol%nat, mol%nat), dbdL(3, 3, mol%nat))
 
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
@@ -417,7 +417,7 @@ subroutine test_dbdr(error, mol, model)
          ! Right-hand side
          xvecr(:) = 0.0_wp
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
-         call model%update(mol, cache, trans)
+         call model%update(mol, cache, trans, grad=.false.)
          call model%get_capacitance_matrix(mol, ndim, cache)
          call model%get_xvec(mol, ndim, cache)
          xvecr = cache%xvec
@@ -425,7 +425,7 @@ subroutine test_dbdr(error, mol, model)
          ! Left-hand side
          xvecl(:) = 0.0_wp
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - 2*step
-         call model%update(mol, cache, trans)
+         call model%update(mol, cache, trans, grad=.false.)
          call model%get_capacitance_matrix(mol, ndim, cache)
          call model%get_xvec(mol, ndim, cache)
          xvecl = cache%xvec
@@ -436,7 +436,7 @@ subroutine test_dbdr(error, mol, model)
    end do lp
 
    ! Analytical gradient
-   call model%update(mol, cache, trans, dcndr, dcndL)
+   call model%update(mol, cache, trans, grad)
    call model%get_capacitance_matrix(mol, ndim, cache)
    call model%get_xvec(mol, ndim, cache) ! need to call this for xtmp in cache (eeqbc)
    call model%get_xvec_derivs(mol, ndim, cache)
@@ -477,12 +477,13 @@ subroutine test_dbdL(error, mol, model)
    real(wp), parameter :: cutoff = 25.0_wp
    real(wp), parameter :: step = 1.0e-6_wp, unity(3, 3) = reshape(&
    & [1, 0, 0, 0, 1, 0, 0, 0, 1], [3, 3])
-   real(wp), allocatable :: dcndr(:, :, :), dcndL(:, :, :), trans(:, :)
+   real(wp), allocatable :: trans(:, :)
    real(wp), allocatable :: dbdr(:, :, :), dbdL(:, :, :)
    real(wp), allocatable :: numsigma(:, :, :), xvecr(:), xvecl(:)
    real(wp), allocatable :: xyz(:, :), lattice(:, :), lattr(:, :)
    real(wp) :: eps(3, 3)
    type(mchrg_cache), allocatable :: cache
+   logical :: grad = .true.
   
    allocate(cg_input :: solver_input)
    select type (solver_input)
@@ -496,8 +497,7 @@ subroutine test_dbdL(error, mol, model)
 
    allocate (cache)
 
-   allocate (dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
-      & xvecr(mol%nat), xvecl(mol%nat), numsigma(3, 3, mol%nat), &
+   allocate (xvecr(mol%nat), xvecl(mol%nat), numsigma(3, 3, mol%nat), &
       & dbdr(3, mol%nat, mol%nat), dbdL(3, 3, mol%nat), xyz(3, mol%nat), lattice(3, 3))
 
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
@@ -516,7 +516,7 @@ subroutine test_dbdL(error, mol, model)
          mol%xyz(:, :) = matmul(eps, xyz)
          mol%lattice(:, :) = matmul(eps, lattice)
          lattr(:, :) = matmul(eps, trans)
-         call model%update(mol, cache, lattr)
+         call model%update(mol, cache, lattr, grad=.false.)
          call model%get_capacitance_matrix(mol, ndim, cache)
          call model%get_xvec(mol, ndim, cache)
          xvecr = cache%xvec
@@ -527,7 +527,7 @@ subroutine test_dbdL(error, mol, model)
          mol%xyz(:, :) = matmul(eps, xyz)
          mol%lattice(:, :) = matmul(eps, lattice)
          lattr(:, :) = matmul(eps, trans)
-         call model%update(mol, cache, lattr)
+         call model%update(mol, cache, lattr, grad=.false.)
          call model%get_capacitance_matrix(mol, ndim, cache)
          call model%get_xvec(mol, ndim, cache)
          xvecl = cache%xvec
@@ -543,7 +543,7 @@ subroutine test_dbdL(error, mol, model)
    end do lp
 
    ! Analytical gradient
-   call model%update(mol, cache, trans, dcndr, dcndL)
+   call model%update(mol, cache, trans, grad)
    call model%get_capacitance_matrix(mol, ndim, cache)
    call model%get_xvec(mol, ndim, cache) ! need to call this for xtmp in cache (eeqbc)
    call model%get_xvec_derivs(mol, ndim, cache)
@@ -586,10 +586,10 @@ subroutine test_dadr(error, mol, model)
    real(wp), parameter :: cutoff = 25.0_wp
    real(wp), parameter :: step = 1.0e-6_wp
    real(wp), allocatable :: trans(:, :)
-   real(wp), allocatable :: dcndr(:, :, :), dcndL(:, :, :)
    real(wp), allocatable :: qvec(:), numgrad(:, :, :),  numtrace(:, :)
    real(wp), allocatable :: amatr1(:, :), amatr2(:, :), amatl1(:, :), amatl2(:, :)
    type(mchrg_cache), allocatable :: cache
+   logical :: grad = .true.
 
    allocate(cg_input :: solver_input)
    select type (solver_input)
@@ -604,7 +604,6 @@ subroutine test_dadr(error, mol, model)
    allocate (cache)
 
    allocate (amatr1(ndim, ndim), amatl1(ndim, ndim), amatr2(ndim, ndim), amatl2(ndim, ndim), &
-      & dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat),  &
       & numtrace(3, mol%nat), numgrad(3, mol%nat, ndim), qvec(mol%nat))
 
    ! Set tolerance higher if testing eeqbc model
@@ -618,7 +617,7 @@ subroutine test_dadr(error, mol, model)
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
    ! Obtain the vector of charges
-   call model%update(mol, cache, trans)
+   call model%update(mol, cache, trans, grad=.false.)
    call model%solve(mol, solver, cache, error, qvec=qvec, unit=output_unit)
    if (allocated(error)) return
 
@@ -633,14 +632,14 @@ subroutine test_dadr(error, mol, model)
 
          ! First right-hand side (x+h)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
-         call model%update(mol, cache, trans)
+         call model%update(mol, cache, trans, grad=.false.)
          call model%get_capacitance_matrix(mol, ndim, cache)
          call model%get_coulomb_matrix(mol, ndim, cache)
          amatr1 = cache%amat
 
          ! Second right-hand side (x+2h)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
-         call model%update(mol, cache, trans)
+         call model%update(mol, cache, trans, grad=.false.)
          call model%get_capacitance_matrix(mol, ndim, cache)        
          call model%get_coulomb_matrix(mol, ndim, cache)
          amatr2 = cache%amat
@@ -650,14 +649,14 @@ subroutine test_dadr(error, mol, model)
 
          ! First left-hand side (x-h)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - step
-         call model%update(mol, cache, trans)
+         call model%update(mol, cache, trans, grad=.false.)
          call model%get_capacitance_matrix(mol, ndim, cache)
          call model%get_coulomb_matrix(mol, ndim, cache)
          amatl1 = cache%amat
 
          ! Second left-hand side (x-2h)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - step
-         call model%update(mol, cache, trans)
+         call model%update(mol, cache, trans, grad=.false.)
          call model%get_capacitance_matrix(mol, ndim, cache)
          call model%get_coulomb_matrix(mol, ndim, cache)
          amatl2 = cache%amat
@@ -678,7 +677,7 @@ subroutine test_dadr(error, mol, model)
    end do lp
 
    ! Analytical gradient
-   call model%update(mol, cache, trans, dcndr, dcndL)
+   call model%update(mol, cache, trans, grad)
    call model%get_capacitance_matrix(mol, ndim, cache)
    call model%get_coulomb_derivs(mol, ndim, cache)
 
@@ -716,11 +715,12 @@ subroutine test_dadL(error, mol, model)
    real(wp), parameter :: cutoff = 25.0_wp
    real(wp), parameter :: step = 1.0e-6_wp, unity(3, 3) = reshape(&
    & [1, 0, 0, 0, 1, 0, 0, 0, 1], [3, 3])
-   real(wp), allocatable :: dcndr(:, :, :), dcndL(:, :, :), trans(:, :)
+   real(wp), allocatable :: trans(:, :)
    real(wp), allocatable :: xyz(:, :), lattice(:, :), lattr(:, :)
    real(wp), allocatable :: qvec(:), numsigma(:, :, :), amatr(:, :), amatl(:, :)
    real(wp) :: eps(3, 3)
    type(mchrg_cache), allocatable :: cache
+   logical :: grad = .true.
 
    allocate(cg_input :: solver_input)
    select type (solver_input)
@@ -734,13 +734,12 @@ subroutine test_dadL(error, mol, model)
    
    allocate (cache)
 
-   allocate (dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
-      & amatr(ndim, ndim), amatl(ndim, ndim), xyz(3, mol%nat), &
+   allocate (amatr(ndim, ndim), amatl(ndim, ndim), xyz(3, mol%nat), &
       & numsigma(3, 3, ndim), qvec(mol%nat), lattice(3, 3))
 
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
-   call model%update(mol, cache, trans)
+   call model%update(mol, cache, trans, grad=.false.)
    call model%solve(mol, solver, cache, error, qvec=qvec, unit=output_unit)
    if (allocated(error)) return
 
@@ -757,7 +756,7 @@ subroutine test_dadL(error, mol, model)
          mol%xyz(:, :) = matmul(eps, xyz)
          mol%lattice(:, :) = matmul(eps, lattice)
          lattr(:, :) = matmul(eps, trans)
-         call model%update(mol, cache, lattr)
+         call model%update(mol, cache, lattr, grad=.false.)
          call model%get_capacitance_matrix(mol, ndim, cache)
          call model%get_coulomb_matrix(mol, ndim, cache)
          if (allocated(error)) exit lp
@@ -768,7 +767,7 @@ subroutine test_dadL(error, mol, model)
          mol%xyz(:, :) = matmul(eps, xyz)
          mol%lattice(:, :) = matmul(eps, lattice)
          lattr(:, :) = matmul(eps, trans)
-         call model%update(mol, cache, lattr)
+         call model%update(mol, cache, lattr, grad=.false.)
          call model%get_capacitance_matrix(mol, ndim, cache)
          call model%get_coulomb_matrix(mol, ndim, cache)
          if (allocated(error)) exit lp
@@ -787,7 +786,7 @@ subroutine test_dadL(error, mol, model)
    end do lp
    if (allocated(error)) return
 
-   call model%update(mol, cache, trans, dcndr, dcndL)
+   call model%update(mol, cache, trans, grad)
    call model%get_capacitance_matrix(mol, ndim, cache)
    call model%get_coulomb_derivs(mol, ndim, cache)
    if (allocated(error)) return
@@ -825,9 +824,10 @@ subroutine test_numdqdr(error, mol, model)
    integer :: iat, ic, ndim
    real(wp), parameter :: cutoff = 25.0_wp
    real(wp), parameter :: step = 1.0e-6_wp
-   real(wp), allocatable :: dcndr(:, :, :), dcndL(:, :, :), trans(:, :)
+   real(wp), allocatable :: trans(:, :)
    real(wp), allocatable :: ql(:), qr(:), dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: numdr(:, :, :)
+   logical :: grad = .true.
    
    allocate(direct_input :: solver_input)
    select type (solver_input)
@@ -839,8 +839,7 @@ subroutine test_numdqdr(error, mol, model)
    
    allocate (cache)
 
-   allocate (dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
-      & ql(mol%nat), qr(mol%nat), dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat), &
+   allocate (ql(mol%nat), qr(mol%nat), dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat), &
       & numdr(3, mol%nat, mol%nat))
 
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
@@ -848,12 +847,12 @@ subroutine test_numdqdr(error, mol, model)
    lp: do iat = 1, mol%nat
       do ic = 1, 3
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
-         call model%update(mol, cache, trans)
+         call model%update(mol, cache, trans, grad=.false.)
          call model%solve(mol, solver, cache, error, qvec=qr, unit=output_unit)
          if (allocated(error)) exit lp
 
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - 2*step
-         call model%update(mol, cache, trans)
+         call model%update(mol, cache, trans, grad=.false.)
          call model%solve(mol, solver, cache, error, qvec=ql, unit=output_unit)
          if (allocated(error)) exit lp
 
@@ -863,7 +862,7 @@ subroutine test_numdqdr(error, mol, model)
    end do lp
    if (allocated(error)) return
 
-   call model%update(mol, cache, trans, dcndr, dcndL)
+   call model%update(mol, cache, trans, grad)
    call model%solve(mol, solver, cache, error, &
       & dqdr=dqdr, dqdL=dqdL, unit=output_unit)
    if (allocated(error)) return
@@ -902,10 +901,11 @@ subroutine test_numdqdL(error, mol, model)
    real(wp), parameter :: cutoff = 25.0_wp
    real(wp), parameter :: step = 1.0e-6_wp, unity(3, 3) = reshape(&
       & [1, 0, 0, 0, 1, 0, 0, 0, 1], [3, 3])
-   real(wp), allocatable :: dcndr(:, :, :), dcndL(:, :, :), trans(:, :)
+   real(wp), allocatable :: trans(:, :)
    real(wp), allocatable :: qr(:), ql(:), dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: lattr(:, :), xyz(:, :), lattice(:, :), numdL(:, :, :)
    real(wp) :: eps(3, 3)
+   logical :: grad = .true.
 
    allocate(direct_input :: solver_input)
    select type (solver_input)
@@ -917,8 +917,7 @@ subroutine test_numdqdL(error, mol, model)
 
    allocate (cache)
 
-   allocate (dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
-      & qr(mol%nat), ql(mol%nat), dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat), &
+   allocate (qr(mol%nat), ql(mol%nat), dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat), &
       & xyz(3, mol%nat), lattice(3, 3), numdL(3, 3, mol%nat))
 
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
@@ -935,7 +934,7 @@ subroutine test_numdqdL(error, mol, model)
          mol%xyz(:, :) = matmul(eps, xyz)
          mol%lattice(:, :) = matmul(eps, lattice)
          lattr(:, :) = matmul(eps, trans)
-         call model%update(mol, cache, lattr)
+         call model%update(mol, cache, lattr, grad=.false.)
          call model%solve(mol, solver, cache, error, qvec=qr, unit=output_unit)
          if (allocated(error)) exit lp
 
@@ -943,7 +942,7 @@ subroutine test_numdqdL(error, mol, model)
          mol%xyz(:, :) = matmul(eps, xyz)
          mol%lattice(:, :) = matmul(eps, lattice)
          lattr(:, :) = matmul(eps, trans)
-         call model%update(mol, cache, lattr)
+         call model%update(mol, cache, lattr, grad=.false.)
          call model%solve(mol, solver, cache, error, qvec=ql, unit=output_unit)
          if (allocated(error)) exit lp
 
@@ -956,7 +955,7 @@ subroutine test_numdqdL(error, mol, model)
    end do lp
    if (allocated(error)) return
 
-   call model%update(mol, cache, trans, dcndr, dcndL)
+   call model%update(mol, cache, trans, grad)
    call model%solve(mol, solver, cache, error, &
       & dqdr=dqdr, dqdL=dqdL, unit=output_unit)
    if (allocated(error)) return
@@ -1001,9 +1000,10 @@ subroutine test_dfdr(error, mol, dfdq, model)
    real(wp), allocatable :: dfdr(:, :)
 
    real(wp), parameter :: cutoff = 25.0_wp
-   real(wp), allocatable :: dcndr(:, :, :), dcndL(:, :, :), trans(:, :)
+   real(wp), allocatable :: trans(:, :)
    real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: gradient(:, :), sigma(:, :)
+   logical :: grad = .true.
    
    ! Allocate direct solver input for dqdr
    allocate(direct_input :: solver_dqdr_input)
@@ -1027,8 +1027,7 @@ subroutine test_dfdr(error, mol, dfdq, model)
 
    allocate (cache)
 
-   allocate (dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat), &
-      & dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat), &
+   allocate (dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat), &
       & gradient(3, mol%nat), sigma(3, mol%nat), dfdr(3, mol%nat))
 
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
@@ -1039,7 +1038,7 @@ subroutine test_dfdr(error, mol, dfdq, model)
    end if
 
    ! Solve with direct solver to get dqdr
-   call model%update(mol, cache, trans, dcndr, dcndL)
+   call model%update(mol, cache, trans, grad)
    call model%solve(mol, solver_dqdr, cache, error, &
       & dqdr=dqdr, dqdL=dqdL, unit=output_unit)
    if (allocated(error)) return
@@ -1051,7 +1050,7 @@ subroutine test_dfdr(error, mol, dfdq, model)
    ! Main solve using the direct solver to check consistency
    deallocate(cache)
    allocate(cache)
-   call model%update(mol, cache, trans, dcndr, dcndL)
+   call model%update(mol, cache, trans, grad)
    call model%solve(mol, solver_dfdr, cache, error)
    if (allocated(error)) return
    gradient = 0.0_wp
