@@ -29,6 +29,7 @@ module multicharge_model_eeq
    use mctc_io_math, only: matdet_3x3
    use mctc_ncoord, only: new_ncoord, cn_count
    use multicharge_wignerseitz, only: wignerseitz_cell_type, new_wignerseitz_cell
+   use multicharge_adjlist, only: adjacency_list
    use multicharge_ewald, only: get_alpha
    use multicharge_model_type, only: mchrg_model_type, get_dir_trans, get_rec_trans
    use multicharge_model_cache, only: mchrg_cache
@@ -136,7 +137,7 @@ subroutine update(self, mol, cache, trans, grad)
 end subroutine update
 
 !> Compute the capacitance matrix (required for the EEQBC model).
-subroutine get_capacitance_matrix(self, mol, ndim, cache)
+subroutine get_capacitance_matrix(self, mol, ndim, cache, list)
    !> EEQ model type
    class(eeq_model), intent(in) :: self
    !> Structure type
@@ -145,10 +146,12 @@ subroutine get_capacitance_matrix(self, mol, ndim, cache)
    integer, intent(in) :: ndim
    !> Multicharge cache 
    type(mchrg_cache), intent(inout) :: cache
+   !> Multicharge neighbourlist type
+   type(adjacency_list), intent(in), optional :: list
 end subroutine get_capacitance_matrix
 
 !> Build the electronegativity vector with CN correction.
-subroutine get_xvec(self, mol, ndim, cache)
+subroutine get_xvec(self, mol, ndim, cache, list)
    !> EEQ model type
    class(eeq_model), intent(in) :: self
    !> Structure type
@@ -157,6 +160,9 @@ subroutine get_xvec(self, mol, ndim, cache)
    integer, intent(in) :: ndim
    !> Multicharge cache (provides CN and will store the vector)
    type(mchrg_cache), intent(inout) :: cache
+   !> Multicharge neighbourlist type
+   type(adjacency_list), intent(in), optional :: list
+
    real(wp), parameter :: reg = 1.0e-14_wp
 
    integer :: iat, izp
@@ -183,7 +189,7 @@ subroutine get_xvec(self, mol, ndim, cache)
 end subroutine get_xvec
 
 !> Compute derivatives of the electronegativity vector with respect to atomic positions and lattice parameters.
-subroutine get_xvec_derivs(self, mol, ndim, cache)
+subroutine get_xvec_derivs(self, mol, ndim, cache, list)
    !> EEQ model type
    class(eeq_model), intent(in) :: self
    !> Structure type
@@ -192,6 +198,9 @@ subroutine get_xvec_derivs(self, mol, ndim, cache)
    integer, intent(in) :: ndim
    !> Multicharge cache (provides CN derivatives, stores x‑vector derivatives)
    type(mchrg_cache), intent(inout) :: cache
+   !> Multicharge neighbourlist type
+   type(adjacency_list), intent(in), optional :: list
+
    real(wp), parameter :: reg = 1.0e-14_wp
 
    integer :: iat, izp
@@ -220,7 +229,7 @@ subroutine get_xvec_derivs(self, mol, ndim, cache)
 end subroutine get_xvec_derivs
 
 !> Assemble the Coulomb matrix (periodic or non‑periodic).
-subroutine get_coulomb_matrix(self, mol, ndim, cache)
+subroutine get_coulomb_matrix(self, mol, ndim, cache, list)
    !> EEQ model type
    class(eeq_model), intent(in) :: self
    !> Structure type
@@ -229,6 +238,8 @@ subroutine get_coulomb_matrix(self, mol, ndim, cache)
    integer, intent(in) :: ndim
    !> Multicharge cache (will hold the Coulomb matrix)
    type(mchrg_cache), intent(inout) :: cache
+   !> Multicharge neighbourlist type
+   type(adjacency_list), intent(in), optional :: list
 
    if (.not. allocated(cache%amat)) then
       allocate(cache%amat(ndim, ndim))
@@ -426,7 +437,7 @@ subroutine get_amat_rec_3d(rij, vol, alp, trans, amat)
 end subroutine get_amat_rec_3d
 
 !> Compute the derivatives of the Coulomb matrix (multiplied by the charge vector).
-subroutine get_coulomb_derivs(self, mol, ndim, cache)
+subroutine get_coulomb_derivs(self, mol, ndim, cache, list)
    !> EEQ model type
    class(eeq_model), intent(in) :: self
    !> Structure type
@@ -435,6 +446,8 @@ subroutine get_coulomb_derivs(self, mol, ndim, cache)
    integer, intent(in) :: ndim
    !> Multicharge cache (provides charges and will store derivatives)
    type(mchrg_cache), intent(inout) :: cache
+   !> Multicharge neighbourlist type
+   type(adjacency_list), intent(in), optional :: list
 
    real(wp), allocatable :: atrace(:,:)
 

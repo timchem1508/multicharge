@@ -51,7 +51,7 @@ module multicharge_adjlist
     implicit none
     private
 
-    public :: adjacency_list, mchrg_adjlist_input, new_adjacency_list, symv_sparse
+    public :: adjacency_list, mchrg_adjlist_input, new_adjacency_list, symv_sparse, gemv_sparse
 
     !> @class adjacency_list
     !> Neighbourlist in CSR format

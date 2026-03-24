@@ -29,7 +29,7 @@ module multicharge_model_type
    use mctc_io_math, only: matinv_3x3
    use mctc_cutoff, only: get_lattice_points
    use mctc_ncoord, only: ncoord_type
-   use multicharge_adjlist, only: adjacency_list
+   use multicharge_adjlist,  only: adjacency_list, symv_sparse, gemv_sparse
    use multicharge_blas, only: gemv, symv, gemm
    use multicharge_lapack, only: sytrf, sytrs
    use multicharge_wignerseitz, only: wignerseitz_cell_type, new_wignerseitz_cell
@@ -85,7 +85,7 @@ module multicharge_model_type
    abstract interface
       !> Update model-dependent quantities and cache
       subroutine update(self, mol, cache, trans, grad)
-         import :: mchrg_model_type, structure_type, mchrg_cache, wp
+         import :: mchrg_model_type, structure_type, mchrg_cache, adjacency_list, wp
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
          !> Structure type
@@ -100,8 +100,8 @@ module multicharge_model_type
       end subroutine update
 
       !> Capacitance matrix construction using cached CN/charge data (only for the EEQBC model)
-      subroutine get_capacitance_matrix(self, mol, ndim, cache)
-         import :: mchrg_model_type, structure_type, mchrg_cache, wp
+      subroutine get_capacitance_matrix(self, mol, ndim, cache, list)
+         import :: mchrg_model_type, structure_type, mchrg_cache, adjacency_list, wp
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
          !> Structure type
@@ -111,11 +111,13 @@ module multicharge_model_type
          !> Multicharge cache 
          !> Allocation: cmat, (dcdr, dcdL if cache%dcndr/L and cache%dqlocdr/L allocated)
          type(mchrg_cache), intent(inout) :: cache
+         !> Multicharge neighbourlist type
+         type(adjacency_list), intent(in), optional :: list
       end subroutine get_capacitance_matrix
 
       !> Coulomb interaction matrix (A-matrix) construction
-      subroutine get_coulomb_matrix(self, mol, ndim, cache)
-         import :: mchrg_model_type, structure_type, mchrg_cache, wp
+      subroutine get_coulomb_matrix(self, mol, ndim, cache, list)
+         import :: mchrg_model_type, structure_type, mchrg_cache, adjacency_list, wp
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
          !> Structure type
@@ -125,12 +127,14 @@ module multicharge_model_type
          !> Multicharge cache 
          !> Allocation: amat
          type(mchrg_cache), intent(inout) :: cache
+         !> Multicharge neighbourlist type
+         type(adjacency_list), intent(in), optional :: list
       end subroutine get_coulomb_matrix
 
 
       !> Coulomb matrix derivatives contracted with charges
-      subroutine get_coulomb_derivs(self, mol, ndim, cache)
-         import :: mchrg_model_type, structure_type, mchrg_cache, wp
+      subroutine get_coulomb_derivs(self, mol, ndim, cache, list)
+         import :: mchrg_model_type, structure_type, mchrg_cache, adjacency_list, wp
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
          !> Structure type
@@ -140,12 +144,14 @@ module multicharge_model_type
          !> Multicharge cache 
          !> Allocation: dadr, dadL
          type(mchrg_cache), intent(inout) :: cache
+         !> Multicharge neighbourlist type
+         type(adjacency_list), intent(in), optional :: list
       end subroutine get_coulomb_derivs
 
       !> Electronegativity vector construction
 
-      subroutine get_xvec(self, mol, ndim, cache)
-         import :: mchrg_model_type, mchrg_cache, structure_type, wp
+      subroutine get_xvec(self, mol, ndim, cache, list)
+         import :: mchrg_model_type, mchrg_cache, structure_type, adjacency_list, wp
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
          !> Structure type
@@ -155,11 +161,13 @@ module multicharge_model_type
          !> Multicharge cache 
          !> Allocation: xvec, xtmp
          type(mchrg_cache), intent(inout) :: cache
+         !> Multicharge neighbourlist type
+         type(adjacency_list), intent(in), optional :: list
       end subroutine get_xvec
 
       !> Derivatives of electronegativity vector
-      subroutine get_xvec_derivs(self, mol, ndim, cache)
-         import :: mchrg_model_type, structure_type, mchrg_cache, wp
+      subroutine get_xvec_derivs(self, mol, ndim, cache, list)
+         import :: mchrg_model_type, structure_type, mchrg_cache, adjacency_list, wp
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
          !> Structure type
@@ -169,6 +177,8 @@ module multicharge_model_type
          !> Multicharge cache 
          !> Allocation: dxdr, dxdL
          type(mchrg_cache), intent(inout) :: cache
+         !> Multicharge neighbourlist type
+         type(adjacency_list), intent(in), optional :: list
       end subroutine get_xvec_derivs    
    end interface
 
@@ -281,10 +291,10 @@ subroutine solve(self, mol, solver, cache, error, &
    call timer%push("total")
    call timer%push("setup")
 
-   call self%get_capacitance_matrix(mol, ndim, cache)
+   call self%get_capacitance_matrix(mol, ndim, cache, list)
 
    ! Setup the Coulomb matrix 
-   call self%get_coulomb_matrix(mol, ndim, cache)
+   call self%get_coulomb_matrix(mol, ndim, cache, list)
 
    ! Get RHS of ES equation
    call self%get_xvec(mol, ndim, cache)
@@ -345,8 +355,13 @@ subroutine solve(self, mol, solver, cache, error, &
 
    ! Electrostatic energy if present
    if (present(energy)) then
-      call symv(cache%amat, cache%vrhs, cache%xvec(:mol%nat), &
-         & alpha=0.5_wp, beta=-1.0_wp, uplo='l')
+      if (present(list)) then
+      call symv_sparse(list, cache%amat, cache%vrhs, cache%xvec(:mol%nat), &
+            & alpha=0.5_wp, beta=-1.0_wp)
+      else
+         call symv(cache%amat, cache%vrhs, cache%xvec(:mol%nat), &
+            & alpha=0.5_wp, beta=-1.0_wp, uplo='l')
+      end if
       if (ndim > mol%nat) then
          ! Correct xvec to exclude constraint term
          cache%xvec(:mol%nat) = cache%xvec(:mol%nat) - 0.5_wp * cache%vrhs(mol%nat + 1)
