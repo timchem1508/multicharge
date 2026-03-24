@@ -19,7 +19,7 @@
 module multicharge_solver_cg
     use iso_fortran_env, only : output_unit
     use mctc_env, only: error_type, fatal_error, wp, timer_type, format_time
-    use multicharge_adjlist, only: adjacency_list, symv_sparse
+    use multicharge_adjlist, only: adjacency_list, symv_sparse, gemv_sparse
     use multicharge_blas, only: axpy, scal, dot, symv, gemv
     use multicharge_lapack, only: sytrf, sytrs
     use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
