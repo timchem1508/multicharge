@@ -45,72 +45,82 @@
 !> the indexing is from inl(i) to inl(i+1)-1 could be confusing, therefore
 !> two arrays are used for clarity.
 module multicharge_adjlist
-   use mctc_env, only : wp
-   use mctc_io, only : structure_type
-   use mctc_io_resize, only : resize
-   implicit none
-   private
+    use mctc_env, only : wp
+    use mctc_io, only : structure_type
+    use mctc_io_resize, only : resize
+    implicit none
+    private
 
-   public :: adjacency_list, new_adjacency_list, symv_sparse
+    public :: adjacency_list, mchrg_adjlist_input, new_adjacency_list, symv_sparse
 
-   !> @class adjacency_list
-   !> Neighbourlist in CSR format
-   type :: adjacency_list
-      !> Offset index in the neighbour map
-      integer, allocatable :: inl(:)
-      !> Number of neighbours for each atom
-      integer, allocatable :: nnl(:)
-      !> Index of the neighbouring atom
-      integer, allocatable :: nlat(:)
-      !> Cell index of the neighbouring atom
-      integer, allocatable :: nltr(:)
-   end type adjacency_list
+    !> @class adjacency_list
+    !> Neighbourlist in CSR format
+    type :: adjacency_list
+        !> Realspace cutoff for neighbourlist generation
+        real(wp), allocatable :: cutoff
+        !> Whether a complete or a symmetrical reduced map should be generated
+        logical, allocatable :: complete
+        !> Offset index in the neighbour map
+        integer, allocatable :: inl(:)
+        !> Number of neighbours for each atom
+        integer, allocatable :: nnl(:)
+        !> Index of the neighbouring atom
+        integer, allocatable :: nlat(:)
+        !> Cell index of the neighbouring atom
+        integer, allocatable :: nltr(:)
+    end type adjacency_list
 
-   real(wp), parameter :: eps = tiny(1.0_wp)
+    !> Solver input abstract type
+    type, public :: mchrg_adjlist_input
+        !> Realspace cutoff for neighbourlist generation
+        real(wp), allocatable :: cutoff
+        !> Whether a complete or a symmetrical reduced map should be generated
+        logical, allocatable :: complete
+    end type mchrg_adjlist_input
+
+    ! Default input 
+    real(wp), parameter :: cutoff_def = 25.0_wp
+    logical, parameter :: complete_def = .false.
+
+    real(wp), parameter :: eps = tiny(1.0_wp)
 
 contains
 
     !> Create new neighbourlist for a given geometry and cutoff
-    subroutine new_adjacency_list(self, mol, trans, cutoff, complete)
+    subroutine new_adjacency_list(self, input, mol, trans)
         !> Instance of the neighbourlist
         type(adjacency_list), intent(out) :: self
+        !> Neighbour list input
+        type(mchrg_adjlist_input), intent(in) :: input
         !> Molecular structure data
         type(structure_type), intent(in) :: mol
         !> Translation vectors for all images
         real(wp), intent(in) :: trans(:, :)
-        !> Realspace cutoff for neighbourlist generation
-        real(wp), intent(in) :: cutoff
-        !> Whether a complete or a symmetrical reduced map should be generated
-        logical, intent(in), optional :: complete
 
-        logical :: cmplt
-
-        cmplt = .false.
-        if (present(complete)) cmplt = complete
+        if (allocated(input%cutoff)) then
+            self%cutoff = input%cutoff
+        else 
+            self%cutoff = cutoff_def
+        end if
+        if (allocated(input%complete)) then
+            self%complete = input%complete
+        else 
+            self%complete = complete_def
+        end if
 
         allocate(self%inl(mol%nat), source=0)
         allocate(self%nnl(mol%nat), source=0)
-        call generate(mol, trans, cutoff, self%inl, self%nnl, self%nlat, self%nltr, cmplt)
+        call generate(self, mol, trans)
     end subroutine new_adjacency_list
 
     !> Generator for neighbourlist using a Linked Cell List approach (O(N) scaling)
-    subroutine generate(mol, trans, cutoff, inl, nnl, nlat, nltr, complete)
+    subroutine generate(self, mol, trans)
+        !> Instance of the neighbourlist
+        type(adjacency_list), intent(inout) :: self
         !> Molecular structure data
         type(structure_type), intent(in) :: mol
         !> Translation vectors for all images
         real(wp), intent(in) :: trans(:, :)
-        !> Realspace cutoff for neighbourlist generation
-        real(wp), intent(in) :: cutoff
-        !> Offset index in the neighbour map
-        integer, intent(inout) :: inl(:)
-        !> Number of neighbours for each atom
-        integer, intent(inout) :: nnl(:)
-        !> Index of the neighbouring atom
-        integer, allocatable, intent(out) :: nlat(:)
-        !> Cell index of the neighbouring atom
-        integer, allocatable, intent(out) :: nltr(:)
-        !> Whether a complete or a symmetrical reduced map should be generated
-        logical, intent(in) :: complete
 
         integer :: iat, jat, itr, img, ic, jc
         integer :: ix, iy, iz, jx, jy, jz, di, dj, dk
@@ -119,7 +129,7 @@ contains
         real(wp) :: r2, vec(3), cutoff2, cell_w(3), min_xyz(3), max_xyz(3)
 
         img = 0
-        cutoff2 = cutoff**2
+        cutoff2 = self%cutoff**2
 
         ! 1. Define the grid boundaries and dimensions
         ! We add a small buffer to the bounding box to ensure all atoms are contained
@@ -127,7 +137,7 @@ contains
         max_xyz = maxval(mol%xyz, dim=2) + 0.01_wp
         
         ! Number of cells: must be at least 1, and cell width >= cutoff
-        n_xyz = max(1, floor((max_xyz - min_xyz) / (cutoff + eps)))
+        n_xyz = max(1, floor((max_xyz - min_xyz) / (self%cutoff + eps)))
         cell_w = (max_xyz - min_xyz) / (real(n_xyz, wp) + eps) + eps
 
         ! 2. Build the Linked List
@@ -145,12 +155,12 @@ contains
         end do
 
         ! Pre-allocate neighbor arrays
-        call resize(nlat, 10*mol%nat)
-        call resize(nltr, 10*mol%nat)
+        call resize(self%nlat, 10*mol%nat)
+        call resize(self%nltr, 10*mol%nat)
 
         ! 3. Triple loop search over nearby cells (O(N) time)
         do iat = 1, mol%nat
-            inl(iat) = img
+            self%inl(iat) = img
             
             ix = min(n_xyz(1), max(1, int((mol%xyz(1, iat) - min_xyz(1)) / cell_w(1)) + 1))
             iy = min(n_xyz(2), max(1, int((mol%xyz(2, iat) - min_xyz(2)) / cell_w(2)) + 1))
@@ -171,7 +181,7 @@ contains
                 do while (jat > 0)
 
                 ! Symmetrical optimization: skip if jat > iat and complete is false
-                if (.not. complete .and. jat > iat) then
+                if (.not. self%complete .and. jat > iat) then
                     jat = nxt(jat)
                     cycle
                 end if
@@ -186,22 +196,22 @@ contains
                     if (r2 < epsilon(cutoff2) .or. r2 > cutoff2) cycle
                     
                     img = img + 1
-                    if (size(nlat) < img) call resize(nlat)
-                    if (size(nltr) < img) call resize(nltr)
-                    nlat(img) = jat
-                    nltr(img) = itr
+                    if (size(self%nlat) < img) call resize(self%nlat)
+                    if (size(self%nltr) < img) call resize(self%nltr)
+                    self%nlat(img) = jat
+                    self%nltr(img) = itr
                 end do
                 jat = nxt(jat)
                 end do
             end do; end do; end do
-            nnl(iat) = img - inl(iat)
+            self%nnl(iat) = img - self%inl(iat)
         end do
 
         ! Cleanup and final sizing
         if (allocated(head)) deallocate(head)
         if (allocated(nxt)) deallocate(nxt)
-        call resize(nlat, img)
-        call resize(nltr, img)
+        call resize(self%nlat, img)
+        call resize(self%nltr, img)
 
     end subroutine generate
 
