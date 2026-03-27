@@ -51,7 +51,8 @@ module multicharge_adjlist
     implicit none
     private
 
-    public :: adjacency_list, mchrg_adjlist_input, new_adjacency_list, symv_sparse, gemv_sparse
+    public :: adjacency_list, mchrg_adjlist_input, new_adjacency_list
+    public :: symv_sparse, gemv_sparse, gemm_sparse
 
     !> @class adjacency_list
     !> Neighbourlist in CSR format
@@ -79,8 +80,10 @@ module multicharge_adjlist
     end type mchrg_adjlist_input
 
     ! Default input 
-    real(wp), parameter :: cutoff_def = 25.0_wp
+    real(wp), parameter :: cutoff_def = 28.0_wp
     logical, parameter :: complete_def = .false.
+    integer, parameter :: init_size = 10
+    real(wp), parameter :: buffer = 0.1_wp
 
     real(wp), parameter :: eps = tiny(1.0_wp)
 
@@ -133,8 +136,8 @@ contains
 
         ! 1. Define the grid boundaries and dimensions
         ! We add a small buffer to the bounding box to ensure all atoms are contained
-        min_xyz = minval(mol%xyz, dim=2) - 0.01_wp
-        max_xyz = maxval(mol%xyz, dim=2) + 0.01_wp
+        min_xyz = minval(mol%xyz, dim=2) - buffer
+        max_xyz = maxval(mol%xyz, dim=2) + buffer
         
         ! Number of cells: must be at least 1, and cell width >= cutoff
         n_xyz = max(1, floor((max_xyz - min_xyz) / (self%cutoff + eps)))
@@ -155,8 +158,8 @@ contains
         end do
 
         ! Pre-allocate neighbor arrays
-        call resize(self%nlat, 10*mol%nat)
-        call resize(self%nltr, 10*mol%nat)
+        call resize(self%nlat, init_size*mol%nat)
+        call resize(self%nltr, init_size*mol%nat)
 
         ! 3. Triple loop search over nearby cells (O(N) time)
         do iat = 1, mol%nat
@@ -185,7 +188,6 @@ contains
                     jat = nxt(jat)
                     cycle
                 end if
-
 
                 ! Check all translation images for this atom pair
                 do itr = 1, size(trans, 2)
@@ -264,26 +266,98 @@ contains
 
         nat = size(adjlist%inl)
 
-        ! Scale y by beta
+        !--------------------------------------------------
+        ! Scale y by beta   (BLAS behaviour)
+        !--------------------------------------------------
         if (beta == 0.0_wp) then
             y(:) = 0.0_wp
         else if (beta /= 1.0_wp) then
             y(:) = beta * y(:)
         end if
 
-        ! Loop over all atoms (rows)
+        !--------------------------------------------------
+        ! y = alpha * A * x + y
+        !--------------------------------------------------
         do i = 1, nat
-            ! Add diagonal contribution
-            y(i) = y(i) + alpha * amat(i, i) * x(i)
 
-            ! Loop over off‑diagonal neighbors (stored in the reduced map)
+            ! Diagonal element A(i,i)
+            y(i) = y(i) + alpha * amat(i,i) * x(i)
+
+            ! Off-diagonal nonzeros of row i
             do k = adjlist%inl(i) + 1, adjlist%inl(i) + adjlist%nnl(i)
                 j = adjlist%nlat(k)
 
-                ! Update y(i) using the off‑diagonal element
-                y(i) = y(i) + alpha * amat(i, j)  * x(j)
+                y(i) = y(i) + alpha * amat(i,j) * x(j)
+
             end do
         end do
+
     end subroutine gemv_sparse
+
+    subroutine gemm_sparse(adjlist, amat, B, C, alpha, beta)
+        use omp_lib
+        type(adjacency_list), intent(in) :: adjlist
+        real(wp), intent(in) :: amat(:, :)
+        real(wp), intent(in) :: B(:, :)
+        real(wp), intent(inout) :: C(:, :)
+        real(wp), intent(in) :: alpha, beta
+
+        integer :: i, j, k, col, nat, ncol
+        real(wp) :: aij
+
+        nat  = size(adjlist%inl)
+        ncol = size(B,2)
+
+        !--------------------------------------------------
+        ! Scale C by beta (parallel friendly)
+        !--------------------------------------------------
+        if (beta == 0.0_wp) then
+            !$omp parallel do collapse(2) schedule(static)
+            do i = 1, nat
+                do col = 1, ncol
+                    C(i,col) = 0.0_wp
+                end do
+            end do
+        else if (beta /= 1.0_wp) then
+            !$omp parallel do collapse(2) schedule(static)
+            do i = 1, nat
+                do col = 1, ncol
+                    C(i,col) = beta * C(i,col)
+                end do
+            end do
+        end if
+
+        !--------------------------------------------------
+        ! C = alpha * A * B + C
+        ! Parallel over rows of A/C
+        !--------------------------------------------------
+        !$omp parallel do default(none) &
+        !$omp private(i,j,k,col,aij) &
+        !$omp shared(adjlist,amat,B,C,alpha,nat,ncol) &
+        !$omp schedule(static)
+        do i = 1, nat
+
+            ! ----- diagonal -----
+            aij = alpha * amat(i,i)
+            if (aij /= 0.0_wp) then
+                do col = 1, ncol
+                    C(i,col) = C(i,col) + aij * B(i,col)
+                end do
+            end if
+
+            ! ----- neighbour list (CSR row) -----
+            do k = adjlist%inl(i) + 1, adjlist%inl(i) + adjlist%nnl(i)
+                j   = adjlist%nlat(k)
+                aij = alpha * amat(i,j)
+
+                do col = 1, ncol
+                    C(i,col) = C(i,col) + aij * B(j,col)
+                end do
+            end do
+
+        end do
+        !$omp end parallel do
+
+    end subroutine gemm_sparse
 
 end module multicharge_adjlist

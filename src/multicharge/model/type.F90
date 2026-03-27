@@ -372,8 +372,8 @@ subroutine solve(self, mol, solver, cache, error, &
    ! Allocate and get amat derivatives
    if (dcn) then
       call timer%push("setup_gradient")
-      call self%get_xvec_derivs(mol, ndim, cache)
-      call self%get_coulomb_derivs(mol, ndim, cache)
+      call self%get_xvec_derivs(mol, ndim, cache, list)
+      call self%get_coulomb_derivs(mol, ndim, cache, list)
       allocate(daqxdr(3, mol%nat, ndim), source=0.0_wp)
       allocate(daqxdL(3, 3, ndim), source=0.0_wp)
       ! pop gradient setup
@@ -607,7 +607,7 @@ subroutine print_gradient_header(unit, verbosity, timer)
       write(unit, '(54("-"))')
       write(unit, '(a)') ''
       if (verbosity > 1) then
-         write(unit, '(a, 1x, a)') "Setup time : ", format_time(timer)
+         write(unit, '(a, 1x, a)') "Gradient setup time : ", format_time(timer)
          write(unit, '(a)') ''
       end if
    end if
