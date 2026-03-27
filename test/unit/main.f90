@@ -23,6 +23,7 @@ program tester
    use test_pbc, only : collect_pbc
    use test_wignerseitz, only : collect_wignerseitz
    use test_solver, only: collect_solver
+   use test_adjlist, only: collect_adjlist
    implicit none
    integer :: stat, is
    character(len=:), allocatable :: suite_name, test_name
@@ -35,6 +36,7 @@ program tester
       & new_testsuite("solver", collect_solver), &
       & new_testsuite("model", collect_model), &
       & new_testsuite("pbc", collect_pbc), &
+      & new_testsuite("adjlist", collect_adjlist), &
       & new_testsuite("wignerseitz", collect_wignerseitz) &
       & ]
 
