@@ -19,6 +19,7 @@ set(
   "model"
   "pbc"
   "wignerseitz"
+  "adjlist"
   "solver"
 )
 set(
