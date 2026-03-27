@@ -139,7 +139,7 @@ program main
    end if
 
    allocate(cache)
-   call model%update(mol, cache, trans, grad=.false.)
+   call model%update(mol, cache, trans, grad)
    call model%solve(mol, solver, cache, error, &
       & energy, gradient, sigma, qvec, dqdr, dqdL, list, verbosity=verbosity, unit=output_unit)
 
