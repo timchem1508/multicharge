@@ -246,6 +246,25 @@ subroutine get_capacitance_matrix(self, mol, ndim, cache, list)
    end if
 
    if (present(list)) then
+
+      ! Allocate cmat
+      if (.not. allocated(cache%clist)) then
+         allocate(cache%clist(size(list%nlat)))
+      end if
+      if (.not. allocated(cache%cdiag)) then
+         allocate(cache%cdiag(mol%nat))
+      end if
+      if (grad) then 
+         if (.not. allocated(cache%dcdrlist)) then
+            allocate(cache%dcdrlist(3, size(list%nlat)))
+         end if
+         if (.not. allocated(cache%dcdrdiag)) then
+            allocate(cache%dcdrdiag(3, mol%nat))
+         end if
+         if (.not. allocated(cache%dcdL)) then
+            allocate(cache%dcdL(3, 3, ndim))
+         end if
+      end if
       ! Neighbour list routines
       if (any(mol%periodic)) then
          call get_dcmat_3d_list(self, mol, list, cache%wsc, cache%dcdr, cache%dcdL)
@@ -254,10 +273,10 @@ subroutine get_capacitance_matrix(self, mol, ndim, cache, list)
             call get_dcmat_3d_list(self, mol, list, cache%wsc, cache%dcdr, cache%dcdL)
          end if
       else
-         call get_cmat_0d_list(self, mol, list, cache%cmat)
+         call get_cmat_0d_list(self, mol, list, cache%clist, cache%cdiag)
          ! cmat gradients
          if (grad) then
-            call get_dcmat_0d_list(self, mol, list, cache%dcdr, cache%dcdL)
+            call get_dcmat_0d_list(self, mol, list, cache%dcdrlist, cache%dcdrdiag, cache%dcdL)
          end if
       end if
    else 
@@ -2045,29 +2064,33 @@ subroutine get_cmat_0d(self, mol, cmat)
 end subroutine get_cmat_0d
 
 !> Build the bond capacitance matrix for a non‑periodic system.
-subroutine get_cmat_0d_list(self, mol, list, cmat)
+subroutine get_cmat_0d_list(self, mol, list, clist, cdiag)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
    !> Multicharge neighbourlist type
    type(adjacency_list), intent(in) :: list
-   !> Output capacitance matrix (size ndim × ndim)
-   real(wp), intent(out) :: cmat(:, :)
+   !> Output capacitance matrix in compressed format, size of list%nlat
+   real(wp), intent(out) :: clist(:)
+   !> Output diagonal elements capacitance matrix in compressed format, size of mol%nat
+   real(wp), intent(out) :: cdiag(:)
 
    integer :: iat, jat, kat, izp, jzp
    real(wp) :: vec(3), rvdw, tmp, capi, capj, r1
 
    ! Thread-private array for reduction
-   real(wp), allocatable :: cmat_local(:, :)
+   real(wp), allocatable :: clist_local(:), cdiag_local(:)
 
-   cmat(:, :) = 0.0_wp
+   clist(:) = 0.0_wp
+   cdiag(:) = 0.0_wp
 
    !$omp parallel default(none) &
-   !$omp shared(cmat, mol, list, self) &
+   !$omp shared(clist, cdiag, mol, list, self) &
    !$omp private(iat, kat, izp, jat, jzp) &
-   !$omp private(vec, r1, rvdw, tmp, capi, capj, cmat_local)
-   allocate(cmat_local, source=cmat)
+   !$omp private(vec, r1, rvdw, tmp, capi, capj, clist_local, cdiag_local)
+   allocate(clist_local, source=clist)
+   allocate(cdiag_local, source=cdiag)
    !$omp do schedule(runtime)
    do iat = 1, mol%nat
       izp = mol%id(iat)
@@ -2083,23 +2106,20 @@ subroutine get_cmat_0d_list(self, mol, list, cmat)
          call get_cpair(self%kbc, tmp, r1, rvdw, capi, capj)
 
          ! Off-diagonal elements
-         cmat_local(jat, iat) = -tmp
-         cmat_local(iat, jat) = -tmp
+         clist_local(kat) = -tmp
          ! Diagonal elements
-         cmat_local(iat, iat) = cmat_local(iat, iat) + tmp
-         cmat_local(jat, jat) = cmat_local(jat, jat) + tmp
+         cdiag_local(iat) = cdiag_local(iat) + tmp
+         cdiag_local(jat) = cdiag_local(jat) + tmp
       end do
    end do
    !$omp end do
    !$omp critical (get_cmat_0d_list_)
-   cmat(:, :) = cmat + cmat_local
+   clist(:) = clist + clist_local
+   cdiag(:) = cdiag + cdiag_local
    !$omp end critical (get_cmat_0d_list_)
-   deallocate(cmat_local)
+   deallocate(clist_local)
+   deallocate(cdiag_local)
    !$omp end parallel
-
-   if (size(cmat, 1) == mol%nat + 1) then
-      cmat(maxval(list%nnl), mol%nat + 1) = 1.0_wp
-   end if
 
 end subroutine get_cmat_0d_list
 
@@ -2176,7 +2196,7 @@ subroutine get_cmat_3d(self, mol, wsc, cmat)
 end subroutine 
 
 !> Build the bond capacitance matrix for a periodic system.
-subroutine get_cmat_3d_list(self, mol, list, wsc, cmat)
+subroutine get_cmat_3d_list(self, mol, list, wsc, clist, cdiag)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Molecular structure data
@@ -2185,25 +2205,29 @@ subroutine get_cmat_3d_list(self, mol, list, wsc, cmat)
    type(adjacency_list), intent(in) :: list
    !> Wigner–Seitz cell
    type(wignerseitz_cell_type), intent(in) :: wsc
-   !> Output capacitance matrix (size ndim × ndim)
-   real(wp), intent(out) :: cmat(:, :)
+   !> Output capacitance matrix in compressed format, size of list%nlat
+   real(wp), intent(out) :: clist(:)
+   !> Output diagonal elements capacitance matrix in compressed format, size of mol%nat
+   real(wp), intent(out) :: cdiag(:)
 
    integer :: iat, jat, izp, jzp, img, kat
    real(wp) :: vec(3), rvdw, tmp, capi, capj, wsw
    real(wp), allocatable :: dtrans(:, :)
 
    ! Thread-private array for reduction
-   real(wp), allocatable :: cmat_local(:, :)
+   real(wp), allocatable :: clist_local(:), cdiag_local(:)
 
    call get_dir_trans(mol%lattice, dtrans)
 
-   cmat(:, :) = 0.0_wp
+   clist(:) = 0.0_wp
+   cdiag(:) = 0.0_wp
 
    !$omp parallel default(none) &
-   !$omp shared(cmat, mol, list, self, wsc, dtrans) &
+   !$omp shared(clist, cdiag, mol, list, self, wsc, dtrans) &
    !$omp private(iat, izp, jat, kat, jzp, img) &
-   !$omp private(vec, rvdw, tmp, capi, capj, wsw, cmat_local)
-   allocate(cmat_local, source=cmat)
+   !$omp private(vec, rvdw, tmp, capi, capj, wsw, clist_local, cdiag_local)
+   allocate(clist_local, source=clist)
+   allocate(cdiag_local, source=cdiag)
    !$omp do schedule(runtime)
    do iat = 1, mol%nat
       izp = mol%id(iat)
@@ -2220,11 +2244,10 @@ subroutine get_cmat_3d_list(self, mol, list, wsc, cmat)
             call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, tmp)
 
             ! Off-diagonal elements
-            cmat_local(jat, iat) = cmat_local(jat, iat) - tmp * wsw
-            cmat_local(iat, jat) = cmat_local(iat, jat) - tmp * wsw
+            clist_local(kat) = clist_local(kat) - tmp * wsw
             ! Diagonal elements
-            cmat_local(iat, iat) = cmat_local(iat, iat) + tmp * wsw
-            cmat_local(jat, jat) = cmat_local(jat, jat) + tmp * wsw
+            cdiag_local(iat) = cdiag_local(iat) + tmp * wsw
+            cdiag_local(jat) = cdiag_local(jat) + tmp * wsw
          end do
       end do
 
@@ -2234,19 +2257,18 @@ subroutine get_cmat_3d_list(self, mol, list, wsc, cmat)
       do img = 1, wsc%nimg(iat, iat)
          vec = wsc%trans(:, wsc%tridx(img, iat, iat))
          call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, tmp)
-         cmat_local(iat, iat) = cmat_local(iat, iat) + tmp * wsw
+         cdiag_local(iat) = cdiag_local(iat) + tmp * wsw
       end do
    end do
    !$omp end do
    !$omp critical (get_cmat_3d_)
-   cmat(:, :) = cmat + cmat_local
+   clist(:) = clist + clist_local
+   cdiag(:) = cdiag + cdiag_local
    !$omp end critical (get_cmat_3d_)
-   deallocate(cmat_local)
+   deallocate(clist_local)
+   deallocate(cdiag_local)
    !$omp end parallel
-   !
-   if (size(cmat, 1) == mol%nat + 1) then
-      cmat(mol%nat + 1, mol%nat + 1) = 1.0_wp
-   end if
+
 
 end subroutine get_cmat_3d_list
 

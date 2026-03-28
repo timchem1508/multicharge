@@ -572,8 +572,6 @@ subroutine test_eeqbc_g_mb06(error)
 end subroutine test_eeqbc_g_mb06
 
 
-
-
 subroutine test_eeqbc_g_co2(error)
 
    !> Error handling
