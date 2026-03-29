@@ -52,7 +52,7 @@ module multicharge_adjlist
     private
 
     public :: adjacency_list, mchrg_adjlist_input, new_adjacency_list
-    public :: symv_sparse, gemv_sparse, gemm_sparse
+    public :: symv_sparse, gemv_sparse, gemv_cmp, gemm_sparse
 
     !> @class adjacency_list
     !> Neighbourlist in CSR format
@@ -293,6 +293,40 @@ contains
         end do
 
     end subroutine gemv_sparse
+
+    subroutine gemv_cmp(list, mlist, mdiag, x, y, alpha, beta)
+        type(adjacency_list), intent(in) :: list
+        real(wp), intent(in)  :: mlist(:)   ! same size as list%nlat
+        real(wp), intent(in)  :: mdiag(:)
+        real(wp), intent(in)  :: x(:)
+        real(wp), intent(out) :: y(:)
+        real(wp), intent(in) :: alpha, beta
+
+        integer :: i, k, j
+
+        if (size(mlist) /= size(list%nlat)) return
+
+        ! Scale y by beta
+        if (beta == 0.0_wp) then
+            y(:) = 0.0_wp
+        else if (beta /= 1.0_wp) then
+            y(:) = beta * y(:)
+        end if
+
+        do i = 1, size(list%nnl)
+
+            ! Diagonal element A(i,i)
+            y(i) = y(i) + alpha * mdiag(i) * x(i)
+
+            ! Off-diagonal nonzeros of row i
+            do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+                j = list%nlat(k)
+
+                y(i) = y(i) + alpha * mlist(k) * x(j)
+                y(j) = y(j) + alpha * mlist(k) * x(i) 
+            end do
+        end do
+    end subroutine gemv_cmp
 
     subroutine gemm_sparse(adjlist, amat, B, C, alpha, beta)
         use omp_lib

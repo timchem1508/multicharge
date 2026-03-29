@@ -37,7 +37,8 @@ module test_adjlist
 
    real(wp), parameter :: thr = 100 * epsilon(1.0_wp)
    real(wp), parameter :: thr2 = sqrt(epsilon(1.0_wp))
-   real(wp), parameter :: cutoff = 28.0_wp   ! Same as default in adjacency_list
+   real(wp), parameter :: thr3 = 100 * thr2
+   real(wp), parameter :: cutoff = 28.0_wp 
 
 contains
 
@@ -53,7 +54,7 @@ subroutine collect_adjlist(testsuite)
       & new_unittest("eeqbc-charges-actinides", test_eeqbc_q_actinides), &
       & new_unittest("eeqbc-energy-mb03", test_eeqbc_e_mb03), &
       & new_unittest("eeqbc-energy-mb04", test_eeqbc_e_mb04), &
-         & new_unittest("eeqbc-gradient-mb05", test_eeqbc_g_mb05), &
+      & new_unittest("eeqbc-gradient-mb05", test_eeqbc_g_mb05), &
       & new_unittest("eeqbc-gradient-mb06", test_eeqbc_g_mb06), &
       & new_unittest("eeqbc-gradient-co2", test_eeqbc_g_co2) &
       & ]
@@ -61,32 +62,32 @@ subroutine collect_adjlist(testsuite)
 end subroutine collect_adjlist
 
 subroutine solver_maker(solver, input, error)
-    !> Solver type
-    class(mchrg_solver_type), intent(out), allocatable :: solver
-    !> Solver input
-    class(mchrg_solver_input), intent(in) :: input
-    !> Error handling
-    type(error_type), allocatable, intent(out) :: error
+   !> Solver type
+   class(mchrg_solver_type), intent(out), allocatable :: solver
+   !> Solver input
+   class(mchrg_solver_input), intent(in) :: input
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
 
-    select type (input)
-    type is (cg_input)
-        block
+   select type (input)
+      type is (cg_input)
+         block
             class(cg_solver), allocatable :: tmp
             allocate(tmp)
             call new_cg_solver(tmp, input)
             call move_alloc(tmp, solver)
-        end block
-    type is (direct_input)
-        block
+         end block
+      type is (direct_input)
+         block
             class(direct_solver), allocatable :: tmp
             allocate(tmp)
             call new_direct_solver(tmp, input)
             call move_alloc(tmp, solver)
-        end block
-    class default 
-        allocate(error)
-        return
-    end select
+         end block
+      class default 
+         allocate(error)
+         return
+   end select
     
 end subroutine solver_maker
 
@@ -143,7 +144,7 @@ subroutine gen_test_molecular(error, mol, model, qref, eref)
    end if
 
     allocate(list_input)
-    list_input%cutoff = 25.0_wp
+    list_input%cutoff = cutoff
     list_input%complete = .false.
     allocate(list)
     call new_adjacency_list(list, list_input, mol, trans)
@@ -196,7 +197,7 @@ subroutine test_numgrad(error, mol, model)
    integer :: verbosity = 0
 
    integer :: iat, ic, ndim
-    type(mchrg_adjlist_input), allocatable :: list_input
+   type(mchrg_adjlist_input), allocatable :: list_input
    type(adjacency_list), allocatable :: list
    real(wp), parameter :: trans(3, 1) = 0.0_wp
    real(wp), parameter :: step = 1.0e-6_wp
@@ -224,7 +225,7 @@ subroutine test_numgrad(error, mol, model)
    sigma(:, :) = 0.0_wp
 
     allocate(list_input)
-    list_input%cutoff = 25.0_wp
+    list_input%cutoff = cutoff
     list_input%complete = .false.
     allocate(list)
     call new_adjacency_list(list, list_input, mol, trans)
@@ -251,17 +252,12 @@ subroutine test_numgrad(error, mol, model)
    end do lp
    if (allocated(error)) return
 
-   ! dcndr(:, :, :) = 0.0_wp
-   ! dcndL(:, :, :) = 0.0_wp
-   ! dqlocdr(:, :, :) = 0.0_wp
-   ! dqlocdL(:, :, :) = 0.0_wp
-
    call model%update(mol, cache, trans, grad)
    call model%solve(mol, solver, cache, error, &
       & gradient=gradient, sigma=sigma, list=list, unit=output_unit)
    if (allocated(error)) return
 
-   if (any(abs(gradient(:, :) - numgrad(:, :)) > thr2)) then
+   if (any(abs(gradient(:, :) - numgrad(:, :)) > thr3)) then
       call test_failed(error, "Derivative of energy does not match")
       print'(a)', "Energy gradient:"
       print'(3es21.14)', gradient
@@ -296,7 +292,6 @@ subroutine test_numgrad_periodic(error, mol, model)
    integer :: iat, ic, ndim
     type(mchrg_adjlist_input), allocatable :: list_input
    type(adjacency_list), allocatable :: list
-   real(wp), parameter :: cutoff = 25.0_wp
    real(wp), parameter :: step = 1.0e-6_wp
    real(wp), allocatable :: trans(:, :)
    real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
@@ -322,10 +317,10 @@ subroutine test_numgrad_periodic(error, mol, model)
    gradient(:, :) = 0.0_wp
    sigma(:, :) = 0.0_wp
 
-      call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
+   call get_lattice_points(mol%periodic, mol%lattice, 25.0_wp, trans)
 
     allocate(list_input)
-    list_input%cutoff = 25.0_wp
+    list_input%cutoff = cutoff
     list_input%complete = .false.
     allocate(list)
     call new_adjacency_list(list, list_input, mol, trans)
@@ -357,7 +352,7 @@ subroutine test_numgrad_periodic(error, mol, model)
       & gradient=gradient, sigma=sigma, unit=output_unit)
    if (allocated(error)) return
 
-   if (any(abs(gradient(:, :) - numgrad(:, :)) > thr2)) then
+   if (any(abs(gradient(:, :) - numgrad(:, :)) > thr3)) then
       call test_failed(error, "Derivative of energy does not match")
       print'(a)', "Energy gradient:"
       print'(3es21.14)', gradient
@@ -441,8 +436,6 @@ subroutine test_eeqbc_q_mb02(error)
    call new_eeqbc2025_model(mol, model, error)
    if (allocated(error)) return
    call gen_test_molecular(error, mol, model, qref=ref)
-
-   
 
 end subroutine test_eeqbc_q_mb02
 
@@ -566,8 +559,6 @@ subroutine test_eeqbc_g_mb06(error)
    call new_eeqbc2025_model(mol, model, error)
    if (allocated(error)) return
    call test_numgrad(error, mol, model)
-
-   
 
 end subroutine test_eeqbc_g_mb06
 

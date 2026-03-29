@@ -29,7 +29,7 @@ module multicharge_model_type
    use mctc_io_math, only: matinv_3x3
    use mctc_cutoff, only: get_lattice_points
    use mctc_ncoord, only: ncoord_type
-   use multicharge_adjlist,  only: adjacency_list, symv_sparse, gemv_sparse
+   use multicharge_adjlist,  only: adjacency_list, symv_sparse, gemv_sparse, gemv_cmp
    use multicharge_blas, only: gemv, symv, gemm
    use multicharge_lapack, only: sytrf, sytrs
    use multicharge_wignerseitz, only: wignerseitz_cell_type, new_wignerseitz_cell
@@ -297,7 +297,7 @@ subroutine solve(self, mol, solver, cache, error, &
    call self%get_coulomb_matrix(mol, ndim, cache, list)
 
    ! Get RHS of ES equation
-   call self%get_xvec(mol, ndim, cache)
+   call self%get_xvec(mol, ndim, cache, list)
    if (.not. allocated(cache%vrhs)) then
       allocate(cache%vrhs(mol%nat + 1))
    end if
@@ -314,7 +314,7 @@ subroutine solve(self, mol, solver, cache, error, &
       end if
       cache%vrhs = cache%xvec
       cache%ainv = cache%amat
-      call solver%solve(cache%amat, cache%xvec, cache%vrhs, ainv=cache%ainv, &
+      call solver%solve(amat=cache%amat, xvec=cache%xvec, vrhs=cache%vrhs, ainv=cache%ainv, &
          & cpq=cpq, new_unit=print_unit, error=error)
 
    else
@@ -324,19 +324,26 @@ subroutine solve(self, mol, solver, cache, error, &
       allocate(unitvec(mol%nat))
       allocate(vvec(mol%nat))
       ! Initial guess
-      do iat = 1, mol%nat
-         cache%uvec(iat) = 1.0_wp / (cache%amat(iat, iat) + eps)
-         vvec(iat) = - cache%xvec(iat) / (cache%amat(iat, iat) + eps)
-      end do
+      if (present(list)) then
+         cache%uvec(:) = 1.0_wp / (cache%adiag(:) + eps)
+         vvec(:) = - cache%xvec(:) / (cache%adiag(:) + eps)
+      else
+         do iat = 1, mol%nat
+            cache%uvec(iat) = 1.0_wp / (cache%amat(iat, iat) + eps)
+            vvec(iat) = - cache%xvec(iat) / (cache%amat(iat, iat) + eps)
+         end do
+      end if
 
       unitvec = 1.0_wp
 
       call print_constrained_system_message(print_unit, verbosity_solve, 'u')
       ! Constrained response: A*uvec = 1
-      call solver%solve(amat=cache%amat, xvec=unitvec, vrhs=cache%uvec, list=list, new_unit=print_unit, error=error)
+      call solver%solve(amat=cache%amat, alist=cache%alist, adiag=cache%adiag, xvec=unitvec, &
+            & vrhs=cache%uvec, list=list, new_unit=print_unit, error=error)
       call print_constrained_system_message(print_unit, verbosity_solve, 'v')
       ! Constrained response: A*uvec = chi
-      call solver%solve(amat=cache%amat, xvec=-cache%xvec, vrhs=vvec, list=list, new_unit=print_unit, error=error)
+      call solver%solve(amat=cache%amat, alist=cache%alist, adiag=cache%adiag, xvec=-cache%xvec, &
+            & vrhs=vvec, list=list, new_unit=print_unit, error=error)
       uvecsum = sum(cache%uvec)
       vvecsum = sum(vvec)
       ! Lagrangian multiplier
@@ -356,7 +363,7 @@ subroutine solve(self, mol, solver, cache, error, &
    ! Electrostatic energy if present
    if (present(energy)) then
       if (present(list)) then
-      call symv_sparse(list, cache%amat, cache%vrhs, cache%xvec(:mol%nat), &
+         call gemv_cmp(list, cache%alist, cache%adiag, cache%vrhs, cache%xvec(:mol%nat), &
             & alpha=0.5_wp, beta=-1.0_wp)
       else
          call symv(cache%amat, cache%vrhs, cache%xvec(:mol%nat), &
@@ -510,7 +517,8 @@ subroutine get_external_gradient(self, mol, solver, cache, error, dfdq, dfdr, df
 
       ! Constrained response: J*yvec = dfdq
       call print_adjoint_message(print_unit, verbosity_solve)
-      call solver%solve(cache%amat, dfdq, yvec, list=list, error=error)
+      call solver%solve(amat=cache%amat, alist=cache%alist, adiag=cache%adiag, &
+         & xvec=dfdq, vrhs=yvec, list=list, error=error)
       if (allocated(error)) return
 
       ! Projection of uvec on yvec
@@ -531,7 +539,7 @@ subroutine get_external_gradient(self, mol, solver, cache, error, dfdq, dfdr, df
 
       ! Direct solution: J*yvec = dfdq
       call print_adjoint_message(print_unit, verbosity_solve)
-      call solver%solve(cache%amat, dfdq_loc, padj, new_unit=print_unit, error=error)
+      call solver%solve(amat=cache%amat, xvec=dfdq_loc, vrhs=padj, new_unit=print_unit, error=error)
       if (allocated(error)) return
 
       ! Evaluate external gradients via adjoint contraction:

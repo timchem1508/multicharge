@@ -27,7 +27,7 @@ module multicharge_model_eeqbc
    use mctc_io_constants, only: pi
    use mctc_ncoord, only: new_ncoord, cn_count
    use multicharge_wignerseitz, only: new_wignerseitz_cell, wignerseitz_cell_type
-   use multicharge_adjlist, only: adjacency_list, gemv_sparse
+   use multicharge_adjlist, only: adjacency_list, gemv_sparse, gemv_cmp
    use multicharge_model_type, only: mchrg_model_type, get_dir_trans
    use multicharge_blas, only: gemv, gemm
    use multicharge_model_cache, only: mchrg_cache
@@ -232,10 +232,7 @@ subroutine get_capacitance_matrix(self, mol, ndim, cache, list)
    grad = allocated(cache%dcndr) .and. allocated(cache%dcndL) .and. &
       & allocated(cache%dqlocdr) .and. allocated(cache%dqlocdL)
 
-   ! Allocate cmat
-   if (.not. allocated(cache%cmat)) then
-      allocate(cache%cmat(ndim, ndim))
-   end if
+   
    if (grad) then 
       if (.not. allocated(cache%dcdr)) then
          allocate(cache%dcdr(3, mol%nat, ndim))
@@ -254,17 +251,7 @@ subroutine get_capacitance_matrix(self, mol, ndim, cache, list)
       if (.not. allocated(cache%cdiag)) then
          allocate(cache%cdiag(mol%nat))
       end if
-      if (grad) then 
-         if (.not. allocated(cache%dcdrlist)) then
-            allocate(cache%dcdrlist(3, size(list%nlat)))
-         end if
-         if (.not. allocated(cache%dcdrdiag)) then
-            allocate(cache%dcdrdiag(3, mol%nat))
-         end if
-         if (.not. allocated(cache%dcdL)) then
-            allocate(cache%dcdL(3, 3, ndim))
-         end if
-      end if
+
       ! Neighbour list routines
       if (any(mol%periodic)) then
          call get_dcmat_3d_list(self, mol, list, cache%wsc, cache%dcdr, cache%dcdL)
@@ -276,10 +263,15 @@ subroutine get_capacitance_matrix(self, mol, ndim, cache, list)
          call get_cmat_0d_list(self, mol, list, cache%clist, cache%cdiag)
          ! cmat gradients
          if (grad) then
-            call get_dcmat_0d_list(self, mol, list, cache%dcdrlist, cache%dcdrdiag, cache%dcdL)
+            call get_dcmat_0d_list(self, mol, list, cache%dcdr, cache%dcdL)
          end if
       end if
    else 
+
+      ! Allocate cmat
+      if (.not. allocated(cache%cmat)) then
+         allocate(cache%cmat(ndim, ndim))
+      end if
       ! Direct routines
       if (any(mol%periodic)) then
          ! Get full cmat sum over all WSC images (for get_xvec and xvec_derivs)
@@ -342,7 +334,7 @@ subroutine get_xvec(self, mol, ndim, cache, list)
    end if
 
    if (present(list)) then
-      call gemv_sparse(list, cache%cmat, cache%xtmp, cache%xvec, alpha=1.0_wp, beta=0.0_wp)
+      call gemv_cmp(list, cache%clist, cache%cdiag, cache%xtmp, cache%xvec, alpha=1.0_wp, beta=0.0_wp)
    else
       call gemv(cache%cmat, cache%xtmp, cache%xvec)
    end if
@@ -833,17 +825,27 @@ subroutine get_coulomb_matrix(self, mol, ndim, cache, list)
    !> Multicharge neighbourlist type
    type(adjacency_list), intent(in), optional :: list
 
-   if (.not. allocated(cache%amat)) then
-      allocate(cache%amat(ndim, ndim))
-   end if
 
    if (present(list)) then
+      ! Allocate amat
+      if (.not. allocated(cache%alist)) then
+         allocate(cache%alist(size(list%nlat)))
+      end if
+      if (.not. allocated(cache%adiag)) then
+         allocate(cache%adiag(mol%nat))
+      end if
       if (any(mol%periodic)) then
-         call get_amat_3d_list(self, mol, list, cache%wsc, cache%cn, cache%qloc, cache%cmat, cache%amat)
+         call get_amat_3d_list(self, mol, list, cache%wsc, cache%cn, &
+               & cache%qloc, cache%clist, cache%cdiag, cache%alist, cache%adiag)
       else
-         call get_amat_0d_list(self, mol, list, cache%cn, cache%qloc, cache%cmat, cache%amat)
+         call get_amat_0d_list(self, mol, list, cache%cn, &
+               & cache%qloc, cache%clist, cache%cdiag, cache%alist, cache%adiag)
       end if
    else
+      ! Allocate amat
+      if (.not. allocated(cache%amat)) then
+         allocate(cache%amat(ndim, ndim))
+      end if
       if (any(mol%periodic)) then
          call get_amat_3d(self, mol, cache%wsc, cache%cn, cache%qloc, cache%cmat, cache%amat)
       else
@@ -919,7 +921,7 @@ subroutine get_amat_0d(self, mol, cn, qloc, cmat, amat)
 end subroutine get_amat_0d
 
 !> Build the Coulomb matrix for a non‑periodic system (0D).
-subroutine get_amat_0d_list(self, mol, list, cn, qloc, cmat, amat)
+subroutine get_amat_0d_list(self, mol, list, cn, qloc, clist, cdiag, alist, adiag)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Molecular structure data
@@ -931,23 +933,25 @@ subroutine get_amat_0d_list(self, mol, list, cn, qloc, cmat, amat)
    !> Local charges
    real(wp), intent(in) :: qloc(:)
    !> Bond capacitance matrix
-   real(wp), intent(in) :: cmat(:, :)
+   real(wp), intent(in) :: clist(:), cdiag(:)
    !> Output Coulomb matrix (size ndim × ndim)
-   real(wp), intent(out) :: amat(:, :)
+   real(wp), intent(out) :: alist(:), adiag(:)
 
    integer :: iat, jat, kat, izp, jzp
    real(wp) :: vec(3), r2, gam2, tmp, norm_cn, radi, radj
 
    ! Thread-private array for reduction
-   real(wp), allocatable :: amat_local(:, :)
+   real(wp), allocatable :: alist_local(:), adiag_local(:)
 
-   amat(:, :) = 0.0_wp
+   alist(:) = 0.0_wp
+   adiag(:) = 0.0_wp
 
    !$omp parallel default(none) &
-   !$omp shared(amat, mol, self, list, cn, qloc, cmat) &
+   !$omp shared(alist, adiag, mol, self, list, cn, qloc, clist, cdiag) &
    !$omp private(iat, izp, jat, kat, jzp, gam2, vec, r2, tmp) &
-   !$omp private(norm_cn, radi, radj, amat_local)
-   allocate(amat_local, source=amat)
+   !$omp private(norm_cn, radi, radj, alist_local, adiag_local)
+   allocate(alist_local, source=alist)
+   allocate(adiag_local, source=adiag)
    !$omp do schedule(runtime)
    do iat = 1, mol%nat
       izp = mol%id(iat)
@@ -964,26 +968,21 @@ subroutine get_amat_0d_list(self, mol, list, cn, qloc, cmat, amat)
          radj = self%rad(jzp) * (1.0_wp - self%kcnrad * norm_cn)
          ! Coulomb interaction of Gaussian charges
          gam2 = 1.0_wp / (radi**2 + radj**2)
-         tmp = erf(sqrt(r2 * gam2)) / sqrt(r2) * cmat(jat, iat)
-         amat_local(jat, iat) = tmp
-         amat_local(iat, jat) = tmp
+         tmp = erf(sqrt(r2 * gam2)) / sqrt(r2) * clist(kat)
+         alist_local(kat) = tmp
       end do
       ! Effective hardness
       tmp = self%eta(izp) + self%kqeta(izp) * qloc(iat) + sqrt2pi / radi
-      amat_local(iat, iat) = amat_local(iat, iat) + tmp * cmat(iat, iat) + 1.0_wp
+      adiag_local(iat) = adiag_local(iat) + tmp * cdiag(iat) + 1.0_wp
    end do
    !$omp end do
    !$omp critical (get_amat_0d_list_)
-   amat(:, :) = amat + amat_local
+   alist(:) = alist + alist_local
+   adiag(:) = adiag + adiag_local
    !$omp end critical (get_amat_0d_list_)
-   deallocate(amat_local)
+   deallocate(alist_local)
+   deallocate(adiag_local)
    !$omp end parallel
-
-   if (size(amat, 1) == mol%nat + 1) then
-      amat(mol%nat + 1, 1:mol%nat + 1) = 1.0_wp
-      amat(1:mol%nat + 1, mol%nat + 1) = 1.0_wp
-      amat(mol%nat + 1, mol%nat + 1) = 0.0_wp
-   end if
 
 end subroutine get_amat_0d_list
 
@@ -1071,7 +1070,7 @@ subroutine get_amat_3d(self, mol, wsc, cn, qloc, cmat, amat)
 end subroutine get_amat_3d
 
 !> Build the Coulomb matrix for a periodic system (3D) using Ewald summation and bond capacitance.
-subroutine get_amat_3d_list(self, mol, list, wsc, cn, qloc, cmat, amat)
+subroutine get_amat_3d_list(self, mol, list, wsc, cn, qloc, clist, cdiag, alist, adiag)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Molecular structure data
@@ -1081,26 +1080,28 @@ subroutine get_amat_3d_list(self, mol, list, wsc, cn, qloc, cmat, amat)
    !> Wigner–Seitz cell
    type(wignerseitz_cell_type), intent(in) :: wsc
    !> Coordination numbers
-   real(wp), intent(in) :: cn(:), qloc(:), cmat(:, :)
+   real(wp), intent(in) :: cn(:), qloc(:)
+   !> Bond capacitance matrix
+   real(wp), intent(in) :: clist(:), cdiag(:)
    !> Output Coulomb matrix (size ndim × ndim)
-   real(wp), intent(out) :: amat(:, :)
+   real(wp), intent(out) :: alist(:), adiag(:)
 
    integer :: iat, jat, izp, jzp, img, kat
    real(wp) :: vec(3), r1, gam, dtmp, ctmp, capi, capj, radi, radj, norm_cn, rvdw, wsw
    real(wp), allocatable :: dtrans(:, :)
 
    ! Thread-private array for reduction
-   real(wp), allocatable :: amat_local(:, :)
+   real(wp), allocatable :: alist_local(:), adiag_local(:)
 
-   call get_dir_trans(mol%lattice, dtrans)
-
-   amat(:, :) = 0.0_wp
+   alist(:) = 0.0_wp
+   adiag(:) = 0.0_wp
 
    !$omp parallel default(none) &
-   !$omp shared(amat, cmat, mol, list, cn, qloc, self, wsc, dtrans)  &
-   !$omp private(iat, izp, jat, kat, jzp, gam, vec, dtmp, ctmp, norm_cn) &
-   !$omp private(radi, radj, capi, capj, rvdw, r1, wsw, amat_local)
-   allocate(amat_local, source=amat)
+   !$omp shared(alist, adiag, mol, self, list, cn, qloc, wsc, dtrans, clist, cdiag) &
+   !$omp private(iat, izp, jat, jzp, gam, vec, dtmp, ctmp, norm_cn) &
+   !$omp private(radi, radj, capi, capj, rvdw, r1, wsw, alist_local, adiag_local)
+   allocate(alist_local, source=alist)
+   allocate(adiag_local, source=adiag)
    !$omp do schedule(runtime)
    do iat = 1, mol%nat
       izp = mol%id(iat)
@@ -1123,8 +1124,7 @@ subroutine get_amat_3d_list(self, mol, list, wsc, cn, qloc, cmat, amat)
          do img = 1, wsc%nimg(jat, iat)
             vec = mol%xyz(:, jat) - mol%xyz(:, iat) + wsc%trans(:, wsc%tridx(img, jat, iat))
             call get_amat_dir_3d(vec, gam, dtrans, self%kbc, rvdw, capi, capj, dtmp)
-            amat_local(jat, iat) = amat_local(jat, iat) + dtmp * wsw
-            amat_local(iat, jat) = amat_local(iat, jat) + dtmp * wsw
+            alist_local(kat) = alist_local(kat) + dtmp * wsw
          end do
       end do
 
@@ -1135,25 +1135,22 @@ subroutine get_amat_3d_list(self, mol, list, wsc, cn, qloc, cmat, amat)
       do img = 1, wsc%nimg(iat, iat)
          vec = wsc%trans(:, wsc%tridx(img, iat, iat))
          call get_amat_dir_3d(vec, gam, dtrans, self%kbc, rvdw, capi, capi, dtmp)
-         amat_local(iat, iat) = amat_local(iat, iat) + dtmp * wsw
+         adiag_local(iat) = adiag_local(iat) + dtmp * wsw
       end do
 
       ! Effective hardness
       dtmp = self%eta(izp) + self%kqeta(izp) * qloc(iat) + sqrt2pi / radi
-      amat_local(iat, iat) = amat_local(iat, iat) + cmat(iat, iat) * dtmp + 1.0_wp
+      adiag_local(iat) = adiag_local(iat) + cdiag(iat) * dtmp + 1.0_wp
    end do
    !$omp end do
-   !$omp critical (get_amat_3d_)
-   amat(:, :) = amat + amat_local
-   !$omp end critical (get_amat_3d_)
-   deallocate(amat_local)
+   !$omp critical (get_amat_3d_list_)
+   alist(:) = alist + alist_local
+   adiag(:) = adiag + adiag_local
+   !$omp end critical (get_amat_3d_list_)
+   deallocate(alist_local)
+   deallocate(adiag_local)
    !$omp end parallel
 
-   if (size(amat, 1) == mol%nat + 1) then
-      amat(mol%nat + 1, 1:mol%nat + 1) = 1.0_wp
-      amat(1:mol%nat + 1, mol%nat + 1) = 1.0_wp
-      amat(mol%nat + 1, mol%nat + 1) = 0.0_wp
-   end if
 end subroutine get_amat_3d_list
 
 !> Real-space contribution to the Coulomb matrix for the EEQBC model.

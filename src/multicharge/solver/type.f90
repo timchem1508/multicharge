@@ -36,16 +36,28 @@ module multicharge_solver_type
 
 
 abstract interface
-    subroutine solve(self, amat, xvec, vrhs, ainv, cpq, list, new_unit, error)
+    subroutine solve(self, amat, alist, adiag, xvec, vrhs, ainv, cpq, list, new_unit, error)
         import :: mchrg_solver_type, error_type, wp, adjacency_list
         class(mchrg_solver_type), intent(in) :: self
-        real(wp), intent(in)  :: amat(:, :)
+        !> A matrix of Ax=b system
+        real(wp), intent(in), optional  :: amat(:, :)
+        !> Off-diagonall elements of matrix for in compressed
+        real(wp), intent(in), optional  :: alist(:)
+        !> Diagonall elements of tmatrix for in compressed
+        real(wp), intent(in), optional  :: adiag(:)
+        !> Right-hand side vector 
         real(wp), intent(in)  :: xvec(:)
+        !> On input: initial guess; on output: solution
         real(wp), intent(inout), contiguous :: vrhs(:)
+        !> Inverse matrix 
         real(wp), intent(out), optional :: ainv(:, :)
+        !> Flag for coupled-perturbed equations
         logical, intent(in), optional :: cpq
+        !> Neighbour list optional type
         type(adjacency_list), intent(in), optional :: list
+        !> Output unit
         integer, intent(in), optional :: new_unit
+        !> Error handling
         type(error_type), allocatable, intent(out) :: error
     end subroutine solve
 end interface
