@@ -14,7 +14,7 @@
 ! limitations under the License.
 
 module multicharge_output
-   use mctc_env, only : wp
+   use mctc_env, only : wp, timer_type, format_time
    use mctc_io, only : structure_type
    use mctc_io_convert, only : autoaa
    use mctc_io_constants, only : pi
@@ -27,7 +27,7 @@ module multicharge_output
 
 contains
 
-subroutine write_ascii_model(unit, mol, model)
+subroutine write_ascii_model(unit, mol, model, verbosity, timer)
 
    !> Formatted unit
    integer, intent(in) :: unit
@@ -37,6 +37,12 @@ subroutine write_ascii_model(unit, mol, model)
 
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
+
+   !> Verbosity level for output
+   integer, intent(in) :: verbosity
+
+   !> Timer for performance measurement
+   real(wp), intent(in) :: timer
 
    integer :: isp
    real(wp), parameter :: sqrt2pi = sqrt(2.0_wp/pi)
@@ -51,6 +57,11 @@ subroutine write_ascii_model(unit, mol, model)
          & model%eta(isp) + sqrt2pi/model%rad(isp), model%rad(isp) * autoaa
    end do
    write(unit, '(54("-"),/)')
+
+   if (verbosity > 1) then
+      write(unit, '(a, 1x, a)') "Model setup time :", format_time(timer)
+      write(unit, '(a)') ""
+   end if
 
 end subroutine write_ascii_model
 

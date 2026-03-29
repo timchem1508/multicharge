@@ -29,8 +29,9 @@ module multicharge_model_type
    use mctc_io_math, only: matinv_3x3
    use mctc_cutoff, only: get_lattice_points
    use mctc_ncoord, only: ncoord_type
-   use multicharge_adjlist,  only: adjacency_list, symv_sparse, gemv_sparse, gemv_cmp
+   use multicharge_adjlist,  only: adjacency_list
    use multicharge_blas, only: gemv, symv, gemm
+   use multicharge_blascomp, only: gemv_cmp
    use multicharge_lapack, only: sytrf, sytrs
    use multicharge_wignerseitz, only: wignerseitz_cell_type, new_wignerseitz_cell
    use multicharge_model_cache, only: mchrg_cache

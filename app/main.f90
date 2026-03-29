@@ -95,7 +95,7 @@ program main
       end if
    end if
 
-   write(output_unit, '(a)') 'Start the model generation ... '
+   call timer%push("model_setup")
 
    if (model_id == mchrg_model%eeq2019) then
       call new_eeq2019_model(mol, model, error)
@@ -109,7 +109,9 @@ program main
       error stop
    end if
 
-   call write_ascii_model(output_unit, mol, model)
+   call timer%pop
+
+   call write_ascii_model(output_unit, mol, model, verbosity, timer%get("model_setup"))
 
    allocate(energy(mol%nat), qvec(mol%nat))
    energy(:) = 0.0_wp
