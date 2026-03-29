@@ -52,7 +52,6 @@ module multicharge_adjlist
     private
 
     public :: adjacency_list, mchrg_adjlist_input, new_adjacency_list
-    public :: symv_sparse, gemv_sparse, gemv_cmp, gemm_sparse
 
     !> @class adjacency_list
     !> Neighbourlist in CSR format
@@ -80,7 +79,7 @@ module multicharge_adjlist
     end type mchrg_adjlist_input
 
     ! Default input 
-    real(wp), parameter :: cutoff_def = 28.0_wp
+    real(wp), parameter :: cutoff_def = 29.0_wp
     logical, parameter :: complete_def = .false.
     integer, parameter :: init_size = 10
     real(wp), parameter :: buffer = 0.1_wp
