@@ -19,7 +19,7 @@
 module multicharge_solver_cg
     use iso_fortran_env, only : output_unit
     use mctc_env, only: error_type, fatal_error, wp, timer_type, format_time
-    use multicharge_adjlist, only: adjacency_list, symv_sparse, gemv_sparse
+    use multicharge_adjlist, only: adjacency_list, symv_sparse, gemv_sparse, gemv_cmp
     use multicharge_blas, only: axpy, scal, dot, symv, gemv
     use multicharge_lapack, only: sytrf, sytrs
     use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
@@ -96,15 +96,19 @@ contains
     end subroutine new_cg_solver
 
     !> Conjugate gradient solver procedure with diagonal preconditioner
-    subroutine solve(self, amat, xvec, vrhs, ainv, cpq, list, new_unit, error)
+    subroutine solve(self, amat, alist, adiag, xvec, vrhs, ainv, cpq, list, new_unit, error)
         class(cg_solver), intent(in) :: self
         !> A matrix of Ax=b system
-        real(wp), intent(in)  :: amat(:, :)
+        real(wp), intent(in), optional  :: amat(:, :)
+        !> Off-diagonall elements of matrix for in compressed
+        real(wp), intent(in), optional  :: alist(:)
+        !> Diagonall elements of tmatrix for in compressed
+        real(wp), intent(in), optional  :: adiag(:)
         !> Right-hand side vector 
         real(wp), intent(in)  :: xvec(:)
         !> On input: initial guess; on output: solution
         real(wp), intent(inout), contiguous :: vrhs(:)
-        !> Inverse matrix – not computed by CG, but required by interface
+        !> Inverse matrix
         real(wp), intent(out), optional :: ainv(:, :)
         !> Flag for coupled-perturbed equations
         logical, intent(in), optional :: cpq
@@ -150,6 +154,10 @@ contains
 
         type(timer_type) :: timer
         integer :: unit
+        logical :: nlist
+
+        nlist = self%use_nlist .and. .not. present(amat) .and. &
+                & present(list) .and. present(alist) .and. present(adiag)
 
         ! CG cannot compute the inverse matrix
         if (present(ainv) .or. present(cpq)) then
@@ -165,9 +173,11 @@ contains
 
         ! Dimensions check
         ndim = size(xvec)
-        if (size(amat,1) /= ndim .or. size(amat,2) /= ndim .or. size(vrhs) /= ndim) then
-            call fatal_error(error, "dimension mismatch.")
-            return
+        if (.not. nlist) then
+            if (size(amat,1) /= ndim .or. size(amat,2) /= ndim .or. size(vrhs) /= ndim) then
+                call fatal_error(error, "dimension mismatch.")
+                return
+            end if
         end if
 
         tol = self%cgtol
@@ -180,13 +190,17 @@ contains
         if (self%verbosity > 1) call timer%push("initialization")
 
         ! Diagonal preconditioner 
-        do iat = 1, ndim
-            prec(iat) = 1.0_wp / (amat(iat,iat) + eps)
-        end do
+        if (nlist) then
+            prec(:) = 1.0_wp / (adiag(:) + eps)
+        else
+            do iat = 1, ndim
+                prec(iat) = 1.0_wp / (amat(iat,iat) + eps)
+            end do
+        end if
     
         ! Initial residual
-        if (self%use_nlist .and. present(list)) then
-            call symv_sparse(list, amat, vrhs, Adir, alpha=1.0_wp, beta=0.0_wp)
+        if (nlist) then
+            call gemv_cmp(list, alist, adiag, vrhs, Adir, alpha=1.0_wp, beta=0.0_wp)
         else
             call symv(amat, vrhs, Adir, alpha=1.0_wp, beta=0.0_wp)  
         end if 
@@ -216,8 +230,8 @@ contains
             if (self%verbosity > 1) call timer%push("iteration")
 
             ! Matrix-vector product
-            if (self%use_nlist .and. present(list)) then
-                call symv_sparse(list, amat, dir, Adir, alpha=1.0_wp, beta=0.0_wp)
+            if (nlist) then
+                call gemv_cmp(list, alist, adiag, dir, Adir, alpha=1.0_wp, beta=0.0_wp)
             else
                 call symv(amat, dir, Adir, alpha=1.0_wp, beta=0.0_wp)  
             end if

@@ -95,6 +95,8 @@ program main
       end if
    end if
 
+   write(output_unit, '(a)') 'Start the model generation ... '
+
    if (model_id == mchrg_model%eeq2019) then
       call new_eeq2019_model(mol, model, error)
    else if (model_id == mchrg_model%eeqbc2025) then
