@@ -17,6 +17,7 @@ module multicharge_param
    use mctc_env, only: error_type, wp
    use mctc_io, only: structure_type
    use mctc_io_convert, only: autoaa
+   use mctc_ncoord, only: adjacency_list
    use mctc_data, only: get_covalent_rad, get_pauling_en, get_vdw_rad
    use multicharge_model, only: mchrg_model_type, &
       & new_eeq_model, eeq_model, new_eeqbc_model, eeqbc_model
@@ -72,13 +73,15 @@ subroutine new_eeq2019_model(mol, model, error)
 
 end subroutine new_eeq2019_model
 
-subroutine new_eeqbc2025_model(mol, model, error)
+subroutine new_eeqbc2025_model(mol, model, error, list)
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
    !> Electronegativity equilibration model
    class(mchrg_model_type), allocatable, intent(out) :: model
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
+   !> Neighbour list for bond-capacitor correction
+   type(adjacency_list), optional, intent(in) :: list
 
    real(wp), parameter :: kcnrad = 0.14_wp
    real(wp), parameter :: kbc = 0.60_wp
@@ -86,9 +89,11 @@ subroutine new_eeqbc2025_model(mol, model, error)
    real(wp), parameter :: cn_exp = 2.0_wp
    real(wp), parameter :: norm_exp = 0.75_wp
 
+   integer :: iat, jat, kat
+
    real(wp), allocatable :: chi(:), eta(:), rad(:), kcnchi(:), &
       & kqchi(:), kqeta(:), cap(:), rcov(:), avg_cn(:), en(:), &
-      & rvdw(:, :)
+      & rvdw(:, :), rvdwlist(:), rvdwdiag(:)
    type(eeqbc_model), allocatable :: eeqbc
 
    chi = get_eeqbc_chi(mol%num)
@@ -111,13 +116,34 @@ subroutine new_eeqbc2025_model(mol, model, error)
    en = merge(1.20_wp, en, mol%num == 93 .or. mol%num == 94 &
       &.or. mol%num == 97 .or. mol%num == 103)
    en = en / 3.98_wp
-   rvdw = get_vdw_rad(spread(mol%num(mol%id), 2, mol%nat), &
-      & spread(mol%num(mol%id), 1, mol%nat)) * autoaa
+   
+   if (present(list)) then
+      allocate(rvdwlist(size(list%nlat)))
+      allocate(rvdwdiag(mol%nat))
+      do iat = 1, mol%nat
+         rvdwdiag(iat) = get_vdw_rad( mol%num(mol%id(iat)), &
+                                    mol%num(mol%id(iat)) ) * autoaa
+         do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
+            jat = list%nlat(kat)
+            rvdwlist(kat) = get_vdw_rad( mol%num(mol%id(iat)), &
+                                    mol%num(mol%id(jat)) ) * autoaa
+         end do
+      end do
+   else
+      allocate(rvdw(mol%nat, mol%nat))
+      do iat = 1, mol%nat
+         do jat = 1, mol%nat
+            rvdw(iat,jat) = get_vdw_rad( mol%num(mol%id(iat)), &
+                                    mol%num(mol%id(jat)) ) * autoaa
+         end do
+      end do
+   end if
 
    allocate(eeqbc)
    call new_eeqbc_model(eeqbc, mol=mol, error=error, chi=chi, &
       & rad=rad, eta=eta, kcnchi=kcnchi, kqchi=kqchi, kqeta=kqeta, &
-      & kcnrad=kcnrad, cap=cap, avg_cn=avg_cn, rvdw=rvdw, kbc=kbc, &
+      & kcnrad=kcnrad, cap=cap, avg_cn=avg_cn, rvdw=rvdw, &
+      & rvdwlist=rvdwlist, rvdwdiag=rvdwdiag, kbc=kbc, &
       & cutoff=cutoff, cn_exp=cn_exp, rcov=rcov, en=en, &
       & norm_exp=norm_exp)
    call move_alloc(eeqbc, model)

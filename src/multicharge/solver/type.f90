@@ -18,7 +18,7 @@
 
 module multicharge_solver_type
     use mctc_env, only: error_type, wp
-    use multicharge_adjlist, only: adjacency_list
+    use mctc_ncoord, only: adjacency_list
     implicit none
     private
 

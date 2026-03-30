@@ -19,7 +19,7 @@
 module multicharge_solver_direct
     use iso_fortran_env, only: output_unit
     use mctc_env, only: error_type, fatal_error, wp, timer_type, timer_type, format_time
-    use multicharge_adjlist, only: adjacency_list
+    use mctc_ncoord, only: adjacency_list
     use multicharge_blas, only: symv
     use multicharge_lapack, only: sytrf, sytrs, sytri
     use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input

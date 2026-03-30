@@ -29,7 +29,7 @@ module multicharge_model_type
    use mctc_io_math, only: matinv_3x3
    use mctc_cutoff, only: get_lattice_points
    use mctc_ncoord, only: ncoord_type
-   use multicharge_adjlist,  only: adjacency_list
+   use mctc_ncoord, only: adjacency_list
    use multicharge_blas, only: gemv, symv, gemm
    use multicharge_blascomp, only: gemv_cmp
    use multicharge_lapack, only: sytrf, sytrs
@@ -85,12 +85,14 @@ module multicharge_model_type
 
    abstract interface
       !> Update model-dependent quantities and cache
-      subroutine update(self, mol, cache, trans, grad)
+      subroutine update(self, mol, cache, trans, grad, list)
          import :: mchrg_model_type, structure_type, mchrg_cache, adjacency_list, wp
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
          !> Structure type
          type(structure_type), intent(in) :: mol
+         !> Multicharge neighbourlist type
+         type(adjacency_list), intent(in), optional :: list
          !> Multicharge cache 
          !> Allocation: cn, qloc, wsc
          type(mchrg_cache), intent(inout) :: cache
@@ -363,6 +365,7 @@ subroutine solve(self, mol, solver, cache, error, &
 
    ! Electrostatic energy if present
    if (present(energy)) then
+      call timer%push("energy")
       if (present(list)) then
          call gemv_cmp(list, cache%alist, cache%adiag, cache%vrhs, cache%xvec(:mol%nat), &
             & alpha=0.5_wp, beta=-1.0_wp)
@@ -375,6 +378,8 @@ subroutine solve(self, mol, solver, cache, error, &
          cache%xvec(:mol%nat) = cache%xvec(:mol%nat) - 0.5_wp * cache%vrhs(mol%nat + 1)
       end if
       energy(:) = energy(:) + cache%vrhs(:mol%nat) * cache%xvec(:mol%nat)
+      call timer%pop
+      call print_energy_time(print_unit, verbosity_solve, timer%get("energy"))
    end if
 
    ! Allocate and get amat derivatives
@@ -558,12 +563,13 @@ subroutine get_external_gradient(self, mol, solver, cache, error, dfdq, dfdr, df
 end subroutine get_external_gradient
 
 !> Local charges calculation
-subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL)
+subroutine local_charge(self, mol, list, trans, qloc, dqlocdr, dqlocdL)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: self
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
    !> Lattice points
+   type(adjacency_list), intent(in) :: list
    real(wp), intent(in) :: trans(:, :)
    !> Local atomic partial charges
    real(wp), intent(out) :: qloc(:)
@@ -580,7 +586,7 @@ subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL)
    ! Get the electronegativity weighted CN for local charge
    ! Derivatives depend only in this CN
    if (allocated(self%ncoord_en)) then
-      call self%ncoord_en%get_coordination_number(mol, trans, qloc, dqlocdr, dqlocdL)
+      call self%ncoord_en%get_coordination_number(mol, trans, qloc, dqlocdr, dqlocdL, list)
    end if
 
    ! Distribute the total charge equally
@@ -659,6 +665,17 @@ subroutine print_gradient_time(unit, verbosity, timer)
       write(unit, '(a)') ''
    end if
 end subroutine print_gradient_time
+
+!> Print gradient calculation time
+subroutine print_energy_time(unit, verbosity, timer)
+   integer, intent(in) :: unit, verbosity
+   real(wp):: timer
+
+   if (verbosity > 1) then
+      write(unit, '(a, 1x, a)') "Energy calculation time : ", format_time(timer)
+      write(unit, '(a)') ''
+   end if
+end subroutine print_energy_time
 
 !> Print total solve time
 subroutine print_total_time(unit, verbosity, timer)

@@ -18,7 +18,7 @@ program main
    use mctc_env, only: error_type, fatal_error, get_argument, wp, timer_type, format_time
    use mctc_io, only: structure_type, read_structure, filetype, get_filetype
    use mctc_cutoff, only: get_lattice_points
-   use multicharge_adjlist, only: new_adjacency_list, adjacency_list, mchrg_adjlist_input
+   use mctc_ncoord, only: adjacency_list, new_adjacency_list
    use multicharge, only: mchrg_model_type, mchrg_model, mchrg_cache, new_eeq2019_model, &
       & new_eeqbc2025_model, get_multicharge_version, &
       & write_ascii_model, write_ascii_properties, write_ascii_results
@@ -41,20 +41,19 @@ program main
    type(mchrg_cache), allocatable :: cache
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
-   type(mchrg_adjlist_input), allocatable :: nlist_input
-   logical :: grad, egrad, qgrad, json, exist
+   logical :: grad, egrad, qgrad, json, exist, use_nlist, compl
    real(wp), allocatable :: trans(:, :)
    real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
    real(wp), allocatable :: qvec(:)
    real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: charge
    integer, allocatable :: verbosity
-   real(wp), parameter :: cn_max = 8.0_wp, cutoff = 10000.0_wp
+   real(wp) :: cutoff
    type(timer_type) :: timer
 
    call timer%push("total")
 
-   call get_arguments(input, model_id, nlist_input, input_format, egrad, qgrad, charge, json, &
+   call get_arguments(input, model_id, use_nlist, cutoff, compl, input_format, egrad, qgrad, charge, json, &
                       solver_input, verbosity, error)
    if (allocated(error)) then
       write(error_unit, '(a)') error%message
@@ -95,12 +94,23 @@ program main
       end if
    end if
 
+   call get_lattice_points(mol%periodic, mol%lattice, 25.0_wp, trans)
+
+   ! Create neighbour list if requested
+   if (use_nlist) then
+      call timer%push("nlist")
+      allocate(list)
+      call new_adjacency_list(list, mol, trans, cutoff, compl)
+      call timer%pop
+      write(output_unit, '(a, 1x, a)') "Neighbour list generation time :", format_time(timer%get("nlist"))
+   end if
+
    call timer%push("model_setup")
 
    if (model_id == mchrg_model%eeq2019) then
       call new_eeq2019_model(mol, model, error)
    else if (model_id == mchrg_model%eeqbc2025) then
-      call new_eeqbc2025_model(mol, model, error)
+      call new_eeqbc2025_model(mol, model, error, list)
    else
       call fatal_error(error, "Invalid model was choosen.")
    end if
@@ -131,19 +141,15 @@ program main
 
    grad = egrad .or. qgrad
 
-   call get_lattice_points(mol%periodic, mol%lattice, model%ncoord%cutoff, trans)
+   allocate(cache)
 
-   ! Create neighbour list if requested
-   if (allocated(nlist_input)) then
-      call timer%push("nlist")
-      allocate(list)
-      call new_adjacency_list(list, nlist_input, mol, trans)
-      call timer%pop
-      write(output_unit, '(a, 1x, a)') "Neighbour list generation time", format_time(timer%get("nlist"))
+   call timer%push("update")
+   call model%update(mol, cache, trans, grad, list)
+   call timer%pop
+   if (verbosity > 1) then
+      write(output_unit, '(a, 1x, a)') "Get coordination number time : ", format_time(timer%get("update"))
    end if
 
-   allocate(cache)
-   call model%update(mol, cache, trans, grad)
    call model%solve(mol, solver, cache, error, &
       & energy, gradient, sigma, qvec, dqdr, dqdL, list, verbosity=verbosity, unit=output_unit)
 
@@ -211,8 +217,8 @@ subroutine version(unit)
 
 end subroutine version
 
-subroutine get_arguments(input, model_id, nlist_input, input_format, egrad, qgrad, charge, &
-   & json, solver_input, verbosity, error)
+subroutine get_arguments(input, model_id, use_nlist, cutoff, complete_nlist, &
+   & input_format, egrad, qgrad, charge, json, solver_input, verbosity, error)
 
    !> Input file name
    character(len=:), allocatable :: input
@@ -221,7 +227,13 @@ subroutine get_arguments(input, model_id, nlist_input, input_format, egrad, qgra
    integer, intent(out) :: model_id
 
    !> Flag for neighbour list creation
-   type(mchrg_adjlist_input), allocatable, intent(out) :: nlist_input
+   logical, intent(out) :: use_nlist
+
+   !> Nlist cutoff
+   real(wp), intent(out) :: cutoff
+
+   !> Complete neighbourlist flag
+   logical, intent(out) :: complete_nlist
 
    !> Input file format
    integer, allocatable, intent(out) :: input_format
@@ -252,14 +264,15 @@ subroutine get_arguments(input, model_id, nlist_input, input_format, egrad, qgra
 
    character(len=:), allocatable :: solver_name
    integer, allocatable :: maxiter
-   real(wp), allocatable :: tol, cutoff
-   logical :: complete_nlist
+   real(wp), allocatable :: tol
 
    model_id = mchrg_model%eeq2019
+   use_nlist = .false.
    egrad = .false.
    qgrad = .false.
    json = .false.
    complete_nlist = .false.
+   cutoff = 29.0_wp
    iarg = 0
    verbosity = 1
    narg = command_argument_count()
@@ -359,9 +372,8 @@ subroutine get_arguments(input, model_id, nlist_input, input_format, egrad, qgra
             exit
          end if 
       case("-nlist", "-list", "--nlist")
-         allocate(nlist_input)
+         use_nlist = .true.
       case("-cut", "-cutoff", "--cutoff")
-         allocate(cutoff)
          iarg = iarg + 1
          call get_argument(iarg, arg)
          read(arg, *, iostat=iostat) cutoff
@@ -404,25 +416,13 @@ subroutine get_arguments(input, model_id, nlist_input, input_format, egrad, qgra
    if (allocated(verbosity)) then
       solver_input%verbosity = verbosity
    end if
-   if (allocated(nlist_input)) then
-      solver_input%use_nlist = .true.
-   end if
+      solver_input%use_nlist = use_nlist
    type is (direct_input)
    if (allocated(verbosity)) then
       solver_input%verbosity = verbosity
    end if  
    end select
    
-   ! Neighbourlist input
-   if (allocated(nlist_input)) then
-      if (allocated(cutoff)) then
-         nlist_input%cutoff = cutoff
-      end if 
-      nlist_input%complete = complete_nlist
-   else if (allocated(cutoff)) then
-      call fatal_error(error, "Cuttof cannot be used without neighbour list creation.")
-      return
-   end if
 
    if (.not. allocated(input)) then
       if (.not. allocated(error)) then
