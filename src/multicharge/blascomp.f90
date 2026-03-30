@@ -17,7 +17,7 @@
 !> Matrix-vector and Matrix-matrix routines for CSR compressed matrices.
 module multicharge_blascomp
     use mctc_env, only : wp
-    use multicharge_adjlist, only : adjacency_list
+    use mctc_ncoord, only: adjacency_list
     implicit none
     private
 

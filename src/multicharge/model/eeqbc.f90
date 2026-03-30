@@ -26,8 +26,9 @@ module multicharge_model_eeqbc
    use mctc_io, only: structure_type
    use mctc_io_constants, only: pi
    use mctc_ncoord, only: new_ncoord, cn_count
+   use mctc_ncoord, only: adjacency_list
    use multicharge_wignerseitz, only: new_wignerseitz_cell, wignerseitz_cell_type
-   use multicharge_adjlist, only: adjacency_list, gemv_sparse, gemv_cmp
+   use multicharge_adjlist, only: gemv_sparse, gemv_cmp
    use multicharge_model_type, only: mchrg_model_type, get_dir_trans
    use multicharge_blas, only: gemv, gemm
    use multicharge_model_cache, only: mchrg_cache
@@ -48,6 +49,8 @@ module multicharge_model_eeqbc
       real(wp) :: norm_exp
       !> Van der Waals radii matrix (nat × nat)
       real(wp), allocatable :: rvdw(:, :)
+      !> Van der Waals radii list (list%nlat) and diagonal (nat)
+      real(wp), allocatable :: rvdwlist(:), rvdwdiag(:)
    contains
       !> Update and allocate cache
       procedure :: update
@@ -90,7 +93,7 @@ contains
 !> Constructor for the EEQBC model.
 subroutine new_eeqbc_model(self, mol, error, chi, rad, &
    & eta, kcnchi, kqchi, kqeta, kcnrad, cap, avg_cn, rvdw, &
-   & kbc, cutoff, cn_exp, rcov, en, cn_max, norm_exp)
+   & rvdwlist, rvdwdiag, kbc, cutoff, cn_exp, rcov, en, cn_max, norm_exp)
    !> Bond capacitor electronegativity equilibration model
    type(eeqbc_model), intent(out) :: self
    !> Molecular structure data
@@ -116,7 +119,9 @@ subroutine new_eeqbc_model(self, mol, error, chi, rad, &
    !> Average coordination number
    real(wp), intent(in) :: avg_cn(:)
    !> Van-der-Waals radii
-   real(wp), intent(in) :: rvdw(:, :)
+   real(wp), intent(in), optional :: rvdw(:, :)
+   !> Van-der-Waals radii list (list%nlat) and diagonal (nat)
+   real(wp), intent(in), optional :: rvdwlist(:), rvdwdiag(:)
    !> Exponent of error function in bond capacitance
    real(wp), intent(in), optional :: kbc
    !> Exponent of the distance normalization
@@ -141,7 +146,9 @@ subroutine new_eeqbc_model(self, mol, error, chi, rad, &
    self%kcnrad = kcnrad
    self%cap = cap
    self%avg_cn = avg_cn
-   self%rvdw = rvdw
+   if (present(rvdw)) self%rvdw = rvdw
+   if (present(rvdwlist)) self%rvdwlist = rvdwlist
+   if (present(rvdwlist)) self%rvdwdiag = rvdwdiag
 
    if (present(kbc)) then
       self%kbc = kbc
@@ -167,11 +174,13 @@ subroutine new_eeqbc_model(self, mol, error, chi, rad, &
 end subroutine new_eeqbc_model
 
 !> Update coordination numbers and local charges, and set up Wigner–Seitz cell if periodic.
-subroutine update(self, mol, cache, trans, grad)
+subroutine update(self, mol, cache, trans, grad, list)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Structure type
    type(structure_type), intent(in) :: mol
+   !> Multicharge neighbourlist type
+   type(adjacency_list), intent(in), optional :: list
    !> Multicharge cache 
    type(mchrg_cache), intent(inout) :: cache
    !> Lattice vectors
@@ -200,11 +209,11 @@ subroutine update(self, mol, cache, trans, grad)
       if (.not. allocated(cache%dqlocdL)) then
          allocate(cache%dqlocdL(3, 3, mol%nat))
       end if
-      call self%ncoord%get_coordination_number(mol, trans, cache%cn, cache%dcndr, cache%dcndL)
-      call self%local_charge(mol, trans, cache%qloc, cache%dqlocdr, cache%dqlocdL)
+      call self%ncoord%get_coordination_number(mol, trans, cache%cn, dcndr=cache%dcndr, dcndL=cache%dcndL, list=list)
+      call self%local_charge(mol, list, trans, cache%qloc, cache%dqlocdr, cache%dqlocdL)
    else
-      call self%ncoord%get_coordination_number(mol, trans, cache%cn)
-      call self%local_charge(mol, trans, cache%qloc)
+      call self%ncoord%get_coordination_number(mol, trans, cache%cn, list=list)
+      call self%local_charge(mol, list, trans, cache%qloc)
    end if
 
    if (any(mol%periodic)) then
@@ -254,7 +263,7 @@ subroutine get_capacitance_matrix(self, mol, ndim, cache, list)
 
       ! Neighbour list routines
       if (any(mol%periodic)) then
-         call get_dcmat_3d_list(self, mol, list, cache%wsc, cache%dcdr, cache%dcdL)
+         call get_cmat_3d_list(self, mol, list, cache%wsc, cache%clist, cache%cdiag)
          ! cmat gradients
          if (grad) then
             call get_dcmat_3d_list(self, mol, list, cache%wsc, cache%dcdr, cache%dcdL)
@@ -340,32 +349,61 @@ subroutine get_xvec(self, mol, ndim, cache, list)
    end if
 
    if (any(mol%periodic)) then
-      call get_dir_trans(mol%lattice, dtrans)
-      !$omp parallel default(none) &
-      !$omp shared(mol, self, cache, dtrans) private(iat, izp, img, wsw) &
-      !$omp private(capi, vec, rvdw, ctmp, xvec_local)
-      allocate(xvec_local, mold=cache%xvec)
-      xvec_local(:) = 0.0_wp
-      !$omp do schedule(runtime)
-      do iat = 1, mol%nat
-         izp = mol%id(iat)
-         capi = self%cap(izp)
-         ! eliminate self-interaction (quasi off-diagonal)
-         rvdw = self%rvdw(iat, iat)
-         wsw = 1.0_wp / real(cache%wsc%nimg(iat, iat), wp)
-         do img = 1, cache%wsc%nimg(iat, iat)
-            vec = cache%wsc%trans(:, cache%wsc%tridx(img, iat, iat))
+      if (present (list)) then
+         call get_dir_trans(mol%lattice, dtrans)
+         !$omp parallel default(none) &
+         !$omp shared(mol, list, self, cache, dtrans) private(iat, izp, img, wsw) &
+         !$omp private(capi, vec, rvdw, ctmp, xvec_local)
+         allocate(xvec_local, mold=cache%xvec)
+         xvec_local(:) = 0.0_wp
+         !$omp do schedule(runtime)
+         do iat = 1, mol%nat
+            izp = mol%id(iat)
+            capi = self%cap(izp)
+            ! eliminate self-interaction (quasi off-diagonal)
+            rvdw = self%rvdwdiag(iat)
+            wsw = 1.0_wp / real(cache%wsc%nimg(iat, iat), wp)
+            do img = 1, cache%wsc%nimg(iat, iat)
+               vec = cache%wsc%trans(:, cache%wsc%tridx(img, iat, iat))
 
-            call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, ctmp)
-            xvec_local(iat) = xvec_local(iat) - wsw * ctmp * cache%xtmp(iat)
+               call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, ctmp)
+               xvec_local(iat) = xvec_local(iat) - wsw * ctmp * cache%xtmp(iat)
+            end do
          end do
-      end do
-      !$omp end do
-      !$omp critical (get_xvec_)
-      cache%xvec(:) = cache%xvec + xvec_local
-      !$omp end critical (get_xvec_)
-      deallocate(xvec_local)
-      !$omp end parallel
+         !$omp end do
+         !$omp critical (get_xvec_)
+         cache%xvec(:) = cache%xvec + xvec_local
+         !$omp end critical (get_xvec_)
+         deallocate(xvec_local)
+         !$omp end parallel
+      else
+         call get_dir_trans(mol%lattice, dtrans)
+         !$omp parallel default(none) &
+         !$omp shared(mol, self, cache, dtrans) private(iat, izp, img, wsw) &
+         !$omp private(capi, vec, rvdw, ctmp, xvec_local)
+         allocate(xvec_local, mold=cache%xvec)
+         xvec_local(:) = 0.0_wp
+         !$omp do schedule(runtime)
+         do iat = 1, mol%nat
+            izp = mol%id(iat)
+            capi = self%cap(izp)
+            ! eliminate self-interaction (quasi off-diagonal)
+            rvdw = self%rvdw(iat, iat)
+            wsw = 1.0_wp / real(cache%wsc%nimg(iat, iat), wp)
+            do img = 1, cache%wsc%nimg(iat, iat)
+               vec = cache%wsc%trans(:, cache%wsc%tridx(img, iat, iat))
+
+               call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, ctmp)
+               xvec_local(iat) = xvec_local(iat) - wsw * ctmp * cache%xtmp(iat)
+            end do
+         end do
+         !$omp end do
+         !$omp critical (get_xvec_)
+         cache%xvec(:) = cache%xvec + xvec_local
+         !$omp end critical (get_xvec_)
+         deallocate(xvec_local)
+         !$omp end parallel
+      end if
    end if
 
 end subroutine get_xvec
@@ -508,7 +546,7 @@ subroutine get_xvec_derivs_0d_list(self, mol, ndim, cache, list)
    type(adjacency_list), intent(in) :: list
 
    integer :: iat, izp, jat, kat, jzp
-   real(wp) :: capi, capj, vec(3), ctmp, rvdw, dG(3), dS(3, 3)
+   real(wp) :: capi, capj, vec(3), ctmp, dG(3), dS(3, 3)
    real(wp), allocatable :: dtmpdr(:, :, :), dtmpdL(:, :, :)
 
    ! Thread-private arrays for reduction
@@ -597,7 +635,7 @@ subroutine get_xvec_derivs_3d(self, mol, ndim, cache)
    type(mchrg_cache), intent(inout) :: cache
 
    integer :: iat, izp, jat, jzp, img
-   real(wp) :: capi, capj, wsw, vec(3), ctmp, rvdw, dG(3), dS(3, 3)
+   real(wp) :: capi, capj, wsw, rvdw, vec(3), ctmp, dG(3), dS(3, 3)
    real(wp), allocatable :: dtmpdr(:, :, :), dtmpdL(:, :, :)
    real(wp), allocatable :: dtrans(:, :)
 
@@ -767,7 +805,7 @@ subroutine get_xvec_derivs_3d_list(self, mol, ndim, cache, list)
       capi = self%cap(izp)
       do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
          jat = list%nlat(kat)
-         rvdw = self%rvdw(iat, jat)
+         rvdw = self%rvdwlist(kat)
          jzp = mol%id(jat)
          capj = self%cap(jzp)
 
@@ -788,7 +826,7 @@ subroutine get_xvec_derivs_3d_list(self, mol, ndim, cache, list)
       dxdL_local(:, :, iat) = dxdL_local(:, :, iat) + cache%xtmp(iat) * cache%dcdL(:, :, iat)
 
       ! Capacitance terms for i = j, T != 0
-      rvdw = self%rvdw(iat, iat)
+      rvdw = self%rvdwdiag(iat)
       wsw = 1.0_wp / real(cache%wsc%nimg(iat, iat), wp)
       do img = 1, cache%wsc%nimg(iat, iat)
          vec = cache%wsc%trans(:, cache%wsc%tridx(img, iat, iat))
@@ -1113,7 +1151,7 @@ subroutine get_amat_3d_list(self, mol, list, wsc, cn, qloc, clist, cdiag, alist,
          jat = list%nlat(kat)
          jzp = mol%id(jat)
          ! vdw distance in Angstrom (approximate factor 2)
-         rvdw = self%rvdw(iat, jat)
+         rvdw = self%rvdwlist(kat)
          ! Effective charge width of j
          norm_cn = cn(jat) / self%avg_cn(jzp)**self%norm_exp
          radj = self%rad(jzp) * (1.0_wp - self%kcnrad * norm_cn)
@@ -1130,7 +1168,7 @@ subroutine get_amat_3d_list(self, mol, list, wsc, cn, qloc, clist, cdiag, alist,
 
       ! diagonal Coulomb interaction terms
       gam = 1.0_wp / sqrt(2.0_wp * radi**2)
-      rvdw = self%rvdw(iat, iat)
+      rvdw = self%rvdwdiag(iat)
       wsw = 1.0_wp / real(wsc%nimg(iat, iat), wp)
       do img = 1, wsc%nimg(iat, iat)
          vec = wsc%trans(:, wsc%tridx(img, iat, iat))
@@ -1808,7 +1846,7 @@ subroutine get_damat_3d_list(self, mol, list, wsc, cn, qloc, qvec, dcndr, dcndL,
          jat = list%nlat(kat)
          jzp = mol%id(jat)
          capj = self%cap(jzp)
-         rvdw = self%rvdw(iat, jat)
+         rvdw = self%rvdwlist(kat)
 
          ! Effective charge width of j
          norm_cn = 1.0_wp / self%avg_cn(jzp)**self%norm_exp
@@ -1873,7 +1911,7 @@ subroutine get_damat_3d_list(self, mol, list, wsc, cn, qloc, qvec, dcndr, dcndL,
       ! diagonal explicit, charge width, and capacitance derivative terms
       gam = 1.0_wp / sqrt(2.0_wp * radi**2)
       dtmp = -sqrt2pi * dradi / (radi**2) * qvec(iat)
-      rvdw = self%rvdw(iat, iat)
+      rvdw = self%rvdwdiag(iat)
       wsw = 1.0_wp / real(wsc%nimg(iat, iat), wp)
       do img = 1, wsc%nimg(iat, iat)
          vec = wsc%trans(:, wsc%tridx(img, iat, iat))
@@ -2097,7 +2135,7 @@ subroutine get_cmat_0d_list(self, mol, list, clist, cdiag)
          jzp = mol%id(jat)
          vec = mol%xyz(:, jat) - mol%xyz(:, iat)
          r1 = norm2(vec)
-         rvdw = self%rvdw(iat, jat)
+         rvdw = self%rvdwlist(kat)
          capj = self%cap(jzp)
 
          call get_cpair(self%kbc, tmp, r1, rvdw, capi, capj)
@@ -2232,7 +2270,7 @@ subroutine get_cmat_3d_list(self, mol, list, wsc, clist, cdiag)
       do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
          jat = list%nlat(kat)
          jzp = mol%id(jat)
-         rvdw = self%rvdw(iat, jat)
+         rvdw = self%rvdwlist(kat)
          capj = self%cap(jzp)
          wsw = 1.0_wp / real(wsc%nimg(jat, iat), wp)
          do img = 1, wsc%nimg(jat, iat)
@@ -2249,7 +2287,7 @@ subroutine get_cmat_3d_list(self, mol, list, wsc, clist, cdiag)
       end do
 
       ! diagonal capacitance (interaction with images)
-      rvdw = self%rvdw(iat, iat)
+      rvdw = self%rvdwdiag(iat)
       wsw = 1.0_wp / real(wsc%nimg(iat, iat), wp)
       do img = 1, wsc%nimg(iat, iat)
          vec = wsc%trans(:, wsc%tridx(img, iat, iat))
@@ -2445,7 +2483,7 @@ subroutine get_dcmat_0d_list(self, mol, list, dcdr, dcdL)
          jat = list%nlat(kat)
          jzp = mol%id(jat)
          capj = self%cap(jzp)
-         rvdw = self%rvdw(iat, jat)
+         rvdw = self%rvdwlist(kat)
          vec = mol%xyz(:, jat) - mol%xyz(:, iat)
 
          call get_dcpair(self%kbc, vec, rvdw, capi, capj, dG, dS)
@@ -2589,7 +2627,7 @@ subroutine get_dcmat_3d_list(self, mol, list, wsc, dcdr, dcdL)
       do jat = 1, iat - 1
          jzp = mol%id(jat)
          capj = self%cap(jzp)
-         rvdw = self%rvdw(iat, jat)
+         rvdw = self%rvdwlist(kat)
          wsw = 1.0_wp / real(wsc%nimg(jat, iat), wp)
          do img = 1, wsc%nimg(jat, iat)
             vec = mol%xyz(:, jat) - mol%xyz(:, iat) + wsc%trans(:, wsc%tridx(img, jat, iat))
@@ -2607,7 +2645,7 @@ subroutine get_dcmat_3d_list(self, mol, list, wsc, dcdr, dcdL)
          end do
       end do
 
-      rvdw = self%rvdw(iat, iat)
+      rvdw = self%rvdwdiag(iat)
       wsw = 1.0_wp / real(wsc%nimg(iat, iat), wp)
       do img = 1, wsc%nimg(iat, iat)
          vec = wsc%trans(:, wsc%tridx(img, iat, iat))

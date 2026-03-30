@@ -29,7 +29,7 @@ module multicharge_model_eeq
    use mctc_io_math, only: matdet_3x3
    use mctc_ncoord, only: new_ncoord, cn_count
    use multicharge_wignerseitz, only: wignerseitz_cell_type, new_wignerseitz_cell
-   use multicharge_adjlist, only: adjacency_list
+   use mctc_ncoord, only: adjacency_list
    use multicharge_ewald, only: get_alpha
    use multicharge_model_type, only: mchrg_model_type, get_dir_trans, get_rec_trans
    use multicharge_model_cache, only: mchrg_cache
@@ -99,11 +99,13 @@ subroutine new_eeq_model(self, mol, error, chi, rad, eta, kcnchi, &
 end subroutine new_eeq_model
 
 !> Update coordination numbers and, if needed, the Wigner–Seitz cell and Ewald alpha.
-subroutine update(self, mol, cache, trans, grad)
+subroutine update(self, mol, cache, trans, grad, list)
    !> EEQ model type
    class(eeq_model), intent(in) :: self
    !> Structure type
    type(structure_type), intent(in) :: mol
+   !> Multicharge neighbourlist type
+   type(adjacency_list), intent(in), optional :: list
    !> Multicharge cache 
    type(mchrg_cache), intent(inout) :: cache
    !> Lattice vectors
@@ -123,9 +125,9 @@ subroutine update(self, mol, cache, trans, grad)
       if (.not. allocated(cache%dcndL)) then
          allocate(cache%dcndL(3, 3, mol%nat))
       end if
-      call self%ncoord%get_coordination_number(mol, trans, cache%cn, cache%dcndr, cache%dcndL)
+      call self%ncoord%get_coordination_number(mol, trans, cache%cn, cache%dcndr, cache%dcndL, list=list)
    else 
-      call self%ncoord%get_coordination_number(mol, trans, cache%cn)
+      call self%ncoord%get_coordination_number(mol, trans, cache%cn, list=list)
    end if
 
    if (any(mol%periodic)) then
