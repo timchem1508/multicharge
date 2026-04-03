@@ -63,11 +63,6 @@ pure subroutine gemv_cmp_111(list, mlist, mdiag, x, y, alpha, beta, symmetric)
 
     do i = 1, size(list%nnl)
 
-        ! Diagonal only for symmetric matrices
-        if (is_sym) then
-            y(i) = y(i) + alpha * mdiag(i) * x(i)
-        end if
-
         do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
             j = list%nlat(k)
 
@@ -81,6 +76,12 @@ pure subroutine gemv_cmp_111(list, mlist, mdiag, x, y, alpha, beta, symmetric)
                 y(j) = y(j) - alpha * mlist(k) * x(i)
             end if
         end do
+
+        ! Diagonal only for symmetric matrices
+        if (is_sym) then
+            y(i) = y(i) + alpha * mdiag(i) * x(i)
+        end if
+        
     end do
 end subroutine gemv_cmp_111
 
@@ -113,10 +114,6 @@ pure subroutine gemv_cmp_212(list, mlist, mdiag, x, y, alpha, beta, symmetric)
 
     do i = 1, size(list%nnl)
 
-        if (is_sym) then
-            y(:, i) = y(:, i) + alpha * mdiag(:, i) * x(i)
-        end if
-
         do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
             j = list%nlat(k)
 
@@ -128,6 +125,9 @@ pure subroutine gemv_cmp_212(list, mlist, mdiag, x, y, alpha, beta, symmetric)
                 y(:, j) = y(:, j) - alpha * mlist(:, k) * x(i)
             end if
         end do
+        if (is_sym) then
+            y(:, i) = y(:, i) + alpha * mdiag(:, i) * x(i)
+        end if
     end do
 end subroutine gemv_cmp_212
 

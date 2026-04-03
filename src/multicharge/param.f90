@@ -73,15 +73,13 @@ subroutine new_eeq2019_model(mol, model, error)
 
 end subroutine new_eeq2019_model
 
-subroutine new_eeqbc2025_model(mol, model, error, list)
+subroutine new_eeqbc2025_model(mol, model, error)
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
    !> Electronegativity equilibration model
    class(mchrg_model_type), allocatable, intent(out) :: model
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
-   !> Neighbour list for bond-capacitor correction
-   type(adjacency_list), optional, intent(in) :: list
 
    real(wp), parameter :: kcnrad = 0.14_wp
    real(wp), parameter :: kbc = 0.60_wp
@@ -89,11 +87,11 @@ subroutine new_eeqbc2025_model(mol, model, error, list)
    real(wp), parameter :: cn_exp = 2.0_wp
    real(wp), parameter :: norm_exp = 0.75_wp
 
-   integer :: iat, jat, kat
+   integer :: isp, jsp, ksp, izp, jzp
 
    real(wp), allocatable :: chi(:), eta(:), rad(:), kcnchi(:), &
       & kqchi(:), kqeta(:), cap(:), rcov(:), avg_cn(:), en(:), &
-      & rvdw(:, :), rvdwlist(:), rvdwdiag(:)
+      & rvdw(:, :)
    type(eeqbc_model), allocatable :: eeqbc
 
    chi = get_eeqbc_chi(mol%num)
@@ -117,33 +115,21 @@ subroutine new_eeqbc2025_model(mol, model, error, list)
       &.or. mol%num == 97 .or. mol%num == 103)
    en = en / 3.98_wp
    
-   if (present(list)) then
-      allocate(rvdwlist(size(list%nlat)))
-      allocate(rvdwdiag(mol%nat))
-      do iat = 1, mol%nat
-         rvdwdiag(iat) = get_vdw_rad( mol%num(mol%id(iat)), &
-                                    mol%num(mol%id(iat)) ) * autoaa
-         do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
-            jat = list%nlat(kat)
-            rvdwlist(kat) = get_vdw_rad( mol%num(mol%id(iat)), &
-                                    mol%num(mol%id(jat)) ) * autoaa
-         end do
+   allocate(rvdw(mol%nid, mol%nid))
+   do isp = 1, mol%nid
+      izp = mol%num(isp)
+      do jsp = 1, mol%nid
+         jzp = mol%num(jsp)
+         rvdw(jsp, isp) = get_vdw_rad(jzp, izp) * autoaa
+         rvdw(isp, jsp) = rvdw(jsp, isp)
       end do
-   else
-      allocate(rvdw(mol%nat, mol%nat))
-      do iat = 1, mol%nat
-         do jat = 1, mol%nat
-            rvdw(iat,jat) = get_vdw_rad( mol%num(mol%id(iat)), &
-                                    mol%num(mol%id(jat)) ) * autoaa
-         end do
-      end do
-   end if
+   end do
 
    allocate(eeqbc)
    call new_eeqbc_model(eeqbc, mol=mol, error=error, chi=chi, &
       & rad=rad, eta=eta, kcnchi=kcnchi, kqchi=kqchi, kqeta=kqeta, &
       & kcnrad=kcnrad, cap=cap, avg_cn=avg_cn, rvdw=rvdw, &
-      & rvdwlist=rvdwlist, rvdwdiag=rvdwdiag, kbc=kbc, &
+      & kbc=kbc, &
       & cutoff=cutoff, cn_exp=cn_exp, rcov=rcov, en=en, &
       & norm_exp=norm_exp)
    call move_alloc(eeqbc, model)
