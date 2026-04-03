@@ -174,8 +174,12 @@ contains
 
         ! Dimensions check
         ndim = size(xvec)
+        if (size(vrhs) /= ndim) then
+            call fatal_error(error, "Dimension mismatch between xvec and vrhs.")
+            return
+        end if
         if (.not. nlist) then
-            if (size(amat,1) /= ndim .or. size(amat,2) /= ndim .or. size(vrhs) /= ndim) then
+            if (size(amat,1) /= ndim .or. size(amat,2) /= ndim) then
                 call fatal_error(error, "dimension mismatch.")
                 return
             end if

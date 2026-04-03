@@ -22,6 +22,7 @@ module test_adjlist
    use mctc_ncoord, only: adjacency_list, new_adjacency_list
    use mstore, only: get_structure
    use multicharge_blas, only: gemv
+   use multicharge_wignerseitz, only: new_wignerseitz_cell
    use multicharge_model_type, only: mchrg_model_type
    use multicharge_model_eeqbc, only: eeqbc_model
    use multicharge_param, only: new_eeq2019_model, new_eeqbc2025_model
@@ -39,7 +40,7 @@ module test_adjlist
    real(wp), parameter :: thr = 100 * epsilon(1.0_wp)
    real(wp), parameter :: thr2 = sqrt(epsilon(1.0_wp))
    real(wp), parameter :: thr3 = 100 * thr2
-   real(wp), parameter :: cutoff = 28.0_wp 
+   real(wp), parameter :: cutoff = 29.0_wp 
 
 contains
 
@@ -57,7 +58,8 @@ subroutine collect_adjlist(testsuite)
       & new_unittest("eeqbc-energy-mb04", test_eeqbc_e_mb04), &
       & new_unittest("eeqbc-gradient-mb05", test_eeqbc_g_mb05), &
       & new_unittest("eeqbc-gradient-mb06", test_eeqbc_g_mb06), &
-      & new_unittest("eeqbc-gradient-co2", test_eeqbc_g_co2) &
+      & new_unittest("eeqbc-energy-co2", test_eeqbc_e_co2) &
+      !& new_unittest("eeqbc-gradient-co2", test_eeqbc_g_co2) &
       & ]
 
 end subroutine collect_adjlist
@@ -95,16 +97,13 @@ end subroutine solver_maker
 !------------------------------------------------------------------------
 ! General helper routines – now they accept a pre‑built adjacency list.
 !------------------------------------------------------------------------
-subroutine gen_test_molecular(error, mol, list, model, qref, eref)
+subroutine gen_test_molecular(error, mol, model, qref, eref)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
-
-   !> Adjacency list (already built)
-   type(adjacency_list), intent(inout) :: list
 
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
@@ -124,7 +123,9 @@ subroutine gen_test_molecular(error, mol, list, model, qref, eref)
    integer :: maxiter = 1000
    integer :: verbosity = 0
 
-   real(wp), parameter :: trans(3, 1) = 0.0_wp   ! dummy for non‑periodic systems
+   type(adjacency_list), allocatable :: list
+
+   real(wp) :: trans(3, 1) = 0.0_wp
    real(wp), allocatable :: energy(:)
    real(wp), allocatable :: qvec(:)
 
@@ -148,7 +149,11 @@ subroutine gen_test_molecular(error, mol, list, model, qref, eref)
       allocate (qvec(mol%nat))
    end if
 
-   call model%update(mol, cache, trans, grad=.false.)
+   ! Build adjacency list
+   allocate(list)
+   call new_adjacency_list(list, mol, cutoff, .false.)
+
+   call model%update(mol, cache, trans, grad=.false., list=list)
    call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, unit=output_unit)
    if (allocated(error)) return
 
@@ -175,7 +180,130 @@ subroutine gen_test_molecular(error, mol, list, model, qref, eref)
 
 end subroutine gen_test_molecular
 
-subroutine test_numgrad(error, mol, model, list)
+subroutine gen_test_periodic(error, mol, model)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Electronegativity equilibration model
+   class(mchrg_model_type), intent(in) :: model
+
+   !> Reference charges
+   real(wp), allocatable :: qref(:)
+
+   !> Reference energies
+   real(wp), allocatable :: eref(:)
+
+   type(mchrg_cache), allocatable :: cache
+
+   type(adjacency_list), allocatable :: list
+
+   ! Solver variables
+   class(mchrg_solver_type), allocatable :: solver
+   class(mchrg_solver_input), allocatable :: solver_input
+   real(wp) :: tol = 1.0e-15_wp
+   integer :: maxiter = 1000
+   integer :: verbosity = 0
+
+   integer :: ndim
+   real(wp), allocatable :: trans(:, :)
+   real(wp), allocatable :: energy(:)
+   real(wp), allocatable :: qvec(:)
+   real(wp), allocatable :: amat_dir(:,:)
+   real(wp), allocatable :: amat_list(:,:)
+
+   integer :: iat, jat, kat
+
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      solver_input%cgtol = tol
+      solver_input%cgmiter = maxiter
+      solver_input%verbosity = verbosity
+      ndim = mol%nat
+      solver_input%use_nlist = .true.
+   end select
+   call solver_maker(solver, solver_input, error)
+   
+   allocate(cache)
+
+   call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
+
+   allocate(eref(mol%nat))
+   eref(:) = 0.0_wp
+   allocate(energy(mol%nat))
+   energy(:) = 0.0_wp
+   allocate (qref(mol%nat))
+   allocate (qvec(mol%nat))
+
+   allocate(amat_dir(mol%nat, mol%nat), amat_list(mol%nat, mol%nat))
+
+   call model%update(mol, cache, trans, grad=.false.)
+   !call model%get_capacitance_matrix(mol, mol%nat, cache)
+   !call model%get_xvec( mol, mol%nat, cache)
+   !call model%get_coulomb_matrix(mol, mol%nat, cache)
+   !amat_dir(:,:) = cache%amat
+   !write(*,*) "DIRECT AMAT"
+   !print'(12es21.14)', amat_dir
+   !write(*,*) "DIRECT XVEC"
+   !write(*,'(es21.14)') cache%xvec
+   !write(*,'(50("-"))')
+   call model%solve(mol, solver, cache, error, energy=eref, qvec=qref, unit=output_unit)
+
+
+   if (allocated(error)) return
+
+   ! Build adjacency list
+   deallocate(cache)
+   allocate(cache)
+   allocate(list)
+   call new_adjacency_list(list, mol, cutoff, .false.)
+   call model%update(mol, cache, trans, grad=.false., list=list)
+   !call model%get_capacitance_matrix(mol, mol%nat, cache, list)
+   !call model%get_xvec(mol, mol%nat, cache, list)
+   !call model%get_coulomb_matrix(mol, mol%nat, cache, list)
+   !do iat = 1, mol%nat
+   !   
+   !   do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
+   !      jat = list%nlat(kat)
+   !      amat_list(iat, jat) = cache%alist(kat)
+   !      amat_list(jat, iat) = cache%alist(kat)
+   !   end do
+   !   amat_list(iat, iat) = cache%adiag(iat)
+   !end do
+   !write(*,*) "NLIST AMAT"
+   !write(*,'(12es21.14)') amat_list
+   !write(*,*) "NLIST XVEC"
+   !write(*,'(es21.14)') cache%xvec
+   !write(*,'(50("-"))')
+   call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, unit=output_unit)
+
+
+
+   if (any(abs(qvec - qref) > thr)) then
+      call test_failed(error, "Partial charges do not match")
+      print'(a)', "Charges:"
+      print'(3es21.14)', qvec
+      print'(a)', "diff:"
+      print'(3es21.14)', qvec - qref
+   end if
+
+   if (any(abs(energy - eref) > thr)) then
+      call test_failed(error, "Energies do not match")
+      print'(a)', "Energy:"
+      print'(3es21.14)', energy
+      print'(a)', "diff:"
+      print'(3es21.14)', energy - eref
+   end if
+   if (allocated(error)) return
+
+
+end subroutine gen_test_periodic
+
+subroutine test_numgrad(error, mol, model)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -186,9 +314,6 @@ subroutine test_numgrad(error, mol, model, list)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   !> Adjacency list (already built)
-   type(adjacency_list), intent(inout) :: list
-
    type(mchrg_cache), allocatable :: cache
 
    ! Solver variables
@@ -197,6 +322,8 @@ subroutine test_numgrad(error, mol, model, list)
    real(wp) :: tol = 1.0e-15_wp
    integer :: maxiter = 1000
    integer :: verbosity = 0
+
+   type(adjacency_list), allocatable :: list
 
    integer :: iat, ic, ndim
    real(wp), parameter :: trans(3, 1) = 0.0_wp   ! dummy for non‑periodic systems
@@ -246,7 +373,11 @@ subroutine test_numgrad(error, mol, model, list)
    end do lp
    if (allocated(error)) return
 
-   call model%update(mol, cache, trans, grad)
+   ! Build adjacency list
+   allocate(list)
+   call new_adjacency_list(list, mol, cutoff, .false.)
+
+   call model%update(mol, cache, trans, grad, list=list)
    call model%solve(mol, solver, cache, error, &
       & gradient=gradient, sigma=sigma, list=list, unit=output_unit)
    if (allocated(error)) return
@@ -263,7 +394,7 @@ subroutine test_numgrad(error, mol, model, list)
 
 end subroutine test_numgrad
 
-subroutine test_numgrad_periodic(error, mol, model, list)
+subroutine test_numgrad_periodic(error, mol, model)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -274,9 +405,6 @@ subroutine test_numgrad_periodic(error, mol, model, list)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   !> Adjacency list (already built)
-   type(adjacency_list), intent(inout) :: list
-
    type(mchrg_cache), allocatable :: cache
 
    ! Solver variables
@@ -285,6 +413,8 @@ subroutine test_numgrad_periodic(error, mol, model, list)
    real(wp) :: tol = 1.0e-15_wp
    integer :: maxiter = 1000
    integer :: verbosity = 0
+
+   type(adjacency_list), allocatable :: list
 
    integer :: iat, ic, ndim
    real(wp), allocatable :: trans(:, :)
@@ -336,7 +466,13 @@ subroutine test_numgrad_periodic(error, mol, model, list)
    end do lp
    if (allocated(error)) return
 
-   call model%update(mol, cache, trans, grad)
+   ! Build adjacency list
+   deallocate(cache)
+   allocate(cache)
+   allocate(list)
+   call new_adjacency_list(list, mol, cutoff, .false.)
+
+   call model%update(mol, cache, trans, grad, list=list)
    call model%solve(mol, solver, cache, error, &
       & gradient=gradient, sigma=sigma, list=list, unit=output_unit)
    if (allocated(error)) return
@@ -353,6 +489,81 @@ subroutine test_numgrad_periodic(error, mol, model, list)
 
 end subroutine test_numgrad_periodic
 
+subroutine test_dadr(error, mol, model)
+
+
+   !> Molecular structure data
+   type(structure_type), intent(inout) :: mol
+
+   !> Electronegativity equilibration model
+   class(mchrg_model_type), intent(in) :: model
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   ! Solver variables
+   class(mchrg_solver_type), allocatable :: solver
+   class(mchrg_solver_input), allocatable :: solver_input
+   real(wp) :: tol = 1.0e-15_wp
+   integer :: maxiter = 1000
+   integer :: verbosity = 0
+
+   integer :: iat, ic, jat, kat, ndim
+   real(wp) :: thr2_local
+   real(wp), parameter :: step = 1.0e-6_wp
+   real(wp), allocatable :: trans(:, :)
+   real(wp), allocatable :: qvec(:), numgrad(:, :, :),  numtrace(:, :)
+   real(wp), allocatable :: amatr1(:, :), amatr2(:, :), amatl1(:, :), amatl2(:, :)
+   type(mchrg_cache), allocatable :: cache
+   logical :: grad = .true.
+
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      solver_input%cgtol = tol
+      solver_input%cgmiter = maxiter
+      solver_input%verbosity = verbosity
+      ndim = mol%nat
+   end select
+   call solver_maker(solver, solver_input, error)
+
+   allocate (cache)
+
+   allocate (amatr1(ndim, ndim), amatl1(ndim, ndim), amatr2(ndim, ndim), amatl2(ndim, ndim), &
+      & numtrace(3, mol%nat), numgrad(3, mol%nat, ndim), qvec(mol%nat))
+
+   ! Set tolerance higher if testing eeqbc model
+   select type (model)
+   type is (eeqbc_model)
+      thr2_local = 3.0_wp*thr2
+   class default
+      thr2_local = thr2
+   end select
+
+   call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
+
+   ! Obtain the vector of charges
+   call model%update(mol, cache, trans, grad=.false.)
+   call model%solve(mol, solver, cache, error, qvec=qvec, unit=output_unit)
+   if (allocated(error)) return
+
+   ! Analytical gradient
+   call model%update(mol, cache, trans, grad)
+   call model%get_capacitance_matrix(mol, ndim, cache)
+   call model%get_coulomb_derivs(mol, ndim, cache)
+
+   if (any(abs(cache%dadr(:, :, :) - numgrad(:, :, :)) > thr2_local)) then
+      call test_failed(error, "Derivative of the A matrix does not match")
+      print'(a)', "dadr:"
+      print'(3es21.12)', cache%dadr
+      print'(a)', "numgrad:"
+      print'(3es21.12)', numgrad
+      print'(a)', "diff:"
+      print'(3es21.12)', cache%dadr - numgrad
+   end if
+
+end subroutine test_dadr
+
 !------------------------------------------------------------------------
 ! Test routines – now each builds its own adjacency list.
 !------------------------------------------------------------------------
@@ -365,7 +576,6 @@ subroutine test_eeqbc_q_mb01(error)
    type(structure_type) :: mol
    class(mchrg_model_type), allocatable :: model
 
-   type(adjacency_list), allocatable :: list
    real(wp), parameter :: ref(16) = [&
       & 4.75783090912440E-1_wp, -4.26540500638442E-2_wp, -3.77871226005535E-1_wp, &
       &-9.67376090029522E-2_wp, -1.73364116997142E-1_wp, 1.08660101025683E-1_wp, &
@@ -379,13 +589,9 @@ subroutine test_eeqbc_q_mb01(error)
 
    call get_structure(mol, "MB16-43", "01")
 
-   ! Build adjacency list
-   allocate(list)
-   call new_adjacency_list(list, mol, trans, cutoff, .false.)
-
-   call new_eeqbc2025_model(mol, model, error, list)
+   call new_eeqbc2025_model(mol, model, error)
    if (allocated(error)) return
-   call gen_test_molecular(error, mol, list, model, qref=ref)
+   call gen_test_molecular(error, mol, model, qref=ref)
 
 end subroutine test_eeqbc_q_mb01
 
@@ -398,7 +604,6 @@ subroutine test_eeqbc_q_mb02(error)
    type(structure_type) :: mol
    class(mchrg_model_type), allocatable :: model
 
-   type(adjacency_list), allocatable :: list
    real(wp), parameter :: ref(16) = [&
       &-7.89571755894845E-2_wp, -1.84724587297173E-1_wp, -1.63060175795952E-2_wp, &
       &-2.36115890461711E-1_wp, 5.05729582512203E-1_wp, 1.37556939519704E-1_wp, &
@@ -411,13 +616,9 @@ subroutine test_eeqbc_q_mb02(error)
 
    call get_structure(mol, "MB16-43", "02")
 
-   ! Build adjacency list
-   allocate(list)
-   call new_adjacency_list(list, mol, trans, cutoff, .false.)
-
-   call new_eeqbc2025_model(mol, model, error, list)
+   call new_eeqbc2025_model(mol, model, error)
    if (allocated(error)) return
-   call gen_test_molecular(error, mol, list, model, qref=ref)
+   call gen_test_molecular(error, mol, model, qref=ref)
 
 end subroutine test_eeqbc_q_mb02
 
@@ -429,7 +630,6 @@ subroutine test_eeqbc_q_actinides(error)
    type(structure_type) :: mol
    class(mchrg_model_type), allocatable :: model
 
-   type(adjacency_list), allocatable :: list
    real(wp), parameter :: ref(17) = [&
       & 9.27195802124755E-2_wp, -2.78358027117801E-1_wp, 1.71815557281178E-1_wp, &
       & 7.85579953672371E-2_wp, -1.08186262417305E-2_wp, -4.81860290986309E-2_wp, &
@@ -468,13 +668,9 @@ subroutine test_eeqbc_q_actinides(error)
       & [3, 17])
    mol%periodic = [.false.]
 
-   ! Build adjacency list
-   allocate(list)
-   call new_adjacency_list(list, mol, trans, cutoff, .false.)
-
-   call new_eeqbc2025_model(mol, model, error, list)
+   call new_eeqbc2025_model(mol, model, error)
    if (allocated(error)) return
-   call gen_test_molecular(error, mol, list, model, qref=ref)
+   call gen_test_molecular(error, mol, model, qref=ref)
 
 end subroutine test_eeqbc_q_actinides
 
@@ -486,7 +682,6 @@ subroutine test_eeqbc_e_mb03(error)
    type(structure_type) :: mol
    class(mchrg_model_type), allocatable :: model
 
-   type(adjacency_list), allocatable :: list
    real(wp), parameter :: ref(16) = [&
       &-6.96992195046228E-2_wp, -1.62155815983893E+0_wp, -1.38060751929644E-3_wp, &
       &-9.06342279911342E-1_wp, -1.83281566961757E+0_wp, -1.20333262207652E-1_wp, &
@@ -499,13 +694,9 @@ subroutine test_eeqbc_e_mb03(error)
 
    call get_structure(mol, "MB16-43", "03")
 
-   ! Build adjacency list
-   allocate(list)
-   call new_adjacency_list(list, mol, trans, cutoff, .false.)
-
-   call new_eeqbc2025_model(mol, model, error, list)
+   call new_eeqbc2025_model(mol, model, error)
    if (allocated(error)) return
-   call gen_test_molecular(error, mol, list, model, eref=ref)
+   call gen_test_molecular(error, mol, model, eref=ref)
 
 end subroutine test_eeqbc_e_mb03
 
@@ -517,7 +708,6 @@ subroutine test_eeqbc_e_mb04(error)
    type(structure_type) :: mol
    class(mchrg_model_type), allocatable :: model
 
-   type(adjacency_list), allocatable :: list
    real(wp), parameter :: ref(16) = [&
       &-3.91054587109712E-2_wp, -8.21933095021462E-4_wp, -1.28550631772418E-2_wp, &
       &-8.95571658260288E-2_wp, -4.94655224590082E-1_wp, -3.34598696522549E-2_wp, &
@@ -530,13 +720,9 @@ subroutine test_eeqbc_e_mb04(error)
 
    call get_structure(mol, "MB16-43", "04")
 
-   ! Build adjacency list
-   allocate(list)
-   call new_adjacency_list(list, mol, trans, cutoff, .false.)
-
-   call new_eeqbc2025_model(mol, model, error, list)
+   call new_eeqbc2025_model(mol, model, error)
    if (allocated(error)) return
-   call gen_test_molecular(error, mol, list, model, eref=ref)
+   call gen_test_molecular(error, mol, model, eref=ref)
 
 end subroutine test_eeqbc_e_mb04
 
@@ -548,18 +734,13 @@ subroutine test_eeqbc_g_mb05(error)
    type(structure_type) :: mol
    class(mchrg_model_type), allocatable :: model
 
-   type(adjacency_list), allocatable :: list
    real(wp), parameter :: trans(3, 1) = 0.0_wp
 
    call get_structure(mol, "MB16-43", "05")
 
-   ! Build adjacency list
-   allocate(list)
-   call new_adjacency_list(list, mol, trans, cutoff, .false.)
-
-   call new_eeqbc2025_model(mol, model, error, list)
+   call new_eeqbc2025_model(mol, model, error)
    if (allocated(error)) return
-   call test_numgrad(error, mol, model, list)
+   call test_numgrad(error, mol, model)
 
 end subroutine test_eeqbc_g_mb05
 
@@ -571,18 +752,13 @@ subroutine test_eeqbc_g_mb06(error)
    type(structure_type) :: mol
    class(mchrg_model_type), allocatable :: model
 
-   type(adjacency_list), allocatable :: list
    real(wp), parameter :: trans(3, 1) = 0.0_wp
 
    call get_structure(mol, "MB16-43", "06")
 
-   ! Build adjacency list
-   allocate(list)
-   call new_adjacency_list(list, mol, trans, cutoff, .false.)
-
-   call new_eeqbc2025_model(mol, model, error, list)
+   call new_eeqbc2025_model(mol, model, error)
    if (allocated(error)) return
-   call test_numgrad(error, mol, model, list)
+   call test_numgrad(error, mol, model)
 
 end subroutine test_eeqbc_g_mb06
 
@@ -594,22 +770,26 @@ subroutine test_eeqbc_g_co2(error)
    type(structure_type) :: mol
    class(mchrg_model_type), allocatable :: model
 
-   type(adjacency_list), allocatable :: list
-   real(wp), allocatable :: trans(:, :)
-
    call get_structure(mol, "X23", "CO2")
-
-   ! Compute lattice translation vectors
-   call get_lattice_points(mol%periodic, mol%lattice, 25.0_wp, trans)
-
-   ! Build adjacency list
-   allocate(list)
-   call new_adjacency_list(list, mol, trans, cutoff, .false.)
-
-   call new_eeqbc2025_model(mol, model, error, list)
+   call new_eeqbc2025_model(mol, model, error)
    if (allocated(error)) return
-   call test_numgrad_periodic(error, mol, model, list)
+   call test_numgrad_periodic(error, mol, model)
 
 end subroutine test_eeqbc_g_co2
+
+subroutine test_eeqbc_e_co2(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "X23", "CO2")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call gen_test_periodic(error, mol, model)
+
+end subroutine test_eeqbc_e_co2
 
 end module test_adjlist

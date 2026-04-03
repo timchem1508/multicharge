@@ -100,7 +100,7 @@ program main
    if (use_nlist) then
       call timer%push("nlist")
       allocate(list)
-      call new_adjacency_list(list, mol, trans, cutoff, compl)
+      call new_adjacency_list(list, mol, cutoff, compl)
       call timer%pop
       write(output_unit, '(a, 1x, a)') "Neighbour list generation time :", format_time(timer%get("nlist"))
    end if
@@ -110,7 +110,7 @@ program main
    if (model_id == mchrg_model%eeq2019) then
       call new_eeq2019_model(mol, model, error)
    else if (model_id == mchrg_model%eeqbc2025) then
-      call new_eeqbc2025_model(mol, model, error, list)
+      call new_eeqbc2025_model(mol, model, error)
    else
       call fatal_error(error, "Invalid model was choosen.")
    end if

@@ -32,6 +32,8 @@ module multicharge_model_cache
       real(wp) :: alpha
       !> Wigner-Seitz cell
       type(wignerseitz_cell_type) :: wsc
+      !> Translation matrix
+      real(wp), allocatable :: trans(:, :)
       !> Local charges
       real(wp), allocatable :: qloc(:)
       !> Full Maxwell capacitance matrix
