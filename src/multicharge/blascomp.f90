@@ -31,6 +31,8 @@ module multicharge_blascomp
     interface gemm_cmp
         module procedure gemm_cmp_122
         module procedure gemm_cmp_222
+        module procedure gemm_cmp_133
+        module procedure gemm_cmp_211
     end interface gemm_cmp
 
 contains
@@ -224,5 +226,139 @@ pure subroutine gemm_cmp_222(list, mlist, mdiag, x, y, alpha, beta, symmetric)
         end do
     end do
 end subroutine gemm_cmp_222
+
+!=========================================================
+! RIGHT GEMM 133
+! Computes Y(:,:,i) = sum_j X(:,:,j) * C(j,i)
+! where C is symmetric and stored via neighbour list
+!=========================================================
+pure subroutine gemm_cmp_133(list, clist, cdiag, x, y, alpha, beta, symmetric)
+    type(adjacency_list), intent(in) :: list
+    real(wp), intent(in)  :: clist(:)
+    real(wp), intent(in)  :: cdiag(:)
+    real(wp), intent(in)  :: x(:,:,:)
+    real(wp), intent(inout) :: y(:,:,:)
+    real(wp), intent(in)  :: alpha, beta
+    logical, intent(in), optional :: symmetric
+
+    integer :: i, j, k
+    logical :: is_sym
+    is_sym = .true.
+    if (present(symmetric)) is_sym = symmetric
+    if (size(clist) /= size(list%nlat)) return
+
+    ! Scale output
+    if (beta == 0.0_wp) then
+        y(:,:,:) = 0.0_wp
+    else if (beta /= 1.0_wp) then
+        y(:,:,:) = beta * y(:,:,:)
+    end if
+
+    do i = 1, size(list%nnl)
+
+        ! Diagonal contribution
+        y(:,:,i) = y(:,:,i) + alpha * cdiag(i) * x(:,:,i)
+
+        ! Off-diagonal neighbours
+        do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+            j = list%nlat(k)
+
+            ! Y_i += X_j * C(j,i)
+            y(:,:,i) = y(:,:,i) + alpha * clist(k) * x(:,:,j)
+
+            if (is_sym) then
+                ! symmetric partner
+                y(:,:,j) = y(:,:,j) + alpha * clist(k) * x(:,:,i)
+            else
+                ! antisymmetric partner
+                y(:,:,j) = y(:,:,j) - alpha * clist(k) * x(:,:,i)
+            end if
+
+        end do
+    end do
+
+end subroutine gemm_cmp_133
+
+!=========================================================
+! GEMM COMPRESSED 211
+!
+! DX = DTMP * C
+!
+! DTMP may be symmetric OR antisymmetric
+! C is symmetric
+!=========================================================
+pure subroutine gemm_cmp_211(list, clist, cdiag, &
+                                   dtmp_list, dtmp_diag, &
+                                   dx_list, dx_diag, alpha, beta, &
+                                   symmetric)
+
+    type(adjacency_list), intent(in) :: list
+    real(wp), intent(in)  :: clist(:)
+    real(wp), intent(in)  :: cdiag(:)
+    real(wp), intent(in)  :: dtmp_list(:,:)   ! (ncomp, nnz)
+    real(wp), intent(in)  :: dtmp_diag(:,:)   ! (ncomp, nat)
+    real(wp), intent(inout) :: dx_list(:,:)   ! (ncomp, nnz)
+    real(wp), intent(inout) :: dx_diag(:,:)   ! (ncomp, nat)
+    real(wp), intent(in) :: alpha, beta
+    logical, intent(in), optional :: symmetric
+
+    logical :: is_sym
+    integer :: i, j, k
+
+    is_sym = .true.
+    if (present(symmetric)) is_sym = symmetric
+
+    ! Scale outputs
+    if (beta == 0.0_wp) then
+        dx_list(:,:) = 0.0_wp
+        dx_diag(:,:) = 0.0_wp
+    else if (beta /= 1.0_wp) then
+        dx_list(:,:) = beta * dx_list(:,:)
+        dx_diag(:,:) = beta * dx_diag(:,:)
+    end if
+
+    do i = 1, size(list%nnl)
+
+        !==================================================
+        ! DIAGONAL
+        !==================================================
+        if (is_sym) then
+            ! symmetric result
+            dx_diag(:,i) = dx_diag(:,i) + alpha * dtmp_diag(:,i) * cdiag(i)
+
+            do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+                j = list%nlat(k)
+                dx_diag(:,i) = dx_diag(:,i) + alpha * dtmp_list(:,k) * clist(k)
+                dx_diag(:,j) = dx_diag(:,j) + alpha * dtmp_list(:,k) * clist(k)
+            end do
+        else
+            ! antisymmetric result → diagonal must remain ZERO
+            dx_diag(:,i) = 0.0_wp
+        end if
+
+        !==================================================
+        ! OFF-DIAGONAL
+        !==================================================
+        do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+            j = list%nlat(k)
+
+            if (is_sym) then
+                ! symmetric × symmetric → symmetric
+                dx_list(:,k) = dx_list(:,k) + alpha * ( &
+                     dtmp_diag(:,i) * clist(k) &
+                   + cdiag(i)      * dtmp_list(:,k) &
+                   + dtmp_list(:,k)* cdiag(j) &
+                   + clist(k)      * dtmp_diag(:,j) )
+            else
+                ! antisymmetric × symmetric → antisymmetric
+                dx_list(:,k) = dx_list(:,k) + alpha * &
+                     dtmp_list(:,k) * (cdiag(j) - cdiag(i))
+            end if
+
+        end do
+
+    end do
+
+end subroutine gemm_cmp_211
 
 end module multicharge_blascomp

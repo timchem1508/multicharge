@@ -33,11 +33,11 @@ program tester
    stat = 0
 
    testsuites = [ &
-     ! & new_testsuite("solver", collect_solver), &
-     ! & new_testsuite("model", collect_model), &
-     ! & new_testsuite("pbc", collect_pbc), &
-      & new_testsuite("adjlist", collect_adjlist) &
-     ! & new_testsuite("wignerseitz", collect_wignerseitz) &
+      & new_testsuite("solver", collect_solver), &
+      & new_testsuite("model", collect_model), &
+      & new_testsuite("pbc", collect_pbc), &
+      & new_testsuite("adjlist", collect_adjlist), &
+      & new_testsuite("wignerseitz", collect_wignerseitz) &
       & ]
 
    call get_argument(1, suite_name)
