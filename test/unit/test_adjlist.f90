@@ -374,12 +374,18 @@ subroutine test_numgrad(error, mol, model)
    if (allocated(error)) return
 
    ! Build adjacency list
+   deallocate(cache)
+   allocate(cache)
    allocate(list)
    call new_adjacency_list(list, mol, cutoff, .false.)
-
    call model%update(mol, cache, trans, grad, list=list)
    call model%solve(mol, solver, cache, error, &
       & gradient=gradient, sigma=sigma, list=list, unit=output_unit)
+   print'(a)', "DCN/DR:"
+   print'(3es21.14)', cache%dcndr
+   write(*,'(50("-"))')
+   print'(a)', "DQLOC/DR:"
+   print'(3es21.14)', cache%dqlocdr
    if (allocated(error)) return
 
    if (any(abs(gradient(:, :) - numgrad(:, :)) > thr3)) then
@@ -467,8 +473,6 @@ subroutine test_numgrad_periodic(error, mol, model)
    if (allocated(error)) return
 
    ! Build adjacency list
-   deallocate(cache)
-   allocate(cache)
    allocate(list)
    call new_adjacency_list(list, mol, cutoff, .false.)
 

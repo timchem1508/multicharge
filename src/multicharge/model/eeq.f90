@@ -125,9 +125,9 @@ subroutine update(self, mol, cache, trans, grad, list)
       if (.not. allocated(cache%dcndL)) then
          allocate(cache%dcndL(3, 3, mol%nat))
       end if
-      call self%ncoord%get_coordination_number(mol, trans, cache%cn, cache%dcndr, cache%dcndL, list=list)
+      call self%ncoord%get_coordination_number(mol, trans, cache%cn, cache%dcndr, cache%dcndL)
    else 
-      call self%ncoord%get_coordination_number(mol, trans, cache%cn, list=list)
+      call self%ncoord%get_coordination_number(mol, trans, cache%cn)
    end if
 
    if (any(mol%periodic)) then

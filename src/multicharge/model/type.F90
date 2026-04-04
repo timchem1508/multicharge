@@ -562,13 +562,12 @@ subroutine get_external_gradient(self, mol, solver, cache, error, dfdq, dfdr, df
 end subroutine get_external_gradient
 
 !> Local charges calculation
-subroutine local_charge(self, mol, list, trans, qloc, dqlocdr, dqlocdL)
+subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL, &
+   & list, dqlocdrlist, dqlocdrdiag)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: self
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
-   !> Lattice points
-   type(adjacency_list), intent(in) :: list
    real(wp), intent(in) :: trans(:, :)
    !> Local atomic partial charges
    real(wp), intent(out) :: qloc(:)
@@ -576,16 +575,26 @@ subroutine local_charge(self, mol, list, trans, qloc, dqlocdr, dqlocdL)
    real(wp), intent(out), optional :: dqlocdr(3, mol%nat, mol%nat)
    !> Optional derivative of local atomic partial charges w.r.t. lattice vectors
    real(wp), intent(out), optional :: dqlocdL(3, 3, mol%nat)
+   !> Lattice points
+   type(adjacency_list), intent(in), optional :: list
+   !> Optional derivative of local atomic partial charges w.r.t. atomic positions
+   real(wp), intent(out), optional :: dqlocdrlist(:, :), dqlocdrdiag(:, :)
 
    qloc = 0.0_wp
    if (present(dqlocdr) .and. present(dqlocdL)) then
       dqlocdr = 0.0_wp
       dqlocdL = 0.0_wp
    end if
+   if (present(list) .and. present(dqlocdrlist) .and. present(dqlocdrdiag) .and. present(dqlocdL)) then
+      dqlocdrlist = 0.0_wp
+      dqlocdrdiag = 0.0_wp
+      dqlocdL = 0.0_wp
+   end if
    ! Get the electronegativity weighted CN for local charge
    ! Derivatives depend only in this CN
    if (allocated(self%ncoord_en)) then
-      call self%ncoord_en%get_coordination_number(mol, trans, qloc, dqlocdr, dqlocdL, list)
+      call self%ncoord_en%get_coordination_number(mol, trans, qloc, dcndr=dqlocdr, &
+         & dcndrlist=dqlocdrlist, dcndrdiag=dqlocdrdiag, dcndL=dqlocdL, list=list)
    end if
 
    ! Distribute the total charge equally
