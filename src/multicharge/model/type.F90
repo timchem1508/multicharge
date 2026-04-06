@@ -257,6 +257,7 @@ subroutine solve(self, mol, solver, cache, error, &
    real(wp) :: lambda 
    real(wp), allocatable :: daqxdr(:,:,:)
    real(wp), allocatable :: daqxdL(:,:,:)
+   real(wp), allocatable :: daqxdrlist(:,:), daqxdrdiag(:,:)
 
    logical :: grad, cpq, dcn
    logical :: add_lagr = .true.  
@@ -386,8 +387,14 @@ subroutine solve(self, mol, solver, cache, error, &
       call timer%push("setup_gradient")
       call self%get_xvec_derivs(mol, ndim, cache, list)
       call self%get_coulomb_derivs(mol, ndim, cache, list)
-      allocate(daqxdr(3, mol%nat, ndim), source=0.0_wp)
-      allocate(daqxdL(3, 3, ndim), source=0.0_wp)
+      if (present(list)) then
+         allocate(daqxdrlist(3, size(list%nlat)), source=0.0_wp)
+         allocate(daqxdrdiag(3, mol%nat), source=0.0_wp)
+         allocate(daqxdL(3, 3, ndim), source=0.0_wp)
+      else
+         allocate(daqxdr(3, mol%nat, ndim), source=0.0_wp)
+         allocate(daqxdL(3, 3, ndim), source=0.0_wp)
+      end if
       ! pop gradient setup
       call timer%pop
       call print_gradient_header(print_unit, verbosity_solve, timer%get("setup_gradient"))
@@ -396,12 +403,23 @@ subroutine solve(self, mol, solver, cache, error, &
    ! Calculate gradients if requested
    if (grad) then
       call timer%push("gradient") 
-      do iat = 1, mol%nat
-         daqxdr(:, :, iat) = - cache%dxdr(:, :, iat) + 0.5_wp * cache%dadr(:, :, iat)
-         daqxdL(:, :, iat) = - cache%dxdL(:, :, iat) + 0.5_wp * cache%dadL(:, :, iat)
-      end do
-      call gemv(daqxdr(:, :, :mol%nat), cache%vrhs(:mol%nat), gradient, beta=1.0_wp, alpha=1.0_wp)
-      call gemv(daqxdL, cache%vrhs, sigma, beta=1.0_wp, alpha=1.0_wp)
+      if (present(list)) then
+         daqxdrlist = - cache%dxdrlist + 0.5_wp * cache%dadrlist
+         daqxdrdiag = - cache%dxdrdiag + 0.5_wp * cache%dadrdiag
+         do iat = 1, mol%nat
+            daqxdL(:, :, iat) = - cache%dxdL(:, :, iat) + 0.5_wp * cache%dadL(:, :, iat)
+         end do
+         call gemv_cmp(list, daqxdrlist, daqxdrdiag, cache%vrhs, gradient, &
+            & alpha=1.0_wp, beta=1.0_wp, symmetric=.false.)
+         call gemv(daqxdL, cache%vrhs, sigma, beta=1.0_wp, alpha=1.0_wp)
+      else
+         do iat = 1, mol%nat
+            daqxdr(:, :, iat) = - cache%dxdr(:, :, iat) + 0.5_wp * cache%dadr(:, :, iat)
+            daqxdL(:, :, iat) = - cache%dxdL(:, :, iat) + 0.5_wp * cache%dadL(:, :, iat)
+         end do
+         call gemv(daqxdr(:, :, :mol%nat), cache%vrhs(:mol%nat), gradient, beta=1.0_wp, alpha=1.0_wp)
+         call gemv(daqxdL, cache%vrhs, sigma, beta=1.0_wp, alpha=1.0_wp)
+      end if
       ! pop gradient timer
       call timer%pop 
       call print_gradient_time(print_unit, verbosity_solve, timer%get("gradient"))

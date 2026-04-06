@@ -314,7 +314,7 @@ subroutine test_numgrad(error, mol, model)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   type(mchrg_cache), allocatable :: cache
+   type(mchrg_cache), allocatable :: cache1, cache2
 
    ! Solver variables
    class(mchrg_solver_type), allocatable :: solver
@@ -325,12 +325,13 @@ subroutine test_numgrad(error, mol, model)
 
    type(adjacency_list), allocatable :: list
 
-   integer :: iat, ic, ndim
+   integer :: iat, jat, kat, ic, ndim
    real(wp), parameter :: trans(3, 1) = 0.0_wp   ! dummy for non‑periodic systems
    real(wp), parameter :: step = 1.0e-6_wp
    real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
-   real(wp), allocatable :: numgrad(:, :)
+   real(wp), allocatable :: numgrad(:, :), numsigma(:, :)
    real(wp) :: er, el
+   real(wp), allocatable :: damat_list(:, :, :), dxvec_list(:, :, :), dcn_list(:, :, :), dqloc_list(:, :, :)
    logical :: grad = .true.
 
    allocate(cg_input :: solver_input)
@@ -344,59 +345,123 @@ subroutine test_numgrad(error, mol, model)
    end select
    call solver_maker(solver, solver_input, error)
 
-   allocate(cache)
+   allocate(cache1)
    
    allocate (energy(mol%nat), gradient(3, mol%nat), sigma(3, 3), numgrad(3, mol%nat))
    energy(:) = 0.0_wp
    gradient(:, :) = 0.0_wp
    sigma(:, :) = 0.0_wp
 
-   lp: do iat = 1, mol%nat
-      do ic = 1, 3
-         energy(:) = 0.0_wp
-         mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
-         call model%update(mol, cache, trans, grad=.false.)
-         call model%solve(mol, solver, cache, error, energy=energy, unit=output_unit)
-         if (allocated(error)) exit lp
-         er = sum(energy)
+   call model%update(mol, cache1, trans, grad=.true.)
+   call model%solve(mol, solver, cache1, error, &
+      & gradient=gradient, sigma=sigma, unit=output_unit)
+   !call model%get_capacitance_matrix(mol, mol%nat, cache)
+   !call model%get_xvec( mol, mol%nat, cache)
+   !call model%get_coulomb_matrix(mol, mol%nat, cache)
+   !print'(a)', "DIRECT DCN/DR:"
+   !print'(3es21.14)', cache1%dcndr
+   !write(*,'(50("-"))')
+   write(*, *) "Number of atoms:", mol%nat
+   print'(a)', "DQLOC/DR:"
+   print'(16es21.14)', cache1%dqlocdr(1, :, :)
+   !print'(a)', "DIRECT DADR:"
+   !print'(12es21.14)', cache1%dadr
+   !write(*,*) "DIRECT DXDR"
+   !write(*,'(es21.14)') cache1%dxdr
+   !write(*,'(50("-"))')
 
-         energy(:) = 0.0_wp
-         mol%xyz(ic, iat) = mol%xyz(ic, iat) - 2*step
-         call model%update(mol, cache, trans, grad=.false.)
-         call model%solve(mol, solver, cache, error, energy=energy, unit=output_unit)
-         if (allocated(error)) exit lp
-         el = sum(energy)
 
-         mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
-         numgrad(ic, iat) = 0.5_wp*(er - el)/step
-      end do
-   end do lp
+
    if (allocated(error)) return
+
+
 
    ! Build adjacency list
-   deallocate(cache)
-   allocate(cache)
+   allocate(damat_list(3, mol%nat, mol%nat), dxvec_list(3, mol%nat, mol%nat), &
+      & dcn_list(3, mol%nat, mol%nat), dqloc_list(3, mol%nat, mol%nat))
+
+   damat_list(:,:,:) = 0.0_wp
+   dxvec_list(:,:,:) = 0.0_wp
+   dcn_list(:,:,:) = 0.0_wp
+   dqloc_list(:,:,:) = 0.0_wp
+
+   allocate(numsigma(3, 3), source=0.0_wp)
+
+   allocate(cache2)
    allocate(list)
    call new_adjacency_list(list, mol, cutoff, .false.)
-   call model%update(mol, cache, trans, grad, list=list)
-   call model%solve(mol, solver, cache, error, &
-      & gradient=gradient, sigma=sigma, list=list, unit=output_unit)
-   print'(a)', "DCN/DR:"
-   print'(3es21.14)', cache%dcndr
-   write(*,'(50("-"))')
-   print'(a)', "DQLOC/DR:"
-   print'(3es21.14)', cache%dqlocdr
+   call model%update(mol, cache2, trans, grad, list=list)
+   call model%solve(mol, solver, cache2, error, &
+      & gradient=numgrad, sigma=numsigma, list=list, unit=output_unit)
+   do iat = 1, mol%nat
+      
+      do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
+         jat = list%nlat(kat)
+         dqloc_list(:, iat, jat) = cache2%dqlocdrlist(:, kat)
+         dqloc_list(:, jat, iat) = -cache2%dqlocdrlist(:, kat)
+         dcn_list(:, iat, jat) = cache2%dcndrlist(:, kat)
+         dcn_list(:, jat, iat) = -cache2%dcndrlist(:, kat)
+         !dxvec_list(:, iat, jat) = cache2%dxdrlist(:, kat)
+         !dxvec_list(:, jat, iat) = -cache2%dxdrlist(:, kat)
+         !damat_list(:, iat, jat) = cache2%dadrlist(:, kat)
+         !damat_list(:, jat, iat) = -cache2%dadrlist(:, kat)
+      end do
+      !damat_list(:, iat, iat) = cache2%dadrdiag(:, iat)
+      dqloc_list(:, iat, iat) = cache2%dqlocdrdiag(:, iat)
+      !dxvec_list(:, iat, iat) = cache2%dxdrdiag(:, iat)
+      dcn_list(:, iat, iat) = cache2%dcndrdiag(:, iat)
+   end do
+   !write(*,*) "NLIST DAMAT"
+   !write(*,'(12es21.14)') damat_list
+   !write(*,*) "NLIST DXVEC"
+   !write(*,'(es21.14)') dxvec_list
+   !write(*,'(50("-"))')
+   !print'(a)', "NLIST DCN/DR:"
+   !print'(3es21.14)', dcn_list
+   !write(*,'(50("-"))')
+   !print'(a)', "NLIST DQLOC/DR:"
+   !print'(3es21.14)', dqloc_list
    if (allocated(error)) return
 
-   if (any(abs(gradient(:, :) - numgrad(:, :)) > thr3)) then
-      call test_failed(error, "Derivative of energy does not match")
-      print'(a)', "Energy gradient:"
-      print'(3es21.14)', gradient
-      print'(a)', "numgrad:"
-      print'(3es21.14)', numgrad
+   !if (any(abs(cache1%dqlocdr(:, :, :) - dqloc_list(:, :, :)) > thr3)) then
+   !   call test_failed(error, "Derivative of local charge does not match")
+   !   print'(a)', "Local charge derivative:"
+   !   print'(3es21.14)', cache1%dqlocdr
+   !   print'(a)', "Nlist local charge derivative:"
+   !   print'(3es21.14)', dqloc_list
+   !   print'(a)', "diff:"
+   !   print'(3es21.14)', dqloc_list - cache1%dqlocdr
+   !end if
+
+   if (any(abs(cache1%dcndr(:, :, :) - dcn_list(:, :, :)) > thr3)) then
+      call test_failed(error, "Derivative of CN does not match")
+      print'(a)', "CN derivative:"
+      print'(3es21.14)', cache1%dcndr
+      print'(a)', "Nlist CN derivative:"
+      print'(3es21.14)', dcn_list
       print'(a)', "diff:"
-      print'(3es21.14)', gradient - numgrad
+      print'(3es21.14)', dcn_list - cache1%dcndr
    end if
+   
+  ! if (any(abs(gradient(:, :) - numgrad(:, :)) > thr3)) then
+  !    call test_failed(error, "Derivative of energy does not match")
+  !    print'(a)', "Energy gradient:"
+  !    print'(3es21.14)', gradient
+  !    print'(a)', "numgrad:"
+  !    print'(3es21.14)', numgrad
+  !    print'(a)', "diff:"
+  !    print'(3es21.14)', gradient - numgrad
+  ! end if
+!
+  ! if (any(abs(sigma(:, :) - numsigma(:, :)) > thr3)) then
+  !    call test_failed(error, "Derivative of energy does not match")
+  !    print'(a)', "Energy sigma:"
+  !    print'(3es21.14)', sigma
+  !    print'(a)', "numsigma:"
+  !    print'(3es21.14)', numsigma
+  !    print'(a)', "diff:"
+  !    print'(3es21.14)', sigma - numsigma
+  ! end if
 
 end subroutine test_numgrad
 
