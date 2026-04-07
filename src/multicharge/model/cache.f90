@@ -57,31 +57,31 @@ module multicharge_model_cache
       !> Coordination number gradient w.r.t the positions
       real(wp), allocatable :: dcndr(:, :, :)
       !> Coordination number gradient w.r.t the positions in compressed format
-      real(wp), allocatable :: dcndrlist(:, :), dcndrdiag(:, :)
+      real(wp), allocatable :: dcndrlistij(:, :), dcndrlistji(:, :), dcndrdiag(:, :)
       !> Coordination number gradient w.r.t the lattice vectors
       real(wp), allocatable :: dcndL(:, :, :)
       !> Local charge derivatives w.r.t positions
       real(wp), allocatable :: dqlocdr(:, :, :)
       !> Local charge derivatives w.r.t positions in compressed format
-      real(wp), allocatable :: dqlocdrlist(:, :), dqlocdrdiag(:, :)
+      real(wp), allocatable :: dqlocdrlistij(:, :), dqlocdrlistji(:, :), dqlocdrdiag(:, :)
       !> Local charge derivatives w.r.t lattice vectors
       real(wp), allocatable :: dqlocdL(:, :, :)
       !> Derivative of Maxwell capacitance matrix w.r.t positions
       real(wp), allocatable :: dcdr(:, :, :)
       !> Derivative of Maxwell capacitance matrix w.r.t positions in compressed format
-      real(wp), allocatable :: dcdrlist(:, :), dcdrdiag(:, :)
+      real(wp), allocatable :: dcdrlistij(:, :), dcdrlistji(:, :), dcdrdiag(:, :)
       !> Derivative of Maxwell capacitance matrix w.r.t lattice vectors
       real(wp), allocatable :: dcdL(:, :, :)
       !> Coulomb matrix derivatives w.r.t positions
       real(wp), allocatable :: dadr(:, :, :)
       !> Coulomb matrix derivatives w.r.t positions in compressed format
-      real(wp), allocatable :: dadrlist(:, :), dadrdiag(:, :) 
+      real(wp), allocatable :: dadrlistij(:, :), dadrlistji(:, :), dadrdiag(:, :) 
       !> Coulomb matrix derivatives w.r.t lattice vectors
       real(wp), allocatable :: dadL(:, :, :)
       !> Electronegativity derivatives w.r.t positions
       real(wp), allocatable :: dxdr(:, :, :)
       !> Electronegativity derivatives w.r.t positions in compressed format
-      real(wp), allocatable :: dxdrlist(:, :), dxdrdiag(:, :)
+      real(wp), allocatable :: dxdrlistij(:, :), dxdrlistji(:, :), dxdrdiag(:, :)
       !> Electronegativity derivatives w.r.t lattice vectors
       real(wp), allocatable :: dxdL(:, :, :)
 
