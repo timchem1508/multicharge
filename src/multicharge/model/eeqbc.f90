@@ -214,15 +214,16 @@ subroutine update(self, mol, cache, trans, grad, list)
             allocate(cache%dqlocdL(3, 3, mol%nat))
          end if
          call self%ncoord%get_coordination_number(mol, trans, cache%cn, &
-            & dcndrlist=cache%dcndrlist, dcndrdiag=cache%dcndrdiag, dcndL=cache%dcndL, list=list)
-         call self%local_charge(mol, trans, cache%qloc, list=list, dqlocdrlist=cache%dqlocdrlist, &
-            & dqlocdrdiag=cache%dqlocdrdiag, dqlocdL=cache%dqlocdL)
+            & dcndrlistij=cache%dcndrlistij, dcndrlistji=cache%dcndrlistji, &
+            & dcndrdiag=cache%dcndrdiag, dcndL=cache%dcndL, list=list)
+         call self%local_charge(mol, trans, cache%qloc, list=list, dqlocdrlistij=cache%dqlocdrlistij, &
+            & dqlocdrlistji=cache%dqlocdrlistji, dqlocdrdiag=cache%dqlocdrdiag, dqlocdL=cache%dqlocdL)
       else
          call self%ncoord%get_coordination_number(mol, trans, cache%cn, list=list)
          call self%local_charge(mol, trans, cache%qloc, list=list)
       end if
    else
-         if (grad) then
+      if (grad) then
          if (.not. allocated(cache%dcndr)) then
             allocate(cache%dcndr(3, mol%nat, mol%nat))
          end if
@@ -274,7 +275,8 @@ subroutine get_capacitance_matrix(self, mol, ndim, cache, list)
    
    if (grad) then 
       if (present(list)) then
-         if (.not. allocated(cache%dcdrlist)) allocate(cache%dcdrlist(3, size(list%nlat)))
+         if (.not. allocated(cache%dcdrlistij)) allocate(cache%dcdrlistij(3, size(list%nlat)))
+         if (.not. allocated(cache%dcdrlistji)) allocate(cache%dcdrlistji(3, size(list%nlat)))
          if (.not. allocated(cache%dcdrdiag)) allocate(cache%dcdrdiag(3, mol%nat))
          if (.not. allocated(cache%dcdL)) allocate(cache%dcdL(3, 3, ndim))
       else
