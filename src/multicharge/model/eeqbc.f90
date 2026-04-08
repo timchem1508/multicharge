@@ -1525,20 +1525,23 @@ contains
       real(wp) :: pre_i, pre_j, dgam_pre
 
       ! Thread-private arrays for reduction
-      real(wp), allocatable :: dadrdiag_local(:, :), dadrlist_local(:, :), dadL_local(:, :, :)
+      real(wp), allocatable :: dadrij_local(:, :), dadrji_local(:, :)
+      real(wp), allocatable :: dadrdiag_local(:, :), dadL_local(:, :, :)
 
       cache%dadrdiag = 0.0_wp
-      cache%dadrlist = 0.0_wp
+      cache%dadrij = 0.0_wp
+      cache%dadrji = 0.0_wp
       cache%dadL = 0.0_wp
 
       !$omp parallel default(none) &
       !$omp shared(cache, mol, list, self) &
       !$omp private(iat, kat, izp, jat, jzp, gam, vec, r2, dtmp, norm_cn, arg, start_kat, finish_kat) &
       !$omp private(radi, radj, dradi, dradj, dG, dS, pre_i, pre_j, dgam_pre) &
-      !$omp private(dadrdiag_local, dadrlist_local, dadL_local)
+      !$omp private(dadrij_local, dadrji_local, dadrdiag_local, dadL_local)
 
+      allocate(dadrij_local, source=cache%dadrij)
+      allocate(dadrji_local, source=cache%dadrji)
       allocate(dadrdiag_local, source=cache%dadrdiag)
-      allocate(dadrlist_local, source=cache%dadrlist)
       allocate(dadL_local, source=cache%dadL)
 
       !$omp do schedule(runtime)
@@ -1575,7 +1578,8 @@ contains
 
             dadrdiag_local(:, iat) = dadrdiag_local(:, iat) - dG * cache%vrhs(jat) * cache%clist(kat)
             dadrdiag_local(:, jat) = dadrdiag_local(:, jat) + dG * cache%vrhs(iat) * cache%clist(kat)
-            dadrlist_local(:, kat) = dadrlist_local(:, kat) - dG * cache%vrhs(iat) * cache%clist(kat)
+            dadrij_local(:, kat) = dadrij_local(:, kat) - dG * cache%vrhs(iat) * cache%clist(kat)
+            dadrji_local(:, kat) = dadrji_local(:, kat) + dG * cache%vrhs(jat) * cache%clist(kat)
             dadL_local(:, :, iat)  = dadL_local(:, :, iat)  + dS * cache%vrhs(jat) * cache%clist(kat)
             dadL_local(:, :, jat)  = dadL_local(:, :, jat)  + dS * cache%vrhs(iat) * cache%clist(kat)
 
@@ -1586,8 +1590,10 @@ contains
             & (pre_i * cache%dcndrdiag(:, iat))
             dadrdiag_local(:, jat) = dadrdiag_local(:, jat) + dgam_pre * cache%vrhs(iat) * &
             & (pre_j * cache%dcndrdiag(:, jat))
-            dadrlist_local(:, kat) = dadrlist_local(:, kat) - dgam_pre * cache%vrhs(iat) * &
-            & (pre_i * cache%dcndrlist(:, kat))
+            dadrij_local(:, kat) = dadrij_local(:, kat) - dgam_pre * cache%vrhs(iat) * &
+            & (pre_i * cache%dcndrij(:, kat))
+            dadrji_local(:, kat) = dadrji_local(:, kat) - dgam_pre * cache%vrhs(jat) * &
+            & (pre_j * cache%dcndrji(:, kat))
 
             dadL_local(:, :, iat) = dadL_local(:, :, iat) + dgam_pre * cache%vrhs(jat) * &
             & (pre_i * cache%dcndL(:, :, iat) + pre_j * cache%dcndL(:, :, jat))
@@ -1596,9 +1602,10 @@ contains
 
             ! 3. Capacitance derivative off-diagonal
             dtmp = erf(sqrt(r2) * gam) / sqrt(r2)
-            dadrdiag_local(:, iat) = dadrdiag_local(:, iat) + dtmp * cache%vrhs(jat) * cache%dcdrlist(:, kat)
-            dadrdiag_local(:, jat) = dadrdiag_local(:, jat) - dtmp * cache%vrhs(iat) * cache%dcdrlist(:, kat)
-            dadrlist_local(:, kat) = dadrlist_local(:, kat) + dtmp * cache%vrhs(iat) * cache%dcdrlist(:, kat)
+            dadrdiag_local(:, iat) = dadrdiag_local(:, iat) + dtmp * cache%vrhs(jat) * cache%dcdrji(:, kat)
+            dadrdiag_local(:, jat) = dadrdiag_local(:, jat) - dtmp * cache%vrhs(iat) * cache%dcdrij(:, kat)
+            dadrij_local(:, kat) = dadrij_local(:, kat) + dtmp * cache%vrhs(iat) * cache%dcdrij(:, kat)
+            dadrji_local(:, kat) = dadrji_local(:, kat) + dtmp * cache%vrhs(jat) * cache%dcdrji(:, kat)
 
             ! 4. Capacitance derivative diagonal contribution
             dtmp = (self%eta(jzp) + self%kqeta(jzp) * cache%qloc(jat) + sqrt2pi / radj) * cache%vrhs(jat)
