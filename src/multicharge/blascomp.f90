@@ -21,11 +21,12 @@ module multicharge_blascomp
    implicit none
    private
 
-   public :: gemv_cmp, gemm_cmp
+   public :: gemv_cmp, gemm_cmp, gemm_cmp_211_dir
 
    interface gemv_cmp
       module procedure gemv_cmp_111
       module procedure gemv_cmp_212
+      module procedure gemv_cmp_212_dir
    end interface gemv_cmp
 
    interface gemm_cmp
@@ -35,6 +36,11 @@ module multicharge_blascomp
       module procedure gemm_cmp_211
       module procedure gemm_cmp_211_dir
    end interface gemm_cmp
+
+   interface gemm_cmp_211_dir
+      module procedure gemm_cmp_211_dir
+   end interface gemm_cmp_211_dir
+
 
 contains
 
@@ -133,6 +139,61 @@ contains
          end if
       end do
    end subroutine gemv_cmp_212
+
+!=========================================================
+! GEMV 212 DIRECTED
+!
+! Y = Beta * Y + Alpha * M * X
+! Matches the 9-argument signature with explicit i->j
+! (drij) and j->i (drji) directed edge dependencies.
+!=========================================================
+   pure subroutine gemv_cmp_212_dir(list, mlist_drij, mlist_drji, mdiag, x, y, alpha, beta, symmetric)
+      type(adjacency_list), intent(in) :: list
+      real(wp), intent(in)  :: mlist_drij(:,:)
+      real(wp), intent(in)  :: mlist_drji(:,:)
+      real(wp), intent(in)  :: mdiag(:,:)
+      real(wp), intent(in)  :: x(:)
+      real(wp), intent(inout) :: y(:,:)
+      real(wp), intent(in)  :: alpha, beta
+      logical, intent(in), optional :: symmetric
+
+      integer :: i, k, j
+      logical :: is_sym
+
+      is_sym = .true.
+      if (present(symmetric)) is_sym = symmetric
+
+      if (size(mlist_drij, 2) /= size(list%nlat)) return
+      if (size(mlist_drji, 2) /= size(list%nlat)) return
+
+      if (beta == 0.0_wp) then
+         y(:,:) = 0.0_wp
+      else if (beta /= 1.0_wp) then
+         y(:,:) = beta * y(:,:)
+      end if
+
+      do i = 1, size(list%nnl)
+
+         do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+            j = list%nlat(k)
+
+            ! Contribution to node i from neighbor j (using forward edge)
+            y(:, i) = y(:, i) + alpha * mlist_drij(:, k) * x(j)
+
+            ! Contribution to node j from node i (using backward edge)
+            if (is_sym) then
+               y(:, j) = y(:, j) + alpha * mlist_drji(:, k) * x(i)
+            else
+               y(:, j) = y(:, j) - alpha * mlist_drji(:, k) * x(i)
+            end if
+         end do
+
+         ! Diagonal logic follows established pattern: applied only if symmetric
+         if (is_sym) then
+            y(:, i) = y(:, i) + alpha * mdiag(:, i) * x(i)
+         end if
+      end do
+   end subroutine gemv_cmp_212_dir
 
 
 !=========================================================
@@ -390,7 +451,6 @@ contains
       integer :: i, j, k
 
       is_sym = .true.
-      if (present(symmetric)) is_sym = symmetric
 
       ! Scale outputs
       if (beta == 0.0_wp) then
@@ -408,19 +468,15 @@ contains
          !==================================================
          ! DIAGONAL
          !==================================================
-         if (is_sym) then
-            ! symmetric result
-            dx_diag(:,i) = dx_diag(:,i) + alpha * dtmp_diag(:,i) * cdiag(i)
 
-            do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
-               j = list%nlat(k)
-               dx_diag(:,i) = dx_diag(:,i) + alpha * dtmp_drij(:,k) * clist(k)
-               dx_diag(:,j) = dx_diag(:,j) + alpha * dtmp_drji(:,k) * clist(k)
-            end do
-         else
-            ! antisymmetric result → diagonal must remain ZERO
-            dx_diag(:,i) = 0.0_wp
-         end if
+         dx_diag(:,i) = dx_diag(:,i) + alpha * dtmp_diag(:,i) * cdiag(i)
+
+         do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+            j = list%nlat(k)
+            dx_diag(:,i) = dx_diag(:,i) + alpha * dtmp_drij(:,k) * clist(k)
+            dx_diag(:,j) = dx_diag(:,j) + alpha * dtmp_drji(:,k) * clist(k)
+         end do
+
 
          !==================================================
          ! OFF-DIAGONAL
@@ -428,29 +484,17 @@ contains
          do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
             j = list%nlat(k)
 
-            if (is_sym) then
-               ! symmetric × symmetric → symmetric (forward edge i->j)
-               dx_drij(:,k) = dx_drij(:,k) + alpha * ( &
-                  dtmp_diag(:,i) * clist(k) &
-                  + cdiag(i)      * dtmp_drij(:,k) &
-                  + dtmp_drij(:,k)* cdiag(j) &
-                  + clist(k)      * dtmp_diag(:,j) )
+            dx_drij(:,k) = dx_drij(:,k) + alpha * ( &
+               dtmp_diag(:,i) * clist(k) + &
+               cdiag(i)       * dtmp_drij(:,k) + &
+               dtmp_drij(:,k) * cdiag(j) + &
+               clist(k)       * dtmp_diag(:,j) )
 
-               ! symmetric × symmetric → symmetric (backward edge j->i)
-               dx_drji(:,k) = dx_drji(:,k) + alpha * ( &
-                  dtmp_diag(:,j) * clist(k) &
-                  + cdiag(j)      * dtmp_drji(:,k) &
-                  + dtmp_drji(:,k)* cdiag(i) &
-                  + clist(k)      * dtmp_diag(:,i) )
-            else
-               ! antisymmetric × symmetric → antisymmetric
-               ! swapping nodes i and j shifts the target cdiag value for drji
-               dx_drij(:,k) = dx_drij(:,k) + alpha * &
-                  dtmp_drij(:,k) * (cdiag(j) - cdiag(i))
-
-               dx_drji(:,k) = dx_drji(:,k) + alpha * &
-                  dtmp_drji(:,k) * (cdiag(i) - cdiag(j))
-            end if
+            dx_drji(:,k) = dx_drji(:,k) + alpha * ( &
+               dtmp_diag(:,j) * clist(k) + &
+               cdiag(j)       * dtmp_drji(:,k) + &
+               dtmp_drji(:,k) * cdiag(i) + &
+               clist(k)       * dtmp_diag(:,i) )
 
          end do
 

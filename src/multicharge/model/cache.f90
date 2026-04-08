@@ -81,7 +81,7 @@ module multicharge_model_cache
       !> Electronegativity derivatives w.r.t positions
       real(wp), allocatable :: dxdr(:, :, :)
       !> Electronegativity derivatives w.r.t positions in compressed format
-      real(wp), allocatable :: dxdrij(:, :), dxdrij(:, :), dxdrdiag(:, :)
+      real(wp), allocatable :: dxdrij(:, :), dxdrji(:, :), dxdrdiag(:, :)
       !> Electronegativity derivatives w.r.t lattice vectors
       real(wp), allocatable :: dxdL(:, :, :)
       !> Logical flag for gradient calculation
