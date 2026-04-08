@@ -257,7 +257,7 @@ contains
       real(wp) :: lambda
       real(wp), allocatable :: daqxdr(:,:,:)
       real(wp), allocatable :: daqxdL(:,:,:)
-      real(wp), allocatable :: daqxdrlist(:,:), daqxdrdiag(:,:)
+      real(wp), allocatable :: daqxdrij(:,:), daqxdrji(:,:), daqxdrdiag(:,:)
 
       logical :: grad, cpq, dcn
       logical :: add_lagr = .true.
@@ -266,7 +266,8 @@ contains
 
 
       ! Calculate gradient if the respective arrays are present
-      dcn = allocated(cache%dcndr) .and. allocated(cache%dcndL)
+      dcn = allocated(cache%dcndr) .and. allocated(cache%dcndL) .or. &
+      & allocated(cache%dcndrij)
       grad = present(gradient) .and. present(sigma) .and. dcn
       cpq = present(dqdr) .and. present(dqdL) .and. dcn
 
@@ -385,13 +386,17 @@ contains
       ! Allocate and get amat derivatives
       if (dcn) then
          call timer%push("setup_gradient")
-         call self%get_xvec_derivs(mol, ndim, cache, list)
-         call self%get_coulomb_derivs(mol, ndim, cache, list)
          if (present(list)) then
-            allocate(daqxdrlist(3, size(list%nlat)), source=0.0_wp)
+            write(*, *) 'Using neighbour list for gradient setup.'
+            call self%get_xvec_derivs(mol, ndim, cache, list=list)
+            call self%get_coulomb_derivs(mol, ndim, cache, list=list)
+            allocate(daqxdrij(3, size(list%nlat)), source=0.0_wp)
+            allocate(daqxdrji(3, size(list%nlat)), source=0.0_wp)
             allocate(daqxdrdiag(3, mol%nat), source=0.0_wp)
             allocate(daqxdL(3, 3, ndim), source=0.0_wp)
          else
+            call self%get_xvec_derivs(mol, ndim, cache)
+            call self%get_coulomb_derivs(mol, ndim, cache)
             allocate(daqxdr(3, mol%nat, ndim), source=0.0_wp)
             allocate(daqxdL(3, 3, ndim), source=0.0_wp)
          end if
@@ -404,12 +409,16 @@ contains
       if (grad) then
          call timer%push("gradient")
          if (present(list)) then
-            daqxdrlist = - cache%dxdrlist + 0.5_wp * cache%dadrlist
+            daqxdrij = - cache%dxdrij + 0.5_wp * cache%dadrij
+            daqxdrji = - cache%dxdrji + 0.5_wp * cache%dadrji
             daqxdrdiag = - cache%dxdrdiag + 0.5_wp * cache%dadrdiag
+            if (any(abs(daqxdrij - daqxdrji) > 1e-6_wp)) then
+               write(*, *) 'Warning: Asymmetry detected in Combined matrix derivatives!'
+            end if
             do iat = 1, mol%nat
                daqxdL(:, :, iat) = - cache%dxdL(:, :, iat) + 0.5_wp * cache%dadL(:, :, iat)
             end do
-            call gemv_cmp(list, daqxdrlist, daqxdrdiag, cache%vrhs, gradient, &
+            call gemv_cmp(list, daqxdrij, daqxdrji, daqxdrdiag, cache%vrhs, gradient, &
             & alpha=1.0_wp, beta=1.0_wp, symmetric=.false.)
             call gemv(daqxdL, cache%vrhs, sigma, beta=1.0_wp, alpha=1.0_wp)
          else
@@ -596,7 +605,7 @@ contains
       !> Lattice points
       type(adjacency_list), intent(in), optional :: list
       !> Optional derivative of local atomic partial charges w.r.t. atomic positions
-      real(wp), intent(out), optional :: dqlocdrlistij(:, :), dqlocdrlistji(:, :), dqlocdrdiag(:, :)
+      real(wp), intent(out), optional :: dqlocdrij(:, :), dqlocdrji(:, :), dqlocdrdiag(:, :)
 
       qloc = 0.0_wp
       if (present(dqlocdr) .and. present(dqlocdL)) then

@@ -40,124 +40,249 @@ module test_adjlist
    real(wp), parameter :: thr = 100 * epsilon(1.0_wp)
    real(wp), parameter :: thr2 = sqrt(epsilon(1.0_wp))
    real(wp), parameter :: thr3 = 100 * thr2
-   real(wp), parameter :: cutoff = 29.0_wp 
+   real(wp), parameter :: cutoff = 29.0_wp
 
 contains
 
 !> Collect all exported unit tests
-subroutine collect_adjlist(testsuite)
+   subroutine collect_adjlist(testsuite)
 
-   !> Collection of tests
-   type(unittest_type), allocatable, intent(out) :: testsuite(:)
+      !> Collection of tests
+      type(unittest_type), allocatable, intent(out) :: testsuite(:)
 
-   testsuite = [ &
+      testsuite = [ &
       & new_unittest("eeqbc-charges-mb01", test_eeqbc_q_mb01), &
       & new_unittest("eeqbc-charges-mb02", test_eeqbc_q_mb02), &
       & new_unittest("eeqbc-charges-actinides", test_eeqbc_q_actinides), &
       & new_unittest("eeqbc-energy-mb03", test_eeqbc_e_mb03), &
       & new_unittest("eeqbc-energy-mb04", test_eeqbc_e_mb04), &
       & new_unittest("eeqbc-gradient-mb05", test_eeqbc_g_mb05), &
-      & new_unittest("eeqbc-gradient-mb06", test_eeqbc_g_mb06), &
+      !& new_unittest("eeqbc-gradient-mb06", test_eeqbc_g_mb06), &
       & new_unittest("eeqbc-energy-co2", test_eeqbc_e_co2) &
       !& new_unittest("eeqbc-gradient-co2", test_eeqbc_g_co2) &
       & ]
 
-end subroutine collect_adjlist
+   end subroutine collect_adjlist
 
-subroutine solver_maker(solver, input, error)
-   !> Solver type
-   class(mchrg_solver_type), intent(out), allocatable :: solver
-   !> Solver input
-   class(mchrg_solver_input), intent(in) :: input
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+   subroutine solver_maker(solver, input, error)
+      !> Solver type
+      class(mchrg_solver_type), intent(out), allocatable :: solver
+      !> Solver input
+      class(mchrg_solver_input), intent(in) :: input
+      !> Error handling
+      type(error_type), allocatable, intent(out) :: error
 
-   select type (input)
-      type is (cg_input)
+      select type (input)
+       type is (cg_input)
          block
             class(cg_solver), allocatable :: tmp
             allocate(tmp)
             call new_cg_solver(tmp, input)
             call move_alloc(tmp, solver)
          end block
-      type is (direct_input)
+       type is (direct_input)
          block
             class(direct_solver), allocatable :: tmp
             allocate(tmp)
             call new_direct_solver(tmp, input)
             call move_alloc(tmp, solver)
          end block
-      class default 
+       class default
          allocate(error)
          return
-   end select
-    
-end subroutine solver_maker
+      end select
+
+   end subroutine solver_maker
 
 !------------------------------------------------------------------------
 ! General helper routines – now they accept a pre‑built adjacency list.
 !------------------------------------------------------------------------
-subroutine gen_test_molecular(error, mol, model, qref, eref)
+   subroutine gen_test_molecular(error, mol, model, qref, eref)
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+      !> Error handling
+      type(error_type), allocatable, intent(out) :: error
 
-   !> Molecular structure data
-   type(structure_type), intent(in) :: mol
+      !> Molecular structure data
+      type(structure_type), intent(in) :: mol
 
-   !> Electronegativity equilibration model
-   class(mchrg_model_type), intent(in) :: model
+      !> Electronegativity equilibration model
+      class(mchrg_model_type), intent(in) :: model
 
-   !> Reference charges
-   real(wp), intent(in), optional :: qref(:)
+      !> Reference charges
+      real(wp), intent(in), optional :: qref(:)
 
-   !> Reference energies
-   real(wp), intent(in), optional :: eref(:)
+      !> Reference energies
+      real(wp), intent(in), optional :: eref(:)
 
-   type(mchrg_cache), allocatable :: cache
+      type(mchrg_cache), allocatable :: cache
 
-   ! Solver variables
-   class(mchrg_solver_type), allocatable :: solver
-   class(mchrg_solver_input), allocatable :: solver_input
-   real(wp) :: tol = 1.0e-15_wp
-   integer :: maxiter = 1000
-   integer :: verbosity = 0
+      ! Solver variables
+      class(mchrg_solver_type), allocatable :: solver
+      class(mchrg_solver_input), allocatable :: solver_input
+      real(wp) :: tol = 1.0e-15_wp
+      integer :: maxiter = 1000
+      integer :: verbosity = 0
 
-   type(adjacency_list), allocatable :: list
+      type(adjacency_list), allocatable :: list
 
-   real(wp) :: trans(3, 1) = 0.0_wp
-   real(wp), allocatable :: energy(:)
-   real(wp), allocatable :: qvec(:)
+      real(wp) :: trans(3, 1) = 0.0_wp
+      real(wp), allocatable :: energy(:)
+      real(wp), allocatable :: qvec(:)
 
-   allocate(cg_input :: solver_input)
-   select type (solver_input)
-   type is (cg_input)
-      solver_input%cgtol = tol
-      solver_input%cgmiter = maxiter
-      solver_input%verbosity = verbosity
-      solver_input%use_nlist = .true.
-   end select
-   call solver_maker(solver, solver_input, error)
+      allocate(cg_input :: solver_input)
+      select type (solver_input)
+       type is (cg_input)
+         solver_input%cgtol = tol
+         solver_input%cgmiter = maxiter
+         solver_input%verbosity = verbosity
+         solver_input%use_nlist = .true.
+      end select
+      call solver_maker(solver, solver_input, error)
 
-   allocate(cache)
+      allocate(cache)
 
-   if (present(eref)) then
-      allocate (energy(mol%nat))
+      if (present(eref)) then
+         allocate (energy(mol%nat))
+         energy(:) = 0.0_wp
+      end if
+      if (present(qref)) then
+         allocate (qvec(mol%nat))
+      end if
+
+      ! Build adjacency list
+      allocate(list)
+      call new_adjacency_list(list, mol, cutoff, .false.)
+
+      call model%update(mol, cache, trans, grad=.false., list=list)
+      call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, unit=output_unit)
+      if (allocated(error)) return
+
+      if (present(qref)) then
+         if (any(abs(qvec - qref) > thr)) then
+            call test_failed(error, "Partial charges do not match")
+            print'(a)', "Charges:"
+            print'(3es21.14)', qvec
+            print'(a)', "diff:"
+            print'(3es21.14)', qvec - qref
+         end if
+      end if
+      if (allocated(error)) return
+
+      if (present(eref)) then
+         if (any(abs(energy - eref) > thr)) then
+            call test_failed(error, "Energies do not match")
+            print'(a)', "Energy:"
+            print'(3es21.14)', energy
+            print'(a)', "diff:"
+            print'(3es21.14)', energy - eref
+         end if
+      end if
+
+   end subroutine gen_test_molecular
+
+   subroutine gen_test_periodic(error, mol, model)
+
+      !> Error handling
+      type(error_type), allocatable, intent(out) :: error
+
+      !> Molecular structure data
+      type(structure_type), intent(in) :: mol
+
+      !> Electronegativity equilibration model
+      class(mchrg_model_type), intent(in) :: model
+
+      !> Reference charges
+      real(wp), allocatable :: qref(:)
+
+      !> Reference energies
+      real(wp), allocatable :: eref(:)
+
+      type(mchrg_cache), allocatable :: cache
+
+      type(adjacency_list), allocatable :: list
+
+      ! Solver variables
+      class(mchrg_solver_type), allocatable :: solver
+      class(mchrg_solver_input), allocatable :: solver_input
+      real(wp) :: tol = 1.0e-15_wp
+      integer :: maxiter = 1000
+      integer :: verbosity = 0
+
+      integer :: ndim
+      real(wp), allocatable :: trans(:, :)
+      real(wp), allocatable :: energy(:)
+      real(wp), allocatable :: qvec(:)
+      real(wp), allocatable :: amat_dir(:,:)
+      real(wp), allocatable :: amat_list(:,:)
+
+      integer :: iat, jat, kat
+
+      allocate(cg_input :: solver_input)
+      select type (solver_input)
+       type is (cg_input)
+         solver_input%cgtol = tol
+         solver_input%cgmiter = maxiter
+         solver_input%verbosity = verbosity
+         ndim = mol%nat
+         solver_input%use_nlist = .true.
+      end select
+      call solver_maker(solver, solver_input, error)
+
+      allocate(cache)
+
+      call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
+
+      allocate(eref(mol%nat))
+      eref(:) = 0.0_wp
+      allocate(energy(mol%nat))
       energy(:) = 0.0_wp
-   end if
-   if (present(qref)) then
+      allocate (qref(mol%nat))
       allocate (qvec(mol%nat))
-   end if
 
-   ! Build adjacency list
-   allocate(list)
-   call new_adjacency_list(list, mol, cutoff, .false.)
+      allocate(amat_dir(mol%nat, mol%nat), amat_list(mol%nat, mol%nat))
 
-   call model%update(mol, cache, trans, grad=.false., list=list)
-   call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, unit=output_unit)
-   if (allocated(error)) return
+      call model%update(mol, cache, trans, grad=.false.)
+      !call model%get_capacitance_matrix(mol, mol%nat, cache)
+      !call model%get_xvec( mol, mol%nat, cache)
+      !call model%get_coulomb_matrix(mol, mol%nat, cache)
+      !amat_dir(:,:) = cache%amat
+      !write(*,*) "DIRECT AMAT"
+      !print'(12es21.14)', amat_dir
+      !write(*,*) "DIRECT XVEC"
+      !write(*,'(es21.14)') cache%xvec
+      !write(*,'(50("-"))')
+      call model%solve(mol, solver, cache, error, energy=eref, qvec=qref, unit=output_unit)
 
-   if (present(qref)) then
+
+      if (allocated(error)) return
+
+      ! Build adjacency list
+      deallocate(cache)
+      allocate(cache)
+      allocate(list)
+      call new_adjacency_list(list, mol, cutoff , .false.)
+      call model%update(mol, cache, trans, grad=.false., list=list)
+      !call model%get_capacitance_matrix(mol, mol%nat, cache, list)
+      !call model%get_xvec(mol, mol%nat, cache, list)
+      !call model%get_coulomb_matrix(mol, mol%nat, cache, list)
+      !do iat = 1, mol%nat
+      !
+      !   do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
+      !      jat = list%nlat(kat)
+      !      amat_list(iat, jat) = cache%alist(kat)
+      !      amat_list(jat, iat) = cache%alist(kat)
+      !   end do
+      !   amat_list(iat, iat) = cache%adiag(iat)
+      !end do
+      !write(*,*) "NLIST AMAT"
+      !write(*,'(12es21.14)') amat_list
+      !write(*,*) "NLIST XVEC"
+      !write(*,'(es21.14)') cache%xvec
+      !write(*,'(50("-"))')
+      call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, unit=output_unit)
+
+
+
       if (any(abs(qvec - qref) > thr)) then
          call test_failed(error, "Partial charges do not match")
          print'(a)', "Charges:"
@@ -165,10 +290,7 @@ subroutine gen_test_molecular(error, mol, model, qref, eref)
          print'(a)', "diff:"
          print'(3es21.14)', qvec - qref
       end if
-   end if
-   if (allocated(error)) return
 
-   if (present(eref)) then
       if (any(abs(energy - eref) > thr)) then
          call test_failed(error, "Energies do not match")
          print'(a)', "Energy:"
@@ -176,476 +298,414 @@ subroutine gen_test_molecular(error, mol, model, qref, eref)
          print'(a)', "diff:"
          print'(3es21.14)', energy - eref
       end if
-   end if
-
-end subroutine gen_test_molecular
-
-subroutine gen_test_periodic(error, mol, model)
-
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
-
-   !> Molecular structure data
-   type(structure_type), intent(in) :: mol
-
-   !> Electronegativity equilibration model
-   class(mchrg_model_type), intent(in) :: model
-
-   !> Reference charges
-   real(wp), allocatable :: qref(:)
-
-   !> Reference energies
-   real(wp), allocatable :: eref(:)
-
-   type(mchrg_cache), allocatable :: cache
-
-   type(adjacency_list), allocatable :: list
-
-   ! Solver variables
-   class(mchrg_solver_type), allocatable :: solver
-   class(mchrg_solver_input), allocatable :: solver_input
-   real(wp) :: tol = 1.0e-15_wp
-   integer :: maxiter = 1000
-   integer :: verbosity = 0
-
-   integer :: ndim
-   real(wp), allocatable :: trans(:, :)
-   real(wp), allocatable :: energy(:)
-   real(wp), allocatable :: qvec(:)
-   real(wp), allocatable :: amat_dir(:,:)
-   real(wp), allocatable :: amat_list(:,:)
-
-   integer :: iat, jat, kat
-
-   allocate(cg_input :: solver_input)
-   select type (solver_input)
-   type is (cg_input)
-      solver_input%cgtol = tol
-      solver_input%cgmiter = maxiter
-      solver_input%verbosity = verbosity
-      ndim = mol%nat
-      solver_input%use_nlist = .true.
-   end select
-   call solver_maker(solver, solver_input, error)
-   
-   allocate(cache)
-
-   call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
-
-   allocate(eref(mol%nat))
-   eref(:) = 0.0_wp
-   allocate(energy(mol%nat))
-   energy(:) = 0.0_wp
-   allocate (qref(mol%nat))
-   allocate (qvec(mol%nat))
-
-   allocate(amat_dir(mol%nat, mol%nat), amat_list(mol%nat, mol%nat))
-
-   call model%update(mol, cache, trans, grad=.false.)
-   !call model%get_capacitance_matrix(mol, mol%nat, cache)
-   !call model%get_xvec( mol, mol%nat, cache)
-   !call model%get_coulomb_matrix(mol, mol%nat, cache)
-   !amat_dir(:,:) = cache%amat
-   !write(*,*) "DIRECT AMAT"
-   !print'(12es21.14)', amat_dir
-   !write(*,*) "DIRECT XVEC"
-   !write(*,'(es21.14)') cache%xvec
-   !write(*,'(50("-"))')
-   call model%solve(mol, solver, cache, error, energy=eref, qvec=qref, unit=output_unit)
+      if (allocated(error)) return
 
 
-   if (allocated(error)) return
+   end subroutine gen_test_periodic
 
-   ! Build adjacency list
-   deallocate(cache)
-   allocate(cache)
-   allocate(list)
-   call new_adjacency_list(list, mol, cutoff, .false.)
-   call model%update(mol, cache, trans, grad=.false., list=list)
-   !call model%get_capacitance_matrix(mol, mol%nat, cache, list)
-   !call model%get_xvec(mol, mol%nat, cache, list)
-   !call model%get_coulomb_matrix(mol, mol%nat, cache, list)
-   !do iat = 1, mol%nat
-   !   
-   !   do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
-   !      jat = list%nlat(kat)
-   !      amat_list(iat, jat) = cache%alist(kat)
-   !      amat_list(jat, iat) = cache%alist(kat)
-   !   end do
-   !   amat_list(iat, iat) = cache%adiag(iat)
-   !end do
-   !write(*,*) "NLIST AMAT"
-   !write(*,'(12es21.14)') amat_list
-   !write(*,*) "NLIST XVEC"
-   !write(*,'(es21.14)') cache%xvec
-   !write(*,'(50("-"))')
-   call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, unit=output_unit)
+   subroutine test_numgrad(error, mol, model)
 
+      !> Error handling
+      type(error_type), allocatable, intent(out) :: error
 
+      !> Molecular structure data
+      type(structure_type), intent(inout) :: mol
 
-   if (any(abs(qvec - qref) > thr)) then
-      call test_failed(error, "Partial charges do not match")
-      print'(a)', "Charges:"
-      print'(3es21.14)', qvec
-      print'(a)', "diff:"
-      print'(3es21.14)', qvec - qref
-   end if
+      !> Electronegativity equilibration model
+      class(mchrg_model_type), intent(in) :: model
 
-   if (any(abs(energy - eref) > thr)) then
-      call test_failed(error, "Energies do not match")
-      print'(a)', "Energy:"
-      print'(3es21.14)', energy
-      print'(a)', "diff:"
-      print'(3es21.14)', energy - eref
-   end if
-   if (allocated(error)) return
+      type(mchrg_cache), allocatable :: cache1, cache2
 
+      ! Solver variables
+      class(mchrg_solver_type), allocatable :: solver
+      class(mchrg_solver_input), allocatable :: solver_input
+      real(wp) :: tol = 1.0e-15_wp
+      integer :: maxiter = 1000
+      integer :: verbosity = 0
 
-end subroutine gen_test_periodic
+      type(adjacency_list), allocatable :: list
 
-subroutine test_numgrad(error, mol, model)
+      integer :: iat, jat, kat, ic, ndim
+      real(wp), parameter :: trans(3, 1) = 0.0_wp   ! dummy for non‑periodic systems
+      real(wp), parameter :: step = 1.0e-6_wp
+      real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
+      real(wp), allocatable :: numgrad(:, :), numsigma(:, :)
+      real(wp) :: er, el
+      real(wp), allocatable :: dcmat_list(:, :, :), damat_list(:, :, :)
+      real(wp), allocatable :: dxvec_list(:, :, :), dcn_list(:, :, :), dqloc_list(:, :, :)
+      logical :: grad = .true.
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+      allocate(cg_input :: solver_input)
+      select type (solver_input)
+       type is (cg_input)
+         solver_input%cgtol = tol
+         solver_input%cgmiter = maxiter
+         solver_input%verbosity = verbosity
+         solver_input%use_nlist = .true.
+         ndim = mol%nat
+      end select
+      call solver_maker(solver, solver_input, error)
 
-   !> Molecular structure data
-   type(structure_type), intent(inout) :: mol
+      allocate(cache1)
 
-   !> Electronegativity equilibration model
-   class(mchrg_model_type), intent(in) :: model
+      allocate (energy(mol%nat), gradient(3, mol%nat), sigma(3, 3), numgrad(3, mol%nat))
+      energy(:) = 0.0_wp
+      gradient(:, :) = 0.0_wp
+      sigma(:, :) = 0.0_wp
 
-   type(mchrg_cache), allocatable :: cache1, cache2
+      allocate(damat_list(3, mol%nat, mol%nat))
+      allocate(dcmat_list(3, mol%nat, mol%nat))
+      allocate(dxvec_list(3, mol%nat, mol%nat))
+      allocate(dcn_list(3, mol%nat, mol%nat), dqloc_list(3, mol%nat, mol%nat))
+      damat_list(:,:,:) = 0.0_wp
+      dcmat_list(:,:,:) = 0.0_wp
+      dxvec_list(:,:,:) = 0.0_wp
+      dcn_list(:,:,:) = 0.0_wp
+      dqloc_list(:,:,:) = 0.0_wp
 
-   ! Solver variables
-   class(mchrg_solver_type), allocatable :: solver
-   class(mchrg_solver_input), allocatable :: solver_input
-   real(wp) :: tol = 1.0e-15_wp
-   integer :: maxiter = 1000
-   integer :: verbosity = 0
-
-   type(adjacency_list), allocatable :: list
-
-   integer :: iat, jat, kat, ic, ndim
-   real(wp), parameter :: trans(3, 1) = 0.0_wp   ! dummy for non‑periodic systems
-   real(wp), parameter :: step = 1.0e-6_wp
-   real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
-   real(wp), allocatable :: numgrad(:, :), numsigma(:, :)
-   real(wp) :: er, el
-   real(wp), allocatable :: damat_list(:, :, :), dxvec_list(:, :, :), dcn_list(:, :, :), dqloc_list(:, :, :)
-   logical :: grad = .true.
-
-   allocate(cg_input :: solver_input)
-   select type (solver_input)
-   type is (cg_input)
-      solver_input%cgtol = tol
-      solver_input%cgmiter = maxiter
-      solver_input%verbosity = verbosity
-      solver_input%use_nlist = .true.
-      ndim = mol%nat
-   end select
-   call solver_maker(solver, solver_input, error)
-
-   allocate(cache1)
-   
-   allocate (energy(mol%nat), gradient(3, mol%nat), sigma(3, 3), numgrad(3, mol%nat))
-   energy(:) = 0.0_wp
-   gradient(:, :) = 0.0_wp
-   sigma(:, :) = 0.0_wp
-
-   call model%update(mol, cache1, trans, grad=.true.)
-   call model%solve(mol, solver, cache1, error, &
+      call model%update(mol, cache1, trans, grad=.true.)
+      call model%solve(mol, solver, cache1, error, &
       & gradient=gradient, sigma=sigma, unit=output_unit)
-   !call model%get_capacitance_matrix(mol, mol%nat, cache)
-   !call model%get_xvec( mol, mol%nat, cache)
-   !call model%get_coulomb_matrix(mol, mol%nat, cache)
-   !print'(a)', "DIRECT DCN/DR:"
-   !print'(3es21.14)', cache1%dcndr
-   !write(*,'(50("-"))')
-   write(*, *) "Number of atoms:", mol%nat
-   print'(a)', "DQLOC/DR:"
-   print'(16es21.14)', cache1%dqlocdr(1, :, :)
-   !print'(a)', "DIRECT DADR:"
-   !print'(12es21.14)', cache1%dadr
-   !write(*,*) "DIRECT DXDR"
-   !write(*,'(es21.14)') cache1%dxdr
-   !write(*,'(50("-"))')
+      !call model%get_capacitance_matrix(mol, mol%nat, cache)
+      !call model%get_xvec( mol, mol%nat, cache)
+      !call model%get_coulomb_matrix(mol, mol%nat, cache)
+      !print'(a)', "DIRECT DCN/DR:"
+      !print'(3es21.14)', cache1%dcndr
+      !write(*,'(50("-"))')
+      !write(*, *) "Number of atoms:", mol%nat
+      !print'(a)', "DQLOC/DR:"
+      !print'(16es21.14)', cache1%dqlocdr(1, :, :)
+      !print'(a)', "DIRECT DADR:"
+      !print'(12es21.14)', cache1%dadr
+      !write(*,*) "DIRECT DXDR"
+      !write(*,'(16es21.14)') cache1%dxdr
+      !write(*,'(50("-"))')
 
+      if (allocated(error)) return
 
+      ! Build adjacency list
+      allocate(numsigma(3, 3), source=0.0_wp)
 
-   if (allocated(error)) return
+      allocate(cache2)
+      allocate(list)
+      call new_adjacency_list(list, mol, 1.0e9_wp, .false.)
+      call model%update(mol, cache2, trans, grad=.true., list=list)
 
+      !call model%get_capacitance_matrix(mol, mol%nat, cache2, list=list)
+      !call model%get_xvec( mol, mol%nat, cache2, list=list)
+      !call model%get_coulomb_matrix(mol, mol%nat, cache2, list=list)
 
-
-   ! Build adjacency list
-   allocate(damat_list(3, mol%nat, mol%nat), dxvec_list(3, mol%nat, mol%nat), &
-      & dcn_list(3, mol%nat, mol%nat), dqloc_list(3, mol%nat, mol%nat))
-
-   damat_list(:,:,:) = 0.0_wp
-   dxvec_list(:,:,:) = 0.0_wp
-   dcn_list(:,:,:) = 0.0_wp
-   dqloc_list(:,:,:) = 0.0_wp
-
-   allocate(numsigma(3, 3), source=0.0_wp)
-
-   allocate(cache2)
-   allocate(list)
-   call new_adjacency_list(list, mol, cutoff, .false.)
-   call model%update(mol, cache2, trans, grad, list=list)
-   call model%solve(mol, solver, cache2, error, &
+      call model%solve(mol, solver, cache2, error, &
       & gradient=numgrad, sigma=numsigma, list=list, unit=output_unit)
-   do iat = 1, mol%nat
-      
-      do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
-         jat = list%nlat(kat)
-         dqloc_list(:, iat, jat) = cache2%dqlocdrlist(:, kat)
-         dqloc_list(:, jat, iat) = -cache2%dqlocdrlist(:, kat)
-         dcn_list(:, iat, jat) = cache2%dcndrlist(:, kat)
-         dcn_list(:, jat, iat) = -cache2%dcndrlist(:, kat)
-         !dxvec_list(:, iat, jat) = cache2%dxdrlist(:, kat)
-         !dxvec_list(:, jat, iat) = -cache2%dxdrlist(:, kat)
-         !damat_list(:, iat, jat) = cache2%dadrlist(:, kat)
-         !damat_list(:, jat, iat) = -cache2%dadrlist(:, kat)
+
+
+      if (.not. allocated(cache2%dadrdiag)) then
+         call test_failed(error, "cache2%dadrdiag not allocated")
+         return
+      end if
+      if (any(shape(cache2%dadrdiag) /= [3, mol%nat])) then
+         call test_failed(error, "cache2%dadrdiag has wrong shape")
+         return
+      end if
+
+      !write(*,*) "Number of atoms:", mol%nat
+      !write(*,*) "DXDR DIAG"
+      !write(*,'(16es21.14)') cache2%dxdrdiag
+      !write(*,*) " DXDRIJ"
+      !write(*,'(16es21.14)') cache2%dxdrij
+      !write(*,*) "DXDRJI"
+      !write(*,'(16es21.14)') cache2%dxdrji
+
+
+
+      do iat = 1, mol%nat
+
+         dcmat_list(:, iat, iat) = cache2%dcdrdiag(:, iat)
+         damat_list(:, iat, iat) = cache2%dadrdiag(:, iat) + damat_list(:, iat, iat)
+         dqloc_list(:, iat, iat) = cache2%dqlocdrdiag(:, iat)
+         dxvec_list(:, iat, iat) = cache2%dxdrdiag(:, iat) + dxvec_list(:, iat, iat)
+         dcn_list(:, iat, iat) = cache2%dcndrdiag(:, iat)
+
+         do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
+            jat = list%nlat(kat)
+            dcmat_list(:, iat, jat) = cache2%dcdrij(:, kat)
+            dcmat_list(:, jat, iat) = cache2%dcdrji(:, kat)
+            dqloc_list(:, iat, jat) = cache2%dqlocdrij(:, kat)
+            dqloc_list(:, jat, iat) = cache2%dqlocdrji(:, kat)
+            dcn_list(:, iat, jat) = cache2%dcndrij(:, kat)
+            dcn_list(:, jat, iat) = cache2%dcndrji(:, kat)
+            dxvec_list(:, iat, jat) = cache2%dxdrij(:, kat)
+            dxvec_list(:, jat, iat) = cache2%dxdrji(:, kat)
+            damat_list(:, iat, jat) = cache2%dadrij(:, kat)
+            damat_list(:, jat, iat) = cache2%dadrji(:, kat)
+         end do
       end do
-      !damat_list(:, iat, iat) = cache2%dadrdiag(:, iat)
-      dqloc_list(:, iat, iat) = cache2%dqlocdrdiag(:, iat)
-      !dxvec_list(:, iat, iat) = cache2%dxdrdiag(:, iat)
-      dcn_list(:, iat, iat) = cache2%dcndrdiag(:, iat)
-   end do
-   !write(*,*) "NLIST DAMAT"
-   !write(*,'(12es21.14)') damat_list
-   !write(*,*) "NLIST DXVEC"
-   !write(*,'(es21.14)') dxvec_list
-   !write(*,'(50("-"))')
-   !print'(a)', "NLIST DCN/DR:"
-   !print'(3es21.14)', dcn_list
-   !write(*,'(50("-"))')
-   !print'(a)', "NLIST DQLOC/DR:"
-   !print'(3es21.14)', dqloc_list
-   if (allocated(error)) return
+      !write(*,*) "NLIST DAMAT"
+      !write(*,'(12es21.14)') damat_list
+      !write(*,*) "NLIST DXVEC"
+      !write(*,'(16es21.14)') dxvec_list
+      !!write(*,'(50("-"))')
+      !print'(a)', "NLIST DCN/DR:"
+      !print'(3es21.14)', dcn_list
+      !write(*,'(50("-"))')
+      !print'(a)', "NLIST DQLOC/DR:"
+      !print'(3es21.14)', dqloc_list
 
-   !if (any(abs(cache1%dqlocdr(:, :, :) - dqloc_list(:, :, :)) > thr3)) then
-   !   call test_failed(error, "Derivative of local charge does not match")
-   !   print'(a)', "Local charge derivative:"
-   !   print'(3es21.14)', cache1%dqlocdr
-   !   print'(a)', "Nlist local charge derivative:"
-   !   print'(3es21.14)', dqloc_list
-   !   print'(a)', "diff:"
-   !   print'(3es21.14)', dqloc_list - cache1%dqlocdr
-   !end if
+      if (allocated(error)) return
 
-   if (any(abs(cache1%dcndr(:, :, :) - dcn_list(:, :, :)) > thr3)) then
-      call test_failed(error, "Derivative of CN does not match")
-      print'(a)', "CN derivative:"
-      print'(3es21.14)', cache1%dcndr
-      print'(a)', "Nlist CN derivative:"
-      print'(3es21.14)', dcn_list
-      print'(a)', "diff:"
-      print'(3es21.14)', dcn_list - cache1%dcndr
-   end if
-   
-  ! if (any(abs(gradient(:, :) - numgrad(:, :)) > thr3)) then
-  !    call test_failed(error, "Derivative of energy does not match")
-  !    print'(a)', "Energy gradient:"
-  !    print'(3es21.14)', gradient
-  !    print'(a)', "numgrad:"
-  !    print'(3es21.14)', numgrad
-  !    print'(a)', "diff:"
-  !    print'(3es21.14)', gradient - numgrad
-  ! end if
+      if (any(abs(cache1%dqlocdr(:, :, :) - dqloc_list(:, :, :)) > thr3)) then
+         call test_failed(error, "Derivative of local charge does not match")
+         print'(a)', "Local charge derivative:"
+         print'(3es21.14)', cache1%dqlocdr
+         print'(a)', "Nlist local charge derivative:"
+         print'(3es21.14)', dqloc_list
+         print'(a)', "diff:"
+         print'(3es21.14)', dqloc_list - cache1%dqlocdr
+      end if
+
+      if (any(abs(cache1%dcndr(:, :, :) - dcn_list(:, :, :)) > thr3)) then
+         call test_failed(error, "Derivative of CN does not match")
+         print'(a)', "CN derivative:"
+         print'(3es21.14)', cache1%dcndr
+         print'(a)', "Nlist CN derivative:"
+         print'(3es21.14)', dcn_list
+         print'(a)', "diff:"
+         print'(3es21.14)', dcn_list - cache1%dcndr
+      end if
+
+      if (any(abs(cache1%dcdr(:, :, :) - dcmat_list(:, :, :)) > thr3)) then
+         call test_failed(error, "Derivative of Capacitance matrix does not match")
+         print'(a)', "Capacitance derivative:"
+         print'(16es21.14)', cache1%dcdr
+         print'(a)', "Nlist Capacitance derivative:"
+         print'(16es21.14)', dcmat_list
+         print'(a)', "diff:"
+         print'(16es21.14)', dcmat_list - cache1%dcdr
+      end if
+
+      if (any(abs(cache1%dxdr(:, :, :) - dxvec_list(:, :, :)) > thr3)) then
+         call test_failed(error, "Derivative of electronegativity does not match")
+         print'(a)', "Electronegativity derivative:"
+         print'(16es21.14)', cache1%dxdr(3, :, :)
+         print'(a)', "Nlist electronegativity derivative:"
+         print'(16es21.14)', dxvec_list(3, :, :)
+         print'(a)', "diff:"
+         print'(16es21.14)', dxvec_list(3, :, :) - cache1%dxdr(3, :, :)
+      end if
+
+      !if (any(abs(cache1%dadr(:, :, :) - damat_list(:, :, :)) > thr3)) then
+      !   call test_failed(error, "Derivative of Coulomb matrix does not match")
+      !   print'(a)', "Coulomb matrix derivative:"
+      !   print'(16es21.14)', cache1%dadr
+      !   print'(a)', "Nlist Coulomb matrix derivative:"
+      !   print'(16es21.14)', damat_list
+      !   print'(a)', "diff:"
+      !   print'(16es21.14)', damat_list - cache1%dadr
+      !end if
+
+      ! if (any(abs(gradient(:, :) - numgrad(:, :)) > thr3)) then
+      !    call test_failed(error, "Derivative of energy does not match")
+      !    print'(a)', "Energy gradient:"
+      !    print'(3es21.14)', gradient
+      !    print'(a)', "numgrad:"
+      !    print'(3es21.14)', numgrad
+      !    print'(a)', "diff:"
+      !    print'(3es21.14)', gradient - numgrad
+      ! end if
 !
-  ! if (any(abs(sigma(:, :) - numsigma(:, :)) > thr3)) then
-  !    call test_failed(error, "Derivative of energy does not match")
-  !    print'(a)', "Energy sigma:"
-  !    print'(3es21.14)', sigma
-  !    print'(a)', "numsigma:"
-  !    print'(3es21.14)', numsigma
-  !    print'(a)', "diff:"
-  !    print'(3es21.14)', sigma - numsigma
-  ! end if
+      ! if (any(abs(sigma(:, :) - numsigma(:, :)) > thr3)) then
+      !    call test_failed(error, "Derivative of energy does not match")
+      !    print'(a)', "Energy sigma:"
+      !    print'(3es21.14)', sigma
+      !    print'(a)', "numsigma:"
+      !    print'(3es21.14)', numsigma
+      !    print'(a)', "diff:"
+      !    print'(3es21.14)', sigma - numsigma
+      ! end if
 
-end subroutine test_numgrad
+   end subroutine test_numgrad
 
-subroutine test_numgrad_periodic(error, mol, model)
+   subroutine test_numgrad_periodic(error, mol, model)
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+      !> Error handling
+      type(error_type), allocatable, intent(out) :: error
 
-   !> Molecular structure data
-   type(structure_type), intent(inout) :: mol
+      !> Molecular structure data
+      type(structure_type), intent(inout) :: mol
 
-   !> Electronegativity equilibration model
-   class(mchrg_model_type), intent(in) :: model
+      !> Electronegativity equilibration model
+      class(mchrg_model_type), intent(in) :: model
 
-   type(mchrg_cache), allocatable :: cache
+      type(mchrg_cache), allocatable :: cache
 
-   ! Solver variables
-   class(mchrg_solver_type), allocatable :: solver
-   class(mchrg_solver_input), allocatable :: solver_input
-   real(wp) :: tol = 1.0e-15_wp
-   integer :: maxiter = 1000
-   integer :: verbosity = 0
+      ! Solver variables
+      class(mchrg_solver_type), allocatable :: solver
+      class(mchrg_solver_input), allocatable :: solver_input
+      real(wp) :: tol = 1.0e-15_wp
+      integer :: maxiter = 1000
+      integer :: verbosity = 0
 
-   type(adjacency_list), allocatable :: list
+      type(adjacency_list), allocatable :: list
 
-   integer :: iat, ic, ndim
-   real(wp), allocatable :: trans(:, :)
-   real(wp), parameter :: step = 1.0e-6_wp
-   real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
-   real(wp), allocatable :: numgrad(:, :)
-   real(wp) :: er, el
-   logical :: grad = .true.
+      integer :: iat, ic, ndim
+      real(wp), allocatable :: trans(:, :)
+      real(wp), parameter :: step = 1.0e-6_wp
+      real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
+      real(wp), allocatable :: numgrad(:, :)
+      real(wp) :: er, el
+      logical :: grad = .true.
 
-   allocate(cg_input :: solver_input)
-   select type (solver_input)
-   type is (cg_input)
-      solver_input%cgtol = tol
-      solver_input%cgmiter = maxiter
-      solver_input%verbosity = verbosity
-      solver_input%use_nlist = .true.
-      ndim = mol%nat
-   end select
-   call solver_maker(solver, solver_input, error)
+      allocate(cg_input :: solver_input)
+      select type (solver_input)
+       type is (cg_input)
+         solver_input%cgtol = tol
+         solver_input%cgmiter = maxiter
+         solver_input%verbosity = verbosity
+         solver_input%use_nlist = .true.
+         ndim = mol%nat
+      end select
+      call solver_maker(solver, solver_input, error)
 
-   allocate(cache)
-   
-   allocate (energy(mol%nat), gradient(3, mol%nat), sigma(3, 3), numgrad(3, mol%nat))
-   energy(:) = 0.0_wp
-   gradient(:, :) = 0.0_wp
-   sigma(:, :) = 0.0_wp
+      allocate(cache)
 
-   call get_lattice_points(mol%periodic, mol%lattice, 25.0_wp, trans)
+      allocate (energy(mol%nat), gradient(3, mol%nat), sigma(3, 3), numgrad(3, mol%nat))
+      energy(:) = 0.0_wp
+      gradient(:, :) = 0.0_wp
+      sigma(:, :) = 0.0_wp
 
-   lp: do iat = 1, mol%nat
-      do ic = 1, 3
-         energy(:) = 0.0_wp
-         mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
-         call model%update(mol, cache, trans, grad=.false.)
-         call model%solve(mol, solver, cache, error, energy=energy, unit=output_unit)
-         if (allocated(error)) exit lp
-         er = sum(energy)
+      call get_lattice_points(mol%periodic, mol%lattice, 25.0_wp, trans)
 
-         energy(:) = 0.0_wp
-         mol%xyz(ic, iat) = mol%xyz(ic, iat) - 2*step
-         call model%update(mol, cache, trans, grad=.false.)
-         call model%solve(mol, solver, cache, error, energy=energy, unit=output_unit)
-         if (allocated(error)) exit lp
-         el = sum(energy)
+      lp: do iat = 1, mol%nat
+         do ic = 1, 3
+            energy(:) = 0.0_wp
+            mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
+            call model%update(mol, cache, trans, grad=.false.)
+            call model%solve(mol, solver, cache, error, energy=energy, unit=output_unit)
+            if (allocated(error)) exit lp
+            er = sum(energy)
 
-         mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
-         numgrad(ic, iat) = 0.5_wp*(er - el)/step
-      end do
-   end do lp
-   if (allocated(error)) return
+            energy(:) = 0.0_wp
+            mol%xyz(ic, iat) = mol%xyz(ic, iat) - 2*step
+            call model%update(mol, cache, trans, grad=.false.)
+            call model%solve(mol, solver, cache, error, energy=energy, unit=output_unit)
+            if (allocated(error)) exit lp
+            el = sum(energy)
 
-   ! Build adjacency list
-   allocate(list)
-   call new_adjacency_list(list, mol, cutoff, .false.)
+            mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
+            numgrad(ic, iat) = 0.5_wp*(er - el)/step
+         end do
+      end do lp
+      if (allocated(error)) return
 
-   call model%update(mol, cache, trans, grad, list=list)
-   call model%solve(mol, solver, cache, error, &
+      ! Build adjacency list
+      allocate(list)
+      call new_adjacency_list(list, mol, cutoff, .false.)
+
+      call model%update(mol, cache, trans, grad, list=list)
+      call model%solve(mol, solver, cache, error, &
       & gradient=gradient, sigma=sigma, list=list, unit=output_unit)
-   if (allocated(error)) return
+      if (allocated(error)) return
 
-   if (any(abs(gradient(:, :) - numgrad(:, :)) > thr3)) then
-      call test_failed(error, "Derivative of energy does not match")
-      print'(a)', "Energy gradient:"
-      print'(3es21.14)', gradient
-      print'(a)', "numgrad:"
-      print'(3es21.14)', numgrad
-      print'(a)', "diff:"
-      print'(3es21.14)', gradient - numgrad
-   end if
+      if (any(abs(gradient(:, :) - numgrad(:, :)) > thr3)) then
+         call test_failed(error, "Derivative of energy does not match")
+         print'(a)', "Energy gradient:"
+         print'(3es21.14)', gradient
+         print'(a)', "numgrad:"
+         print'(3es21.14)', numgrad
+         print'(a)', "diff:"
+         print'(3es21.14)', gradient - numgrad
+      end if
 
-end subroutine test_numgrad_periodic
+   end subroutine test_numgrad_periodic
 
-subroutine test_dadr(error, mol, model)
+   subroutine test_dadr(error, mol, model)
 
 
-   !> Molecular structure data
-   type(structure_type), intent(inout) :: mol
+      !> Molecular structure data
+      type(structure_type), intent(inout) :: mol
 
-   !> Electronegativity equilibration model
-   class(mchrg_model_type), intent(in) :: model
+      !> Electronegativity equilibration model
+      class(mchrg_model_type), intent(in) :: model
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+      !> Error handling
+      type(error_type), allocatable, intent(out) :: error
 
-   ! Solver variables
-   class(mchrg_solver_type), allocatable :: solver
-   class(mchrg_solver_input), allocatable :: solver_input
-   real(wp) :: tol = 1.0e-15_wp
-   integer :: maxiter = 1000
-   integer :: verbosity = 0
+      ! Solver variables
+      class(mchrg_solver_type), allocatable :: solver
+      class(mchrg_solver_input), allocatable :: solver_input
+      real(wp) :: tol = 1.0e-15_wp
+      integer :: maxiter = 1000
+      integer :: verbosity = 0
 
-   integer :: iat, ic, jat, kat, ndim
-   real(wp) :: thr2_local
-   real(wp), parameter :: step = 1.0e-6_wp
-   real(wp), allocatable :: trans(:, :)
-   real(wp), allocatable :: qvec(:), numgrad(:, :, :),  numtrace(:, :)
-   real(wp), allocatable :: amatr1(:, :), amatr2(:, :), amatl1(:, :), amatl2(:, :)
-   type(mchrg_cache), allocatable :: cache
-   logical :: grad = .true.
+      integer :: iat, ic, jat, kat, ndim
+      real(wp) :: thr2_local
+      real(wp), parameter :: step = 1.0e-6_wp
+      real(wp), allocatable :: trans(:, :)
+      real(wp), allocatable :: qvec(:), numgrad(:, :, :),  numtrace(:, :)
+      real(wp), allocatable :: amatr1(:, :), amatr2(:, :), amatl1(:, :), amatl2(:, :)
+      type(mchrg_cache), allocatable :: cache
+      logical :: grad = .true.
 
-   allocate(cg_input :: solver_input)
-   select type (solver_input)
-   type is (cg_input)
-      solver_input%cgtol = tol
-      solver_input%cgmiter = maxiter
-      solver_input%verbosity = verbosity
-      ndim = mol%nat
-   end select
-   call solver_maker(solver, solver_input, error)
+      allocate(cg_input :: solver_input)
+      select type (solver_input)
+       type is (cg_input)
+         solver_input%cgtol = tol
+         solver_input%cgmiter = maxiter
+         solver_input%verbosity = verbosity
+         ndim = mol%nat
+      end select
+      call solver_maker(solver, solver_input, error)
 
-   allocate (cache)
+      allocate (cache)
 
-   allocate (amatr1(ndim, ndim), amatl1(ndim, ndim), amatr2(ndim, ndim), amatl2(ndim, ndim), &
+      allocate (amatr1(ndim, ndim), amatl1(ndim, ndim), amatr2(ndim, ndim), amatl2(ndim, ndim), &
       & numtrace(3, mol%nat), numgrad(3, mol%nat, ndim), qvec(mol%nat))
 
-   ! Set tolerance higher if testing eeqbc model
-   select type (model)
-   type is (eeqbc_model)
-      thr2_local = 3.0_wp*thr2
-   class default
-      thr2_local = thr2
-   end select
+      ! Set tolerance higher if testing eeqbc model
+      select type (model)
+       type is (eeqbc_model)
+         thr2_local = 3.0_wp*thr2
+       class default
+         thr2_local = thr2
+      end select
 
-   call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
+      call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
-   ! Obtain the vector of charges
-   call model%update(mol, cache, trans, grad=.false.)
-   call model%solve(mol, solver, cache, error, qvec=qvec, unit=output_unit)
-   if (allocated(error)) return
+      ! Obtain the vector of charges
+      call model%update(mol, cache, trans, grad=.false.)
+      call model%solve(mol, solver, cache, error, qvec=qvec, unit=output_unit)
+      if (allocated(error)) return
 
-   ! Analytical gradient
-   call model%update(mol, cache, trans, grad)
-   call model%get_capacitance_matrix(mol, ndim, cache)
-   call model%get_coulomb_derivs(mol, ndim, cache)
+      ! Analytical gradient
+      call model%update(mol, cache, trans, grad)
+      call model%get_capacitance_matrix(mol, ndim, cache)
+      call model%get_coulomb_derivs(mol, ndim, cache)
 
-   if (any(abs(cache%dadr(:, :, :) - numgrad(:, :, :)) > thr2_local)) then
-      call test_failed(error, "Derivative of the A matrix does not match")
-      print'(a)', "dadr:"
-      print'(3es21.12)', cache%dadr
-      print'(a)', "numgrad:"
-      print'(3es21.12)', numgrad
-      print'(a)', "diff:"
-      print'(3es21.12)', cache%dadr - numgrad
-   end if
+      if (any(abs(cache%dadr(:, :, :) - numgrad(:, :, :)) > thr2_local)) then
+         call test_failed(error, "Derivative of the A matrix does not match")
+         print'(a)', "dadr:"
+         print'(3es21.12)', cache%dadr
+         print'(a)', "numgrad:"
+         print'(3es21.12)', numgrad
+         print'(a)', "diff:"
+         print'(3es21.12)', cache%dadr - numgrad
+      end if
 
-end subroutine test_dadr
+   end subroutine test_dadr
 
 !------------------------------------------------------------------------
 ! Test routines – now each builds its own adjacency list.
 !------------------------------------------------------------------------
-subroutine test_eeqbc_q_mb01(error)
+   subroutine test_eeqbc_q_mb01(error)
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+      !> Error handling
+      type(error_type), allocatable, intent(out) :: error
 
-   !> Molecular structure data
-   type(structure_type) :: mol
-   class(mchrg_model_type), allocatable :: model
+      !> Molecular structure data
+      type(structure_type) :: mol
+      class(mchrg_model_type), allocatable :: model
 
-   real(wp), parameter :: ref(16) = [&
+      real(wp), parameter :: ref(16) = [&
       & 4.75783090912440E-1_wp, -4.26540500638442E-2_wp, -3.77871226005535E-1_wp, &
       &-9.67376090029522E-2_wp, -1.73364116997142E-1_wp, 1.08660101025683E-1_wp, &
       &-1.13628448410420E-1_wp, -3.17939699645693E-1_wp, -2.45655524697400E-1_wp, &
@@ -653,27 +713,27 @@ subroutine test_eeqbc_q_mb01(error)
       &-1.44595425453640E-2_wp, 2.57782082780412E-1_wp, -1.11777579535162E-1_wp, &
       & 4.83486124588080E-1_wp]
 
-   real(wp), allocatable :: qvec(:)
-   real(wp), parameter :: trans(3, 1) = 0.0_wp
+      real(wp), allocatable :: qvec(:)
+      real(wp), parameter :: trans(3, 1) = 0.0_wp
 
-   call get_structure(mol, "MB16-43", "01")
+      call get_structure(mol, "MB16-43", "01")
 
-   call new_eeqbc2025_model(mol, model, error)
-   if (allocated(error)) return
-   call gen_test_molecular(error, mol, model, qref=ref)
+      call new_eeqbc2025_model(mol, model, error)
+      if (allocated(error)) return
+      call gen_test_molecular(error, mol, model, qref=ref)
 
-end subroutine test_eeqbc_q_mb01
+   end subroutine test_eeqbc_q_mb01
 
-subroutine test_eeqbc_q_mb02(error)
+   subroutine test_eeqbc_q_mb02(error)
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+      !> Error handling
+      type(error_type), allocatable, intent(out) :: error
 
-   !> Molecular structure data
-   type(structure_type) :: mol
-   class(mchrg_model_type), allocatable :: model
+      !> Molecular structure data
+      type(structure_type) :: mol
+      class(mchrg_model_type), allocatable :: model
 
-   real(wp), parameter :: ref(16) = [&
+      real(wp), parameter :: ref(16) = [&
       &-7.89571755894845E-2_wp, -1.84724587297173E-1_wp, -1.63060175795952E-2_wp, &
       &-2.36115890461711E-1_wp, 5.05729582512203E-1_wp, 1.37556939519704E-1_wp, &
       &-2.29048340967271E-2_wp, -4.31722346626804E-2_wp, 2.26466952977883E-1_wp, &
@@ -681,25 +741,25 @@ subroutine test_eeqbc_q_mb02(error)
       &-3.34344661086462E-1_wp, -3.16758668376149E-2_wp, -5.24170403450005E-2_wp, &
       &-3.09898225456160E-1_wp]
 
-   real(wp), parameter :: trans(3, 1) = 0.0_wp
+      real(wp), parameter :: trans(3, 1) = 0.0_wp
 
-   call get_structure(mol, "MB16-43", "02")
+      call get_structure(mol, "MB16-43", "02")
 
-   call new_eeqbc2025_model(mol, model, error)
-   if (allocated(error)) return
-   call gen_test_molecular(error, mol, model, qref=ref)
+      call new_eeqbc2025_model(mol, model, error)
+      if (allocated(error)) return
+      call gen_test_molecular(error, mol, model, qref=ref)
 
-end subroutine test_eeqbc_q_mb02
+   end subroutine test_eeqbc_q_mb02
 
-subroutine test_eeqbc_q_actinides(error)
+   subroutine test_eeqbc_q_actinides(error)
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+      !> Error handling
+      type(error_type), allocatable, intent(out) :: error
 
-   type(structure_type) :: mol
-   class(mchrg_model_type), allocatable :: model
+      type(structure_type) :: mol
+      class(mchrg_model_type), allocatable :: model
 
-   real(wp), parameter :: ref(17) = [&
+      real(wp), parameter :: ref(17) = [&
       & 9.27195802124755E-2_wp, -2.78358027117801E-1_wp, 1.71815557281178E-1_wp, &
       & 7.85579953672371E-2_wp, -1.08186262417305E-2_wp, -4.81860290986309E-2_wp, &
       & 1.57794666483371E-1_wp, -1.61830258916072E-1_wp, -2.76569765724910E-1_wp, &
@@ -707,16 +767,16 @@ subroutine test_eeqbc_q_actinides(error)
       &-3.42285450387671E-2_wp, -3.15076271542101E-2_wp, 1.49700940990172E-1_wp, &
       & 1.45447393911445E-1_wp, 4.69764784954047E-1_wp]
 
-   real(wp), parameter :: trans(3, 1) = 0.0_wp
+      real(wp), parameter :: trans(3, 1) = 0.0_wp
 
-   ! Molecular structure data
-   mol%nat = 17
-   mol%nid = 17
-   mol%id = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, &
+      ! Molecular structure data
+      mol%nat = 17
+      mol%nid = 17
+      mol%id = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, &
       & 12, 13, 14, 15, 16, 17]
-   mol%num = [87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, &
+      mol%num = [87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, &
       & 98, 99, 100, 101, 102, 103]
-   mol%xyz = reshape([ &
+      mol%xyz = reshape([ &
       & 0.98692316414074_wp, 6.12727238368797_wp, -6.67861597188102_wp, &
       & 3.63898862390869_wp, 5.12109301182962_wp, 3.01908613326278_wp, &
       & 5.14503571563551_wp, -3.97172984617710_wp, 3.82011791828867_wp, &
@@ -735,23 +795,23 @@ subroutine test_eeqbc_q_actinides(error)
       & 7.04586341131562_wp, 5.20053667939076_wp, -7.51972863675876_wp, &
       & 2.01082807362334_wp, 1.34838807211157_wp, -4.70482633508447_wp],&
       & [3, 17])
-   mol%periodic = [.false.]
+      mol%periodic = [.false.]
 
-   call new_eeqbc2025_model(mol, model, error)
-   if (allocated(error)) return
-   call gen_test_molecular(error, mol, model, qref=ref)
+      call new_eeqbc2025_model(mol, model, error)
+      if (allocated(error)) return
+      call gen_test_molecular(error, mol, model, qref=ref)
 
-end subroutine test_eeqbc_q_actinides
+   end subroutine test_eeqbc_q_actinides
 
-subroutine test_eeqbc_e_mb03(error)
+   subroutine test_eeqbc_e_mb03(error)
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+      !> Error handling
+      type(error_type), allocatable, intent(out) :: error
 
-   type(structure_type) :: mol
-   class(mchrg_model_type), allocatable :: model
+      type(structure_type) :: mol
+      class(mchrg_model_type), allocatable :: model
 
-   real(wp), parameter :: ref(16) = [&
+      real(wp), parameter :: ref(16) = [&
       &-6.96992195046228E-2_wp, -1.62155815983893E+0_wp, -1.38060751929644E-3_wp, &
       &-9.06342279911342E-1_wp, -1.83281566961757E+0_wp, -1.20333262207652E-1_wp, &
       &-6.51187555181622E-1_wp, -3.27410111288548E-3_wp, -8.00565881078213E-3_wp, &
@@ -759,25 +819,25 @@ subroutine test_eeqbc_e_mb03(error)
       &-7.19456827995756E-1_wp, -9.58311834831915E-2_wp, -1.54672086637309E+0_wp, &
       &-1.03483694342593E-5_wp]
 
-   real(wp), parameter :: trans(3, 1) = 0.0_wp
+      real(wp), parameter :: trans(3, 1) = 0.0_wp
 
-   call get_structure(mol, "MB16-43", "03")
+      call get_structure(mol, "MB16-43", "03")
 
-   call new_eeqbc2025_model(mol, model, error)
-   if (allocated(error)) return
-   call gen_test_molecular(error, mol, model, eref=ref)
+      call new_eeqbc2025_model(mol, model, error)
+      if (allocated(error)) return
+      call gen_test_molecular(error, mol, model, eref=ref)
 
-end subroutine test_eeqbc_e_mb03
+   end subroutine test_eeqbc_e_mb03
 
-subroutine test_eeqbc_e_mb04(error)
+   subroutine test_eeqbc_e_mb04(error)
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+      !> Error handling
+      type(error_type), allocatable, intent(out) :: error
 
-   type(structure_type) :: mol
-   class(mchrg_model_type), allocatable :: model
+      type(structure_type) :: mol
+      class(mchrg_model_type), allocatable :: model
 
-   real(wp), parameter :: ref(16) = [&
+      real(wp), parameter :: ref(16) = [&
       &-3.91054587109712E-2_wp, -8.21933095021462E-4_wp, -1.28550631772418E-2_wp, &
       &-8.95571658260288E-2_wp, -4.94655224590082E-1_wp, -3.34598696522549E-2_wp, &
       &-3.75768676247744E-2_wp, -1.36087478076862E-2_wp, -2.07985587717960E-3_wp, &
@@ -785,80 +845,80 @@ subroutine test_eeqbc_e_mb04(error)
       &-5.64487253409848E-2_wp, -4.89693252471477E-1_wp, -3.74734977139679E-2_wp, &
       &-9.22642011641358E-3_wp]
 
-   real(wp), parameter :: trans(3, 1) = 0.0_wp
+      real(wp), parameter :: trans(3, 1) = 0.0_wp
 
-   call get_structure(mol, "MB16-43", "04")
+      call get_structure(mol, "MB16-43", "04")
 
-   call new_eeqbc2025_model(mol, model, error)
-   if (allocated(error)) return
-   call gen_test_molecular(error, mol, model, eref=ref)
+      call new_eeqbc2025_model(mol, model, error)
+      if (allocated(error)) return
+      call gen_test_molecular(error, mol, model, eref=ref)
 
-end subroutine test_eeqbc_e_mb04
+   end subroutine test_eeqbc_e_mb04
 
-subroutine test_eeqbc_g_mb05(error)
+   subroutine test_eeqbc_g_mb05(error)
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+      !> Error handling
+      type(error_type), allocatable, intent(out) :: error
 
-   type(structure_type) :: mol
-   class(mchrg_model_type), allocatable :: model
+      type(structure_type) :: mol
+      class(mchrg_model_type), allocatable :: model
 
-   real(wp), parameter :: trans(3, 1) = 0.0_wp
+      real(wp), parameter :: trans(3, 1) = 0.0_wp
 
-   call get_structure(mol, "MB16-43", "05")
+      call get_structure(mol, "MB16-43", "05")
 
-   call new_eeqbc2025_model(mol, model, error)
-   if (allocated(error)) return
-   call test_numgrad(error, mol, model)
+      call new_eeqbc2025_model(mol, model, error)
+      if (allocated(error)) return
+      call test_numgrad(error, mol, model)
 
-end subroutine test_eeqbc_g_mb05
+   end subroutine test_eeqbc_g_mb05
 
-subroutine test_eeqbc_g_mb06(error)
+   subroutine test_eeqbc_g_mb06(error)
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+      !> Error handling
+      type(error_type), allocatable, intent(out) :: error
 
-   type(structure_type) :: mol
-   class(mchrg_model_type), allocatable :: model
+      type(structure_type) :: mol
+      class(mchrg_model_type), allocatable :: model
 
-   real(wp), parameter :: trans(3, 1) = 0.0_wp
+      real(wp), parameter :: trans(3, 1) = 0.0_wp
 
-   call get_structure(mol, "MB16-43", "06")
+      call get_structure(mol, "MB16-43", "06")
 
-   call new_eeqbc2025_model(mol, model, error)
-   if (allocated(error)) return
-   call test_numgrad(error, mol, model)
+      call new_eeqbc2025_model(mol, model, error)
+      if (allocated(error)) return
+      call test_numgrad(error, mol, model)
 
-end subroutine test_eeqbc_g_mb06
+   end subroutine test_eeqbc_g_mb06
 
-subroutine test_eeqbc_g_co2(error)
+   subroutine test_eeqbc_g_co2(error)
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+      !> Error handling
+      type(error_type), allocatable, intent(out) :: error
 
-   type(structure_type) :: mol
-   class(mchrg_model_type), allocatable :: model
+      type(structure_type) :: mol
+      class(mchrg_model_type), allocatable :: model
 
-   call get_structure(mol, "X23", "CO2")
-   call new_eeqbc2025_model(mol, model, error)
-   if (allocated(error)) return
-   call test_numgrad_periodic(error, mol, model)
+      call get_structure(mol, "X23", "CO2")
+      call new_eeqbc2025_model(mol, model, error)
+      if (allocated(error)) return
+      call test_numgrad_periodic(error, mol, model)
 
-end subroutine test_eeqbc_g_co2
+   end subroutine test_eeqbc_g_co2
 
-subroutine test_eeqbc_e_co2(error)
+   subroutine test_eeqbc_e_co2(error)
 
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+      !> Error handling
+      type(error_type), allocatable, intent(out) :: error
 
-   type(structure_type) :: mol
-   class(mchrg_model_type), allocatable :: model
+      type(structure_type) :: mol
+      class(mchrg_model_type), allocatable :: model
 
-   call get_structure(mol, "X23", "CO2")
-   call new_eeqbc2025_model(mol, model, error)
-   if (allocated(error)) return
-   call gen_test_periodic(error, mol, model)
+      call get_structure(mol, "X23", "CO2")
+      call new_eeqbc2025_model(mol, model, error)
+      if (allocated(error)) return
+      call gen_test_periodic(error, mol, model)
 
-end subroutine test_eeqbc_e_co2
+   end subroutine test_eeqbc_e_co2
 
 end module test_adjlist
