@@ -1606,10 +1606,17 @@ contains
             dadrdiag_local(:, jat) = dadrdiag_local(:, jat) - dtmp * cache%vrhs(iat) * cache%dcdrij(:, kat)
             dadrij_local(:, kat) = dadrij_local(:, kat) + dtmp * cache%vrhs(iat) * cache%dcdrij(:, kat)
             dadrji_local(:, kat) = dadrji_local(:, kat) + dtmp * cache%vrhs(jat) * cache%dcdrji(:, kat)
+            dadL_local(:, :, iat) = -dtmp * cache%vrhs(jat) * spread(cache%dcdrij(:, kat), 2, 3) * spread(vec, 1, 3) &
+            & + dadL_local(:, :, iat)
+            dadL_local(:, :, jat) = -dtmp * cache%vrhs(iat) * spread(cache%dcdrji(:, kat), 2, 3) * spread(vec, 1, 3) &
+            & + dadL_local(:, :, jat)
 
             ! 4. Capacitance derivative diagonal contribution
+            dtmp = (self%eta(izp) + self%kqeta(izp) * cache%qloc(iat) + sqrt2pi / radi) * cache%vrhs(iat)
+            dadrji_local(:, kat) = -dtmp * cache%dcdrji(:, kat) + dadrji_local(:, kat)
+
             dtmp = (self%eta(jzp) + self%kqeta(jzp) * cache%qloc(jat) + sqrt2pi / radj) * cache%vrhs(jat)
-            dadrlist_local(:, kat) = dadrlist_local(:, kat) - dtmp * cache%dcdrlist(:, kat)
+            dadrij_local(:, kat) = -dtmp * cache%dcdrij(:, kat) + dadrij_local(:, kat)
          end do
 
          ! 5. Hardness and coordination-dependent diagonal corrections
