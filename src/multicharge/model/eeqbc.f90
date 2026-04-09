@@ -28,7 +28,7 @@ module multicharge_model_eeqbc
    use mctc_ncoord, only: new_ncoord, cn_count
    use mctc_ncoord, only: adjacency_list
    use multicharge_wignerseitz, only: new_wignerseitz_cell, wignerseitz_cell_type
-   use multicharge_blascomp, only: gemv_cmp, gemm_cmp, gemm_cmp_211_dir
+   use multicharge_blascomp, only: gemv_cmp, gemm_cmp, gemm_cmp_211_dir, gemm_cmp_212
    use multicharge_model_type, only: mchrg_model_type, get_dir_trans
    use multicharge_blas, only: gemv, gemm
    use multicharge_model_cache, only: mchrg_cache
@@ -544,14 +544,14 @@ contains
       deallocate(dtmpdL_local, dtmpdr_local)
       !$omp end parallel
 
-      write(*, *) 'DTMPDR(3, :, :):'
-      write(*,'(16es21.14)') dtmpdr(3, :, :)
+      !write(*, *) 'DTMPDR(3, :, :):'
+      !write(*,'(16es21.14)') dtmpdr(3, :, :)
 
       call gemm(dtmpdr, cache%cmat, cache%dxdr)
       call gemm(dtmpdL, cache%cmat, cache%dxdL)
 
-      write(*, *) 'DXDR(3, :, :):'
-      write(*,'(16es21.14)') cache%dxdr(3, :, :)
+      !write(*, *) 'DXDR(3, :, :):'
+      !write(*,'(16es21.14)') cache%dxdr(3, :, :)
 
       !$omp parallel default(none) &
       !$omp shared(mol, self, cache) &
@@ -658,22 +658,22 @@ contains
       deallocate(dtmpdL_local, dtmpdrij_local, dtmpdrji_local, dtmpdrdiag_local)
       !$omp end parallel
 
-      write(*, *) 'DTMPDRDIAG(3, :):'
-      write(*,'(16es21.14)') dtmpdrdiag(3, :)
-      write(*, *) 'DTMPDRIJ(3, :):'
-      write(*,'(16es21.14)') dtmpdrij(3, :)
-      write(*, *) 'DTMPDRJI(3, :):'
-      write(*,'(16es21.14)') dtmpdrji(3, :)
+      !write(*, *) 'DTMPDRDIAG(3, :):'
+      !write(*,'(16es21.14)') dtmpdrdiag(3, :)
+      !write(*, *) 'DTMPDRIJ(3, :):'
+      !write(*,'(16es21.14)') dtmpdrij(3, :)
+      !write(*, *) 'DTMPDRJI(3, :):'
+      !write(*,'(16es21.14)') dtmpdrji(3, :)
 
-      call gemm_cmp_211_dir(list, cache%clist, cache%cdiag, dtmpdrij, dtmpdrji, dtmpdrdiag, &
+      call gemm_cmp_212(list, cache%clist, cache%cdiag, dtmpdrij, dtmpdrji, dtmpdrdiag, &
       & cache%dxdrij, cache%dxdrji, cache%dxdrdiag, 1.0_wp, 0.0_wp)
 
-      write(*, *) 'DXDRDIAG(3, :):'
-      write(*,'(16es21.14)') cache%dxdrdiag(3, :)
-      write(*, *) 'DXDRIJ(3, :):'
-      write(*,'(16es21.14)') cache%dxdrij(3, :)
-      write(*, *) 'DXDRJI(3, :):'
-      write(*,'(16es21.14)') cache%dxdrji(3, :)
+      !write(*, *) 'DXDRDIAG(3, :):'
+      !write(*,'(16es21.14)') cache%dxdrdiag(3, :)
+      !write(*, *) 'DXDRIJ(3, :):'
+      !write(*,'(16es21.14)') cache%dxdrij(3, :)
+      !write(*, *) 'DXDRJI(3, :):'
+      !write(*,'(16es21.14)') cache%dxdrji(3, :)
 
       call gemm_cmp(list, cache%clist, cache%cdiag, dtmpdL, cache%dxdL, 1.0_wp, 0.0_wp)
 
@@ -699,8 +699,8 @@ contains
             dxdrdiag_local(:, jat) = dxdrdiag_local(:, jat) + cache%xtmp(iat) * cache%dcdrji(:, kat)
 
             ! Off-diagonal updates
-            dxdrij_local(:, kat) = (cache%xtmp(iat) - cache%xtmp(jat)) * cache%dcdrji(:, kat) + dxdrij_local(:, kat)
-            dxdrji_local(:, kat) = (cache%xtmp(jat) - cache%xtmp(iat)) * cache%dcdrij(:, kat) + dxdrji_local(:, kat)
+            dxdrij_local(:, kat) = (cache%xtmp(iat) - cache%xtmp(jat)) * cache%dcdrij(:, kat) + dxdrij_local(:, kat)
+            dxdrji_local(:, kat) = (cache%xtmp(jat) - cache%xtmp(iat)) * cache%dcdrji(:, kat) + dxdrji_local(:, kat)
 
             ! Cell parameter updates
             vec = mol%xyz(:, iat) - mol%xyz(:, jat)
@@ -1578,8 +1578,8 @@ contains
 
       integer :: iat, jat, kat, izp, jzp, start_kat, finish_kat
       real(wp) :: vec(3), r2, gam, arg, dtmp, norm_cn
-      real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3)
-      real(wp) :: pre_i, pre_j, dgam_pre
+      real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), dgamdL(3, 3)
+      real(wp) :: pre_i, pre_j, dgam_pre, dgami(3), dgamj(3)
 
       ! Thread-private arrays for reduction
       real(wp), allocatable :: dadrij_local(:, :), dadrji_local(:, :)
@@ -1622,6 +1622,12 @@ contains
             dradj = -self%rad(jzp) * self%kcnrad * norm_cn
 
             gam = 1.0_wp / sqrt(radi**2 + radj**2)
+            dgami(:) = -(radi * dradi * cache%dcndrdiag(:, iat) + radj * dradj * cache%dcndrij(:, kat)) &
+            & * gam**3.0_wp
+            dgamj(:) = -(radi * dradi * cache%dcndrji(:, kat) + radj * dradj * cache%dcndrdiag(:, jat)) &
+            & * gam**3.0_wp
+            dgamdL(:, :) = -(radi * dradi * cache%dcndL(:, :, iat) + radj * dradj * cache%dcndL(:, :, jat)) &
+            & * gam**3.0_wp
             arg = gam * gam * r2
 
             ! 1. Explicit Geometry Derivative (Coulomb kernel)
@@ -1641,23 +1647,20 @@ contains
             dadL_local(:, :, jat)  = dadL_local(:, :, jat)  + dS * cache%vrhs(iat) * cache%clist(kat)
 
             ! 2. Effective charge width derivative
-            dgam_pre = (2.0_wp * exp(-arg) / sqrtpi) * cache%clist(kat)
-            pre_i = -radi * dradi * gam**3
-            pre_j = -radj * dradj * gam**3
 
             ! Update dadrdiag (atrace equivalent)
-            dadrdiag_local(:, iat) = dadrdiag_local(:, iat) - dgam_pre * cache%vrhs(jat) * pre_j * cache%dcndrij(:, kat)
-            dadrdiag_local(:, jat) = dadrdiag_local(:, jat) - dgam_pre * cache%vrhs(iat) * pre_i * cache%dcndrji(:, kat)
+            dtmp = 2.0_wp * exp(-arg) / (sqrtpi)
+            dadrdiag_local(:, iat) = dadrdiag_local(:, iat) - dtmp * dgamj(:) * cache%vrhs(jat) * cache%clist(kat)
+            dadrdiag_local(:, jat) = dadrdiag_local(:, jat) - dtmp * dgami(:) * cache%vrhs(iat) * cache%clist(kat)
 
             ! Update dadrij/ji (off-diagonal)
-            dadrij_local(:, kat) = dadrij_local(:, kat) + dgam_pre * cache%vrhs(iat) * pre_i * cache%dcndrdiag(:, iat)
-            dadrji_local(:, kat) = dadrji_local(:, kat) + dgam_pre * cache%vrhs(jat) * pre_j * cache%dcndrdiag(:, jat)
+            dadrij_local(:, kat) = dadrij_local(:, kat) + dtmp * dgami(:) * cache%vrhs(iat) * cache%clist(kat)
+            dadrji_local(:, kat) = dadrji_local(:, kat) + dtmp * dgamj(:) * cache%vrhs(jat) * cache%clist(kat)
 
             ! Lattice derivative
-            dadL_local(:, :, iat) = dadL_local(:, :, iat) + dgam_pre * cache%vrhs(jat) * &
-               (pre_i * cache%dcndL(:, :, iat) + pre_j * cache%dcndL(:, :, jat))
-            dadL_local(:, :, jat) = dadL_local(:, :, jat) + dgam_pre * cache%vrhs(iat) * &
-               (pre_i * cache%dcndL(:, :, iat) + pre_j * cache%dcndL(:, :, jat))
+            dadL_local(:, :, iat) = +dtmp * cache%vrhs(jat) * dgamdL(:, :) * cache%clist(kat) + dadL_local(:, :, iat)
+            dadL_local(:, :, jat) = +dtmp * cache%vrhs(iat) * dgamdL(:, :) * cache%clist(kat) + dadL_local(:, :, jat)
+
 
             ! 3. Capacitance derivative off-diagonal
             dtmp = erf(sqrt(r2) * gam) / sqrt(r2)
@@ -1678,24 +1681,28 @@ contains
 
             dtmp = (self%eta(jzp) + self%kqeta(jzp) * cache%qloc(jat) + sqrt2pi / radj) * cache%vrhs(jat)
             dadrij_local(:, kat) = -dtmp * cache%dcdrij(:, kat) + dadrij_local(:, kat)
+
+            ! 5. Hardness and coordination-dependent diagonal corrections
+            dtmp = self%kqeta(izp) * cache%vrhs(iat) * cache%cdiag(iat)
+            dadrij_local(:, kat) = dadrij_local(:, kat) + dtmp * cache%dqlocdrij(:, kat)
+            dadrji_local(:, kat) = dadrji_local(:, kat) + dtmp * cache%dqlocdrji(:, kat)
+            
+
+            ! Effective charge width diagonal derivative
+            dtmp = -sqrt2pi * dradi / (radi**2) * cache%vrhs(iat) * cache%cdiag(iat)
+            dadrij_local(:, kat) = dadrij_local(:, kat) + dtmp * cache%dcndrij(:, kat)
+            dadrji_local(:, kat) = dadrji_local(:, kat) + dtmp * cache%dcndrji(:, kat)
+
          end do
 
          ! 5. Hardness and coordination-dependent diagonal corrections
          dtmp = self%kqeta(izp) * cache%vrhs(iat) * cache%cdiag(iat)
          dadrdiag_local(:, iat) = dadrdiag_local(:, iat) + dtmp * cache%dqlocdrdiag(:, iat)
-         dadrij_local(:, start_kat:finish_kat) = dadrij_local(:, start_kat:finish_kat) + &
-            dtmp * cache%dqlocdrij(:, start_kat:finish_kat)
-         dadrji_local(:, start_kat:finish_kat) = dadrji_local(:, start_kat:finish_kat) + &
-            dtmp * cache%dqlocdrji(:, start_kat:finish_kat)
          dadL_local(:, :, iat) = dadL_local(:, :, iat) + dtmp * cache%dqlocdL(:, :, iat)
 
          ! Effective charge width diagonal derivative
          dtmp = -sqrt2pi * dradi / (radi**2) * cache%vrhs(iat) * cache%cdiag(iat)
          dadrdiag_local(:, iat) = dadrdiag_local(:, iat) + dtmp * cache%dcndrdiag(:, iat)
-         dadrij_local(:, start_kat:finish_kat) = dadrij_local(:, start_kat:finish_kat) + &
-            dtmp * cache%dcndrij(:, start_kat:finish_kat)
-         dadrji_local(:, start_kat:finish_kat) = dadrji_local(:, start_kat:finish_kat) + &
-            dtmp * cache%dcndrji(:, start_kat:finish_kat)
          dadL_local(:, :, iat) = dadL_local(:, :, iat) + dtmp * cache%dcndL(:, :, iat)
 
          ! 6. Intrinsic capacitance derivative
