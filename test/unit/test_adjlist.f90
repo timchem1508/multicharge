@@ -262,26 +262,7 @@ contains
       allocate(list)
       call new_adjacency_list(list, mol, cutoff , .false.)
       call model%update(mol, cache, trans, grad=.false., list=list)
-      !call model%get_capacitance_matrix(mol, mol%nat, cache, list)
-      !call model%get_xvec(mol, mol%nat, cache, list)
-      !call model%get_coulomb_matrix(mol, mol%nat, cache, list)
-      !do iat = 1, mol%nat
-      !
-      !   do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
-      !      jat = list%nlat(kat)
-      !      amat_list(iat, jat) = cache%alist(kat)
-      !      amat_list(jat, iat) = cache%alist(kat)
-      !   end do
-      !   amat_list(iat, iat) = cache%adiag(iat)
-      !end do
-      !write(*,*) "NLIST AMAT"
-      !write(*,'(12es21.14)') amat_list
-      !write(*,*) "NLIST XVEC"
-      !write(*,'(es21.14)') cache%xvec
-      !write(*,'(50("-"))')
       call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, unit=output_unit)
-
-
 
       if (any(abs(qvec - qref) > thr)) then
          call test_failed(error, "Partial charges do not match")
@@ -369,27 +350,7 @@ contains
       call model%update(mol, cache1, trans, grad=.true.)
       call model%solve(mol, solver, cache1, error, &
       & gradient=numgrad, sigma=numsigma, unit=output_unit)
-
-      !dqlocdr_direct = cache1%dqlocdr
-      !dcndr_direct = cache1%dcndr
-      !call model%get_capacitance_matrix(mol, mol%nat, cache)
-      !call model%get_xvec( mol, mol%nat, cache)
-      !call model%get_coulomb_matrix(mol, mol%nat, cache)
-      !print'(a)', "DIRECT DCN/DR:"
-      !print'(3es21.14)', cache1%dcndr
-      !write(*,'(50("-"))')
-      !write(*, *) "Number of atoms:", mol%nat
-      !print'(a)', "DQLOC/DR:"
-      !print'(16es21.14)', cache1%dqlocdr(1, :, :)
-      !print'(a)', "DIRECT DADR:"
-      !print'(12es21.14)', cache1%dadr
-      !write(*,*) "DIRECT DXDR"
-      !write(*,'(16es21.14)') cache1%dxdr
-      !write(*,'(50("-"))')
-
       if (allocated(error)) return
-
-      
 
       allocate(cache2)
       allocate(list)
@@ -414,16 +375,6 @@ contains
          return
       end if
 
-      !write(*,*) "Number of atoms:", mol%nat
-      !write(*,*) "DXDR DIAG"
-      !write(*,'(16es21.14)') cache2%dxdrdiag
-      !write(*,*) " DXDRIJ"
-      !write(*,'(16es21.14)') cache2%dxdrij
-      !write(*,*) "DXDRJI"
-      !write(*,'(16es21.14)') cache2%dxdrji
-
-
-
       do iat = 1, mol%nat
 
          do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
@@ -446,16 +397,6 @@ contains
          dxvec_list(:, iat, iat) = cache2%dxdrdiag(:, iat)
          dcn_list(:, iat, iat) = cache2%dcndrdiag(:, iat)
       end do
-      !write(*,*) "NLIST DAMAT"
-      !write(*,'(12es21.14)') damat_list
-      !write(*,*) "NLIST DXVEC"
-      !write(*,'(16es21.14)') dxvec_list
-      !!write(*,'(50("-"))')
-      !print'(a)', "NLIST DCN/DR:"
-      !print'(3es21.14)', dcn_list
-      !write(*,'(50("-"))')
-      !print'(a)', "NLIST DQLOC/DR:"
-      !print'(3es21.14)', dqloc_list
 
       if (allocated(error)) return
 

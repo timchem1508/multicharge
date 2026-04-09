@@ -22,7 +22,7 @@
 !> *J. Chem. Phys.*, **2025**, 162, 214109.
 !> DOI: [10.1063/5.0268978](https://dx.doi.org/10.1063/5.0268978)
 module multicharge_model_eeqbc
-   use mctc_env, only: error_type, wp
+   use mctc_env, only: timer_type, format_time, error_type, wp
    use mctc_io, only: structure_type
    use mctc_io_constants, only: pi
    use mctc_ncoord, only: new_ncoord, cn_count
@@ -531,14 +531,8 @@ contains
       deallocate(dtmpdL_local, dtmpdr_local)
       !$omp end parallel
 
-      !write(*, *) 'DTMPDR(3, :, :):'
-      !write(*,'(16es21.14)') dtmpdr(3, :, :)
-
       call gemm(dtmpdr, cache%cmat, cache%dxdr)
       call gemm(dtmpdL, cache%cmat, cache%dxdL)
-
-      !write(*, *) 'DXDR(3, :, :):'
-      !write(*,'(16es21.14)') cache%dxdr(3, :, :)
 
       !$omp parallel default(none) &
       !$omp shared(mol, self, cache) &
@@ -645,23 +639,9 @@ contains
       deallocate(dtmpdL_local, dtmpdrij_local, dtmpdrji_local, dtmpdrdiag_local)
       !$omp end parallel
 
-      !write(*, *) 'DTMPDRDIAG(3, :):'
-      !write(*,'(16es21.14)') dtmpdrdiag(3, :)
-      !write(*, *) 'DTMPDRIJ(3, :):'
-      !write(*,'(16es21.14)') dtmpdrij(3, :)
-      !write(*, *) 'DTMPDRJI(3, :):'
-      !write(*,'(16es21.14)') dtmpdrji(3, :)
 
       call gemm_cmp_212(list, cache%clist, cache%cdiag, dtmpdrij, dtmpdrji, dtmpdrdiag, &
       & cache%dxdrij, cache%dxdrji, cache%dxdrdiag, 1.0_wp, 0.0_wp)
-
-      !write(*, *) 'DXDRDIAG(3, :):'
-      !write(*,'(16es21.14)') cache%dxdrdiag(3, :)
-      !write(*, *) 'DXDRIJ(3, :):'
-      !write(*,'(16es21.14)') cache%dxdrij(3, :)
-      !write(*, *) 'DXDRJI(3, :):'
-      !write(*,'(16es21.14)') cache%dxdrji(3, :)
-
       call gemm_cmp(list, cache%clist, cache%cdiag, dtmpdL, cache%dxdL, 1.0_wp, 0.0_wp)
 
       !$omp parallel default(none) &
