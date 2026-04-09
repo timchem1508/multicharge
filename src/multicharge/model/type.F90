@@ -387,15 +387,39 @@ contains
       if (dcn) then
          call timer%push("setup_gradient")
          if (present(list)) then
+            call timer%push("dxdr_setup")
             call self%get_xvec_derivs(mol, ndim, cache, list=list)
+            call timer%pop
+            if (verbosity_solve > 1) then
+               write(output_unit, '(a, 1x, a)') "Electronegativity derivatives setup time : ", format_time(timer%get("dxdr_setup"))
+               write(output_unit, '(a)') ''
+            end if
+            call timer%push("dadr_setup")
             call self%get_coulomb_derivs(mol, ndim, cache, list=list)
+            call timer%pop
+            if (verbosity_solve > 1) then
+               write(output_unit, '(a, 1x, a)') "Coulomb matrix derivatives setup time : ", format_time(timer%get("dadr_setup"))
+               write(output_unit, '(a)') ''
+            end if
             allocate(daqxdrij(3, size(list%nlat)), source=0.0_wp)
             allocate(daqxdrji(3, size(list%nlat)), source=0.0_wp)
             allocate(daqxdrdiag(3, mol%nat), source=0.0_wp)
             allocate(daqxdL(3, 3, ndim), source=0.0_wp)
          else
+            call timer%push("dxdr_setup")
             call self%get_xvec_derivs(mol, ndim, cache)
+            call timer%pop
+            if (verbosity_solve > 1) then
+               write(output_unit, '(a, 1x, a)') "Electronegativity derivatives setup time : ", format_time(timer%get("dxdr_setup"))
+               write(output_unit, '(a)') ''
+            end if
+            call timer%push("dadr_setup")
             call self%get_coulomb_derivs(mol, ndim, cache)
+            call timer%pop
+            if (verbosity_solve > 1) then
+               write(output_unit, '(a, 1x, a)') "Coulomb matrix derivatives setup time : ", format_time(timer%get("dadr_setup"))
+               write(output_unit, '(a)') ''
+            end if
             allocate(daqxdr(3, mol%nat, ndim), source=0.0_wp)
             allocate(daqxdL(3, 3, ndim), source=0.0_wp)
          end if
