@@ -21,13 +21,16 @@ module multicharge_blascomp
    implicit none
    private
 
-   public :: gemv_cmp, gemm_cmp, gemm_cmp_211_dir, gemm_cmp_212
+   public :: gemv_cmp, gemm_cmp, gemv_cmp_212, gemm_cmp_212
 
    interface gemv_cmp
       module procedure gemv_cmp_111
       module procedure gemv_cmp_212
-      module procedure gemv_cmp_212_dir
    end interface gemv_cmp
+
+   interface gemv_cmp_212
+      module procedure gemv_cmp_212
+   end interface gemv_cmp_212
 
    interface gemm_cmp
       module procedure gemm_cmp_122
@@ -102,46 +105,54 @@ contains
 !=========================================================
 ! GEMV 212
 !=========================================================
-   pure subroutine gemv_cmp_212(list, mlist, mdiag, x, y, alpha, beta, symmetric)
+   pure subroutine gemv_cmp_212(list, mdrij, mdrji, mdrdiag, x, y, alpha, beta)
+      !> Assumes wp (working precision) and adjacency_list type 
+      !> are accessible via module or host association.
       type(adjacency_list), intent(in) :: list
-      real(wp), intent(in)  :: mlist(:,:)
-      real(wp), intent(in)  :: mdiag(:,:)
-      real(wp), intent(in)  :: x(:)
-      real(wp), intent(inout) :: y(:,:)
-      real(wp), intent(in)  :: alpha, beta
-      logical, intent(in), optional :: symmetric
+      real(wp), intent(in)  :: mdrij(:,:)   ! Dimensions: (3, n_edges)
+      real(wp), intent(in)  :: mdrji(:,:)   ! Dimensions: (3, n_edges)
+      real(wp), intent(in)  :: mdrdiag(:,:) ! Dimensions: (3, nat)
+      real(wp), intent(in)  :: x(:)         ! Dimensions: (nat)
+      real(wp), intent(inout) :: y(:,:)     ! Dimensions: (3, nat)
+      real(wp), intent(in), optional :: alpha
+      real(wp), intent(in), optional :: beta
 
-      integer :: i, k, j
-      logical :: is_sym
+      real(wp) :: a, b
+      integer  :: i, j, k
 
-      is_sym = .true.
-      if (present(symmetric)) is_sym = symmetric
+      ! 1. Parse optional arguments
+      a = 1.0_wp
+      if (present(alpha)) a = alpha
+      b = 0.0_wp
+      if (present(beta)) b = beta
 
-      if (size(mlist, 2) /= size(list%nlat)) return
-
-      if (beta == 0.0_wp) then
-         y(:,:) = 0.0_wp
-      else if (beta /= 1.0_wp) then
-         y(:,:) = beta * y(:,:)
+      ! 2. Apply beta scaling upfront
+      if (b == 0.0_wp) then
+         y(:, :) = 0.0_wp
+      else if (b /= 1.0_wp) then
+         y(:, :) = b * y(:, :)
       end if
 
+      ! 3. Accumulate matrix-vector product
       do i = 1, size(list%nnl)
-
+         
+         ! Off-diagonal contributions
          do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
             j = list%nlat(k)
+            
+            ! Contribution to y(:, i) from x(j) -> Forward edge A(:, i, j)
+            y(:, i) = y(:, i) + a * mdrij(:, k) * x(j)
+            
+            ! Contribution to y(:, j) from x(i) -> Backward edge A(:, j, i)
+            y(:, j) = y(:, j) + a * mdrji(:, k) * x(i)
 
-            y(:, i) = y(:, i) + alpha * mlist(:, k) * x(j)
-
-            if (is_sym) then
-               y(:, j) = y(:, j) + alpha * mlist(:, k) * x(i)
-            else
-               y(:, j) = y(:, j) - alpha * mlist(:, k) * x(i)
-            end if
          end do
-         if (is_sym) then
-            y(:, i) = y(:, i) + alpha * mdiag(:, i) * x(i)
-         end if
+
+         ! Diagonal contribution: A(:, i, i) * x(i)
+         y(:, i) = y(:, i) + a * mdrdiag(:, i) * x(i)
+         
       end do
+
    end subroutine gemv_cmp_212
 
 !=========================================================

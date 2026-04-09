@@ -57,7 +57,7 @@ contains
       & new_unittest("eeqbc-energy-mb03", test_eeqbc_e_mb03), &
       & new_unittest("eeqbc-energy-mb04", test_eeqbc_e_mb04), &
       & new_unittest("eeqbc-gradient-mb05", test_eeqbc_g_mb05), &
-      !& new_unittest("eeqbc-gradient-mb06", test_eeqbc_g_mb06), &
+      & new_unittest("eeqbc-gradient-mb06", test_eeqbc_g_mb06), &
       & new_unittest("eeqbc-energy-co2", test_eeqbc_e_co2) &
       !& new_unittest("eeqbc-gradient-co2", test_eeqbc_g_co2) &
       & ]
@@ -348,7 +348,7 @@ contains
 
       allocate(cache1)
 
-      allocate (energy(mol%nat), gradient(3, mol%nat), sigma(3, 3), numgrad(3, mol%nat))
+      allocate (energy(mol%nat), gradient(3, mol%nat), sigma(3, 3))
       energy(:) = 0.0_wp
       gradient(:, :) = 0.0_wp
       sigma(:, :) = 0.0_wp
@@ -362,10 +362,16 @@ contains
       dxvec_list(:,:,:) = 0.0_wp
       dcn_list(:,:,:) = 0.0_wp
       dqloc_list(:,:,:) = 0.0_wp
+      ! Build adjacency list
+      allocate(numsigma(3, 3), source=0.0_wp)
+      allocate(numgrad(3, mol%nat), source=0.0_wp)
 
       call model%update(mol, cache1, trans, grad=.true.)
       call model%solve(mol, solver, cache1, error, &
-      & gradient=gradient, sigma=sigma, unit=output_unit)
+      & gradient=numgrad, sigma=numsigma, unit=output_unit)
+
+      !dqlocdr_direct = cache1%dqlocdr
+      !dcndr_direct = cache1%dcndr
       !call model%get_capacitance_matrix(mol, mol%nat, cache)
       !call model%get_xvec( mol, mol%nat, cache)
       !call model%get_coulomb_matrix(mol, mol%nat, cache)
@@ -383,11 +389,11 @@ contains
 
       if (allocated(error)) return
 
-      ! Build adjacency list
-      allocate(numsigma(3, 3), source=0.0_wp)
+      
 
       allocate(cache2)
       allocate(list)
+      gradient = 0.0_wp
       call new_adjacency_list(list, mol, cutoff, .false.)
       call model%update(mol, cache2, trans, grad=.true., list=list)
 
@@ -396,7 +402,7 @@ contains
       !call model%get_coulomb_matrix(mol, mol%nat, cache2, list=list)
 
       call model%solve(mol, solver, cache2, error, &
-      & gradient=numgrad, sigma=numsigma, list=list, unit=output_unit)
+      & gradient=gradient, sigma=sigma, list=list, unit=output_unit)
 
 
       if (.not. allocated(cache2%dadrdiag)) then
@@ -503,25 +509,25 @@ contains
          print'(16es21.14)', damat_list( 3, :, :) - cache1%dadr(3, :, :)
       end if
 
-      ! if (any(abs(gradient(:, :) - numgrad(:, :)) > thr3)) then
-      !    call test_failed(error, "Derivative of energy does not match")
-      !    print'(a)', "Energy gradient:"
-      !    print'(3es21.14)', gradient
-      !    print'(a)', "numgrad:"
-      !    print'(3es21.14)', numgrad
-      !    print'(a)', "diff:"
-      !    print'(3es21.14)', gradient - numgrad
-      ! end if
-!
-      ! if (any(abs(sigma(:, :) - numsigma(:, :)) > thr3)) then
-      !    call test_failed(error, "Derivative of energy does not match")
-      !    print'(a)', "Energy sigma:"
-      !    print'(3es21.14)', sigma
-      !    print'(a)', "numsigma:"
-      !    print'(3es21.14)', numsigma
-      !    print'(a)', "diff:"
-      !    print'(3es21.14)', sigma - numsigma
-      ! end if
+      if (any(abs(gradient(:, :) - numgrad(:, :)) > thr3)) then
+         call test_failed(error, "Derivative of energy does not match")
+         print'(a)', "Energy gradient:"
+         print'(3es21.14)', gradient
+         print'(a)', "numgrad:"
+         print'(3es21.14)', numgrad
+         print'(a)', "diff:"
+         print'(3es21.14)', gradient - numgrad
+      end if
+
+      if (any(abs(sigma(:, :) - numsigma(:, :)) > thr3)) then
+         call test_failed(error, "Derivative of energy does not match")
+         print'(a)', "Energy sigma:"
+         print'(3es21.14)', sigma
+         print'(a)', "numsigma:"
+         print'(3es21.14)', numsigma
+         print'(a)', "diff:"
+         print'(3es21.14)', sigma - numsigma
+      end if
 
    end subroutine test_numgrad
 
