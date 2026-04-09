@@ -603,40 +603,28 @@ contains
 
       !$omp parallel default(none) &
       !$omp shared(mol, self, list, cache, dtmpdrij, dtmpdrji, dtmpdrdiag, dtmpdL) &
-      !$omp private(iat, jat, jzp, izp, kat, dtmpdrij_local, dtmpdrji_local, dtmpdrdiag_local, dtmpdL_local)
-      allocate(dtmpdrdiag_local, source=dtmpdrdiag)
-      allocate(dtmpdrij_local, source=dtmpdrij)
-      allocate(dtmpdrji_local, source=dtmpdrji)
-      allocate(dtmpdL_local, source=dtmpdL)
+      !$omp private(iat, jat, jzp, izp, kat)
 
       !$omp do schedule(runtime)
       do iat = 1, mol%nat
          izp = mol%id(iat)
          ! Standard diagonal contributions
-         dtmpdrdiag_local(:, iat) = self%kcnchi(izp) * cache%dcndrdiag(:, iat) + dtmpdrdiag_local(:, iat)
-         dtmpdL_local(:, :, iat) = self%kcnchi(izp) * cache%dcndL(:, :, iat) + dtmpdL_local(:, :, iat)
-         dtmpdrdiag_local(:, iat) = self%kqchi(izp) * cache%dqlocdrdiag(:, iat) + dtmpdrdiag_local(:, iat)
-         dtmpdL_local(:, :, iat) = self%kqchi(izp) * cache%dqlocdL(:, :, iat) + dtmpdL_local(:, :, iat)
+         dtmpdrdiag(:, iat) = self%kcnchi(izp) * cache%dcndrdiag(:, iat) + dtmpdrdiag(:, iat)
+         dtmpdL(:, :, iat) = self%kcnchi(izp) * cache%dcndL(:, :, iat) + dtmpdL(:, :, iat)
+         dtmpdrdiag(:, iat) = self%kqchi(izp) * cache%dqlocdrdiag(:, iat) + dtmpdrdiag(:, iat)
+         dtmpdL(:, :, iat) = self%kqchi(izp) * cache%dqlocdL(:, :, iat) + dtmpdL(:, :, iat)
 
          do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
             jat = list%nlat(kat)
             jzp = mol%id(jat)
             ! Since jat > iat, kat represents the pair (iat, jat)
-            dtmpdrij_local(:, kat) = self%kcnchi(jzp) * cache%dcndrij(:, kat) + dtmpdrij_local(:, kat)
-            dtmpdrji_local(:, kat) = self%kcnchi(izp) * cache%dcndrji(:, kat) + dtmpdrji_local(:, kat)
-            dtmpdrij_local(:, kat) = self%kqchi(jzp) * cache%dqlocdrij(:, kat) + dtmpdrij_local(:, kat)
-            dtmpdrji_local(:, kat) = self%kqchi(izp) * cache%dqlocdrji(:, kat) + dtmpdrji_local(:, kat)
+            dtmpdrij(:, kat) = self%kcnchi(jzp) * cache%dcndrij(:, kat) + dtmpdrij(:, kat)
+            dtmpdrji(:, kat) = self%kcnchi(izp) * cache%dcndrji(:, kat) + dtmpdrji(:, kat)
+            dtmpdrij(:, kat) = self%kqchi(jzp) * cache%dqlocdrij(:, kat) + dtmpdrij(:, kat)
+            dtmpdrji(:, kat) = self%kqchi(izp) * cache%dqlocdrji(:, kat) + dtmpdrji(:, kat)
          end do
       end do
       !$omp end do
-
-      !$omp critical (get_xvec_derivs_0d_list_dtmp)
-      dtmpdrij(:, :) = dtmpdrij + dtmpdrij_local
-      dtmpdrji(:, :) = dtmpdrji + dtmpdrji_local
-      dtmpdrdiag(:, :) = dtmpdrdiag + dtmpdrdiag_local
-      dtmpdL(:, :, :) = dtmpdL + dtmpdL_local
-      !$omp end critical (get_xvec_derivs_0d_list_dtmp)
-      deallocate(dtmpdL_local, dtmpdrij_local, dtmpdrji_local, dtmpdrdiag_local)
       !$omp end parallel
 
 
@@ -646,49 +634,32 @@ contains
 
       !$omp parallel default(none) &
       !$omp shared(mol, self, cache, list) &
-      !$omp private(iat, jat, kat, vec, dxdrdiag_local, dxdrij_local, dxdrji_local, dxdL_local)
-      allocate(dxdrdiag_local, mold=cache%dxdrdiag)
-      allocate(dxdrij_local, mold=cache%dxdrij)
-      allocate(dxdrji_local, mold=cache%dxdrji)
-      allocate(dxdL_local, mold=cache%dxdL)
-      dxdrdiag_local(:, :) = 0.0_wp
-      dxdrij_local(:, :) = 0.0_wp
-      dxdrji_local(:, :) = 0.0_wp
-      dxdL_local(:, :, :) = 0.0_wp
-
+      !$omp private(iat, jat, kat, vec)
       !$omp do schedule(runtime)
       do iat = 1, mol%nat
          do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
             jat = list%nlat(kat)
 
             ! Diagonal updates (Correct for symmetric list jat > iat)
-            dxdrdiag_local(:, iat) = dxdrdiag_local(:, iat) + cache%xtmp(jat) * cache%dcdrij(:, kat)
-            dxdrdiag_local(:, jat) = dxdrdiag_local(:, jat) + cache%xtmp(iat) * cache%dcdrji(:, kat)
+            cache%dxdrdiag(:, iat) = cache%dxdrdiag(:, iat) + cache%xtmp(jat) * cache%dcdrij(:, kat)
+            cache%dxdrdiag(:, jat) = cache%dxdrdiag(:, jat) + cache%xtmp(iat) * cache%dcdrji(:, kat)
 
             ! Off-diagonal updates
-            dxdrij_local(:, kat) = (cache%xtmp(iat) - cache%xtmp(jat)) * cache%dcdrij(:, kat) + dxdrij_local(:, kat)
-            dxdrji_local(:, kat) = (cache%xtmp(jat) - cache%xtmp(iat)) * cache%dcdrji(:, kat) + dxdrji_local(:, kat)
+            cache%dxdrij(:, kat) = (cache%xtmp(iat) - cache%xtmp(jat)) * cache%dcdrij(:, kat) + cache%dxdrij(:, kat)
+            cache%dxdrji(:, kat) = (cache%xtmp(jat) - cache%xtmp(iat)) * cache%dcdrji(:, kat) + cache%dxdrji(:, kat)
 
             ! Cell parameter updates
             vec = mol%xyz(:, iat) - mol%xyz(:, jat)
-            dxdL_local(:, :, iat) = dxdL_local(:, :, iat) + cache%xtmp(jat) * &
+            cache%dxdL(:, :, iat) = cache%dxdL(:, :, iat) + cache%xtmp(jat) * &
             & spread(cache%dcdrij(:, kat), 1, 3) * spread(vec, 2, 3)
-            dxdL_local(:, :, jat) = dxdL_local(:, :, jat) + cache%xtmp(iat) * &
+            cache%dxdL(:, :, jat) = cache%dxdL(:, :, jat) + cache%xtmp(iat) * &
             & spread(cache%dcdrji(:, kat), 1, 3) * spread(-vec, 2, 3)
          end do
          ! Add pure self-diagonal contribution
-         dxdrdiag_local(:, iat) = dxdrdiag_local(:, iat) + cache%xtmp(iat) * cache%dcdrdiag(:, iat)
-         dxdL_local(:, :, iat) = dxdL_local(:, :, iat) + cache%xtmp(iat) * cache%dcdL(:, :, iat)
+         cache%dxdrdiag(:, iat) = cache%dxdrdiag(:, iat) + cache%xtmp(iat) * cache%dcdrdiag(:, iat)
+         cache%dxdL(:, :, iat) = cache%dxdL(:, :, iat) + cache%xtmp(iat) * cache%dcdL(:, :, iat)
       end do
       !$omp end do
-
-      !$omp critical (get_xvec_derivs_0d_list_dx)
-      cache%dxdrdiag(:, :) = cache%dxdrdiag + dxdrdiag_local
-      cache%dxdrij(:, :) = cache%dxdrij + dxdrij_local
-      cache%dxdrji(:, :) = cache%dxdrji + dxdrji_local
-      cache%dxdL(:, :, :) = cache%dxdL + dxdL_local
-      !$omp end critical (get_xvec_derivs_0d_list_dx)
-      deallocate(dxdL_local, dxdrij_local, dxdrji_local, dxdrdiag_local)
       !$omp end parallel
 
 
