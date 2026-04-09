@@ -21,7 +21,7 @@ module multicharge_blascomp
    implicit none
    private
 
-   public :: gemv_cmp, gemm_cmp, gemm_cmp_211_dir
+   public :: gemv_cmp, gemm_cmp, gemm_cmp_211_dir, gemm_cmp_212
 
    interface gemv_cmp
       module procedure gemv_cmp_111
@@ -40,6 +40,10 @@ module multicharge_blascomp
    interface gemm_cmp_211_dir
       module procedure gemm_cmp_211_dir
    end interface gemm_cmp_211_dir
+
+   interface gemm_cmp_212
+      module procedure gemm_cmp_212
+   end interface gemm_cmp_212
 
 
 contains
@@ -430,76 +434,288 @@ contains
 ! Matches the 12-argument signature with explicit i->j
 ! (drij) and j->i (drji) directed edge dependencies.
 !=========================================================
-   pure subroutine gemm_cmp_211_dir(list, clist, cdiag, &
-      dtmp_drij, dtmp_drji, dtmp_diag, &
-      dx_drij, dx_drji, dx_diag, alpha, beta, &
-      symmetric)
+pure subroutine gemm_cmp_211_dir(list, clist, cdiag, drij, drji, ddiag, &
+                                 xrij, xrji, xdiag, alpha, beta)
+   use, intrinsic :: iso_fortran_env, only: wp => real64
+   type(adjacency_list), intent(in) :: list
+   real(wp), intent(in)    :: clist(:)          ! B off‑diagonal (i<j)
+   real(wp), intent(in)    :: cdiag(:)          ! B diagonal
+   real(wp), intent(in)    :: drij(:, :)        ! A(:,i,j) for i<j
+   real(wp), intent(in)    :: drji(:, :)        ! A(:,j,i) for i<j
+   real(wp), intent(in)    :: ddiag(:, :)       ! A(:,i,i)
+   real(wp), intent(inout) :: xrij(:, :)        ! C(:,i,j) for i<j
+   real(wp), intent(inout) :: xrji(:, :)        ! C(:,j,i) for i<j
+   real(wp), intent(inout) :: xdiag(:, :)       ! C(:,i,i)
+   real(wp), intent(in)    :: alpha, beta
 
+   integer :: i, j, k, idx_ij, idx_ik, idx_jk
+   integer :: ncomp
+   real(wp) :: A_ij(3), A_ji(3), B_ij, B_ik, B_jk, B_ii, B_jj
+
+   ncomp = size(drij, 1)   ! number of components (here 3)
+
+   ! ----- beta scaling -----
+   if (beta == 0.0_wp) then
+      xrij  = 0.0_wp
+      xrji  = 0.0_wp
+      xdiag = 0.0_wp
+   else if (beta /= 1.0_wp) then
+      xrij  = beta * xrij
+      xrji  = beta * xrji
+      xdiag = beta * xdiag
+   end if
+
+   ! ----- Off‑diagonal contributions from A(i,j) and A(j,i) -----
+   do i = 1, size(list%nnl)
+      B_ii = cdiag(i)
+      do idx_ij = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+         j = list%nlat(idx_ij)
+
+         A_ij = drij(:, idx_ij)
+         A_ji = drji(:, idx_ij)
+         B_ij = clist(idx_ij)
+         B_jj = cdiag(j)
+
+         ! 1) C(i,j) += alpha * A(i,j) * B(j,j)
+         xrij(:, idx_ij) = xrij(:, idx_ij) + alpha * A_ij * B_jj
+         !    C(j,i) += alpha * A(j,i) * B(i,i)
+         xrji(:, idx_ij) = xrji(:, idx_ij) + alpha * A_ji * B_ii
+
+         ! 2) Diagonal contributions from this pair
+         !    C(i,i) += alpha * A(i,j) * B(j,i)  (B(j,i)=B_ij)
+         xdiag(:, i) = xdiag(:, i) + alpha * A_ij * B_ij
+         !    C(j,j) += alpha * A(j,i) * B(i,j)  (B(i,j)=B_ij)
+         xdiag(:, j) = xdiag(:, j) + alpha * A_ji * B_ij
+
+         ! 3) Coupling to other neighbours:
+         !    a) For every neighbour k of j (k /= i):
+         !       C(i,k) += alpha * A(i,j) * B(j,k)
+         do idx_jk = list%inl(j) + 1, list%inl(j) + list%nnl(j)
+            k = list%nlat(idx_jk)
+            if (k == i) cycle
+            B_jk = clist(idx_jk)
+            if (i < k) then
+               idx_ik = find_index(list, i, k)   ! helper function (see below)
+               xrij(:, idx_ik) = xrij(:, idx_ik) + alpha * A_ij * B_jk
+            else if (i > k) then
+               idx_ik = find_index(list, k, i)   ! stored as (k,i)
+               xrji(:, idx_ik) = xrji(:, idx_ik) + alpha * A_ij * B_jk
+            end if
+         end do
+
+         !    b) For every neighbour k of i (k /= j):
+         !       C(j,k) += alpha * A(j,i) * B(i,k)
+         do idx_ik = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+            k = list%nlat(idx_ik)
+            if (k == j) cycle
+            B_ik = clist(idx_ik)
+            if (j < k) then
+               idx_jk = find_index(list, j, k)
+               xrij(:, idx_jk) = xrij(:, idx_jk) + alpha * A_ji * B_ik
+            else if (j > k) then
+               idx_jk = find_index(list, k, j)
+               xrji(:, idx_jk) = xrji(:, idx_jk) + alpha * A_ji * B_ik
+            end if
+         end do
+      end do
+   end do
+
+   ! ----- Diagonal contributions from A(i,i) -----
+   do i = 1, size(list%nnl)
+      A_ij = ddiag(:, i)          ! actually A_ii
+      B_ii = cdiag(i)
+
+      ! C(i,i) += alpha * A(i,i) * B(i,i)
+      xdiag(:, i) = xdiag(:, i) + alpha * A_ij * B_ii
+
+      ! C(i,j) += alpha * A(i,i) * B(i,j)   for j > i
+      do idx_ij = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+         B_ij = clist(idx_ij)
+         xrij(:, idx_ij) = xrij(:, idx_ij) + alpha * A_ij * B_ij
+         ! Note: C(j,i) does *not* get a contribution from A(i,i)
+      end do
+   end do
+
+contains
+   ! Helper: find compressed index for pair (i,j) with i < j
+   pure function find_index(list, i, j) result(idx)
       type(adjacency_list), intent(in) :: list
-      real(wp), intent(in)  :: clist(:)
-      real(wp), intent(in)  :: cdiag(:)
-      real(wp), intent(in)  :: dtmp_drij(:,:)   ! (ncomp, nnz)
-      real(wp), intent(in)  :: dtmp_drji(:,:)   ! (ncomp, nnz)
-      real(wp), intent(in)  :: dtmp_diag(:,:)   ! (ncomp, nat)
-      real(wp), intent(inout) :: dx_drij(:,:)   ! (ncomp, nnz)
-      real(wp), intent(inout) :: dx_drji(:,:)   ! (ncomp, nnz)
-      real(wp), intent(inout) :: dx_diag(:,:)   ! (ncomp, nat)
+      integer, intent(in) :: i, j
+      integer :: idx, k
+      do idx = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+         if (list%nlat(idx) == j) return
+      end do
+      idx = 0   ! should never happen if (i,j) is a neighbour pair
+   end function
+end subroutine gemm_cmp_211_dir
+
+pure subroutine gemm_cmp_212(list, clist, cdiag, dtmpdrij, dtmpdrji, dtmpdrdiag, &
+         & dxdrij, dxdrji, dxdrdiag, alpha, beta)
+      !> Assumes wp (working precision) is accessible via module or host association.
+      !> import :: wp
+      type(adjacency_list), intent(in) :: list
+      real(wp), intent(in) :: clist(:), cdiag(:)
+      real(wp), intent(in) :: dtmpdrij(:,:), dtmpdrji(:,:), dtmpdrdiag(:,:)
+      real(wp), intent(inout) :: dxdrij(:,:), dxdrji(:,:), dxdrdiag(:,:)
       real(wp), intent(in) :: alpha, beta
-      logical, intent(in), optional :: symmetric
+      
+      integer :: nat, n_edges, i, j, k, e
+      integer :: idx, idx_k, idx_y, y, e_k, e_y, m
+      integer, allocatable :: deg(:), head(:)
+      integer, allocatable :: adj_node(:), adj_edge(:)
+      logical, allocatable :: adj_fw(:)
+      real(wp) :: A_xk(3), B_ky
+      real(wp), allocatable :: C_row(:,:)
+      logical, allocatable :: modified(:)
+      integer, allocatable :: mod_list(:)
+      integer :: num_mod
 
-      logical :: is_sym
-      integer :: i, j, k
+      nat = size(list%nnl)
+      n_edges = size(list%nlat)
 
-      is_sym = .true.
-
-      ! Scale outputs
+      ! 1. Apply beta scaling upfront
       if (beta == 0.0_wp) then
-         dx_drij(:,:) = 0.0_wp
-         dx_drji(:,:) = 0.0_wp
-         dx_diag(:,:) = 0.0_wp
+         dxdrdiag = 0.0_wp
+         dxdrij   = 0.0_wp
+         dxdrji   = 0.0_wp
       else if (beta /= 1.0_wp) then
-         dx_drij(:,:) = beta * dx_drij(:,:)
-         dx_drji(:,:) = beta * dx_drji(:,:)
-         dx_diag(:,:) = beta * dx_diag(:,:)
+         dxdrdiag = beta * dxdrdiag
+         dxdrij   = beta * dxdrij
+         dxdrji   = beta * dxdrji
       end if
 
-      do i = 1, size(list%nnl)
+      ! 2. Build full symmetric neighbor list for O(1) reverse lookups
+      allocate(deg(nat))
+      deg = list%nnl
+      do e = 1, n_edges
+         j = list%nlat(e)
+         deg(j) = deg(j) + 1
+      end do
 
-         !==================================================
-         ! DIAGONAL
-         !==================================================
+      allocate(head(nat + 1))
+      head(1) = 1
+      do i = 1, nat
+         head(i+1) = head(i) + deg(i)
+      end do
 
-         dx_diag(:,i) = dx_diag(:,i) + alpha * dtmp_diag(:,i) * cdiag(i)
+      allocate(adj_node(2 * n_edges))
+      allocate(adj_edge(2 * n_edges))
+      allocate(adj_fw(2 * n_edges))
 
-         do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
-            j = list%nlat(k)
-            dx_diag(:,i) = dx_diag(:,i) + alpha * dtmp_drij(:,k) * clist(k)
-            dx_diag(:,j) = dx_diag(:,j) + alpha * dtmp_drji(:,k) * clist(k)
+      deg = head(1:nat) ! Reuse deg array as insertion pointers
+      do i = 1, nat
+         do e = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+            j = list%nlat(e)
+
+            ! Forward edge (i -> j)
+            idx = deg(i)
+            adj_node(idx) = j
+            adj_edge(idx) = e
+            adj_fw(idx) = .true.
+            deg(i) = deg(i) + 1
+
+            ! Backward edge (j -> i)
+            idx = deg(j)
+            adj_node(idx) = i
+            adj_edge(idx) = e
+            adj_fw(idx) = .false.
+            deg(j) = deg(j) + 1
+         end do
+      end do
+      deallocate(deg)
+
+      ! 3. Accumulate matrix product C = A * B row-by-row
+      allocate(C_row(3, nat))
+      C_row = 0.0_wp
+      allocate(modified(nat))
+      modified = .false.
+      allocate(mod_list(nat))
+      num_mod = 0
+
+      do i = 1, nat
+
+         ! -- Process k = i --
+         A_xk(:) = dtmpdrdiag(:, i)
+
+         ! y = i
+         B_ky = cdiag(i)
+         C_row(:, i) = C_row(:, i) + A_xk(:) * B_ky
+         if (.not. modified(i)) then
+            num_mod = num_mod + 1
+            mod_list(num_mod) = i
+            modified(i) = .true.
+         end if
+
+         ! y in N(i)
+         do idx_y = head(i), head(i+1) - 1
+            y = adj_node(idx_y)
+            e_y = adj_edge(idx_y)
+            B_ky = clist(e_y)
+            C_row(:, y) = C_row(:, y) + A_xk(:) * B_ky
+            if (.not. modified(y)) then
+               num_mod = num_mod + 1
+               mod_list(num_mod) = y
+               modified(y) = .true.
+            end if
          end do
 
+         ! -- Process k in N(i) --
+         do idx_k = head(i), head(i+1) - 1
+            k = adj_node(idx_k)
+            e_k = adj_edge(idx_k)
 
-         !==================================================
-         ! OFF-DIAGONAL
-         !==================================================
-         do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
-            j = list%nlat(k)
+            ! Determine if we use the forward or backward asymmetric element
+            if (adj_fw(idx_k)) then
+               A_xk(:) = dtmpdrij(:, e_k)
+            else
+               A_xk(:) = dtmpdrji(:, e_k)
+            end if
 
-            dx_drij(:,k) = dx_drij(:,k) + alpha * ( &
-               dtmp_diag(:,i) * clist(k) + &
-               cdiag(i)       * dtmp_drij(:,k) + &
-               dtmp_drij(:,k) * cdiag(j) + &
-               clist(k)       * dtmp_diag(:,j) )
+            ! y = k
+            B_ky = cdiag(k)
+            C_row(:, k) = C_row(:, k) + A_xk(:) * B_ky
+            if (.not. modified(k)) then
+               num_mod = num_mod + 1
+               mod_list(num_mod) = k
+               modified(k) = .true.
+            end if
 
-            dx_drji(:,k) = dx_drji(:,k) + alpha * ( &
-               dtmp_diag(:,j) * clist(k) + &
-               cdiag(j)       * dtmp_drji(:,k) + &
-               dtmp_drji(:,k) * cdiag(i) + &
-               clist(k)       * dtmp_diag(:,i) )
-
+            ! y in N(k)
+            do idx_y = head(k), head(k+1) - 1
+               y = adj_node(idx_y)
+               e_y = adj_edge(idx_y)
+               B_ky = clist(e_y)
+               C_row(:, y) = C_row(:, y) + A_xk(:) * B_ky
+               if (.not. modified(y)) then
+                  num_mod = num_mod + 1
+                  mod_list(num_mod) = y
+                  modified(y) = .true.
+               end if
+            end do
          end do
+
+         ! 4. Scatter computed row back to compressed layout formats
+         dxdrdiag(:, i) = dxdrdiag(:, i) + alpha * C_row(:, i)
+         do idx_y = head(i), head(i+1) - 1
+            y = adj_node(idx_y)
+            e_y = adj_edge(idx_y)
+            if (adj_fw(idx_y)) then
+               dxdrij(:, e_y) = dxdrij(:, e_y) + alpha * C_row(:, y)
+            else
+               dxdrji(:, e_y) = dxdrji(:, e_y) + alpha * C_row(:, y)
+            end if
+         end do
+
+         ! 5. Clear accumulator array sparse-ly
+         do m = 1, num_mod
+            y = mod_list(m)
+            C_row(:, y) = 0.0_wp
+            modified(y) = .false.
+         end do
+         num_mod = 0
 
       end do
 
-   end subroutine gemm_cmp_211_dir
+   end subroutine gemm_cmp_212
 
 end module multicharge_blascomp

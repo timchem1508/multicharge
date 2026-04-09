@@ -388,7 +388,7 @@ contains
 
       allocate(cache2)
       allocate(list)
-      call new_adjacency_list(list, mol, 1.0e9_wp, .false.)
+      call new_adjacency_list(list, mol, cutoff, .false.)
       call model%update(mol, cache2, trans, grad=.true., list=list)
 
       !call model%get_capacitance_matrix(mol, mol%nat, cache2, list=list)
@@ -420,12 +420,6 @@ contains
 
       do iat = 1, mol%nat
 
-         dcmat_list(:, iat, iat) = cache2%dcdrdiag(:, iat)
-         damat_list(:, iat, iat) = cache2%dadrdiag(:, iat) + damat_list(:, iat, iat)
-         dqloc_list(:, iat, iat) = cache2%dqlocdrdiag(:, iat)
-         dxvec_list(:, iat, iat) = cache2%dxdrdiag(:, iat) + dxvec_list(:, iat, iat)
-         dcn_list(:, iat, iat) = cache2%dcndrdiag(:, iat)
-
          do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
             jat = list%nlat(kat)
             dcmat_list(:, iat, jat) = cache2%dcdrij(:, kat)
@@ -439,6 +433,12 @@ contains
             damat_list(:, iat, jat) = cache2%dadrij(:, kat)
             damat_list(:, jat, iat) = cache2%dadrji(:, kat)
          end do
+
+         dcmat_list(:, iat, iat) = cache2%dcdrdiag(:, iat)
+         damat_list(:, iat, iat) = cache2%dadrdiag(:, iat)
+         dqloc_list(:, iat, iat) = cache2%dqlocdrdiag(:, iat)
+         dxvec_list(:, iat, iat) = cache2%dxdrdiag(:, iat)
+         dcn_list(:, iat, iat) = cache2%dcndrdiag(:, iat)
       end do
       !write(*,*) "NLIST DAMAT"
       !write(*,'(12es21.14)') damat_list
@@ -493,15 +493,15 @@ contains
          print'(16es21.14)', dxvec_list(3, :, :) - cache1%dxdr(3, :, :)
       end if
 
-      !if (any(abs(cache1%dadr(:, :, :) - damat_list(:, :, :)) > thr3)) then
-      !   call test_failed(error, "Derivative of Coulomb matrix does not match")
-      !   print'(a)', "Coulomb matrix derivative:"
-      !   print'(16es21.14)', cache1%dadr
-      !   print'(a)', "Nlist Coulomb matrix derivative:"
-      !   print'(16es21.14)', damat_list
-      !   print'(a)', "diff:"
-      !   print'(16es21.14)', damat_list - cache1%dadr
-      !end if
+      if (any(abs(cache1%dadr(:, :, :) - damat_list(:, :, :)) > thr3)) then
+         call test_failed(error, "Derivative of Coulomb matrix does not match")
+         print'(a)', "Coulomb matrix derivative:"
+         print'(16es21.14)', cache1%dadr(3, :, :)
+         print'(a)', "Nlist Coulomb matrix derivative:"
+         print'(16es21.14)', damat_list( 3, :, :)
+         print'(a)', "diff:"
+         print'(16es21.14)', damat_list( 3, :, :) - cache1%dadr(3, :, :)
+      end if
 
       ! if (any(abs(gradient(:, :) - numgrad(:, :)) > thr3)) then
       !    call test_failed(error, "Derivative of energy does not match")
