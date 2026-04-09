@@ -28,7 +28,7 @@ module multicharge_model_eeqbc
    use mctc_ncoord, only: new_ncoord, cn_count
    use mctc_ncoord, only: adjacency_list
    use multicharge_wignerseitz, only: new_wignerseitz_cell, wignerseitz_cell_type
-   use multicharge_blascomp, only: gemv_cmp, gemm_cmp, gemm_cmp_211_dir, gemm_cmp_212
+   use multicharge_blascomp, only: gemv_cmp, gemm_cmp, gemm_cmp_212
    use multicharge_model_type, only: mchrg_model_type, get_dir_trans
    use multicharge_blas, only: gemv, gemm
    use multicharge_model_cache, only: mchrg_cache
@@ -200,7 +200,6 @@ contains
 
       if (present(list)) then
          if (cache%grad) then
-            write(*, *) 'Using neighbour list for CN and local charge derivatives.'
             if (.not. allocated(cache%dcndrij)) allocate(cache%dcndrij(3, size(list%nlat)))
             if (.not. allocated(cache%dcndrji)) allocate(cache%dcndrji(3, size(list%nlat)))
             if (.not. allocated(cache%dcndrdiag)) allocate(cache%dcndrdiag(3, mol%nat))
@@ -216,18 +215,6 @@ contains
             call self%local_charge(mol, trans, cache%qloc, list=list, dqlocdrij=cache%dqlocdrij, &
             & dqlocdrji=cache%dqlocdrji, dqlocdrdiag=cache%dqlocdrdiag, dqlocdL=cache%dqlocdL)
 
-            if (any(abs(cache%dcndrij - cache%dcndrji) > 1e-6_wp)) then
-               write(*, *) 'Warning: Asymmetry detected in CN derivatives!'
-            end if
-            if (any(abs(cache%dqlocdrij - cache%dqlocdrji) > 1e-6_wp)) then
-               write(*, *) 'Warning: Asymmetry detected in local charge derivatives!'
-            end if
-            if (.not. allocated(cache%dcndrij)) then
-               write(*, *) 'Error: CN derivative arrays not allocated!'
-            end if
-            if (.not. allocated(cache%dqlocdrij)) then
-               write(*, *) 'Error: local charge derivative arrays not allocated!'
-            end if
          else
             call self%ncoord%get_coordination_number(mol, trans, cache%cn, list=list)
             call self%local_charge(mol, trans, cache%qloc, list=list)
@@ -724,9 +711,6 @@ contains
       deallocate(dxdL_local, dxdrij_local, dxdrji_local, dxdrdiag_local)
       !$omp end parallel
 
-      if (any(abs(cache%dxdrij - cache%dxdrji) > 1e-6_wp)) then
-         write(*, *) 'Warning: Asymmetry detected in XVEC derivatives!'
-      end if
 
    end subroutine get_xvec_derivs_0d_list
 
@@ -988,10 +972,6 @@ contains
       !$omp end critical (get_xvec_derivs_3d_list_)
       deallocate(dxdL_local, dxdrij_local, dxdrji_local, dxdrdiag_local)
       !$omp end parallel
-
-      if (any(abs(cache%dxdrij - cache%dxdrji) > 1e-6_wp)) then
-         write(*, *) 'Warning: Asymmetry detected in XVEC derivatives!'
-      end if
 
    end subroutine get_xvec_derivs_3d_list
 
@@ -1376,7 +1356,6 @@ contains
       integer :: iat
 
       if (present(list)) then
-         write(*, *) 'Using neighbour list for Coulomb derivatives.'
          if (.not. allocated(cache%dadrij)) then
             allocate(cache%dadrij(3, size(list%nlat)))
          end if
@@ -1724,10 +1703,6 @@ contains
 
       deallocate(dadL_local, dadrij_local, dadrji_local, dadrdiag_local)
       !$omp end parallel
-
-      if (any(abs(cache%dadrij - cache%dadrji) > 1e-6_wp)) then
-         write(*, *) 'Warning: Asymmetry detected in Coulomb matrix derivatives!'
-      end if
 
    end subroutine get_damat_0d_list
 
@@ -2099,10 +2074,6 @@ contains
       !$omp end critical (get_damat_3d_list_)
       deallocate(dadL_local, dadrij_local, dadrji_local, dadrdiag_local)
       !$omp end parallel
-
-      if (any(abs(cache%dadrij - cache%dadrji) > 1e-6_wp)) then
-         write(*, *) 'Warning: Asymmetry detected in Coulomb matrix derivatives!'
-      end if
 
    end subroutine get_damat_3d_list
 
@@ -2675,10 +2646,6 @@ contains
       deallocate(dcdL_local, dcdrij_local, dcdrji_local, dcdrdiag_local)
       !$omp end parallel
 
-      ! Physical symmetry check: grad_i(C_ij) + grad_j(C_ij) should be zero
-      if (any(abs(cache%dcdrij + cache%dcdrji) > 1e-6_wp)) then
-         write(*, *) 'Warning: Translational invariance violated in Capacitance derivatives!'
-      end if
 
    end subroutine get_dcmat_0d_list
 
@@ -2833,10 +2800,6 @@ contains
 
       deallocate(dcdL_local, dcdrij_local, dcdrji_local, dcdrdiag_local)
       !$omp end parallel
-
-      if (any(abs(cache%dcdrij - cache%dcdrji) > 1e-6_wp)) then
-         write(*, *) 'Warning: Asymmetry detected in Capacitance derivatives!'
-      end if
 
    end subroutine get_dcmat_3d_list
 

@@ -248,7 +248,7 @@ contains
       !> Output unit
       integer, intent(in), optional :: unit
 
-      integer :: iat, ndim
+      integer :: iat, ndim, jat, kat
 
       real(wp), allocatable :: unitvec(:)
       real(wp), allocatable :: vvec(:)
@@ -387,7 +387,6 @@ contains
       if (dcn) then
          call timer%push("setup_gradient")
          if (present(list)) then
-            write(*, *) 'Using neighbour list for gradient setup.'
             call self%get_xvec_derivs(mol, ndim, cache, list=list)
             call self%get_coulomb_derivs(mol, ndim, cache, list=list)
             allocate(daqxdrij(3, size(list%nlat)), source=0.0_wp)
@@ -412,14 +411,11 @@ contains
             daqxdrij = - cache%dxdrij + 0.5_wp * cache%dadrij
             daqxdrji = - cache%dxdrji + 0.5_wp * cache%dadrji
             daqxdrdiag = - cache%dxdrdiag + 0.5_wp * cache%dadrdiag
-            if (any(abs(daqxdrij - daqxdrji) > 1e-6_wp)) then
-               write(*, *) 'Warning: Asymmetry detected in Combined matrix derivatives!'
-            end if
             do iat = 1, mol%nat
                daqxdL(:, :, iat) = - cache%dxdL(:, :, iat) + 0.5_wp * cache%dadL(:, :, iat)
             end do
-            call gemv_cmp(list, daqxdrij, daqxdrji, daqxdrdiag, cache%vrhs, gradient, &
-            & alpha=1.0_wp, beta=1.0_wp, symmetric=.false.)
+            call gemv_cmp(list, daqxdrij(:, :), daqxdrji(:, :), daqxdrdiag(:,:), cache%vrhs(:mol%nat), gradient(:, :), &
+               & alpha=1.0_wp, beta=1.0_wp)
             call gemv(daqxdL, cache%vrhs, sigma, beta=1.0_wp, alpha=1.0_wp)
          else
             do iat = 1, mol%nat
