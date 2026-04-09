@@ -1592,8 +1592,8 @@ contains
 
       !$omp parallel default(none) &
       !$omp shared(cache, mol, list, self) &
-      !$omp private(iat, kat, izp, jat, jzp, gam, vec, r2, dtmp, norm_cn, arg, start_kat, finish_kat) &
-      !$omp private(radi, radj, dradi, dradj, dG, dS, pre_i, pre_j, dgam_pre) &
+      !$omp private(iat, kat, izp, jat, jzp, gam, dgami, dgamj, dgamdL, vec, r2, dtmp, norm_cn, arg) &
+      !$omp private(start_kat, finish_kat, radi, radj, dradi, dradj, dG, dS, pre_i, pre_j, dgam_pre) &
       !$omp private(dadrij_local, dadrji_local, dadrdiag_local, dadL_local)
 
       allocate(dadrij_local, source=cache%dadrij)
@@ -1683,24 +1683,27 @@ contains
             dadrij_local(:, kat) = -dtmp * cache%dcdrij(:, kat) + dadrij_local(:, kat)
 
             ! 5. Hardness and coordination-dependent diagonal corrections
-            dtmp = self%kqeta(izp) * cache%vrhs(iat) * cache%cdiag(iat)
-            dadrij_local(:, kat) = dadrij_local(:, kat) + dtmp * cache%dqlocdrij(:, kat)
-            dadrji_local(:, kat) = dadrji_local(:, kat) + dtmp * cache%dqlocdrji(:, kat)
+            pre_i = self%kqeta(izp) * cache%vrhs(iat) * cache%cdiag(iat)
+            pre_j = self%kqeta(jzp) * cache%vrhs(jat) * cache%cdiag(jat)
             
+            dadrij_local(:, kat) = dadrij_local(:, kat) + pre_j * cache%dqlocdrij(:, kat)
+            dadrji_local(:, kat) = dadrji_local(:, kat) + pre_i * cache%dqlocdrji(:, kat)
 
             ! Effective charge width diagonal derivative
-            dtmp = -sqrt2pi * dradi / (radi**2) * cache%vrhs(iat) * cache%cdiag(iat)
-            dadrij_local(:, kat) = dadrij_local(:, kat) + dtmp * cache%dcndrij(:, kat)
-            dadrji_local(:, kat) = dadrji_local(:, kat) + dtmp * cache%dcndrji(:, kat)
+            pre_i = -sqrt2pi * dradi / (radi**2) * cache%vrhs(iat) * cache%cdiag(iat)
+            pre_j = -sqrt2pi * dradj / (radj**2) * cache%vrhs(jat) * cache%cdiag(jat)
+            
+            dadrij_local(:, kat) = dadrij_local(:, kat) + pre_j * cache%dcndrij(:, kat)
+            dadrji_local(:, kat) = dadrji_local(:, kat) + pre_i * cache%dcndrji(:, kat)
 
          end do
 
-         ! 5. Hardness and coordination-dependent diagonal corrections
+         ! 5. Hardness and coordination-dependent diagonal corrections (Diagonal-only)
          dtmp = self%kqeta(izp) * cache%vrhs(iat) * cache%cdiag(iat)
          dadrdiag_local(:, iat) = dadrdiag_local(:, iat) + dtmp * cache%dqlocdrdiag(:, iat)
          dadL_local(:, :, iat) = dadL_local(:, :, iat) + dtmp * cache%dqlocdL(:, :, iat)
 
-         ! Effective charge width diagonal derivative
+         ! Effective charge width diagonal derivative (Diagonal-only)
          dtmp = -sqrt2pi * dradi / (radi**2) * cache%vrhs(iat) * cache%cdiag(iat)
          dadrdiag_local(:, iat) = dadrdiag_local(:, iat) + dtmp * cache%dcndrdiag(:, iat)
          dadL_local(:, :, iat) = dadL_local(:, :, iat) + dtmp * cache%dcndL(:, :, iat)
