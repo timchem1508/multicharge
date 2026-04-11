@@ -80,6 +80,8 @@ module multicharge_model_type
       procedure(get_coulomb_matrix), deferred :: get_coulomb_matrix
       !> Calculate Coulomb matrix derivatives
       procedure(get_coulomb_derivs), deferred :: get_coulomb_derivs
+      !> Calculate capcaity-corrected EN derivatives
+      procedure(get_pT_dbdR_list), deferred :: get_pT_dbdR_list
    end type mchrg_model_type
 
    abstract interface
@@ -182,6 +184,23 @@ module multicharge_model_type
          !> Multicharge neighbourlist type
          type(adjacency_list), intent(in), optional :: list
       end subroutine get_xvec_derivs
+
+      subroutine get_pT_dbdR_list(self, mol, list, cache, q, gradient, sigma)
+         import :: mchrg_model_type, structure_type, mchrg_cache, adjacency_list, wp
+         !> EEQBC model type
+         class(mchrg_model_type), intent(in) :: self
+         !> Molecular structure data
+         type(structure_type), intent(in) :: mol
+         !> Neighbour list (each unordered pair appears once)
+         type(adjacency_list), intent(in) :: list
+         type(mchrg_cache), intent(in) :: cache
+         !> Input vectors
+         real(wp), intent(in) :: q(:)          ! dE/db (size nat)
+         !> Output derivatives (accumulated)
+         real(wp), intent(inout) :: gradient(:, :)  ! forces (3, nat)
+         real(wp), intent(inout) :: sigma(:, :)     ! stress (3, 3)
+      end subroutine get_pT_dbdR_list
+
    end interface
 
    real(wp), parameter :: twopi = 2 * pi
@@ -263,6 +282,16 @@ contains
       logical :: add_lagr = .true.
       type(timer_type) :: timer
       integer :: print_unit, verbosity_solve
+
+      real(wp), allocatable :: bgrad_direct(:,:), bgrad_new(:,:)
+      real(wp), allocatable :: bsigma_direct(:,:), bsigma_new(:,:)
+
+      allocate(bgrad_direct(3, mol%nat), bgrad_new(3, mol%nat))
+      bgrad_new = 0.0_wp
+      bgrad_direct = 0.0_wp
+      allocate(bsigma_direct(3, 3), bsigma_new(3, 3))
+      bsigma_direct = 0.0_wp
+      bsigma_new = 0.0_wp
 
 
       ! Calculate gradient if the respective arrays are present
@@ -438,6 +467,22 @@ contains
             do iat = 1, mol%nat
                daqxdL(:, :, iat) = - cache%dxdL(:, :, iat) + 0.5_wp * cache%dadL(:, :, iat)
             end do
+
+            
+
+
+
+            call self%get_pT_dbdR_list(mol, list, cache, cache%vrhs(:mol%nat), bgrad_new, bsigma_new)
+
+            write(*,*) "New BGRAD"
+            print'(3es21.14)', bgrad_new(:,:)
+            write(*,*)
+            write(*,*) "New BSIGMA"
+            print'(3es21.14)', bsigma_new
+            write(*,*)
+
+
+            
             call gemv_cmp(list, daqxdrij(:, :), daqxdrji(:, :), daqxdrdiag(:,:), cache%vrhs(:mol%nat), gradient(:, :), &
                & alpha=1.0_wp, beta=1.0_wp)
             call gemv(daqxdL, cache%vrhs, sigma, beta=1.0_wp, alpha=1.0_wp)
@@ -446,6 +491,18 @@ contains
                daqxdr(:, :, iat) = - cache%dxdr(:, :, iat) + 0.5_wp * cache%dadr(:, :, iat)
                daqxdL(:, :, iat) = - cache%dxdL(:, :, iat) + 0.5_wp * cache%dadL(:, :, iat)
             end do
+
+
+            call gemv(cache%dxdr(:, :, :mol%nat), cache%vrhs(:mol%nat), bgrad_direct, beta=0.0_wp, alpha=1.0_wp)
+            call gemv(cache%dxdL, cache%vrhs, bsigma_direct, beta=0.0_wp, alpha=1.0_wp)
+            write(*,*) "DIRECT BGRAD"
+            print'(3es21.14)', bgrad_direct
+            write(*,*)
+            write(*,*) "DIRECT BSIGMA"
+            print'(3es21.14)', bsigma_direct
+            write(*,*)
+
+
             call gemv(daqxdr(:, :, :mol%nat), cache%vrhs(:mol%nat), gradient, beta=1.0_wp, alpha=1.0_wp)
             call gemv(daqxdL, cache%vrhs, sigma, beta=1.0_wp, alpha=1.0_wp)
          end if
