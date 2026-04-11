@@ -2788,4 +2788,139 @@ contains
       end do
    end subroutine get_dcpair_dir
 
+   subroutine get_pT_dbdR_list(self, mol, trans, q, kcnchi, chi, cdiag, clist, &
+                              gradient, sigma, list)
+      !> EEQBC model type
+      class(eeqbc_model), intent(in) :: self
+      !> Molecular structure data
+      type(structure_type), intent(in) :: mol
+      !> Lattice vectors for periodic images
+      real(wp), intent(in) :: trans(:, :)
+      !> Input vectors
+      real(wp), intent(in) :: q(:)          ! dE/db (size nat)
+      real(wp), intent(in) :: kcnchi(:)     ! k_chi_CN (size nat)
+      real(wp), intent(in) :: chi(:)        ! χ (size nat)
+      !> Sparse capacitance matrix (compressed)
+      real(wp), intent(in) :: cdiag(:)      ! diagonal entries (size nat)
+      real(wp), intent(in) :: clist(:)      ! off‑diagonals (size list%nnl)
+      !> Output derivatives (accumulated)
+      real(wp), intent(out) :: gradient(:, :)  ! forces (3, nat)
+      real(wp), intent(out) :: sigma(:, :)     ! stress (3, 3)
+      !> Neighbour list (each unordered pair appears once)
+      type(adjacency_list), intent(in) :: list
+
+      real(wp), allocatable :: dEdcn(:)
+      real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
+      integer :: iat, jat, kat, itr, izp, jzp
+      real(wp) :: r2, r1, rij(3), countd(3), ds(3,3), den, dtmp_dr, tmp, factor(3)
+      real(wp) :: rvdw, capi, capj, kbc, dgpair(3), dspair(3, 3)
+
+
+      ! ---------- 1. Compute dEdcn(i) = kcnchi(i) * (C * q)_i ----------
+      allocate(dEdcn(mol%nat), source=0.0_wp)
+
+      do iat = 1, mol%nat
+         izp = mol%id(iat)
+         dEdcn(iat) = self%kcnchi(izp) * cache%cdiag(iat) * q(iat)
+         do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
+            jat = list%nlat(kat)
+            jzp = mol%id(jat)
+            if (jat <= iat) cycle   ! ensure iat < jat
+            dEdcn(iat) = dEdcn(iat) + self%kcnchi(izp) * cache%clist(kat) * q(jat)
+            dEdcn(jat) = dEdcn(jat) + self%kcnchi(jzp) * cache%clist(kat) * q(iat)
+         end do
+      end do
+
+      ! ---------- 2. Term A: q^T * C * dχ/dR  =  dEdcn^T * dCN/dR ----------
+
+      allocate(gradient_local(3, mol%nat), source=0.0_wp)
+      allocate(sigma_local(3, 3), source=0.0_wp)
+      !    Reuse existing coordination number derivative routine
+      call self%ncoord%add_coordination_number_derivs_list(self, mol, list%trans, dEdcn, &
+                                             gradient_local, sigma_local, list)
+
+      gradient = gradient_local
+      sigma = sigma_local
+
+      ! ---------- 2. Compute dEdcn(i) = kqchi(i) * (C * q)_i ----------
+
+      do iat = 1, mol%nat
+         izp = mol%id(iat)
+         dEdcn(iat) = self%kqchi(iat) * self%cdiag(iat) * q(iat)
+         do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
+            jat = list%nlat(kat)
+            jzp = mol%id(jat)
+            if (jat <= iat) cycle   ! ensure iat < jat
+            dEdcn(iat) = dEdcn(iat) + self%kqchi(izp) * clist(kat) * q(jat)
+            dEdcn(jat) = dEdcn(jat) + self%kqchi(jzp) * clist(kat) * q(iat)
+         end do
+      end do
+
+      ! ---------- 3. Term A: q^T * C * dqloc/dR  =  dEdcn^T * dCN_en/dR ----------
+
+      !    Reuse existing coordination number derivative routine
+      call self%ncoord_en%add_coordination_number_derivs_list(self, mol, list%trans, dEdcn, &
+                                             gradient_local, sigma_local, list)
+
+      gradient = gradient + gradient_local
+      sigma = sigma + sigma_local
+
+      deallocate(gradient)
+      deallocate(sigma)
+
+      ! ---------- 4. Term B: q^T * (dC/dR) * χ ----------
+      !    Thread‑parallel accumulation
+      !$omp parallel default(none) &
+      !$omp shared(self, mol, trans, list, q, chi, gradient, sigma) &
+      !$omp private(iat, jat, kat, itr, izp, jzp, r2, r1, rij, dtmp_dr, tmp, factor) &
+      !$omp private(rvdw, capi, capj, kbc, dgpair, dspair, countd, ds, gradient_local, sigma_local)
+      allocate(gradient_local(3, mol%nat), source=0.0_wp)
+      allocate(sigma_local(3, 3), source=0.0_wp)
+
+      !$omp do schedule(runtime)
+      do iat = 1, mol%nat
+         izp = mol%id(iat)
+         capi = self%cap(izp)
+         do kat = list%inl(iat)+1, list%inl(iat)+list%nnl(iat)
+            jat = list%nlat(kat)
+            jzp = mol%id(jat)
+            capj = self%cap(jzp)
+            rvdw = self%rvdw(izp, jzp)
+            kbc  = self%kbc
+
+            ! Loop over periodic images
+            do itr = 1, size(trans, dim=2)
+               rij = mol%xyz(:, iat) - (mol%xyz(:, jat) + trans(:, itr))
+               r2 = sum(rij**2)
+               r1 = sqrt(r2)
+
+               ! Compute derivative of C_ij summed over all lattice translations
+               call get_dcpair_dir(kbc, rij, trans, rvdw, capi, capj, dgpair, dspair)
+
+               ! Correct factor for Term B: (q_i χ_j + q_j χ_i)
+               factor = q(iat) * chi(jat) + q(jat) * chi(iat)
+
+               ! Forces (dgpair is dC_ij/dR_i ; dC_ij/dR_j = -dgpair)
+               gradient_local(:, iat) = gradient_local(:, iat) + factor * dgpair
+               gradient_local(:, jat) = gradient_local(:, jat) - factor * dgpair
+
+               ! Stress contribution (dspair is ∂C_ij/∂ε summed over images)
+               sigma_local(:, :) = sigma_local(:, :) + factor * dspair
+            end do
+         end do
+      end do
+      !$omp end do
+
+      !$omp critical (add_qT_db_dR_list_)
+      gradient = gradient + gradient_local
+      sigma    = sigma    + sigma_local
+      !$omp end critical (add_qT_db_dR_list_)
+
+      deallocate(gradient_local, sigma_local)
+      !$omp end parallel
+
+      deallocate(dEdcn)
+
+   end subroutine get_pT_dbdR_list
+
 end module multicharge_model_eeqbc
