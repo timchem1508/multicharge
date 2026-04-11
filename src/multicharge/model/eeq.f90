@@ -52,6 +52,7 @@ module multicharge_model_eeq
       procedure :: get_xvec
       !> Calculate EN vector derivatives
       procedure :: get_xvec_derivs
+      procedure :: get_pT_dbdR_list
    end type eeq_model
 
 
@@ -705,6 +706,21 @@ subroutine get_damat_rec_3d(rij, vol, alp, trans, dg, ds)
    end do
 
 end subroutine get_damat_rec_3d
+
+      subroutine get_pT_dbdR_list(self, mol, list, cache, q, gradient, sigma)
+         !> EEQBC model type
+         class(eeq_model), intent(in) :: self
+         !> Molecular structure data
+         type(structure_type), intent(in) :: mol
+         !> Neighbour list (each unordered pair appears once)
+         type(adjacency_list), intent(in) :: list
+         type(mchrg_cache), intent(in) :: cache
+         !> Input vectors
+         real(wp), intent(in) :: q(:)          ! dE/db (size nat)
+         !> Output derivatives (accumulated)
+         real(wp), intent(inout) :: gradient(:, :)  ! forces (3, nat)
+         real(wp), intent(inout) :: sigma(:, :)     ! stress (3, 3)
+      end subroutine get_pT_dbdR_list
 
 
 end module multicharge_model_eeq
