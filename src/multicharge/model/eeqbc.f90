@@ -2894,8 +2894,6 @@ subroutine get_pT_damat_0d_list(self, mol, list, cache, p, gradient, sigma)
       !$omp private(start_kat, finish_kat, radi, radj, dradi, dradj, dG, dS, pre_i, pre_j) &
       !$omp private(W_ii, W_jj, W_ij, gradient_local, sigma_local)
       
-      ! (Allocation moved inside/outside depending on OMP version, 
-      ! but logic remains: each thread needs its own local copy)
       gradient_local = 0.0_wp
       sigma_local = 0.0_wp
 
@@ -2947,7 +2945,7 @@ subroutine get_pT_damat_0d_list(self, mol, list, cache, p, gradient, sigma)
             gradient_local(:, jat) = gradient_local(:, jat) + dtmp * dgamj(:) * cache%clist(kat) * W_ij
             sigma_local(:, :)   = sigma_local(:, :)   + dtmp * dgamdL(:, :) * cache%clist(kat) * W_ij
 
-            ! 3. Capacitance derivative off-diagonal (FIXED SIGN: + to -)
+            ! 3. Capacitance derivative off-diagonal
             dtmp = erf(sqrt(r2) * gam) / sqrt(r2)
             gradient_local(:, iat) = gradient_local(:, iat) - dtmp * cache%dcdrji(:, kat) * W_ij
             gradient_local(:, jat) = gradient_local(:, jat) - dtmp * cache%dcdrij(:, kat) * W_ij
@@ -2961,14 +2959,14 @@ subroutine get_pT_damat_0d_list(self, mol, list, cache, p, gradient, sigma)
             dtmp = (self%eta(izp) + self%kqeta(izp) * cache%qloc(iat) + sqrt2pi / radi)
             gradient_local(:, jat) = gradient_local(:, jat) - dtmp * cache%dcdrji(:, kat) * W_ii
 
-            ! 5. Hardness and coordination corrections (FIXED WEIGHTS: W_ij to W_ii/W_jj)
+            ! 5. Hardness and coordination corrections 
             pre_i = self%kqeta(izp) * W_ii * cache%cdiag(iat)
             pre_j = self%kqeta(jzp) * W_jj * cache%cdiag(jat)
 
             gradient_local(:, iat) = gradient_local(:, iat) + pre_j * cache%dqlocdrij(:, kat)
             gradient_local(:, jat) = gradient_local(:, jat) + pre_i * cache%dqlocdrji(:, kat)
 
-            ! Effective charge width diagonal derivative (FIXED WEIGHTS: W_ij to W_ii/W_jj)
+            ! Effective charge width diagonal derivative
             pre_i = -sqrt2pi * dradi / (radi**2) * W_ii * cache%cdiag(iat)
             pre_j = -sqrt2pi * dradj / (radj**2) * W_jj * cache%cdiag(jat)
 
