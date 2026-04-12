@@ -296,8 +296,6 @@ contains
       type(timer_type) :: timer
       integer :: print_unit, verbosity_solve
 
-      real(wp), allocatable :: agrad(:, :), bgrad(:, :), asigma(:, :), bsigma(:, :)
-
 
       ! Calculate gradient if the respective arrays are present
       dcn = allocated(cache%dcndr) .and. allocated(cache%dcndL) .or. &
@@ -449,15 +447,24 @@ contains
       if (grad) then
          call timer%push("gradient")
          if (present(list)) then
-            allocate(agrad(3, mol%nat), source = 0.0_wp)
-            allocate(bgrad(3, mol%nat), source = 0.0_wp)
-            allocate(asigma(3, 3), source = 0.0_wp)
-            allocate(bsigma(3, 3), source = 0.0_wp)
-            call self%get_pT_damat_0d_list(mol, list, cache, cache%vrhs(:mol%nat), agrad, asigma)
-            call self%get_pT_dbdR_list(mol, list, cache, cache%vrhs(:mol%nat), bgrad, bsigma)
-            gradient = gradient + 0.5_wp * agrad - bgrad
-            sigma = sigma + 0.5_wp * asigma - bsigma
+            call timer%push("dxdr_setup")
+            call self%get_pT_damat_0d_list(mol, list, cache, cache%vrhs(:mol%nat), gradient, sigma)
+            call timer%pop
+            if (verbosity_solve > 1) then
+               write(output_unit, '(a, 1x, a)') "Electronegativity derivatives setup time : ", format_time(timer%get("dxdr_setup"))
+               write(output_unit, '(a)') ''
+            end if
 
+            gradient = 0.5_wp * gradient
+            sigma = 0.5_wp * sigma
+
+            call timer%push("dadr_setup")
+            call self%get_pT_dbdR_list(mol, list, cache, -cache%vrhs(:mol%nat), gradient, sigma)
+            call timer%pop
+            if (verbosity_solve > 1) then
+               write(output_unit, '(a, 1x, a)') "Coulomb matrix derivatives setup time : ", format_time(timer%get("dadr_setup"))
+               write(output_unit, '(a)') ''
+            end if
          else
             do iat = 1, mol%nat
                daqxdr(:, :, iat) = - cache%dxdr(:, :, iat) + 0.5_wp * cache%dadr(:, :, iat)
