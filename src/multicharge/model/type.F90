@@ -82,6 +82,7 @@ module multicharge_model_type
       procedure(get_coulomb_derivs), deferred :: get_coulomb_derivs
       !> Calculate capcaity-corrected EN derivatives
       procedure(get_pT_dbdR_list), deferred :: get_pT_dbdR_list
+      procedure(get_pT_damat_0d_list), deferred :: get_pT_damat_0d_list
    end type mchrg_model_type
 
    abstract interface
@@ -201,6 +202,18 @@ module multicharge_model_type
          real(wp), intent(inout) :: sigma(:, :)     ! stress (3, 3)
       end subroutine get_pT_dbdR_list
 
+      subroutine get_pT_damat_0d_list(self, mol, list, cache, p, gradient, sigma)
+         import :: mchrg_model_type, structure_type, mchrg_cache, adjacency_list, wp
+         !> EEQBC model type
+         class(mchrg_model_type), intent(in) :: self
+         type(structure_type), intent(in) :: mol
+         type(adjacency_list), intent(in) :: list
+         type(mchrg_cache), intent(in) :: cache
+         real(wp), intent(in) :: p(:)
+         real(wp), intent(inout) :: gradient(:, :)
+         real(wp), intent(inout) :: sigma(:, :)
+      end subroutine get_pT_damat_0d_list
+
    end interface
 
    real(wp), parameter :: twopi = 2 * pi
@@ -283,8 +296,8 @@ contains
       type(timer_type) :: timer
       integer :: print_unit, verbosity_solve
 
-      real(wp), allocatable :: bgrad_direct(:,:), bgrad_new(:,:)
-      real(wp), allocatable :: bsigma_direct(:,:), bsigma_new(:,:)
+      real(wp), allocatable :: bgrad_direct(:,:), bgrad_new(:,:), agrad_direct(:,:), agrad_new(:,:)
+      real(wp), allocatable :: bsigma_direct(:,:), bsigma_new(:,:), asigma_direct(:,:), asigma_new(:,:)
 
       allocate(bgrad_direct(3, mol%nat), bgrad_new(3, mol%nat))
       bgrad_new = 0.0_wp
@@ -292,6 +305,13 @@ contains
       allocate(bsigma_direct(3, 3), bsigma_new(3, 3))
       bsigma_direct = 0.0_wp
       bsigma_new = 0.0_wp
+
+      allocate(agrad_direct(3, mol%nat), agrad_new(3, mol%nat))
+      agrad_new = 0.0_wp
+      agrad_direct = 0.0_wp
+      allocate(asigma_direct(3, 3), asigma_new(3, 3))
+      asigma_direct = 0.0_wp
+      asigma_new = 0.0_wp
 
 
       ! Calculate gradient if the respective arrays are present
@@ -468,18 +488,25 @@ contains
                daqxdL(:, :, iat) = - cache%dxdL(:, :, iat) + 0.5_wp * cache%dadL(:, :, iat)
             end do
 
+            call self%get_pT_damat_0d_list(mol, list, cache, cache%vrhs(:mol%nat), agrad_new, asigma_new)
+
+            write(*,*) "New AGRAD"
+            print'(3es21.14)', agrad_new(:,:)
+            write(*,*)
+            write(*,*) "New ASIGMA"
+            print'(3es21.14)', asigma_new
+            write(*,*)
+
             
-
-
 
             call self%get_pT_dbdR_list(mol, list, cache, cache%vrhs(:mol%nat), bgrad_new, bsigma_new)
 
-            write(*,*) "New BGRAD"
-            print'(3es21.14)', bgrad_new(:,:)
-            write(*,*)
-            write(*,*) "New BSIGMA"
-            print'(3es21.14)', bsigma_new
-            write(*,*)
+            !write(*,*) "New BGRAD"
+            !print'(3es21.14)', bgrad_new(:,:)
+            !write(*,*)
+            !write(*,*) "New BSIGMA"
+            !print'(3es21.14)', bsigma_new
+            !write(*,*)
 
 
             
@@ -492,15 +519,24 @@ contains
                daqxdL(:, :, iat) = - cache%dxdL(:, :, iat) + 0.5_wp * cache%dadL(:, :, iat)
             end do
 
+            call gemv(cache%dadr(:, :, :mol%nat), cache%vrhs(:mol%nat), agrad_direct, beta=0.0_wp, alpha=1.0_wp)
+            call gemv(cache%dadL, cache%vrhs, asigma_direct, beta=0.0_wp, alpha=1.0_wp)
+            write(*,*) "DIRECT AGRAD"
+            print'(3es21.14)', agrad_direct
+            write(*,*)
+            write(*,*) "DIRECT aSIGMA"
+            print'(3es21.14)', asigma_direct
+            write(*,*)
+
 
             call gemv(cache%dxdr(:, :, :mol%nat), cache%vrhs(:mol%nat), bgrad_direct, beta=0.0_wp, alpha=1.0_wp)
             call gemv(cache%dxdL, cache%vrhs, bsigma_direct, beta=0.0_wp, alpha=1.0_wp)
-            write(*,*) "DIRECT BGRAD"
-            print'(3es21.14)', bgrad_direct
-            write(*,*)
-            write(*,*) "DIRECT BSIGMA"
-            print'(3es21.14)', bsigma_direct
-            write(*,*)
+            !write(*,*) "DIRECT BGRAD"
+            !print'(3es21.14)', bgrad_direct
+            !write(*,*)
+            !write(*,*) "DIRECT BSIGMA"
+            !print'(3es21.14)', bsigma_direct
+            !write(*,*)
 
 
             call gemv(daqxdr(:, :, :mol%nat), cache%vrhs(:mol%nat), gradient, beta=1.0_wp, alpha=1.0_wp)
