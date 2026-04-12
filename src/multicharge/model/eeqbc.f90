@@ -2882,14 +2882,21 @@ subroutine get_pT_damat_0d_list(self, mol, list, cache, p, gradient, sigma)
       real(wp) :: pre_i, pre_j, dgami(3), dgamj(3)
       real(wp) :: W_ii, W_jj, W_ij
       real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
+      real(wp), allocatable :: hard(:), effchrg(:)
+      real(wp), allocatable :: dtrans(:, :)
+
+      allocate(dtrans, source=list%trans)
 
       allocate(gradient_local(size(gradient, 1), size(gradient, 2)))
       allocate(sigma_local(size(sigma, 1), size(sigma, 2)))
+      allocate(hard(mol%nat), effchrg(mol%nat))
       gradient_local = 0.0_wp
       sigma_local = 0.0_wp
 
+
+
       !$omp parallel default(none) &
-      !$omp shared(cache, mol, list, self, p, gradient, sigma) &
+      !$omp shared(cache, mol, list, self, p, gradient, sigma, hard, effchrg) &
       !$omp private(iat, kat, izp, jat, jzp, gam, dgami, dgamj, dgamdL, vec, r2, dtmp, norm_cn, arg) &
       !$omp private(start_kat, finish_kat, radi, radj, dradi, dradj, dG, dS, pre_i, pre_j) &
       !$omp private(W_ii, W_jj, W_ij, gradient_local, sigma_local)
@@ -2959,30 +2966,12 @@ subroutine get_pT_damat_0d_list(self, mol, list, cache, p, gradient, sigma)
             dtmp = (self%eta(izp) + self%kqeta(izp) * cache%qloc(iat) + sqrt2pi / radi)
             gradient_local(:, jat) = gradient_local(:, jat) - dtmp * cache%dcdrji(:, kat) * W_ii
 
-            ! 5. Hardness and coordination corrections 
-            pre_i = self%kqeta(izp) * W_ii * cache%cdiag(iat)
-            pre_j = self%kqeta(jzp) * W_jj * cache%cdiag(jat)
-
-            gradient_local(:, iat) = gradient_local(:, iat) + pre_j * cache%dqlocdrij(:, kat)
-            gradient_local(:, jat) = gradient_local(:, jat) + pre_i * cache%dqlocdrji(:, kat)
-
-            ! Effective charge width diagonal derivative
-            pre_i = -sqrt2pi * dradi / (radi**2) * W_ii * cache%cdiag(iat)
-            pre_j = -sqrt2pi * dradj / (radj**2) * W_jj * cache%cdiag(jat)
-
-            gradient_local(:, iat) = gradient_local(:, iat) + pre_j * cache%dcndrij(:, kat)
-            gradient_local(:, jat) = gradient_local(:, jat) + pre_i * cache%dcndrji(:, kat)
-
          end do
 
          ! 5. Diagonal-only corrections
-         dtmp = self%kqeta(izp) * W_ii * cache%cdiag(iat)
-         gradient_local(:, iat) = gradient_local(:, iat) + dtmp * cache%dqlocdrdiag(:, iat)
-         sigma_local(:, :)   = sigma_local(:, :)   + dtmp * cache%dqlocdL(:, :, iat)
+         hard(iat) = self%kqeta(izp) * W_ii * cache%cdiag(iat)
 
-         dtmp = -sqrt2pi * dradi / (radi**2) * W_ii * cache%cdiag(iat)
-         gradient_local(:, iat) = gradient_local(:, iat) + dtmp * cache%dcndrdiag(:, iat)
-         sigma_local(:, :)   = sigma_local(:, :)   + dtmp * cache%dcndL(:, :, iat)
+         effchrg(iat) = -sqrt2pi * dradi / (radi**2) * W_ii * cache%cdiag(iat)
 
          ! 6. Intrinsic capacitance derivative
          dtmp = (self%eta(izp) + self%kqeta(izp) * cache%qloc(iat) + sqrt2pi / radi) * W_ii
@@ -2999,6 +2988,10 @@ subroutine get_pT_damat_0d_list(self, mol, list, cache, p, gradient, sigma)
       
       deallocate(gradient_local, sigma_local)
       !$omp end parallel
+
+      call self%ncoord%add_coordination_number_derivs_list(mol, dtrans, effchrg, gradient, sigma, list)
+      call self%ncoord_en%add_coordination_number_derivs_list(mol, dtrans, hard, gradient, sigma, list)
+
    end subroutine get_pT_damat_0d_list
 
 end module multicharge_model_eeqbc
