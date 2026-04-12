@@ -349,6 +349,8 @@ contains
       call model%update(mol, cache1, trans, grad=.true.)
       call model%solve(mol, solver, cache1, error, &
       & gradient=numgrad, sigma=numsigma, unit=output_unit)
+      print'(16es21.14)', cache1%dcndr(3, :, :)
+      write(*, *)
       if (allocated(error)) return
 
       allocate(cache2)

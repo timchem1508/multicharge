@@ -214,8 +214,10 @@ contains
             call self%ncoord%get_coordination_number(mol, trans, cache%cn, &
             & dcndrij=cache%dcndrij, dcndrji=cache%dcndrji, &
             & dcndrdiag=cache%dcndrdiag, dcndL=cache%dcndL, list=list)
+            deallocate(cache%dcndrji)
             call self%local_charge(mol, trans, cache%qloc, list=list, dqlocdrij=cache%dqlocdrij, &
             & dqlocdrji=cache%dqlocdrji, dqlocdrdiag=cache%dqlocdrdiag, dqlocdL=cache%dqlocdL)
+            
 
          else
             call self%ncoord%get_coordination_number(mol, trans, cache%cn, list=list)
@@ -266,7 +268,6 @@ contains
       if (cache%grad) then
          if (present(list)) then
             if (.not. allocated(cache%dcdrij)) allocate(cache%dcdrij(3, size(list%nlat)))
-            if (.not. allocated(cache%dcdrji)) allocate(cache%dcdrji(3, size(list%nlat)))
             if (.not. allocated(cache%dcdrdiag)) allocate(cache%dcdrdiag(3, mol%nat))
             if (.not. allocated(cache%dcdL)) allocate(cache%dcdL(3, 3, mol%nat))
          else
@@ -2544,10 +2545,9 @@ contains
       integer :: iat, jat, kat, izp, jzp
       real(wp) :: vec(3), rvdw, dG(3), dS(3, 3), capi, capj
       real(wp), allocatable :: dcdrdiag_local(:, :), dcdL_local(:, :, :)
-      real(wp), allocatable :: dcdrij_local(:, :), dcdrji_local(:, :)
+      real(wp), allocatable :: dcdrij_local(:, :)
 
       cache%dcdrij(:, :) = 0.0_wp
-      cache%dcdrji(:, :) = 0.0_wp
       cache%dcdrdiag(:, :) = 0.0_wp
       cache%dcdL(:, :, :) = 0.0_wp
 
@@ -2555,9 +2555,8 @@ contains
       !$omp shared(cache, mol, list, self) &
       !$omp private(iat, izp, jat, kat, jzp, vec, rvdw) &
       !$omp private(dG, dS, capi, capj) &
-      !$omp private(dcdrij_local, dcdrji_local, dcdrdiag_local, dcdL_local)
+      !$omp private(dcdrij_local, dcdrdiag_local, dcdL_local)
       allocate(dcdrij_local, source=cache%dcdrij)
-      allocate(dcdrji_local, source=cache%dcdrji)
       allocate(dcdrdiag_local, source=cache%dcdrdiag)
       allocate(dcdL_local, source=cache%dcdL)
 
@@ -2576,7 +2575,6 @@ contains
 
             ! Off-diagonal elements (Matches reference dcdr(i,j) and dcdr(j,i))
             dcdrij_local(:, kat) = +dG
-            dcdrji_local(:, kat) = -dG
 
             ! Diagonal elements (Matches reference dcdr(i,i) and dcdr(j,j))
             dcdrdiag_local(:, iat) = dcdrdiag_local(:, iat) - dG
@@ -2592,11 +2590,10 @@ contains
       !$omp critical (get_dcmat_0d_list_)
       cache%dcdrdiag(:, :) = cache%dcdrdiag + dcdrdiag_local
       cache%dcdrij(:, :) = cache%dcdrij + dcdrij_local
-      cache%dcdrji(:, :) = cache%dcdrji + dcdrji_local
       cache%dcdL(:, :, :) = cache%dcdL + dcdL_local
       !$omp end critical (get_dcmat_0d_list_)
 
-      deallocate(dcdL_local, dcdrij_local, dcdrji_local, dcdrdiag_local)
+      deallocate(dcdL_local, dcdrij_local, dcdrdiag_local)
       !$omp end parallel
 
 
@@ -2928,7 +2925,7 @@ subroutine get_pT_damat_0d_list(self, mol, list, cache, p, gradient, sigma)
 
             gam = 1.0_wp / sqrt(radi**2 + radj**2)
             dgami(:) = -(radi * dradi * cache%dcndrdiag(:, iat) + radj * dradj * cache%dcndrij(:, kat)) * gam**3.0_wp
-            dgamj(:) = -(radi * dradi * cache%dcndrji(:, kat) + radj * dradj * cache%dcndrdiag(:, jat)) * gam**3.0_wp
+            dgamj(:) = -(-radi * dradi * cache%dcndrij(:, kat) + radj * dradj * cache%dcndrdiag(:, jat)) * gam**3.0_wp
             dgamdL(:, :) = -(radi * dradi * cache%dcndL(:, :, iat) + radj * dradj * cache%dcndL(:, :, jat)) * gam**3.0_wp
             arg = gam * gam * r2
 
@@ -2949,7 +2946,7 @@ subroutine get_pT_damat_0d_list(self, mol, list, cache, p, gradient, sigma)
 
             ! 3. Capacitance derivative off-diagonal
             dtmp = erf(sqrt(r2) * gam) / sqrt(r2)
-            gradient_local(:, iat) = gradient_local(:, iat) - dtmp * cache%dcdrji(:, kat) * W_ij
+            gradient_local(:, iat) = gradient_local(:, iat) + dtmp * cache%dcdrij(:, kat) * W_ij
             gradient_local(:, jat) = gradient_local(:, jat) - dtmp * cache%dcdrij(:, kat) * W_ij
             sigma_local(:, :)   = sigma_local(:, :)   - dtmp * W_ij * &
                spread(cache%dcdrij(:, kat), 2, 3) * spread(vec, 1, 3)
@@ -2959,7 +2956,7 @@ subroutine get_pT_damat_0d_list(self, mol, list, cache, p, gradient, sigma)
             gradient_local(:, iat) = gradient_local(:, iat) - dtmp * cache%dcdrij(:, kat) * W_jj
 
             dtmp = (self%eta(izp) + self%kqeta(izp) * cache%qloc(iat) + sqrt2pi / radi)
-            gradient_local(:, jat) = gradient_local(:, jat) - dtmp * cache%dcdrji(:, kat) * W_ii
+            gradient_local(:, jat) = gradient_local(:, jat) + dtmp * cache%dcdrij(:, kat) * W_ii
 
          end do
 
