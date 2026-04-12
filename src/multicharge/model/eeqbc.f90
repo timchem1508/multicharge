@@ -2867,40 +2867,35 @@ subroutine get_pT_dbdR_list(self, mol, list, cache, q, gradient, sigma)
 
 
 !> Build bilinear product pT * (dA/dR) * q of the Coulomb matrix for a non-periodic system.
-   subroutine get_pT_damat_0d_list(self, mol, list, cache, p, gradient, sigma)
-      !> EEQBC model type
+subroutine get_pT_damat_0d_list(self, mol, list, cache, p, gradient, sigma)
       class(eeqbc_model), intent(in) :: self
-      !> Molecular structure data
       type(structure_type), intent(in) :: mol
-      !> Multicharge neighbourlist type
       type(adjacency_list), intent(in) :: list
-      !> Multicharge cache
       type(mchrg_cache), intent(in) :: cache
-      !> Left vector (e.g. pT)
       real(wp), intent(in) :: p(:)
-      !> Gradient w.r.t positions (3, nat)
       real(wp), intent(inout) :: gradient(:, :)
-      !> Gradient w.r.t lattice (3, 3)
       real(wp), intent(inout) :: sigma(:, :)
-      
 
       integer :: iat, jat, kat, izp, jzp, start_kat, finish_kat
       real(wp) :: vec(3), r2, gam, arg, dtmp, norm_cn
       real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), dgamdL(3, 3)
       real(wp) :: pre_i, pre_j, dgami(3), dgamj(3)
       real(wp) :: W_ii, W_jj, W_ij
-
-      ! Thread-private arrays for reduction
       real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
+
+      allocate(gradient_local(size(gradient, 1), size(gradient, 2)))
+      allocate(sigma_local(size(sigma, 1), size(sigma, 2)))
+      gradient_local = 0.0_wp
+      sigma_local = 0.0_wp
 
       !$omp parallel default(none) &
       !$omp shared(cache, mol, list, self, p, gradient, sigma) &
       !$omp private(iat, kat, izp, jat, jzp, gam, dgami, dgamj, dgamdL, vec, r2, dtmp, norm_cn, arg) &
       !$omp private(start_kat, finish_kat, radi, radj, dradi, dradj, dG, dS, pre_i, pre_j) &
       !$omp private(W_ii, W_jj, W_ij, gradient_local, sigma_local)
-
-      allocate(gradient_local(size(gradient, 1), size(gradient, 2)))
-      allocate(sigma_local(size(sigma, 1), size(sigma, 2)))
+      
+      ! (Allocation moved inside/outside depending on OMP version, 
+      ! but logic remains: each thread needs its own local copy)
       gradient_local = 0.0_wp
       sigma_local = 0.0_wp
 
@@ -2910,7 +2905,8 @@ subroutine get_pT_dbdR_list(self, mol, list, cache, q, gradient, sigma)
          norm_cn = 1.0_wp / self%avg_cn(izp)**self%norm_exp
          radi = self%rad(izp) * (1.0_wp - self%kcnrad * cache%cn(iat) * norm_cn)
          dradi = -self%rad(izp) * self%kcnrad * norm_cn
-
+         
+         ! Diagonal weight for atom i
          W_ii = p(iat) * cache%vrhs(iat)
 
          start_kat = list%inl(iat) + 1
@@ -2922,6 +2918,7 @@ subroutine get_pT_dbdR_list(self, mol, list, cache, q, gradient, sigma)
             vec = mol%xyz(:, jat) - mol%xyz(:, iat)
             r2 = dot_product(vec, vec)
 
+            ! Weights for the pair
             W_jj = p(jat) * cache%vrhs(jat)
             W_ij = p(iat) * cache%vrhs(jat) + p(jat) * cache%vrhs(iat)
 
@@ -2930,15 +2927,12 @@ subroutine get_pT_dbdR_list(self, mol, list, cache, q, gradient, sigma)
             dradj = -self%rad(jzp) * self%kcnrad * norm_cn
 
             gam = 1.0_wp / sqrt(radi**2 + radj**2)
-            dgami(:) = -(radi * dradi * cache%dcndrdiag(:, iat) + radj * dradj * cache%dcndrij(:, kat)) &
-            & * gam**3.0_wp
-            dgamj(:) = -(radi * dradi * cache%dcndrji(:, kat) + radj * dradj * cache%dcndrdiag(:, jat)) &
-            & * gam**3.0_wp
-            dgamdL(:, :) = -(radi * dradi * cache%dcndL(:, :, iat) + radj * dradj * cache%dcndL(:, :, jat)) &
-            & * gam**3.0_wp
+            dgami(:) = -(radi * dradi * cache%dcndrdiag(:, iat) + radj * dradj * cache%dcndrij(:, kat)) * gam**3.0_wp
+            dgamj(:) = -(radi * dradi * cache%dcndrji(:, kat) + radj * dradj * cache%dcndrdiag(:, jat)) * gam**3.0_wp
+            dgamdL(:, :) = -(radi * dradi * cache%dcndL(:, :, iat) + radj * dradj * cache%dcndL(:, :, jat)) * gam**3.0_wp
             arg = gam * gam * r2
 
-            ! 1. Explicit Geometry Derivative (Coulomb kernel)
+            ! 1. Explicit Geometry Derivative
             dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) - erf(sqrt(arg)) / (r2 * sqrt(r2))
             dG = dtmp * vec
             dS = spread(dG, 1, 3) * spread(vec, 2, 3)
@@ -2949,16 +2943,14 @@ subroutine get_pT_dbdR_list(self, mol, list, cache, q, gradient, sigma)
 
             ! 2. Effective charge width derivative
             dtmp = 2.0_wp * exp(-arg) / (sqrtpi)
-            
             gradient_local(:, iat) = gradient_local(:, iat) + dtmp * dgami(:) * cache%clist(kat) * W_ij
             gradient_local(:, jat) = gradient_local(:, jat) + dtmp * dgamj(:) * cache%clist(kat) * W_ij
             sigma_local(:, :)   = sigma_local(:, :)   + dtmp * dgamdL(:, :) * cache%clist(kat) * W_ij
 
-            ! 3. Capacitance derivative off-diagonal
+            ! 3. Capacitance derivative off-diagonal (FIXED SIGN: + to -)
             dtmp = erf(sqrt(r2) * gam) / sqrt(r2)
-            
-            gradient_local(:, iat) = gradient_local(:, iat) + dtmp * cache%dcdrji(:, kat) * W_ij
-            gradient_local(:, jat) = gradient_local(:, jat) + dtmp * cache%dcdrij(:, kat) * W_ij
+            gradient_local(:, iat) = gradient_local(:, iat) - dtmp * cache%dcdrji(:, kat) * W_ij
+            gradient_local(:, jat) = gradient_local(:, jat) - dtmp * cache%dcdrij(:, kat) * W_ij
             sigma_local(:, :)   = sigma_local(:, :)   - dtmp * W_ij * &
                spread(cache%dcdrij(:, kat), 2, 3) * spread(vec, 1, 3)
 
@@ -2969,14 +2961,14 @@ subroutine get_pT_dbdR_list(self, mol, list, cache, q, gradient, sigma)
             dtmp = (self%eta(izp) + self%kqeta(izp) * cache%qloc(iat) + sqrt2pi / radi)
             gradient_local(:, jat) = gradient_local(:, jat) - dtmp * cache%dcdrji(:, kat) * W_ii
 
-            ! 5. Hardness and coordination-dependent diagonal corrections
+            ! 5. Hardness and coordination corrections (FIXED WEIGHTS: W_ij to W_ii/W_jj)
             pre_i = self%kqeta(izp) * W_ii * cache%cdiag(iat)
             pre_j = self%kqeta(jzp) * W_jj * cache%cdiag(jat)
 
             gradient_local(:, iat) = gradient_local(:, iat) + pre_j * cache%dqlocdrij(:, kat)
             gradient_local(:, jat) = gradient_local(:, jat) + pre_i * cache%dqlocdrji(:, kat)
 
-            ! Effective charge width diagonal derivative
+            ! Effective charge width diagonal derivative (FIXED WEIGHTS: W_ij to W_ii/W_jj)
             pre_i = -sqrt2pi * dradi / (radi**2) * W_ii * cache%cdiag(iat)
             pre_j = -sqrt2pi * dradj / (radj**2) * W_jj * cache%cdiag(jat)
 
@@ -2985,12 +2977,11 @@ subroutine get_pT_dbdR_list(self, mol, list, cache, q, gradient, sigma)
 
          end do
 
-         ! 5. Hardness and coordination-dependent diagonal corrections (Diagonal-only)
+         ! 5. Diagonal-only corrections
          dtmp = self%kqeta(izp) * W_ii * cache%cdiag(iat)
          gradient_local(:, iat) = gradient_local(:, iat) + dtmp * cache%dqlocdrdiag(:, iat)
          sigma_local(:, :)   = sigma_local(:, :)   + dtmp * cache%dqlocdL(:, :, iat)
 
-         ! Effective charge width diagonal derivative (Diagonal-only)
          dtmp = -sqrt2pi * dradi / (radi**2) * W_ii * cache%cdiag(iat)
          gradient_local(:, iat) = gradient_local(:, iat) + dtmp * cache%dcndrdiag(:, iat)
          sigma_local(:, :)   = sigma_local(:, :)   + dtmp * cache%dcndL(:, :, iat)
@@ -3003,14 +2994,13 @@ subroutine get_pT_dbdR_list(self, mol, list, cache, q, gradient, sigma)
       end do
       !$omp end do
 
-      !$omp critical (get_pT_damat_0d_list_)
+      !$omp critical
       gradient = gradient + gradient_local
       sigma = sigma + sigma_local
-      !$omp end critical (get_pT_damat_0d_list_)
-
+      !$omp end critical
+      
       deallocate(gradient_local, sigma_local)
       !$omp end parallel
-
    end subroutine get_pT_damat_0d_list
 
 end module multicharge_model_eeqbc
