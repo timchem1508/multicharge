@@ -296,22 +296,7 @@ contains
       type(timer_type) :: timer
       integer :: print_unit, verbosity_solve
 
-      real(wp), allocatable :: bgrad_direct(:,:), bgrad_new(:,:), agrad_direct(:,:), agrad_new(:,:)
-      real(wp), allocatable :: bsigma_direct(:,:), bsigma_new(:,:), asigma_direct(:,:), asigma_new(:,:)
-
-      allocate(bgrad_direct(3, mol%nat), bgrad_new(3, mol%nat))
-      bgrad_new = 0.0_wp
-      bgrad_direct = 0.0_wp
-      allocate(bsigma_direct(3, 3), bsigma_new(3, 3))
-      bsigma_direct = 0.0_wp
-      bsigma_new = 0.0_wp
-
-      allocate(agrad_direct(3, mol%nat), agrad_new(3, mol%nat))
-      agrad_new = 0.0_wp
-      agrad_direct = 0.0_wp
-      allocate(asigma_direct(3, 3), asigma_new(3, 3))
-      asigma_direct = 0.0_wp
-      asigma_new = 0.0_wp
+      real(wp), allocatable :: agrad(:, :), bgrad(:, :), asigma(:, :), bsigma(:, :)
 
 
       ! Calculate gradient if the respective arrays are present
@@ -436,24 +421,7 @@ contains
       if (dcn) then
          call timer%push("setup_gradient")
          if (present(list)) then
-            call timer%push("dxdr_setup")
-            call self%get_xvec_derivs(mol, ndim, cache, list=list)
-            call timer%pop
-            if (verbosity_solve > 1) then
-               write(output_unit, '(a, 1x, a)') "Electronegativity derivatives setup time : ", format_time(timer%get("dxdr_setup"))
-               write(output_unit, '(a)') ''
-            end if
-            call timer%push("dadr_setup")
-            call self%get_coulomb_derivs(mol, ndim, cache, list=list)
-            call timer%pop
-            if (verbosity_solve > 1) then
-               write(output_unit, '(a, 1x, a)') "Coulomb matrix derivatives setup time : ", format_time(timer%get("dadr_setup"))
-               write(output_unit, '(a)') ''
-            end if
-            allocate(daqxdrij(3, size(list%nlat)), source=0.0_wp)
-            allocate(daqxdrji(3, size(list%nlat)), source=0.0_wp)
-            allocate(daqxdrdiag(3, mol%nat), source=0.0_wp)
-            allocate(daqxdL(3, 3, ndim), source=0.0_wp)
+
          else
             call timer%push("dxdr_setup")
             call self%get_xvec_derivs(mol, ndim, cache)
@@ -481,63 +449,20 @@ contains
       if (grad) then
          call timer%push("gradient")
          if (present(list)) then
-            daqxdrij = - cache%dxdrij + 0.5_wp * cache%dadrij
-            daqxdrji = - cache%dxdrji + 0.5_wp * cache%dadrji
-            daqxdrdiag = - cache%dxdrdiag + 0.5_wp * cache%dadrdiag
-            do iat = 1, mol%nat
-               daqxdL(:, :, iat) = - cache%dxdL(:, :, iat) + 0.5_wp * cache%dadL(:, :, iat)
-            end do
+            allocate(agrad(3, mol%nat), source = 0.0_wp)
+            allocate(bgrad(3, mol%nat), source = 0.0_wp)
+            allocate(asigma(3, 3), source = 0.0_wp)
+            allocate(bsigma(3, 3), source = 0.0_wp)
+            call self%get_pT_damat_0d_list(mol, list, cache, cache%vrhs(:mol%nat), agrad, asigma)
+            call self%get_pT_dbdR_list(mol, list, cache, cache%vrhs(:mol%nat), bgrad, bsigma)
+            gradient = gradient + 0.5_wp * agrad - bgrad
+            sigma = sigma + 0.5_wp * asigma - bsigma
 
-            call self%get_pT_damat_0d_list(mol, list, cache, cache%vrhs(:mol%nat), agrad_new, asigma_new)
-
-            write(*,*) "New AGRAD"
-            print'(3es21.14)', agrad_new(:,:)
-            write(*,*)
-            write(*,*) "New ASIGMA"
-            print'(3es21.14)', asigma_new
-            write(*,*)
-
-            
-
-            call self%get_pT_dbdR_list(mol, list, cache, cache%vrhs(:mol%nat), bgrad_new, bsigma_new)
-
-            !write(*,*) "New BGRAD"
-            !print'(3es21.14)', bgrad_new(:,:)
-            !write(*,*)
-            !write(*,*) "New BSIGMA"
-            !print'(3es21.14)', bsigma_new
-            !write(*,*)
-
-
-            
-            call gemv_cmp(list, daqxdrij(:, :), daqxdrji(:, :), daqxdrdiag(:,:), cache%vrhs(:mol%nat), gradient(:, :), &
-               & alpha=1.0_wp, beta=1.0_wp)
-            call gemv(daqxdL, cache%vrhs, sigma, beta=1.0_wp, alpha=1.0_wp)
          else
             do iat = 1, mol%nat
                daqxdr(:, :, iat) = - cache%dxdr(:, :, iat) + 0.5_wp * cache%dadr(:, :, iat)
                daqxdL(:, :, iat) = - cache%dxdL(:, :, iat) + 0.5_wp * cache%dadL(:, :, iat)
             end do
-
-            call gemv(cache%dadr(:, :, :mol%nat), cache%vrhs(:mol%nat), agrad_direct, beta=0.0_wp, alpha=1.0_wp)
-            call gemv(cache%dadL, cache%vrhs, asigma_direct, beta=0.0_wp, alpha=1.0_wp)
-            write(*,*) "DIRECT AGRAD"
-            print'(3es21.14)', agrad_direct
-            write(*,*)
-            write(*,*) "DIRECT aSIGMA"
-            print'(3es21.14)', asigma_direct
-            write(*,*)
-
-
-            call gemv(cache%dxdr(:, :, :mol%nat), cache%vrhs(:mol%nat), bgrad_direct, beta=0.0_wp, alpha=1.0_wp)
-            call gemv(cache%dxdL, cache%vrhs, bsigma_direct, beta=0.0_wp, alpha=1.0_wp)
-            !write(*,*) "DIRECT BGRAD"
-            !print'(3es21.14)', bgrad_direct
-            !write(*,*)
-            !write(*,*) "DIRECT BSIGMA"
-            !print'(3es21.14)', bsigma_direct
-            !write(*,*)
-
 
             call gemv(daqxdr(:, :, :mol%nat), cache%vrhs(:mol%nat), gradient, beta=1.0_wp, alpha=1.0_wp)
             call gemv(daqxdL, cache%vrhs, sigma, beta=1.0_wp, alpha=1.0_wp)

@@ -2887,20 +2887,15 @@ subroutine get_pT_damat_0d_list(self, mol, list, cache, p, gradient, sigma)
 
       allocate(dtrans, source=list%trans)
 
-      allocate(gradient_local(size(gradient, 1), size(gradient, 2)))
-      allocate(sigma_local(size(sigma, 1), size(sigma, 2)))
       allocate(hard(mol%nat), effchrg(mol%nat))
-      gradient_local = 0.0_wp
-      sigma_local = 0.0_wp
-
-
 
       !$omp parallel default(none) &
       !$omp shared(cache, mol, list, self, p, gradient, sigma, hard, effchrg) &
       !$omp private(iat, kat, izp, jat, jzp, gam, dgami, dgamj, dgamdL, vec, r2, dtmp, norm_cn, arg) &
       !$omp private(start_kat, finish_kat, radi, radj, dradi, dradj, dG, dS, pre_i, pre_j) &
       !$omp private(W_ii, W_jj, W_ij, gradient_local, sigma_local)
-      
+      allocate(gradient_local(3, mol%nat))
+      allocate(sigma_local(3, 3))
       gradient_local = 0.0_wp
       sigma_local = 0.0_wp
 
