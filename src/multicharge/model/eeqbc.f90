@@ -25,7 +25,7 @@ module multicharge_model_eeqbc
    use mctc_env, only: timer_type, format_time, error_type, wp
    use mctc_io, only: structure_type
    use mctc_io_constants, only: pi
-   use mctc_ncoord, only: new_ncoord, cn_count
+   use mctc_ncoord, only: new_ncoord, cn_count, ncoord_type
    use mctc_ncoord, only: adjacency_list
    use multicharge_wignerseitz, only: new_wignerseitz_cell, wignerseitz_cell_type
    use multicharge_blascomp, only: gemv_cmp, gemm_cmp, gemm_cmp_212
@@ -202,23 +202,11 @@ contains
 
       if (present(list)) then
          if (cache%grad) then
-            if (.not. allocated(cache%dcndrij)) allocate(cache%dcndrij(3, size(list%nlat)))
-            if (.not. allocated(cache%dcndrji)) allocate(cache%dcndrji(3, size(list%nlat)))
             if (.not. allocated(cache%dcndrdiag)) allocate(cache%dcndrdiag(3, mol%nat))
             if (.not. allocated(cache%dcndL)) allocate(cache%dcndL(3, 3, mol%nat))
-            if (.not. allocated(cache%dqlocdrij)) allocate(cache%dqlocdrij(3, size(list%nlat)))
-            if (.not. allocated(cache%dqlocdrji)) allocate(cache%dqlocdrji(3, size(list%nlat)))
-            if (.not. allocated(cache%dqlocdrdiag)) allocate(cache%dqlocdrdiag(3, mol%nat))
-            if (.not. allocated(cache%dqlocdL)) allocate(cache%dqlocdL(3, 3, mol%nat))
-
-            call self%ncoord%get_coordination_number(mol, trans, cache%cn, &
-            & dcndrij=cache%dcndrij, dcndrji=cache%dcndrji, &
-            & dcndrdiag=cache%dcndrdiag, dcndL=cache%dcndL, list=list)
-            deallocate(cache%dcndrji)
-            call self%local_charge(mol, trans, cache%qloc, list=list, dqlocdrij=cache%dqlocdrij, &
-            & dqlocdrji=cache%dqlocdrji, dqlocdrdiag=cache%dqlocdrdiag, dqlocdL=cache%dqlocdL)
-            
-
+            call get_dcndiag_list(self%ncoord, mol, trans, cache%cn, cache%dcndrdiag, cache%dcndL, list)
+            call self%local_charge(mol, trans, cache%qloc, list=list)
+         
          else
             call self%ncoord%get_coordination_number(mol, trans, cache%cn, list=list)
             call self%local_charge(mol, trans, cache%qloc, list=list)
@@ -2779,7 +2767,133 @@ contains
       end do
    end subroutine get_dcpair_dir
 
-subroutine get_pT_dbdR_list(self, mol, list, cache, q, gradient, sigma)
+   subroutine get_dcnpair(self, mol, iat, jat, rij, dG_ij, dG_ji)
+      !> Coordination number container
+      class(ncoord_type), intent(in) :: self
+      !> Molecular structure data
+      type(structure_type), intent(in) :: mol
+      !> Indices of the interacting pair
+      integer, intent(in) :: iat, jat
+      !> Distance vector and scalar (rij = r_i - r_j - trans)
+      real(wp), intent(in) :: rij(3)
+      !> Derivatives: dG_ij = d(CN_j)/d(r_i) and dG_ji = d(CN_i)/d(r_j)
+      real(wp), intent(out) :: dG_ij(3), dG_ji(3)
+
+      ! Atomic numbers / species indices
+      integer :: izp, jzp
+
+      real(wp) :: den, countf, countd(3), r1, r2
+
+      izp = mol%id(iat)
+      jzp = mol%id(jat)
+
+      r2 = sum(rij**2)
+      r1 = sqrt(r2)
+
+      den = self%get_en_factor(izp, jzp)
+      countd = den * self%ncoord_dcount(izp, jzp, r1) * rij / r1
+
+
+      ! Pay attention to the case when atoms are the same 
+      ! (e.g., self-interaction through periodic boundaries)
+      if (iat == jat) then
+         ! Avoid double counting for the same atom
+         dG_ij(:) = 0.0_wp
+         dG_ji(:) = 0.0_wp
+      else
+         
+         ! dG_ij corresponds to the off-diagonal 'dcndrij'
+         dG_ij(:) = countd * self%directed_factor
+         
+         ! dG_ji corresponds to the off-diagonal 'dcndrji'
+         dG_ji(:) = -countd
+      end if
+
+   end subroutine get_dcnpair
+
+   subroutine get_dcndiag_list(self, mol, trans, cn, dcndrdiag, dcndL, list)
+      !> Coordination number container
+      class(ncoord_type), intent(in) :: self
+      !> Molecular structure data
+      type(structure_type), intent(in) :: mol
+      !> Lattice points
+      real(wp), intent(in) :: trans(:, :)
+      !> Error function coordination number.
+      real(wp), intent(out) :: cn(:)
+      !> Diagonal derivative of the CN with respect to the Cartesian coordinates.
+      real(wp), intent(out) :: dcndrdiag(:, :)
+      !> Derivative of the CN with respect to strain deformations.
+      real(wp), intent(out) :: dcndL(:, :, :)
+      !> Adjacency list for neighbourlist-based CN evaluation
+      type(adjacency_list), intent(in) :: list
+
+      integer :: iat, jat, kat, izp, jzp, itr
+      real(wp) :: r2, r1, rij(3), countf, countd(3), sigma(3, 3), cutoff2, den
+
+      ! Thread-private arrays for reduction
+      real(wp), allocatable :: cn_local(:)
+      real(wp), allocatable :: dcndrdiag_local(:, :),  dcndL_local(:, :, :)
+
+      cn(:) = 0.0_wp
+      dcndrdiag(:, :)  = 0.0_wp
+      dcndL(:, :, :) = 0.0_wp
+      cutoff2 = self%cutoff**2
+
+      !$omp parallel default(none) &
+      !$omp shared(self, mol, list, trans, cutoff2, cn, dcndrdiag, dcndL) &
+      !$omp private(jat, kat, itr, izp, jzp, r2, rij, r1, den, countf, countd) &
+      !$omp private(sigma, cn_local, dcndrdiag_local, dcndL_local)
+      allocate(cn_local, source=cn)
+      allocate(dcndrdiag_local, source=dcndrdiag)
+      allocate(dcndL_local, source=dcndL)
+      
+      !$omp do schedule(runtime)
+      do iat = 1, mol%nat
+         izp = mol%id(iat)
+         do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
+            jat = list%nlat(kat)
+            jzp = mol%id(jat)
+            den = self%get_en_factor(izp, jzp)
+
+            do itr = 1, size(trans, dim=2)
+               rij = mol%xyz(:, iat) - (mol%xyz(:, jat) + trans(:, itr))
+               r2 = sum(rij**2)
+               if (r2 > cutoff2 .or. r2 < 1.0e-12_wp) cycle
+               r1 = sqrt(r2)
+
+               countf = den * self%ncoord_count(izp, jzp, r1)
+               countd = den * self%ncoord_dcount(izp, jzp, r1) * rij/r1
+               sigma = spread(countd, 1, 3) * spread(rij, 2, 3)
+
+               ! Accumulate terms for the current atom (i)
+               cn_local(iat) = cn_local(iat) + countf
+               dcndrdiag_local(:,iat) = dcndrdiag_local(:,iat) + countd
+               dcndL_local(:, :, iat) = dcndL_local(:, :, iat) + sigma
+               
+               ! Accumulate terms for the neighbor atom (j), avoiding double counting for self-images
+               if (iat /= jat) then
+                  cn_local(jat) = cn_local(jat) + countf * self%directed_factor
+                  dcndrdiag_local(:,jat) = dcndrdiag_local(:,jat) - countd * self%directed_factor
+                  dcndL_local(:, :, jat) = dcndL_local(:, :, jat) + sigma * self%directed_factor
+               end if
+
+            end do
+         end do
+      end do
+      !$omp end do
+      
+      !$omp critical (ncoord_d_diag_list_)
+      cn(:)            = cn(:)            + cn_local(:)
+      dcndrdiag(:, :)  = dcndrdiag(:, :)  + dcndrdiag_local(:, :)
+      dcndL(:, :, :)   = dcndL(:, :, :)   + dcndL_local(:, :, :)
+      !$omp end critical (ncoord_d_diag_list_)
+      
+      deallocate(cn_local, dcndrdiag_local, dcndL_local)
+      !$omp end parallel
+
+   end subroutine get_dcndiag_list
+
+   subroutine get_pT_dbdR_list(self, mol, list, cache, q, gradient, sigma)
       class(eeqbc_model), intent(in) :: self
       type(structure_type), intent(in) :: mol
       type(adjacency_list), intent(in) :: list
@@ -2862,7 +2976,7 @@ subroutine get_pT_dbdR_list(self, mol, list, cache, q, gradient, sigma)
       integer :: iat, jat, kat, izp, jzp, start_kat, finish_kat
       real(wp) :: vec(3), r2, gam, arg, dtmp, norm_cn
       real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), dgamdL(3, 3)
-      real(wp) :: pre_i, pre_j, dgami(3), dgamj(3)
+      real(wp) :: pre_i, pre_j, dgami(3), dgamj(3), dG_ij(3), dG_ji(3)
       real(wp) :: W_ii, W_jj, W_ij
       real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
       real(wp), allocatable :: hard(:), effchrg(:)
@@ -2875,7 +2989,7 @@ subroutine get_pT_dbdR_list(self, mol, list, cache, q, gradient, sigma)
       !$omp parallel default(none) &
       !$omp shared(cache, mol, list, self, p, gradient, sigma, hard, effchrg) &
       !$omp private(iat, kat, izp, jat, jzp, gam, dgami, dgamj, dgamdL, vec, r2, dtmp, norm_cn, arg) &
-      !$omp private(start_kat, finish_kat, radi, radj, dradi, dradj, dG, dS, pre_i, pre_j) &
+      !$omp private(start_kat, finish_kat, radi, radj, dradi, dradj, dG, dS, dG_ij, dG_ji, pre_i, pre_j) &
       !$omp private(W_ii, W_jj, W_ij, gradient_local, sigma_local)
       allocate(gradient_local(3, mol%nat))
       allocate(sigma_local(3, 3))
@@ -2910,8 +3024,9 @@ subroutine get_pT_dbdR_list(self, mol, list, cache, q, gradient, sigma)
             dradj = -self%rad(jzp) * self%kcnrad * norm_cn
 
             gam = 1.0_wp / sqrt(radi**2 + radj**2)
-            dgami(:) = -(radi * dradi * cache%dcndrdiag(:, iat) + radj * dradj * cache%dcndrij(:, kat)) * gam**3.0_wp
-            dgamj(:) = -(-radi * dradi * cache%dcndrij(:, kat) + radj * dradj * cache%dcndrdiag(:, jat)) * gam**3.0_wp
+            call get_dcnpair(self%ncoord, mol, iat, jat, vec, dG_ij, dG_ji)
+            dgami(:) = -(radi * dradi * cache%dcndrdiag(:, iat) + radj * dradj * dG_ij) * gam**3.0_wp
+            dgamj(:) = -(radi * dradi * dG_ji + radj * dradj * cache%dcndrdiag(:, jat)) * gam**3.0_wp
             dgamdL(:, :) = -(radi * dradi * cache%dcndL(:, :, iat) + radj * dradj * cache%dcndL(:, :, jat)) * gam**3.0_wp
             arg = gam * gam * r2
 

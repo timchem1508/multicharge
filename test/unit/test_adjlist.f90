@@ -307,7 +307,7 @@ contains
       type(adjacency_list), allocatable :: list
 
       integer :: iat, jat, kat, ic, ndim
-      real(wp), parameter :: trans(3, 1) = 0.0_wp   ! dummy for non‑periodic systems
+      real(wp), parameter :: trans(3, 1) = 0.0_wp
       real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
       real(wp), allocatable :: numgrad(:, :), numsigma(:, :)
       real(wp) :: er, el
@@ -333,15 +333,6 @@ contains
       gradient(:, :) = 0.0_wp
       sigma(:, :) = 0.0_wp
 
-      allocate(damat_list(3, mol%nat, mol%nat))
-      allocate(dcmat_list(3, mol%nat, mol%nat))
-      allocate(dxvec_list(3, mol%nat, mol%nat))
-      allocate(dcn_list(3, mol%nat, mol%nat), dqloc_list(3, mol%nat, mol%nat))
-      damat_list(:,:,:) = 0.0_wp
-      dcmat_list(:,:,:) = 0.0_wp
-      dxvec_list(:,:,:) = 0.0_wp
-      dcn_list(:,:,:) = 0.0_wp
-      dqloc_list(:,:,:) = 0.0_wp
       ! Build adjacency list
       allocate(numsigma(3, 3), source=0.0_wp)
       allocate(numgrad(3, mol%nat), source=0.0_wp)
@@ -349,8 +340,6 @@ contains
       call model%update(mol, cache1, trans, grad=.true.)
       call model%solve(mol, solver, cache1, error, &
       & gradient=numgrad, sigma=numsigma, unit=output_unit)
-      print'(16es21.14)', cache1%dcndr(3, :, :)
-      write(*, *)
       if (allocated(error)) return
 
       allocate(cache2)
@@ -360,87 +349,10 @@ contains
       call new_adjacency_list(list, mol, cutoff, .false.)
       call model%update(mol, cache2, trans, grad=.true., list=list)
 
-      !call model%get_capacitance_matrix(mol, mol%nat, cache2, list=list)
-      !call model%get_xvec( mol, mol%nat, cache2, list=list)
-      !call model%get_coulomb_matrix(mol, mol%nat, cache2, list=list)
-
       call model%solve(mol, solver, cache2, error, &
       & gradient=gradient, sigma=sigma, list=list, unit=output_unit)
-
-      !do iat = 1, mol%nat
-!
-      !   do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
-      !      jat = list%nlat(kat)
-      !      dcmat_list(:, iat, jat) = cache2%dcdrij(:, kat)
-      !      dcmat_list(:, jat, iat) = cache2%dcdrji(:, kat)
-      !      dqloc_list(:, iat, jat) = cache2%dqlocdrij(:, kat)
-      !      dqloc_list(:, jat, iat) = cache2%dqlocdrji(:, kat)
-      !      dcn_list(:, iat, jat) = cache2%dcndrij(:, kat)
-      !      dcn_list(:, jat, iat) = cache2%dcndrji(:, kat)
-      !      dxvec_list(:, iat, jat) = cache2%dxdrij(:, kat)
-      !      dxvec_list(:, jat, iat) = cache2%dxdrji(:, kat)
-      !      damat_list(:, iat, jat) = cache2%dadrij(:, kat)
-      !      damat_list(:, jat, iat) = cache2%dadrji(:, kat)
-      !   end do
-!
-      !   dcmat_list(:, iat, iat) = cache2%dcdrdiag(:, iat)
-      !   damat_list(:, iat, iat) = cache2%dadrdiag(:, iat)
-      !   dqloc_list(:, iat, iat) = cache2%dqlocdrdiag(:, iat)
-      !   dxvec_list(:, iat, iat) = cache2%dxdrdiag(:, iat)
-      !   dcn_list(:, iat, iat) = cache2%dcndrdiag(:, iat)
-      !end do
-
       if (allocated(error)) return
 
-      !if (any(abs(cache1%dqlocdr(:, :, :) - dqloc_list(:, :, :)) > thr3)) then
-      !   call test_failed(error, "Derivative of local charge does not match")
-      !   print'(a)', "Local charge derivative:"
-      !   print'(3es21.14)', cache1%dqlocdr
-      !   print'(a)', "Nlist local charge derivative:"
-      !   print'(3es21.14)', dqloc_list
-      !   print'(a)', "diff:"
-      !   print'(3es21.14)', dqloc_list - cache1%dqlocdr
-      !end if
-!
-      !if (any(abs(cache1%dcndr(:, :, :) - dcn_list(:, :, :)) > thr3)) then
-      !   call test_failed(error, "Derivative of CN does not match")
-      !   print'(a)', "CN derivative:"
-      !   print'(3es21.14)', cache1%dcndr
-      !   print'(a)', "Nlist CN derivative:"
-      !   print'(3es21.14)', dcn_list
-      !   print'(a)', "diff:"
-      !   print'(3es21.14)', dcn_list - cache1%dcndr
-      !end if
-!
-      !if (any(abs(cache1%dcdr(:, :, :) - dcmat_list(:, :, :)) > thr3)) then
-      !   call test_failed(error, "Derivative of Capacitance matrix does not match")
-      !   print'(a)', "Capacitance derivative:"
-      !   print'(16es21.14)', cache1%dcdr
-      !   print'(a)', "Nlist Capacitance derivative:"
-      !   print'(16es21.14)', dcmat_list
-      !   print'(a)', "diff:"
-      !   print'(16es21.14)', dcmat_list - cache1%dcdr
-      !end if
-!
-      !if (any(abs(cache1%dxdr(:, :, :) - dxvec_list(:, :, :)) > thr3)) then
-      !   call test_failed(error, "Derivative of electronegativity does not match")
-      !   print'(a)', "Electronegativity derivative:"
-      !   print'(16es21.14)', cache1%dxdr(3, :, :)
-      !   print'(a)', "Nlist electronegativity derivative:"
-      !   print'(16es21.14)', dxvec_list(3, :, :)
-      !   print'(a)', "diff:"
-      !   print'(16es21.14)', dxvec_list(3, :, :) - cache1%dxdr(3, :, :)
-      !end if
-!
-      !if (any(abs(cache1%dadr(:, :, :) - damat_list(:, :, :)) > thr3)) then
-      !   call test_failed(error, "Derivative of Coulomb matrix does not match")
-      !   print'(a)', "Coulomb matrix derivative:"
-      !   print'(16es21.14)', cache1%dadr(3, :, :)
-      !   print'(a)', "Nlist Coulomb matrix derivative:"
-      !   print'(16es21.14)', damat_list( 3, :, :)
-      !   print'(a)', "diff:"
-      !   print'(16es21.14)', damat_list( 3, :, :) - cache1%dadr(3, :, :)
-      !end if
 
       if (any(abs(gradient(:, :) - numgrad(:, :)) > thr3)) then
          call test_failed(error, "Derivative of energy does not match")
