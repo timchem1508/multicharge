@@ -267,7 +267,6 @@ contains
 
       if (cache%grad) then
          if (present(list)) then
-            if (.not. allocated(cache%dcdrij)) allocate(cache%dcdrij(3, size(list%nlat)))
             if (.not. allocated(cache%dcdrdiag)) allocate(cache%dcdrdiag(3, mol%nat))
             if (.not. allocated(cache%dcdL)) allocate(cache%dcdL(3, 3, mol%nat))
          else
@@ -2545,9 +2544,7 @@ contains
       integer :: iat, jat, kat, izp, jzp
       real(wp) :: vec(3), rvdw, dG(3), dS(3, 3), capi, capj
       real(wp), allocatable :: dcdrdiag_local(:, :), dcdL_local(:, :, :)
-      real(wp), allocatable :: dcdrij_local(:, :)
 
-      cache%dcdrij(:, :) = 0.0_wp
       cache%dcdrdiag(:, :) = 0.0_wp
       cache%dcdL(:, :, :) = 0.0_wp
 
@@ -2555,8 +2552,7 @@ contains
       !$omp shared(cache, mol, list, self) &
       !$omp private(iat, izp, jat, kat, jzp, vec, rvdw) &
       !$omp private(dG, dS, capi, capj) &
-      !$omp private(dcdrij_local, dcdrdiag_local, dcdL_local)
-      allocate(dcdrij_local, source=cache%dcdrij)
+      !$omp private(dcdrdiag_local, dcdL_local)
       allocate(dcdrdiag_local, source=cache%dcdrdiag)
       allocate(dcdL_local, source=cache%dcdL)
 
@@ -2573,9 +2569,6 @@ contains
 
             call get_dcpair(self%kbc, vec, rvdw, capi, capj, dG, dS)
 
-            ! Off-diagonal elements (Matches reference dcdr(i,j) and dcdr(j,i))
-            dcdrij_local(:, kat) = +dG
-
             ! Diagonal elements (Matches reference dcdr(i,i) and dcdr(j,j))
             dcdrdiag_local(:, iat) = dcdrdiag_local(:, iat) - dG
             dcdrdiag_local(:, jat) = dcdrdiag_local(:, jat) + dG
@@ -2589,11 +2582,10 @@ contains
 
       !$omp critical (get_dcmat_0d_list_)
       cache%dcdrdiag(:, :) = cache%dcdrdiag + dcdrdiag_local
-      cache%dcdrij(:, :) = cache%dcdrij + dcdrij_local
       cache%dcdL(:, :, :) = cache%dcdL + dcdL_local
       !$omp end critical (get_dcmat_0d_list_)
 
-      deallocate(dcdL_local, dcdrij_local, dcdrdiag_local)
+      deallocate(dcdL_local, dcdrdiag_local)
       !$omp end parallel
 
 
@@ -2800,12 +2792,7 @@ subroutine get_pT_dbdR_list(self, mol, list, cache, q, gradient, sigma)
       real(wp) :: vec(3), rvdw, dG(3), dS(3, 3), capi, capj
       real(wp) :: qi, qj, chi_i, chi_j
       real(wp), allocatable :: v(:), w_cn(:), w_qloc(:)
-      real(wp) :: trans(3, 1)
-
-      ! 1. Initialization: CRITICAL to avoid E+148 noise
-      gradient(:, :) = 0.0_wp
-      sigma(:, :)    = 0.0_wp
-      trans(:, 1)    = 0.0_wp
+      real(wp) :: trans(3, 1) = 0.0_wp
 
       ! 2. Implicit Term: (q^T * C) * dchi/dR
       allocate(v(mol%nat))
@@ -2862,9 +2849,8 @@ subroutine get_pT_dbdR_list(self, mol, list, cache, q, gradient, sigma)
       deallocate(v, w_cn, w_qloc)
    end subroutine get_pT_dbdR_list
 
-
-!> Build bilinear product pT * (dA/dR) * q of the Coulomb matrix for a non-periodic system.
-subroutine get_pT_damat_0d_list(self, mol, list, cache, p, gradient, sigma)
+   !> Build bilinear product pT * (dA/dR) * q of the Coulomb matrix for a non-periodic system.
+   subroutine get_pT_damat_0d_list(self, mol, list, cache, p, gradient, sigma)
       class(eeqbc_model), intent(in) :: self
       type(structure_type), intent(in) :: mol
       type(adjacency_list), intent(in) :: list
@@ -2945,18 +2931,19 @@ subroutine get_pT_damat_0d_list(self, mol, list, cache, p, gradient, sigma)
             sigma_local(:, :)   = sigma_local(:, :)   + dtmp * dgamdL(:, :) * cache%clist(kat) * W_ij
 
             ! 3. Capacitance derivative off-diagonal
+            call get_dcpair(self%kbc, vec, self%rvdw(izp, jzp), self%cap(izp), self%cap(jzp), dG, dS)
             dtmp = erf(sqrt(r2) * gam) / sqrt(r2)
-            gradient_local(:, iat) = gradient_local(:, iat) + dtmp * cache%dcdrij(:, kat) * W_ij
-            gradient_local(:, jat) = gradient_local(:, jat) - dtmp * cache%dcdrij(:, kat) * W_ij
+            gradient_local(:, iat) = gradient_local(:, iat) + dtmp * dG * W_ij
+            gradient_local(:, jat) = gradient_local(:, jat) - dtmp * dG * W_ij
             sigma_local(:, :)   = sigma_local(:, :)   - dtmp * W_ij * &
-               spread(cache%dcdrij(:, kat), 2, 3) * spread(vec, 1, 3)
+               & spread(dG, 2, 3) * spread(vec, 1, 3)
 
             ! 4. Capacitance derivative diagonal contribution
             dtmp = (self%eta(jzp) + self%kqeta(jzp) * cache%qloc(jat) + sqrt2pi / radj)
-            gradient_local(:, iat) = gradient_local(:, iat) - dtmp * cache%dcdrij(:, kat) * W_jj
+            gradient_local(:, iat) = gradient_local(:, iat) - dtmp * dG * W_jj
 
             dtmp = (self%eta(izp) + self%kqeta(izp) * cache%qloc(iat) + sqrt2pi / radi)
-            gradient_local(:, jat) = gradient_local(:, jat) + dtmp * cache%dcdrij(:, kat) * W_ii
+            gradient_local(:, jat) = gradient_local(:, jat) + dtmp * dG * W_ii
 
          end do
 
