@@ -290,6 +290,8 @@ contains
       real(wp), allocatable :: daqxdr(:,:,:)
       real(wp), allocatable :: daqxdL(:,:,:)
       real(wp), allocatable :: daqxdrij(:,:), daqxdrji(:,:), daqxdrdiag(:,:)
+      real(wp), allocatable :: bgrad_dir(:, :), bgrad_list(:, :)
+      real(wp), allocatable :: bsigma_dir(:, :), bsigma_list(:, :)
 
       logical :: grad, cpq, dcn
       logical :: add_lagr = .true.
@@ -447,6 +449,8 @@ contains
       if (grad) then
          call timer%push("gradient")
          if (present(list)) then
+            allocate(bgrad_list(3, mol%nat), source = 0.0_wp)
+            allocate(bsigma_list(3, 3), source = 0.0_wp)
             call timer%push("dadr_setup")
             call self%get_pT_damat_0d_list(mol, list, cache, cache%vrhs(:mol%nat), gradient, sigma)
             call timer%pop
@@ -465,11 +469,28 @@ contains
                write(output_unit, '(a, 1x, a)') "Electronegativity derivatives setup time : ", format_time(timer%get("dxdr_setup"))
                write(output_unit, '(a)') ''
             end if
+
+            call self%get_pT_dbdR_list(mol, list, cache, cache%vrhs(:mol%nat), bgrad_list, bsigma_list)
+
+            write(*, *) "BGRAD LIST:"
+            print'(3es21.14)', bgrad_list
+            write(*, *) "BSIGMA LIST:"
+            print'(3es21.14)', bsigma_list
+            write(*, *)
          else
             do iat = 1, mol%nat
                daqxdr(:, :, iat) = - cache%dxdr(:, :, iat) + 0.5_wp * cache%dadr(:, :, iat)
                daqxdL(:, :, iat) = - cache%dxdL(:, :, iat) + 0.5_wp * cache%dadL(:, :, iat)
             end do
+            allocate(bgrad_dir(3, mol%nat), source = 0.0_wp)
+            allocate(bsigma_dir(3, 3), source = 0.0_wp)
+            call gemv(cache%dxdr(:, :, :mol%nat), cache%vrhs(:mol%nat), bgrad_dir, beta=1.0_wp, alpha=1.0_wp)
+            call gemv(cache%dxdL(:, :, :mol%nat), cache%vrhs(:mol%nat), bsigma_dir, beta=1.0_wp, alpha=1.0_wp)
+            write(*, *) "BGRAD DIR:"
+            print'(3es21.14)', bgrad_dir
+            write(*, *) "BSIGMA DIR:"
+            print'(3es21.14)', bsigma_dir
+            write(*, *)
 
             call gemv(daqxdr(:, :, :mol%nat), cache%vrhs(:mol%nat), gradient, beta=1.0_wp, alpha=1.0_wp)
             call gemv(daqxdL, cache%vrhs, sigma, beta=1.0_wp, alpha=1.0_wp)

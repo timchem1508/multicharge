@@ -58,8 +58,8 @@ contains
       & new_unittest("eeqbc-energy-mb04", test_eeqbc_e_mb04), &
       & new_unittest("eeqbc-gradient-mb05", test_eeqbc_g_mb05), &
       & new_unittest("eeqbc-gradient-mb06", test_eeqbc_g_mb06), &
-      & new_unittest("eeqbc-energy-co2", test_eeqbc_e_co2) &
-      !& new_unittest("eeqbc-gradient-co2", test_eeqbc_g_co2) &
+      & new_unittest("eeqbc-energy-co2", test_eeqbc_e_co2),  &
+      & new_unittest("eeqbc-gradient-co2", test_eeqbc_g_co2) &
       & ]
 
    end subroutine collect_adjlist
@@ -230,7 +230,7 @@ contains
 
       allocate(cache)
 
-      call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
+      call get_lattice_points(mol%periodic, mol%lattice, 25.0_wp, trans)
 
       allocate(eref(mol%nat))
       eref(:) = 0.0_wp
@@ -387,7 +387,7 @@ contains
       !> Electronegativity equilibration model
       class(mchrg_model_type), intent(in) :: model
 
-      type(mchrg_cache), allocatable :: cache
+      type(mchrg_cache), allocatable :: cache1, cache2
 
       ! Solver variables
       class(mchrg_solver_type), allocatable :: solver
@@ -398,12 +398,13 @@ contains
 
       type(adjacency_list), allocatable :: list
 
-      integer :: iat, ic, ndim
-      real(wp), allocatable :: trans(:, :)
-      real(wp), parameter :: step = 1.0e-6_wp
+      integer :: iat, jat, kat, ic, ndim
       real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
-      real(wp), allocatable :: numgrad(:, :)
+      real(wp), allocatable :: numgrad(:, :), numsigma(:, :)
       real(wp) :: er, el
+      real(wp), allocatable :: trans(:, :)
+      real(wp), allocatable :: dcmat_list(:, :, :), damat_list(:, :, :), dcdrdiag(:, :)
+      real(wp), allocatable :: dxvec_list(:, :, :), dcn_list(:, :, :), dqloc_list(:, :, :)
       logical :: grad = .true.
 
       allocate(cg_input :: solver_input)
@@ -417,45 +418,46 @@ contains
       end select
       call solver_maker(solver, solver_input, error)
 
-      allocate(cache)
+      allocate(cache1)
 
-      allocate (energy(mol%nat), gradient(3, mol%nat), sigma(3, 3), numgrad(3, mol%nat))
+      allocate (energy(mol%nat), gradient(3, mol%nat), sigma(3, 3))
       energy(:) = 0.0_wp
       gradient(:, :) = 0.0_wp
       sigma(:, :) = 0.0_wp
 
-      call get_lattice_points(mol%periodic, mol%lattice, 25.0_wp, trans)
+      ! Build adjacency list
+      allocate(numsigma(3, 3), source=0.0_wp)
+      allocate(numgrad(3, mol%nat), source=0.0_wp)
 
-      lp: do iat = 1, mol%nat
-         do ic = 1, 3
-            energy(:) = 0.0_wp
-            mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
-            call model%update(mol, cache, trans, grad=.false.)
-            call model%solve(mol, solver, cache, error, energy=energy, unit=output_unit)
-            if (allocated(error)) exit lp
-            er = sum(energy)
+      call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
-            energy(:) = 0.0_wp
-            mol%xyz(ic, iat) = mol%xyz(ic, iat) - 2*step
-            call model%update(mol, cache, trans, grad=.false.)
-            call model%solve(mol, solver, cache, error, energy=energy, unit=output_unit)
-            if (allocated(error)) exit lp
-            el = sum(energy)
-
-            mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
-            numgrad(ic, iat) = 0.5_wp*(er - el)/step
-         end do
-      end do lp
+      call model%update(mol, cache1, trans, grad=.true.)
+      call model%solve(mol, solver, cache1, error, &
+      & gradient=numgrad, sigma=numsigma, unit=output_unit)
+      allocate(dcdrdiag(3, mol%nat), source = 0.0_wp)
+      do iat = 1, mol%nat
+         dcdrdiag(:, iat) = cache1%dcdr(:, iat, iat)
+      end do
+      write(*, *) "DCDR DIAGONAL DIRECT"
+      print'(3es21.14)', dcdrdiag
+      write(*, *)
       if (allocated(error)) return
 
-      ! Build adjacency list
+      allocate(cache2)
       allocate(list)
+      gradient = 0.0_wp
+      sigma(:, :) = 0.0_wp
       call new_adjacency_list(list, mol, cutoff, .false.)
+      call model%update(mol, cache2, trans, grad=.true., list=list)
 
-      call model%update(mol, cache, trans, grad, list=list)
-      call model%solve(mol, solver, cache, error, &
+      call model%solve(mol, solver, cache2, error, &
       & gradient=gradient, sigma=sigma, list=list, unit=output_unit)
       if (allocated(error)) return
+
+      write(*, *) "DCDR DIAGONAL LIST"
+      print'(3es21.14)', cache2%dcdrdiag
+      write(*, *)
+
 
       if (any(abs(gradient(:, :) - numgrad(:, :)) > thr3)) then
          call test_failed(error, "Derivative of energy does not match")
@@ -465,6 +467,16 @@ contains
          print'(3es21.14)', numgrad
          print'(a)', "diff:"
          print'(3es21.14)', gradient - numgrad
+      end if
+
+      if (any(abs(sigma(:, :) - numsigma(:, :)) > thr3)) then
+         call test_failed(error, "Derivative of energy does not match")
+         print'(a)', "Energy sigma:"
+         print'(3es21.14)', sigma
+         print'(a)', "numsigma:"
+         print'(3es21.14)', numsigma
+         print'(a)', "diff:"
+         print'(3es21.14)', sigma - numsigma
       end if
 
    end subroutine test_numgrad_periodic
