@@ -82,7 +82,7 @@ module multicharge_model_type
       procedure(get_coulomb_derivs), deferred :: get_coulomb_derivs
       !> Calculate capcaity-corrected EN derivatives
       procedure(get_pT_dbdR_list), deferred :: get_pT_dbdR_list
-      procedure(get_pT_damat_0d_list), deferred :: get_pT_damat_0d_list
+      procedure(get_pT_damat_list), deferred :: get_pT_damat_list
    end type mchrg_model_type
 
    abstract interface
@@ -202,7 +202,7 @@ module multicharge_model_type
          real(wp), intent(inout) :: sigma(:, :)     ! stress (3, 3)
       end subroutine get_pT_dbdR_list
 
-      subroutine get_pT_damat_0d_list(self, mol, list, cache, p, gradient, sigma)
+      subroutine get_pT_damat_list(self, mol, list, cache, p, gradient, sigma)
          import :: mchrg_model_type, structure_type, mchrg_cache, adjacency_list, wp
          !> EEQBC model type
          class(mchrg_model_type), intent(in) :: self
@@ -212,7 +212,7 @@ module multicharge_model_type
          real(wp), intent(in) :: p(:)
          real(wp), intent(inout) :: gradient(:, :)
          real(wp), intent(inout) :: sigma(:, :)
-      end subroutine get_pT_damat_0d_list
+      end subroutine get_pT_damat_list
 
    end interface
 
@@ -292,6 +292,8 @@ contains
       real(wp), allocatable :: daqxdrij(:,:), daqxdrji(:,:), daqxdrdiag(:,:)
       real(wp), allocatable :: bgrad_dir(:, :), bgrad_list(:, :)
       real(wp), allocatable :: bsigma_dir(:, :), bsigma_list(:, :)
+      real(wp), allocatable :: agrad_dir(:, :), agrad_list(:, :)
+      real(wp), allocatable :: asigma_dir(:, :), asigma_list(:, :)
 
       logical :: grad, cpq, dcn
       logical :: add_lagr = .true.
@@ -451,8 +453,10 @@ contains
          if (present(list)) then
             allocate(bgrad_list(3, mol%nat), source = 0.0_wp)
             allocate(bsigma_list(3, 3), source = 0.0_wp)
+            allocate(agrad_list(3, mol%nat), source = 0.0_wp)
+            allocate(asigma_list(3, 3), source = 0.0_wp)
             call timer%push("dadr_setup")
-            call self%get_pT_damat_0d_list(mol, list, cache, cache%vrhs(:mol%nat), gradient, sigma)
+            call self%get_pT_damat_list(mol, list, cache, cache%vrhs(:mol%nat), gradient, sigma)
             call timer%pop
             if (verbosity_solve > 1) then
                write(output_unit, '(a, 1x, a)') "Coulomb matrix derivatives setup time : ", format_time(timer%get("dadr_setup"))
@@ -477,6 +481,14 @@ contains
             write(*, *) "BSIGMA LIST:"
             print'(3es21.14)', bsigma_list
             write(*, *)
+
+            call self%get_pT_damat_list(mol, list, cache, cache%vrhs(:mol%nat), agrad_list, asigma_list)
+
+            !write(*, *) "AGRAD LIST:"
+            !print'(3es21.14)', agrad_list
+            !write(*, *) "ASIGMA LIST:"
+            !print'(3es21.14)', asigma_list
+            !write(*, *)
          else
             do iat = 1, mol%nat
                daqxdr(:, :, iat) = - cache%dxdr(:, :, iat) + 0.5_wp * cache%dadr(:, :, iat)
@@ -484,6 +496,8 @@ contains
             end do
             allocate(bgrad_dir(3, mol%nat), source = 0.0_wp)
             allocate(bsigma_dir(3, 3), source = 0.0_wp)
+            allocate(agrad_dir(3, mol%nat), source = 0.0_wp)
+            allocate(asigma_dir(3, 3), source = 0.0_wp)
             call gemv(cache%dxdr(:, :, :mol%nat), cache%vrhs(:mol%nat), bgrad_dir, beta=1.0_wp, alpha=1.0_wp)
             call gemv(cache%dxdL(:, :, :mol%nat), cache%vrhs(:mol%nat), bsigma_dir, beta=1.0_wp, alpha=1.0_wp)
             write(*, *) "BGRAD DIR:"
@@ -491,6 +505,14 @@ contains
             write(*, *) "BSIGMA DIR:"
             print'(3es21.14)', bsigma_dir
             write(*, *)
+
+            call gemv(cache%dadr(:, :, :mol%nat), cache%vrhs(:mol%nat), agrad_dir, beta=1.0_wp, alpha=1.0_wp)
+            call gemv(cache%dadL(:, :, :mol%nat), cache%vrhs(:mol%nat), asigma_dir, beta=1.0_wp, alpha=1.0_wp)
+            !write(*, *) "AGRAD DIR:"
+            !print'(3es21.14)', agrad_dir
+            !write(*, *) "ASIGMA DIR:"
+            !print'(3es21.14)', asigma_dir
+            !write(*, *)
 
             call gemv(daqxdr(:, :, :mol%nat), cache%vrhs(:mol%nat), gradient, beta=1.0_wp, alpha=1.0_wp)
             call gemv(daqxdL, cache%vrhs, sigma, beta=1.0_wp, alpha=1.0_wp)

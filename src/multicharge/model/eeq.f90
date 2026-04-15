@@ -53,7 +53,7 @@ module multicharge_model_eeq
       !> Calculate EN vector derivatives
       procedure :: get_xvec_derivs
       procedure :: get_pT_dbdR_list
-      procedure :: get_pT_damat_0d_list
+      procedure :: get_pT_damat_list
    end type eeq_model
 
 
@@ -724,7 +724,7 @@ end subroutine get_damat_rec_3d
       end subroutine get_pT_dbdR_list
 
 
-      subroutine get_pT_damat_0d_list(self, mol, list, cache, p, gradient, sigma)
+      subroutine get_pT_damat_list(self, mol, list, cache, p, gradient, sigma)
          !> EEQBC model type
          class(eeq_model), intent(in) :: self
          type(structure_type), intent(in) :: mol
@@ -733,6 +733,6 @@ end subroutine get_damat_rec_3d
          real(wp), intent(in) :: p(:)
          real(wp), intent(inout) :: gradient(:, :)
          real(wp), intent(inout) :: sigma(:, :)
-      end subroutine get_pT_damat_0d_list
+      end subroutine get_pT_damat_list
 
 end module multicharge_model_eeq
