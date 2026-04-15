@@ -723,26 +723,26 @@ contains
       do iat = 1, mol%nat
          izp = mol%id(iat)
          capi = self%cap(izp)
-         do jat = 1, mol%nat
-            jzp = mol%id(jat)
-            rvdw = self%rvdw(izp, jzp)
-            capj = self%cap(jzp)
-
-            ! Diagonal elements
-            dxdr_local(:, iat, iat) = dxdr_local(:, iat, iat) + cache%xtmp(jat) * cache%dcdr(:, iat, jat)
-
-            ! Derivative of capacitance matrix
-            dxdr_local(:, iat, jat) = dxdr_local(:, iat, jat)  &
-            & + (cache%xtmp(iat) - cache%xtmp(jat)) * cache%dcdr(:, iat, jat)
-
-            wsw = 1.0_wp / real(cache%wsc%nimg(iat, jat), wp)
-            do img = 1, cache%wsc%nimg(iat, jat)
-               vec = mol%xyz(:, jat) - mol%xyz(:, iat) + cache%wsc%trans(:, cache%wsc%tridx(img, jat, iat))
-               call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
-               dxdL_local(:, :, iat) = dxdL_local(:, :, iat) - wsw * dS * cache%xtmp(jat)
-            end do
-         end do
-         dxdL_local(:, :, iat) = dxdL_local(:, :, iat) + cache%xtmp(iat) * cache%dcdL(:, :, iat)
+      !   do jat = 1, mol%nat
+      !      jzp = mol%id(jat)
+      !      rvdw = self%rvdw(izp, jzp)
+      !      capj = self%cap(jzp)
+!
+      !      ! Diagonal elements
+      !      dxdr_local(:, iat, iat) = dxdr_local(:, iat, iat) + cache%xtmp(jat) * cache%dcdr(:, iat, jat)
+!
+      !      ! Derivative of capacitance matrix
+      !      dxdr_local(:, iat, jat) = dxdr_local(:, iat, jat)  &
+      !      & + (cache%xtmp(iat) - cache%xtmp(jat)) * cache%dcdr(:, iat, jat)
+!
+      !      wsw = 1.0_wp / real(cache%wsc%nimg(iat, jat), wp)
+      !      do img = 1, cache%wsc%nimg(iat, jat)
+      !         vec = mol%xyz(:, jat) - mol%xyz(:, iat) + cache%wsc%trans(:, cache%wsc%tridx(img, jat, iat))
+      !         call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
+      !         dxdL_local(:, :, iat) = dxdL_local(:, :, iat) - wsw * dS * cache%xtmp(jat)
+      !      end do
+      !   end do
+      !   dxdL_local(:, :, iat) = dxdL_local(:, :, iat) + cache%xtmp(iat) * cache%dcdL(:, :, iat)
 
          ! Capacitance terms for i = j, T != 0
          rvdw = self%rvdw(izp, izp)
@@ -3010,86 +3010,66 @@ contains
          w_cn(iat)   = v(iat) * self%kcnchi(mol%id(iat))
          w_qloc(iat) = v(iat) * self%kqchi(mol%id(iat))
       end do
-      call self%ncoord%add_coordination_number_derivs_list(mol, dtrans, w_cn, gradient, sigma, list)
-      call self%ncoord_en%add_coordination_number_derivs_list(mol, dtrans, w_qloc, gradient, sigma, list)
+      call self%ncoord%add_coordination_number_derivs_list_wsc(mol, dtrans, w_cn, gradient, sigma, list)
+      call self%ncoord_en%add_coordination_number_derivs_list_wsc(mol, dtrans, w_qloc, gradient, sigma, list)
       deallocate(v, w_cn, w_qloc)
 
-      ! 3. Explicit Term: q^T * (dC/dR * chi) using get_dcpair
-      !$omp parallel default(none) &
-      !$omp shared(mol, list, self, q, cache, gradient, sigma, wsw, dtrans) &
-      !$omp private(iat, izp, jat, jzp, kat, vec, rvdw, dG, dS, capi, capj) &
-      !$omp private(gradient_local, sigma_local)
-      allocate(gradient_local, mold=gradient)
-      allocate(sigma_local, mold=sigma)
-      gradient_local = 0.0_wp
-      sigma_local = 0.0_wp
-      !$omp do schedule(runtime)
-      do iat = 1, mol%nat
-         izp = mol%id(iat)
-         capi = self%cap(izp)
-
-         ! Diagonal component (Self-capacitance effect)
-         gradient_local(:, iat) = gradient_local(:, iat) + q(iat) * cache%xtmp(iat) * cache%dcdrdiag(:, iat)
-         sigma_local(:, :)      = sigma_local(:, :)      + q(iat) * cache%xtmp(iat) * cache%dcdL(:, :, iat)
-
-         do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
-            jat = list%nlat(kat)
-            jzp = mol%id(jat)
-            capj = self%cap(jzp)
-            if (jat /= iat) then
-               rvdw = self%rvdw(izp, jzp)
-               vec = mol%xyz(:, jat) - mol%xyz(:, iat)
-
-               ! Recalculate pair derivatives
-               call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
-
-               ! Matches dxdrdiag updates:
-               ! grad(i) += q(i) * chi(j) * dCij/dRi
-               ! grad(j) += q(j) * chi(i) * dCji/dRj
-               gradient_local(:, iat) = gradient_local(:, iat) + q(iat) * cache%xtmp(jat) * dG
-               gradient_local(:, jat) = gradient_local(:, jat) - q(jat) * cache%xtmp(iat) * dG
-
-               ! Matches dxdrij/ji updates (Off-diagonal projected on q):
-               ! grad(j) += q(i) * (chi(i) - chi(j)) * dCij/dRi
-               ! grad(i) += q(j) * (chi(j) - chi(i)) * dCji/dRj
-               gradient_local(:, iat) = gradient_local(:, iat) &
-                  + (q(iat) * cache%xtmp(jat) + q(jat) * (cache%xtmp(jat) - cache%xtmp(iat))) * dG
-               gradient_local(:, jat) = gradient_local(:, jat) &
-                  + (q(jat) * cache%xtmp(iat) + q(iat) * (cache%xtmp(iat) - cache%xtmp(jat))) * dG
-
-               wsw = 1.0_wp / real(list%nimg(kat), wp)
-               do img = 1, list%nimg(kat)
-                  vec = mol%xyz(:, jat) - mol%xyz(:, iat) - list%trans(:, list%tridx(img, kat))
-                  call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
-                  sigma_local(:, :) = sigma_local(:, :) + q(iat) * cache%xtmp(jat) * spread(dG * wsw, 1, 3) * spread(-vec, 2, 3)
-                  sigma_local(:, :) = sigma_local(:, :) + q(jat) * cache%xtmp(iat) * spread(-dG * wsw, 1, 3) * spread(-vec, 2, 3)
-               end do
-
-            else
-               !rvdw = self%rvdw(izp, izp)
-               !wsw = 1.0_wp / real(cache%wsc%nimg(iat, iat), wp)
-               !do img = 1, list%nimg(kat)
-               !   vec = list%trans(:, list%tridx(img, iat, iat))
+   !   !$omp parallel default(none) &
+   !   !$omp shared(mol, list, self, q, cache, gradient, sigma, dtrans) &
+   !   !$omp private(iat, izp, jat, jzp, kat, vec, rvdw, dG, dS, capi, capj, img, wsw) &
+   !   !$omp private(gradient_local, sigma_local)
+   !   allocate(gradient_local, mold=gradient)
+   !   allocate(sigma_local, mold=sigma)
+   !   gradient_local = 0.0_wp
+   !   sigma_local = 0.0_wp
 !
-               !   call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, ctmp)
-               !   ctmp = ctmp * wsw
-               !   ! EN derivative
-               !   dxdr_local(:, :, iat) = dxdr_local(:, :, iat) - ctmp * self%kcnchi(izp) * cache%dcndr(:, :, iat)
-               !   dxdL_local(:, :, iat) = dxdL_local(:, :, iat) - ctmp * self%kcnchi(izp) * cache%dcndL(:, :, iat)
-               !   dxdr_local(:, :, iat) = dxdr_local(:, :, iat) - ctmp * self%kqchi(izp) * cache%dqlocdr(:, :, iat)
-               !   dxdL_local(:, :, iat) = dxdL_local(:, :, iat) - ctmp * self%kqchi(izp) * cache%dqlocdL(:, :, iat)
-               !end do
-            end if
-         end do
-      end do
-      !$omp end do
-
-      !$omp critical
-      gradient(:, :) = gradient(:, :) + gradient_local(:, :)
-      sigma(:, :) = sigma(:, :) + sigma_local(:, :)
-      !$omp end critical
-      deallocate(gradient_local, sigma_local)
-      !$omp end parallel
+   !   !$omp do schedule(runtime)
+   !   do iat = 1, mol%nat
+   !      izp = mol%id(iat)
+   !      capi = self%cap(izp)
+!
+   !      ! 1. Diagonal component (Self-capacitance and lattice diagonal)
+   !      gradient_local(:, iat) = gradient_local(:, iat) + q(iat) * cache%xtmp(iat) * cache%dcdrdiag(:, iat)
+   !      sigma_local(:, :)      = sigma_local(:, :)      + q(iat) * cache%xtmp(iat) * cache%dcdL(:, :, iat)
+!
+   !      do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
+   !         jat = list%nlat(kat)
+   !         jzp = mol%id(jat)
+   !         capj = self%cap(jzp)
+   !         if (jat /= iat) then
+   !            rvdw = self%rvdw(izp, jzp)
+   !            wsw = 1.0_wp / real(list%nimg(kat), wp)
+!
+   !            ! 2. Loop over images for BOTH coordinate gradient and lattice sigma
+   !            do img = 1, list%nimg(kat)
+   !               ! Vector including lattice translation
+   !               vec = mol%xyz(:, jat) - mol%xyz(:, iat) + list%trans(:, list%tridx(img, kat))
+   !               
+   !               call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
+!
+   !               ! Coordinate Gradient Updates
+   !               gradient_local(:, iat) = gradient_local(:, iat) + q(iat) * cache%xtmp(jat) * dG * wsw
+   !               gradient_local(:, jat) = gradient_local(:, jat) - q(jat) * cache%xtmp(iat) * dG * wsw
+   !               
+   !               gradient_local(:, jat) = gradient_local(:, jat) + q(iat) * (cache%xtmp(iat) - cache%xtmp(jat)) * dG * wsw
+   !               gradient_local(:, iat) = gradient_local(:, iat) - q(jat) * (cache%xtmp(jat) - cache%xtmp(iat)) * dG * wsw
+!
+   !               ! Lattice Sigma Updates
+   !               ! This ensures the (xi - xj) term is correctly formed against the diagonal dcdL
+   !               sigma_local(:, :) = sigma_local(:, :) - q(iat) * cache%xtmp(jat) * dS * wsw
+   !               sigma_local(:, :) = sigma_local(:, :) - q(jat) * cache%xtmp(iat) * dS * wsw
+   !            end do
+   !         end if
+   !      end do
+   !   end do
+   !   !$omp end do
+!
+   !   !$omp critical
+   !   gradient(:, :) = gradient(:, :) + gradient_local(:, :)
+   !   sigma(:, :) = sigma(:, :) + sigma_local(:, :)
+   !   !$omp end critical
+   !   deallocate(gradient_local, sigma_local)
+   !   !$omp end parallel
 
    end subroutine get_pT_dbdR_3d_list
 
