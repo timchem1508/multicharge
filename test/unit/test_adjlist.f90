@@ -429,7 +429,7 @@ contains
       allocate(numsigma(3, 3), source=0.0_wp)
       allocate(numgrad(3, mol%nat), source=0.0_wp)
 
-      call get_lattice_points(mol%periodic, mol%lattice, 25.0_wp, trans)
+      call get_lattice_points(mol%periodic, mol%lattice, 29.0_wp, trans)
 
       call model%update(mol, cache1, trans, grad=.true.)
       call model%solve(mol, solver, cache1, error, &
