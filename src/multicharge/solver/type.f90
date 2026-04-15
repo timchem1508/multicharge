@@ -66,4 +66,6 @@ end interface
     type, abstract, public :: mchrg_solver_input
     end type mchrg_solver_input
 
+    
+
 end module multicharge_solver_type
