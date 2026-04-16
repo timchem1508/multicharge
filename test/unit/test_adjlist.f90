@@ -532,7 +532,7 @@ contains
          thr2_local = thr2
       end select
 
-      call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
+      call get_lattice_points(mol%periodic, mol%lattice, sqrt(epsilon(0.0_wp)), trans)
 
       ! Obtain the vector of charges
       call model%update(mol, cache, trans, grad=.false.)

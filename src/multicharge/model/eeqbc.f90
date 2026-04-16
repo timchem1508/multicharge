@@ -3407,7 +3407,7 @@ contains
             sigma_local(:, :) =  dtmp * cache%dcndL(:, :, iat) * dgam + sigma_local(:, :)
 
             ! Capacitance derivative
-            call get_damat_dc_dir(vec, list%trans, capi, capi, rvdw, self%kbc, gam, dG, dS)
+            call get_damat_dc_dir(vec, dtrans, capi, capi, rvdw, self%kbc, gam, dG, dS)
             sigma_local(:, :) =  W_ii * dS * wsw + sigma_local(:, :)
          end do
 
