@@ -56,8 +56,8 @@ contains
       & new_unittest("eeqbc-charges-actinides", test_eeqbc_q_actinides), &
       & new_unittest("eeqbc-energy-mb03", test_eeqbc_e_mb03), &
       & new_unittest("eeqbc-energy-mb04", test_eeqbc_e_mb04), &
-     ! & new_unittest("eeqbc-gradient-mb05", test_eeqbc_g_mb05), &
-     ! & new_unittest("eeqbc-gradient-mb06", test_eeqbc_g_mb06), &
+      & new_unittest("eeqbc-gradient-mb05", test_eeqbc_g_mb05), &
+      & new_unittest("eeqbc-gradient-mb06", test_eeqbc_g_mb06), &
       & new_unittest("eeqbc-energy-co2", test_eeqbc_e_co2),  &
       & new_unittest("eeqbc-gradient-co2", test_eeqbc_g_co2) &
       & ]
@@ -429,7 +429,7 @@ contains
       allocate(numsigma(3, 3), source=0.0_wp)
       allocate(numgrad(3, mol%nat), source=0.0_wp)
 
-      call get_lattice_points(mol%periodic, mol%lattice, 29.0_wp, trans)
+      call get_lattice_points(mol%periodic, mol%lattice, sqrt(epsilon(0.0_wp)), trans)
 
       call model%update(mol, cache1, trans, grad=.true.)
       call model%solve(mol, solver, cache1, error, &

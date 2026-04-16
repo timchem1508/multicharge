@@ -500,11 +500,11 @@ contains
             allocate(asigma_dir(3, 3), source = 0.0_wp)
             call gemv(cache%dxdr(:, :, :mol%nat), cache%vrhs(:mol%nat), bgrad_dir, beta=1.0_wp, alpha=1.0_wp)
             call gemv(cache%dxdL(:, :, :mol%nat), cache%vrhs(:mol%nat), bsigma_dir, beta=1.0_wp, alpha=1.0_wp)
-            !write(*, *) "BGRAD DIR:"
             !print'(3es21.14)', bgrad_dir
-            !write(*, *) "BSIGMA DIR:"
-            !print'(3es21.14)', bsigma_dir
-            !write(*, *)
+            write(*, *) "BGRAD DIR:"
+            write(*, *) "BSIGMA DIR:"
+            print'(3es21.14)', bsigma_dir
+            write(*, *)
 
             call gemv(cache%dadr(:, :, :mol%nat), cache%vrhs(:mol%nat), agrad_dir, beta=1.0_wp, alpha=1.0_wp)
             call gemv(cache%dadL(:, :, :mol%nat), cache%vrhs(:mol%nat), asigma_dir, beta=1.0_wp, alpha=1.0_wp)
