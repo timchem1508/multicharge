@@ -94,7 +94,7 @@ program main
       end if
    end if
 
-   call get_lattice_points(mol%periodic, mol%lattice, 25.0_wp, trans)
+   
 
    ! Create neighbour list if requested
    if (use_nlist) then
@@ -118,6 +118,8 @@ program main
       write(error_unit, '(a)') error%message
       error stop
    end if
+
+   call get_lattice_points(mol%periodic, mol%lattice, model%ncoord%cutoff, trans)
 
    call timer%pop
 
