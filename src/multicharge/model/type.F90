@@ -451,10 +451,10 @@ contains
       if (grad) then
          call timer%push("gradient")
          if (present(list)) then
-            allocate(bgrad_list(3, mol%nat), source = 0.0_wp)
-            allocate(bsigma_list(3, 3), source = 0.0_wp)
-            allocate(agrad_list(3, mol%nat), source = 0.0_wp)
-            allocate(asigma_list(3, 3), source = 0.0_wp)
+            !allocate(bgrad_list(3, mol%nat), source = 0.0_wp)
+            !allocate(bsigma_list(3, 3), source = 0.0_wp)
+            !allocate(agrad_list(3, mol%nat), source = 0.0_wp)
+            !allocate(asigma_list(3, 3), source = 0.0_wp)
             call timer%push("dadr_setup")
             call self%get_pT_damat_list(mol, list, cache, cache%vrhs(:mol%nat), gradient, sigma)
             call timer%pop
@@ -474,7 +474,7 @@ contains
                write(output_unit, '(a)') ''
             end if
 
-            call self%get_pT_dbdR_list(mol, list, cache, cache%vrhs(:mol%nat), bgrad_list, bsigma_list)
+            !call self%get_pT_dbdR_list(mol, list, cache, cache%vrhs(:mol%nat), bgrad_list, bsigma_list)
 
             !write(*, *) "BGRAD LIST:"
             !print'(3es21.14)', bgrad_list
@@ -482,37 +482,37 @@ contains
             !print'(3es21.14)', bsigma_list
             !write(*, *)
 
-            call self%get_pT_damat_list(mol, list, cache, cache%vrhs(:mol%nat), agrad_list, asigma_list)
+            !call self%get_pT_damat_list(mol, list, cache, cache%vrhs(:mol%nat), agrad_list, asigma_list)
 
-            write(*, *) "AGRAD LIST:"
-            print'(3es21.14)', agrad_list
-            write(*, *) "ASIGMA LIST:"
-            print'(3es21.14)', asigma_list
-            write(*, *)
+            !write(*, *) "AGRAD LIST:"
+            !print'(3es21.14)', agrad_list
+            !write(*, *) "ASIGMA LIST:"
+            !print'(3es21.14)', asigma_list
+            !write(*, *)
          else
             do iat = 1, mol%nat
                daqxdr(:, :, iat) = - cache%dxdr(:, :, iat) + 0.5_wp * cache%dadr(:, :, iat)
                daqxdL(:, :, iat) = - cache%dxdL(:, :, iat) + 0.5_wp * cache%dadL(:, :, iat)
             end do
-            allocate(bgrad_dir(3, mol%nat), source = 0.0_wp)
-            allocate(bsigma_dir(3, 3), source = 0.0_wp)
-            allocate(agrad_dir(3, mol%nat), source = 0.0_wp)
-            allocate(asigma_dir(3, 3), source = 0.0_wp)
-            call gemv(cache%dxdr(:, :, :mol%nat), cache%vrhs(:mol%nat), bgrad_dir, beta=1.0_wp, alpha=1.0_wp)
-            call gemv(cache%dxdL(:, :, :mol%nat), cache%vrhs(:mol%nat), bsigma_dir, beta=1.0_wp, alpha=1.0_wp)
+            !allocate(bgrad_dir(3, mol%nat), source = 0.0_wp)
+            !allocate(bsigma_dir(3, 3), source = 0.0_wp)
+            !allocate(agrad_dir(3, mol%nat), source = 0.0_wp)
+            !allocate(asigma_dir(3, 3), source = 0.0_wp)
+            !call gemv(cache%dxdr(:, :, :mol%nat), cache%vrhs(:mol%nat), bgrad_dir, beta=1.0_wp, alpha=1.0_wp)
+            !call gemv(cache%dxdL(:, :, :mol%nat), cache%vrhs(:mol%nat), bsigma_dir, beta=1.0_wp, alpha=1.0_wp)
             !print'(3es21.14)', bgrad_dir
-            write(*, *) "BGRAD DIR:"
-            write(*, *) "BSIGMA DIR:"
-            print'(3es21.14)', bsigma_dir
-            write(*, *)
+            !write(*, *) "BGRAD DIR:"
+            !write(*, *) "BSIGMA DIR:"
+            !print'(3es21.14)', bsigma_dir
+            !write(*, *)
 
-            call gemv(cache%dadr(:, :, :mol%nat), cache%vrhs(:mol%nat), agrad_dir, beta=1.0_wp, alpha=1.0_wp)
-            call gemv(cache%dadL(:, :, :mol%nat), cache%vrhs(:mol%nat), asigma_dir, beta=1.0_wp, alpha=1.0_wp)
-            write(*, *) "AGRAD DIR:"
-            print'(3es21.14)', agrad_dir
-            write(*, *) "ASIGMA DIR:"
-            print'(3es21.14)', asigma_dir
-            write(*, *)
+            !call gemv(cache%dadr(:, :, :mol%nat), cache%vrhs(:mol%nat), agrad_dir, beta=1.0_wp, alpha=1.0_wp)
+            !call gemv(cache%dadL(:, :, :mol%nat), cache%vrhs(:mol%nat), asigma_dir, beta=1.0_wp, alpha=1.0_wp)
+            !write(*, *) "AGRAD DIR:"
+            !print'(3es21.14)', agrad_dir
+            !write(*, *) "ASIGMA DIR:"
+            !print'(3es21.14)', asigma_dir
+            !write(*, *)
 
             call gemv(daqxdr(:, :, :mol%nat), cache%vrhs(:mol%nat), gradient, beta=1.0_wp, alpha=1.0_wp)
             call gemv(daqxdL, cache%vrhs, sigma, beta=1.0_wp, alpha=1.0_wp)
