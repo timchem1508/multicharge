@@ -3085,7 +3085,7 @@ contains
             ! The vector is just the lattice translation for self-images
             vec = list%trans(:, list%selftridx(img, iat))
             call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, dG, dS)
-             
+
             ! translations, so we only need to update the lattice tensor (sigma).
             sigma_local(:, :) = sigma_local(:, :) - q(iat) * cache%xtmp(iat) * dS * wsw
          end do
@@ -3102,13 +3102,13 @@ contains
                do img = 1, list%nimg(kat)
                   ! Vector including lattice translation
                   vec = mol%xyz(:, jat) - mol%xyz(:, iat) + list%trans(:, list%tridx(img, kat))
-                  
+
                   call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
 
                   ! Coordinate Gradient Updates
                   gradient_local(:, iat) = gradient_local(:, iat) + q(iat) * cache%xtmp(jat) * dG * wsw
                   gradient_local(:, jat) = gradient_local(:, jat) - q(jat) * cache%xtmp(iat) * dG * wsw
-                  
+
                   gradient_local(:, jat) = gradient_local(:, jat) + q(iat) * (cache%xtmp(iat) - cache%xtmp(jat)) * dG * wsw
                   gradient_local(:, iat) = gradient_local(:, iat) - q(jat) * (cache%xtmp(jat) - cache%xtmp(iat)) * dG * wsw
 
@@ -3131,7 +3131,7 @@ contains
 
    end subroutine get_pT_dbdR_3d_list
 
-      subroutine get_pT_damat_list(self, mol, list, cache, p, gradient, sigma)
+   subroutine get_pT_damat_list(self, mol, list, cache, p, gradient, sigma)
       class(eeqbc_model), intent(in) :: self
       type(structure_type), intent(in) :: mol
       type(adjacency_list), intent(in) :: list
@@ -3324,7 +3324,7 @@ contains
          do kat = start_kat, finish_kat
             jat = list%nlat(kat)
             jzp = mol%id(jat)
-            
+
             capj = self%cap(jzp)
             rvdw = self%rvdw(izp, jzp)
             wsw = 1.0_wp / real(list%nimg(kat), wp)
@@ -3341,7 +3341,7 @@ contains
                vec = mol%xyz(:, jat) - mol%xyz(:, iat) + list%trans(:, list%tridx(img, kat))
                r2 = dot_product(vec, vec)
 
-               call get_dcnpair_dir(self%ncoord, mol, list%trans, iat, jat, vec, dG_ij, dG_ji)
+               call get_dcnpair_dir(self%ncoord, mol, dtrans, iat, jat, vec, dG_ij, dG_ji)
                gam = 1.0_wp / sqrt(radi**2 + radj**2)
                dgami(:) = -(radi * dradi * cache%dcndrdiag(:, iat) + radj * dradj * dG_ij) * gam**3.0_wp
                dgamj(:) = -(radi * dradi * dG_ji + radj * dradj * cache%dcndrdiag(:, jat)) * gam**3.0_wp
@@ -3349,7 +3349,7 @@ contains
                arg = gam * gam * r2
 
                ! 1. Explicit Geometry Derivative
-               call get_damat_dir(vec, list%trans, capi, capj, rvdw, self%kbc, gam, dG, dS, dgam)
+               call get_damat_dir(vec, dtrans, capi, capj, rvdw, self%kbc, gam, dG, dS, dgam)
                dG = dG * wsw
                dS = dS * wsw
                dgam = dgam * wsw
@@ -3358,21 +3358,21 @@ contains
                gradient_local(:, jat) = gradient_local(:, jat) + dG * W_ij
                sigma_local(:, :) = sigma_local(:, :) + dS * W_ij
 
-               ! 2. Effective charge width derivative 
+               ! 2. Effective charge width derivative
                gradient_local(:, iat) = gradient_local(:, iat) + dgam * dgami(:) * W_ij
                gradient_local(:, jat) = gradient_local(:, jat) + dgam * dgamj(:) * W_ij
-               sigma_local(:, :) = sigma_local(:, :) - dgam * dgamdL(:, :) * W_ij
+               sigma_local(:, :) = sigma_local(:, :) + dgam * dgamdL(:, :) * W_ij
 
                ! 3. Capacitance derivative off-diagonal
-               call get_damat_dc_dir(vec, list%trans, capi, capj, rvdw, self%kbc, gam, dG, dS)
+               call get_damat_dc_dir(vec, dtrans, capi, capj, rvdw, self%kbc, gam, dG, dS)
                dG = dG * wsw
                dS = dS * wsw
                gradient_local(:, iat) = gradient_local(:, iat) + dG * W_ij
                gradient_local(:, jat) = gradient_local(:, jat) - dG * W_ij
-               sigma_local(:, :)   = sigma_local(:, :) - W_ij * dS 
+               sigma_local(:, :)   = sigma_local(:, :) - W_ij * dS
 
                ! 4. Capacitance derivative diagonal contribution
-               call get_dcpair_dir(self%kbc, vec, list%trans, rvdw, capi, capj, dG, dS)
+               call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
                dG = dG * wsw
 
                dtmp = (self%eta(jzp) + self%kqeta(jzp) * cache%qloc(jat) + sqrt2pi / radj)
@@ -3384,39 +3384,38 @@ contains
 
          end do
 
+         ! 5. Diagonal-only corrections
+         hard(iat) = self%kqeta(izp) * W_ii * cache%cdiag(iat)
+         dtmp = -sqrt2pi * dradi / (radi**2) * W_ii
+         effchrg(iat) = dtmp * cache%cdiag(iat)
+
          ! diagonal explicit, charge width, and capacitance derivative terms
          gam = 1.0_wp / sqrt(2.0_wp * radi**2)
          dtmp = -sqrt2pi * dradi / (radi**2) * W_ii
          rvdw = self%rvdw(izp, izp)
          wsw = 1.0_wp / real(list%selfnimg(iat), wp)
 
-         ! 5. Diagonal-only corrections
-         hard(iat) = self%kqeta(izp) * W_ii * cache%cdiag(iat)
-         ! This dtmp is the derivative of the diagonal energy term w.r.t. radius
-         dtmp = -sqrt2pi * dradi / (radi**2) * W_ii
-         effchrg(iat) = dtmp * cache%cdiag(iat)
-
          do img = 1, list%selfnimg(iat)
             vec = list%trans(:, list%selftridx(img, iat))
-            call get_damat_dir(vec, list%trans, capi, capi, rvdw, self%kbc, gam, dG, dS, dgam)
+            call get_damat_dir(vec, dtrans, capi, capi, rvdw, self%kbc, gam, dG, dS, dgam)
             dgam = dgam * wsw
 
             ! Explicit derivative
-            sigma_local(:, :) = dS * wsw * W_ii + sigma_local(:, :)
+            sigma_local(:, :) = - dS * wsw * W_ii + sigma_local(:, :)
 
             ! Effective charge width derivative
-            sigma_local(:, :) = dtmp * cache%dcndL(:, :, iat) * dgam + sigma_local(:, :)
+            sigma_local(:, :) =  dtmp * cache%dcndL(:, :, iat) * dgam + sigma_local(:, :)
 
             ! Capacitance derivative
             call get_damat_dc_dir(vec, list%trans, capi, capi, rvdw, self%kbc, gam, dG, dS)
-            sigma_local(:, :) = W_ii * dS * wsw + sigma_local(:, :)
+            sigma_local(:, :) =  W_ii * dS * wsw + sigma_local(:, :)
          end do
 
          ! 6. Intrinsic capacitance and coordination number derivatives
          dtmp = (self%eta(izp) + self%kqeta(izp) * cache%qloc(iat) + sqrt2pi / radi) * W_ii
          gradient_local(:, iat) = gradient_local(:, iat) + dtmp * cache%dcdrdiag(:, iat)
          sigma_local(:, :) = sigma_local(:, :) + dtmp * cache%dcdL(:, :, iat)
-         
+
       end do
       !$omp end do
 
