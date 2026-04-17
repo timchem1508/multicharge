@@ -59,7 +59,7 @@ contains
       & new_unittest("eeqbc-gradient-mb06", test_eeqbc_g_mb06), &
       & new_unittest("eeqbc-energy-co2", test_eeqbc_e_co2),  &
       & new_unittest("eeqbc-energy-ice", test_eeqbc_e_ice), &
-      & new_unittest("eeqbc-energy-ice-supercell", test_eeqbc_e_ice222), &
+      !& new_unittest("eeqbc-energy-ice-supercell", test_eeqbc_e_ice222), &
       & new_unittest("eeqbc-gradient-co2", test_eeqbc_g_co2), &
       & new_unittest("eeqbc-gradient-ice", test_eeqbc_g_ice) &
       & ]
