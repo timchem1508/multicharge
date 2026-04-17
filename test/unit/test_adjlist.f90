@@ -31,7 +31,6 @@ module test_adjlist
    use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
    use multicharge_solver_direct, only : direct_solver, new_direct_solver, direct_input
    use multicharge_solver_cg, only : cg_solver, new_cg_solver, cg_input
-   use multicharge_adjlist, only: symv_sparse
    implicit none
    private
 

@@ -31,7 +31,7 @@ list(
   "${dir}/version.f90"
   "${dir}/wignerseitz.f90"
   "${dir}/solver.f90"
-  "${dir}/adjlist.f90"
+
   "${dir}/blascomp.f90"
 )
 
