@@ -28,6 +28,5 @@ srcs += files(
   'version.f90',
   'wignerseitz.f90',
   'solver.f90',
-  'adjlist.f90',
   'blascomp.f90',
 )
