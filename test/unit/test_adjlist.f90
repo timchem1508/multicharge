@@ -58,7 +58,10 @@ contains
       & new_unittest("eeqbc-gradient-mb05", test_eeqbc_g_mb05), &
       & new_unittest("eeqbc-gradient-mb06", test_eeqbc_g_mb06), &
       & new_unittest("eeqbc-energy-co2", test_eeqbc_e_co2),  &
-      & new_unittest("eeqbc-gradient-co2", test_eeqbc_g_co2) &
+      & new_unittest("eeqbc-energy-ice", test_eeqbc_e_ice), &
+      & new_unittest("eeqbc-energy-ice-supercell", test_eeqbc_e_ice222), &
+      & new_unittest("eeqbc-gradient-co2", test_eeqbc_g_co2), &
+      & new_unittest("eeqbc-gradient-ice", test_eeqbc_g_ice) &
       & ]
 
    end subroutine collect_adjlist
@@ -92,6 +95,33 @@ contains
       end select
 
    end subroutine solver_maker
+
+   subroutine make_supercell(mol, rep)
+      type(structure_type), intent(inout) :: mol
+      integer, intent(in) :: rep(3)
+
+      real(wp), allocatable :: xyz(:, :), lattice(:, :)
+      integer, allocatable :: num(:)
+      integer :: i, j, k, c
+
+      num = reshape(spread([mol%num(mol%id)], 2, product(rep)), [product(rep)*mol%nat])
+      lattice = reshape(&
+         [rep(1)*mol%lattice(:, 1), rep(2)*mol%lattice(:, 2), rep(3)*mol%lattice(:, 3)], &
+         shape(mol%lattice))
+      allocate(xyz(3, product(rep)*mol%nat))
+      c = 0
+      do i = 0, rep(1)-1
+         do j = 0, rep(2)-1
+            do k = 0, rep(3)-1
+               xyz(:, c+1:c+mol%nat) = mol%xyz &
+               & + spread(matmul(mol%lattice, [real(wp):: i, j, k]), 2, mol%nat)
+               c = c + mol%nat
+            end do
+         end do
+      end do
+
+      call new(mol, num, xyz, lattice=lattice)
+   end subroutine make_supercell
 
 !------------------------------------------------------------------------
 ! General helper routines – now they accept a pre‑built adjacency list.
@@ -768,6 +798,36 @@ contains
 
    end subroutine test_eeqbc_g_co2
 
+   subroutine test_eeqbc_g_ice(error)
+
+      !> Error handling
+      type(error_type), allocatable, intent(out) :: error
+
+      type(structure_type) :: mol
+      class(mchrg_model_type), allocatable :: model
+
+      call get_structure(mol, "ICE10", "vi")
+      call new_eeqbc2025_model(mol, model, error)
+      if (allocated(error)) return
+      call test_numgrad_periodic(error, mol, model)
+
+   end subroutine test_eeqbc_g_ice
+
+   subroutine test_eeqbc_e_ice(error)
+
+      !> Error handling
+      type(error_type), allocatable, intent(out) :: error
+
+      type(structure_type) :: mol
+      class(mchrg_model_type), allocatable :: model
+
+      call get_structure(mol, "ICE10", "vi")
+      call new_eeqbc2025_model(mol, model, error)
+      if (allocated(error)) return
+      call gen_test_periodic(error, mol, model)
+
+   end subroutine test_eeqbc_e_ice
+
    subroutine test_eeqbc_e_co2(error)
 
       !> Error handling
@@ -782,5 +842,22 @@ contains
       call gen_test_periodic(error, mol, model)
 
    end subroutine test_eeqbc_e_co2
+
+   subroutine test_eeqbc_e_ice222(error)
+
+      !> Error handling
+      type(error_type), allocatable, intent(out) :: error
+
+      type(structure_type) :: mol
+      class(mchrg_model_type), allocatable :: model
+      integer, parameter :: supercell(*) = [2, 2, 2]
+
+      call get_structure(mol, "ICE10", "vi")
+      call make_supercell(mol, supercell)
+      call new_eeqbc2025_model(mol, model, error)
+      if (allocated(error)) return
+      call gen_test_periodic(error, mol, model)
+
+   end subroutine test_eeqbc_e_ice222
 
 end module test_adjlist
