@@ -327,7 +327,7 @@ contains
       !> Multicharge neighbourlist type
       type(adjacency_list), intent(in), optional :: list
 
-      integer :: iat, izp, img, idx
+      integer :: iat, izp, img, idx, itr, jat, start_idx, end_idx
       real(wp) :: ctmp, vec(3), rvdw, capi, wsw
       real(wp), allocatable :: dtrans(:, :)
 
@@ -420,6 +420,7 @@ contains
             !$omp end parallel
          end if
       end if
+
 
    end subroutine get_xvec
 
@@ -1199,6 +1200,7 @@ contains
             jzp = mol%id(jat)
             capj = self%cap(jzp)
             rvdw = self%rvdw(izp, jzp)
+            if (list%nimg(kat) == 0) cycle
             wsw = 1.0_wp / real(list%nimg(kat), wp)
 
             norm_cn = cn(jat) / self%avg_cn(jzp)**self%norm_exp
@@ -2326,6 +2328,7 @@ contains
             capj = self%cap(jzp)
 
             ! Weight for equivalent images (Wigner-Seitz)
+            if (list%nimg(kat) == 0) cycle
             wsw = 1.0_wp / real(list%nimg(kat), wp)
             do img = 1, list%nimg(kat)
                ! Translation vector is now stored in list%trans indexed by list%tridx
@@ -2364,6 +2367,7 @@ contains
       !$omp end parallel
 
    end subroutine get_cmat_3d_list
+
 
 !> Compute the bond capacitance between two atoms based on distance.
    subroutine get_cpair(kbc, cpair, r1, rvdw, capi, capj)
@@ -2679,6 +2683,7 @@ contains
             jzp = mol%id(jat)
             capj = self%cap(jzp)
             rvdw = self%rvdw(izp, jzp)
+            if (list%nimg(kat) == 0) cycle
             wsw = 1.0_wp / real(list%nimg(kat), wp)
 
             do img = 1, list%nimg(kat)
@@ -3084,6 +3089,7 @@ contains
             capj = self%cap(jzp)
             if (jat /= iat) then
                rvdw = self%rvdw(izp, jzp)
+               if (list%nimg(kat) == 0) cycle
                wsw = 1.0_wp / real(list%nimg(kat), wp)
 
                ! 2. Loop over images for BOTH coordinate gradient and lattice sigma
@@ -3315,6 +3321,7 @@ contains
 
             capj = self%cap(jzp)
             rvdw = self%rvdw(izp, jzp)
+            if (list%nimg(kat) == 0) cycle
             wsw = 1.0_wp / real(list%nimg(kat), wp)
 
             ! Weights for the pair

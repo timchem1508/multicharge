@@ -39,7 +39,7 @@ module test_adjlist
    real(wp), parameter :: thr = 100 * epsilon(1.0_wp)
    real(wp), parameter :: thr2 = sqrt(epsilon(1.0_wp))
    real(wp), parameter :: thr3 = 100 * thr2
-   real(wp), parameter :: cutoff = 29.0_wp
+   real(wp), parameter :: cutoff = 35.0_wp
 
 contains
 
@@ -59,7 +59,7 @@ contains
       & new_unittest("eeqbc-gradient-mb06", test_eeqbc_g_mb06), &
       & new_unittest("eeqbc-energy-co2", test_eeqbc_e_co2),  &
       & new_unittest("eeqbc-energy-ice", test_eeqbc_e_ice), &
-      !& new_unittest("eeqbc-energy-ice-supercell", test_eeqbc_e_ice222), &
+      & new_unittest("eeqbc-energy-ice-supercell", test_eeqbc_e_ice222), &
       & new_unittest("eeqbc-gradient-co2", test_eeqbc_g_co2), &
       & new_unittest("eeqbc-gradient-ice", test_eeqbc_g_ice) &
       & ]
@@ -291,6 +291,15 @@ contains
       allocate(list)
       call new_adjacency_list(list, mol, cutoff , .false.)
       call model%update(mol, cache, trans, grad=.false., list=list)
+      !call model%get_capacitance_matrix(mol, mol%nat, cache, list=list)
+      !call model%get_xvec( mol, mol%nat, cache, list=list)
+      !call model%get_coulomb_matrix(mol, mol%nat, cache)
+      !amat_dir(:,:) = cache%amat
+      !write(*,*) "DIRECT AMAT"
+      !print'(12es21.14)', amat_dir
+      !write(*,*) "LIST XVEC"
+      !write(*,'(es21.14)') cache%xvec
+      !write(*,'(50("-"))')
       call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, unit=output_unit)
 
       if (any(abs(qvec - qref) > thr)) then
