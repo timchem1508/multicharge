@@ -709,23 +709,48 @@ contains
    end subroutine get_damat_rec_3d
 
    subroutine get_pT_dbdR(self, mol, cache, q, gradient, sigma, list)
-      !> EEQBC model type
       class(eeq_model), intent(in) :: self
-      !> Molecular structure data
       type(structure_type), intent(in) :: mol
       type(mchrg_cache), intent(in) :: cache
-      !> Input vectors
-      real(wp), intent(in) :: q(:)          ! dE/db (size nat)
-      !> Output derivatives (accumulated)
-      real(wp), intent(inout) :: gradient(:, :)  ! forces (3, nat)
-      real(wp), intent(inout) :: sigma(:, :)     ! stress (3, 3)
-      !> Neighbour list (each unordered pair appears once)
+      real(wp), intent(in) :: q(:)          ! Vector p
+      real(wp), intent(inout) :: gradient(:, :)
+      real(wp), intent(inout) :: sigma(:, :)
       type(adjacency_list), optional, intent(in) :: list
+
+      integer :: iat, jat
+      real(wp), allocatable :: w_cn(:)
+      real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
+      real(wp), allocatable :: trans(:,:)
+      real(wp), parameter :: reg = 1.0e-14_wp
+
+      allocate(gradient_local(3, mol%nat), source=0.0_wp)
+      allocate(sigma_local(3, 3), source=0.0_wp)
+
+      if (any(mol%periodic)) then
+         call get_dir_trans(mol%lattice, trans)
+      else
+         allocate(trans(3, 1), source=0.0_wp)
+      end if
+
+      allocate(w_cn(mol%nat), source=0.0_wp)
+
+      ! Compute chain rule weights
+      do iat = 1, mol%nat
+         w_cn(iat) = 0.5_wp * self%kcnchi(mol%id(iat)) / sqrt(cache%cn(iat) + reg) * q(iat)
+      end do
+
+      ! sum_i q_i * (db_i / dCN_i) * (dCN_i / dR)
+      call self%ncoord%add_coordination_number_derivs(mol, trans, w_cn, gradient_local, sigma_local)
+
+      gradient(:, :) = gradient(:, :) + gradient_local(:, :)
+      sigma(:, :) = sigma(:, :) + sigma_local(:, :)
+
+      deallocate(w_cn, trans, gradient_local, sigma_local)
    end subroutine get_pT_dbdR
 
 
    subroutine get_pT_damat(self, mol, cache, p, gradient, sigma, list)
-      !> EEQBC model type
+      !> EEQ model type
       class(eeq_model), intent(in) :: self
       type(structure_type), intent(in) :: mol
       type(mchrg_cache), intent(in) :: cache
@@ -734,6 +759,73 @@ contains
       real(wp), intent(inout) :: sigma(:, :)
       !> Neighbour list (each unordered pair appears once)
       type(adjacency_list), optional, intent(in) :: list
+
+      if (any(mol%periodic)) then
+         ! call get_pT_damat_3d(self, mol, cache, p, gradient, sigma)
+      else
+         call get_pT_damat_0d(self, mol, cache, p, gradient, sigma)
+      end if
    end subroutine get_pT_damat
+
+   subroutine get_pT_damat_0d(self, mol, cache, p, gradient, sigma)
+      !> EEQ model type
+      class(eeq_model), intent(in) :: self
+      type(structure_type), intent(in) :: mol
+      type(mchrg_cache), intent(in) :: cache
+      real(wp), intent(in) :: p(:)
+      real(wp), intent(inout) :: gradient(:, :)
+      real(wp), intent(inout) :: sigma(:, :)
+
+      integer :: iat, jat, izp, jzp
+      real(wp) :: vec(3), r2, gam, arg, dtmp
+      real(wp) :: dG(3), dS(3, 3)
+      real(wp) :: W_ij
+      real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
+      real(wp), allocatable :: dtrans(:, :)
+
+
+      !$omp parallel default(none) &
+      !$omp shared(cache, mol, self, p, gradient, sigma) &
+      !$omp private(iat, izp, jat, jzp, gam, vec, r2, dtmp, arg) &
+      !$omp private(W_ij, gradient_local, sigma_local, dG, dS)
+      allocate(gradient_local(3, mol%nat))
+      allocate(sigma_local(3, 3))
+      gradient_local = 0.0_wp
+      sigma_local = 0.0_wp
+
+      !$omp do schedule(runtime)
+      do iat = 1, mol%nat
+         izp = mol%id(iat)
+         do jat = 1, iat - 1
+            jzp = mol%id(jat)
+            vec = mol%xyz(:, jat) - mol%xyz(:, iat)
+            r2 = dot_product(vec, vec)
+            gam = 1.0_wp / sqrt(self%rad(izp)**2 + self%rad(jzp)**2)
+            arg = gam * gam * r2
+            dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) - erf(sqrt(arg)) / (r2 * sqrt(r2))
+            dG = dtmp * vec
+            dS = spread(dG, 1, 3) * spread(vec, 2, 3)
+
+            ! Weights for the pair
+            W_ij = p(iat) * cache%vrhs(jat) + p(jat) * cache%vrhs(iat)
+
+            gradient_local(:, iat) = gradient_local(:, iat) - dG * W_ij
+            gradient_local(:, jat) = gradient_local(:, jat) + dG * W_ij
+            sigma_local(:, :)   = sigma_local(:, :)   + dS * W_ij
+
+         end do
+
+      end do
+      !$omp end do
+
+      !$omp critical
+      gradient = gradient + gradient_local
+      sigma = sigma + sigma_local
+      !$omp end critical
+
+      deallocate(gradient_local, sigma_local)
+      !$omp end parallel
+
+   end subroutine get_pT_damat_0d
 
 end module multicharge_model_eeq
