@@ -490,40 +490,42 @@ contains
             !print'(3es21.14)', asigma_list
             !write(*, *)
          else
-            !allocate(bgrad_dir(3, mol%nat), source = 0.0_wp)
-            !allocate(bsigma_dir(3, 3), source = 0.0_wp)
-            !allocate(agrad_dir(3, mol%nat), source = 0.0_wp)
-            !allocate(asigma_dir(3, 3), source = 0.0_wp)
-            !call gemv(cache%dxdr(:, :, :mol%nat), cache%vrhs(:mol%nat), bgrad_dir, beta=1.0_wp, alpha=1.0_wp)
-            !call gemv(cache%dxdL(:, :, :mol%nat), cache%vrhs(:mol%nat), bsigma_dir, beta=1.0_wp, alpha=1.0_wp)
-            !write(*, *) "BGRAD DIR:"
-            !print'(3es21.14)', bgrad_dir
-            !write(*, *) "BSIGMA DIR:"
-            !print'(3es21.14)', bsigma_dir
-            !write(*, *)
-            !call self%get_pT_dbdR(mol, cache, -cache%vrhs(:mol%nat), gradient, sigma)
-            !write(*, *) "Gradient:"
-            !print'(3es21.14)', gradient
-            !write(*, *) "SIgma:"
-            !print'(3es21.14)', sigma
-            !write(*, *)
-            !gradient = 0.0_wp
-            !sigma = 0.0_wp
-            !call gemv(cache%dadr(:, :, :mol%nat), cache%vrhs(:mol%nat), agrad_dir, beta=1.0_wp, alpha=1.0_wp)
-            !call gemv(cache%dadL(:, :, :mol%nat), cache%vrhs(:mol%nat), asigma_dir, beta=1.0_wp, alpha=1.0_wp)
-            !write(*, *) "AGRAD DIR:"
-            !print'(3es21.14)', agrad_dir
-            !write(*, *) "ASIGMA DIR:"
-            !print'(3es21.14)', asigma_dir
-            !write(*, *)
-            !call self%get_pT_damat(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, list)
-            !write(*, *) "Gradient:"
-            !print'(3es21.14)', gradient
-            !write(*, *) "SIgma:"
-            !print'(3es21.14)', sigma
-            !write(*, *)
-            !gradient = 0.0_wp
-            !sigma = 0.0_wp
+            allocate(bgrad_dir(3, mol%nat), source = 0.0_wp)
+            allocate(bsigma_dir(3, 3), source = 0.0_wp)
+            allocate(agrad_dir(3, mol%nat), source = 0.0_wp)
+            allocate(asigma_dir(3, 3), source = 0.0_wp)
+            call gemv(cache%dxdr(:, :, :mol%nat), cache%vrhs(:mol%nat), bgrad_dir, beta=1.0_wp, alpha=1.0_wp)
+            call gemv(cache%dxdL(:, :, :mol%nat), cache%vrhs(:mol%nat), bsigma_dir, beta=1.0_wp, alpha=1.0_wp)
+            write(*, *) "BGRAD DIR:"
+            print'(3es21.14)', bgrad_dir
+            write(*, *) "BSIGMA DIR:"
+            print'(3es21.14)', bsigma_dir
+            write(*, *)
+            gradient = 0.0_wp
+            sigma = 0.0_wp
+            call self%get_pT_dbdR(mol, cache, cache%vrhs(:mol%nat), gradient, sigma)
+            write(*, *) "Gradient:"
+            print'(3es21.14)', gradient
+            write(*, *) "SIgma:"
+            print'(3es21.14)', sigma
+            write(*, *)
+            gradient = 0.0_wp
+            sigma = 0.0_wp
+            call gemv(cache%dadr(:, :, :mol%nat), cache%vrhs(:mol%nat), agrad_dir, beta=1.0_wp, alpha=1.0_wp)
+            call gemv(cache%dadL(:, :, :mol%nat), cache%vrhs(:mol%nat), asigma_dir, beta=1.0_wp, alpha=1.0_wp)
+            write(*, *) "AGRAD DIR:"
+            print'(3es21.14)', agrad_dir
+            write(*, *) "ASIGMA DIR:"
+            print'(3es21.14)', asigma_dir
+            write(*, *)
+            call self%get_pT_damat(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, list)
+            write(*, *) "Gradient:"
+            print'(3es21.14)', gradient
+            write(*, *) "SIgma:"
+            print'(3es21.14)', sigma
+            write(*, *)
+            gradient = 0.0_wp
+            sigma = 0.0_wp
 
 
             call timer%push("dadr_setup")
