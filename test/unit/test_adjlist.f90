@@ -50,17 +50,17 @@ contains
       type(unittest_type), allocatable, intent(out) :: testsuite(:)
 
       testsuite = [ &
-      ! & new_unittest("eeqbc-charges-mb01", test_eeqbc_q_mb01), &
-      ! & new_unittest("eeqbc-charges-mb02", test_eeqbc_q_mb02), &
-      ! & new_unittest("eeqbc-charges-actinides", test_eeqbc_q_actinides), &
-      ! & new_unittest("eeqbc-energy-mb03", test_eeqbc_e_mb03), &
-      ! & new_unittest("eeqbc-energy-mb04", test_eeqbc_e_mb04), &
-      ! & new_unittest("eeqbc-gradient-mb05", test_eeqbc_g_mb05), &
-      ! & new_unittest("eeqbc-gradient-mb06", test_eeqbc_g_mb06), &
-      ! & new_unittest("eeqbc-energy-co2", test_eeqbc_e_co2),  &
-      ! & new_unittest("eeqbc-energy-ice", test_eeqbc_e_ice), &
-      ! & new_unittest("eeqbc-energy-ice-supercell", test_eeqbc_e_ice222), &
-      ! & new_unittest("eeqbc-gradient-co2", test_eeqbc_g_co2), &
+      & new_unittest("eeqbc-charges-mb01", test_eeqbc_q_mb01), &
+      & new_unittest("eeqbc-charges-mb02", test_eeqbc_q_mb02), &
+      & new_unittest("eeqbc-charges-actinides", test_eeqbc_q_actinides), &
+      & new_unittest("eeqbc-energy-mb03", test_eeqbc_e_mb03), &
+      & new_unittest("eeqbc-energy-mb04", test_eeqbc_e_mb04), &
+      & new_unittest("eeqbc-gradient-mb05", test_eeqbc_g_mb05), &
+      & new_unittest("eeqbc-gradient-mb06", test_eeqbc_g_mb06), &
+      & new_unittest("eeqbc-energy-co2", test_eeqbc_e_co2),  &
+      & new_unittest("eeqbc-energy-ice", test_eeqbc_e_ice), &
+      & new_unittest("eeqbc-energy-ice-supercell", test_eeqbc_e_ice222), &
+      & new_unittest("eeqbc-gradient-co2", test_eeqbc_g_co2), &
       & new_unittest("eeqbc-gradient-ice", test_eeqbc_g_ice) &
       & ]
 
