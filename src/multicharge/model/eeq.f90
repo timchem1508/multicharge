@@ -119,6 +119,8 @@ contains
          allocate(cache%cn(mol%nat))
       end if
 
+      cache%trans = trans
+
       ! Refer CN arrays in cache
       if (grad) then
          if (.not. allocated(cache%dcndr)) then
@@ -711,41 +713,40 @@ contains
    subroutine get_pT_dbdR(self, mol, cache, q, gradient, sigma, list)
       class(eeq_model), intent(in) :: self
       type(structure_type), intent(in) :: mol
-      type(mchrg_cache), intent(in) :: cache
-      real(wp), intent(in) :: q(:)          ! Vector p
+      type(mchrg_cache), intent(in) :: cache   ! contains cn, dcndr, dcndL
+      real(wp), intent(in) :: q(:)
       real(wp), intent(inout) :: gradient(:, :)
       real(wp), intent(inout) :: sigma(:, :)
-      type(adjacency_list), optional, intent(in) :: list
+      type(adjacency_list), intent(in), optional :: list
 
-      integer :: iat, jat
-      real(wp), allocatable :: w_cn(:)
-      real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
-      real(wp), allocatable :: trans(:,:)
       real(wp), parameter :: reg = 1.0e-14_wp
+      real(wp) :: tmp
+      integer :: iat, izp, j
+      real(wp), allocatable :: w_cn(:)
+      real(wp), allocatable :: trans(:, :)
 
+      ! Thread‑private reduction arrays
+      real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
+
+
+      allocate(w_cn(mol%nat))
       allocate(gradient_local(3, mol%nat), source=0.0_wp)
       allocate(sigma_local(3, 3), source=0.0_wp)
 
-      if (any(mol%periodic)) then
-         call get_dir_trans(mol%lattice, trans)
-      else
-         allocate(trans(3, 1), source=0.0_wp)
-      end if
-
-      allocate(w_cn(mol%nat), source=0.0_wp)
-
       ! Compute chain rule weights
       do iat = 1, mol%nat
-         w_cn(iat) = 0.5_wp * self%kcnchi(mol%id(iat)) / sqrt(cache%cn(iat) + reg) * q(iat)
+         izp = mol%id(iat)
+         tmp = self%kcnchi(izp) / sqrt(cache%cn(iat) + reg)
+         w_cn(iat) = 0.5_wp * tmp * q(iat)
       end do
 
       ! sum_i q_i * (db_i / dCN_i) * (dCN_i / dR)
-      call self%ncoord%add_coordination_number_derivs(mol, trans, w_cn, gradient_local, sigma_local)
+      call self%ncoord%add_coordination_number_derivs_cut(mol, cache%trans, w_cn, gradient_local, sigma_local)
 
       gradient(:, :) = gradient(:, :) + gradient_local(:, :)
       sigma(:, :) = sigma(:, :) + sigma_local(:, :)
 
-      deallocate(w_cn, trans, gradient_local, sigma_local)
+      deallocate(w_cn, gradient_local, sigma_local)
    end subroutine get_pT_dbdR
 
 
@@ -761,7 +762,7 @@ contains
       type(adjacency_list), optional, intent(in) :: list
 
       if (any(mol%periodic)) then
-         ! call get_pT_damat_3d(self, mol, cache, p, gradient, sigma)
+         call get_pT_damat_3d(self, mol, cache, p, gradient, sigma)
       else
          call get_pT_damat_0d(self, mol, cache, p, gradient, sigma)
       end if
@@ -827,5 +828,83 @@ contains
       !$omp end parallel
 
    end subroutine get_pT_damat_0d
+
+   subroutine get_pT_damat_3d(self, mol, cache, p, gradient, sigma)
+      !> EEQ model type
+      class(eeq_model), intent(in) :: self
+      type(structure_type), intent(in) :: mol
+      type(mchrg_cache), intent(in) :: cache
+      real(wp), intent(in) :: p(:)
+      real(wp), intent(inout) :: gradient(:, :)
+      real(wp), intent(inout) :: sigma(:, :)
+
+      integer :: iat, jat, izp, jzp, img
+      real(wp) :: vec(3), r2, gam, arg, dtmp
+      real(wp) :: dG(3), dS(3, 3), dGd(3), dSd(3, 3), dGr(3), dSr(3, 3)
+      real(wp) :: W_ij, W_ii, wsw, vol
+      real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
+      real(wp), allocatable :: dtrans(:, :), rtrans(:, :)
+
+      vol = abs(matdet_3x3(mol%lattice))
+      call get_dir_trans(mol%lattice, dtrans)
+      call get_rec_trans(mol%lattice, rtrans)
+
+
+      !$omp parallel default(none) &
+      !$omp shared(cache, mol, self, p, gradient, sigma, vol, dtrans, rtrans) &
+      !$omp private(iat, izp, jat, jzp, gam, vec, r2, dtmp, arg, wsw) &
+      !$omp private(W_ii, W_ij, gradient_local, sigma_local) &
+      !$omp private(dG, dS, dGd, dSd, dGr, dSr)
+      allocate(gradient_local(3, mol%nat))
+      allocate(sigma_local(3, 3))
+      gradient_local = 0.0_wp
+      sigma_local = 0.0_wp
+
+      !$omp do schedule(runtime)
+      do iat = 1, mol%nat
+         izp = mol%id(iat)
+         do jat = 1, iat - 1
+            jzp = mol%id(jat)
+            dG(:) = 0.0_wp
+            dS(:, :) = 0.0_wp
+            gam = 1.0_wp / sqrt(self%rad(izp)**2 + self%rad(jzp)**2)
+            wsw = 1.0_wp / real(cache%wsc%nimg(jat, iat), wp)
+            do img = 1, cache%wsc%nimg(jat, iat)
+               vec = mol%xyz(:, jat) - mol%xyz(:, iat) + cache%wsc%trans(:, cache%wsc%tridx(img, jat, iat))
+               call get_damat_dir_3d(vec, gam, cache%alpha, dtrans, dGd, dSd)
+               call get_damat_rec_3d(vec, vol, cache%alpha, rtrans, dGr, dSr)
+               dG = dG + (dGd + dGr) * wsw
+               dS = dS + (dSd + dSr) * wsw
+            end do
+            ! Weights for the pair
+            W_ij = p(iat) * cache%vrhs(jat) + p(jat) * cache%vrhs(iat)
+
+            gradient_local(:, iat) = gradient_local(:, iat) - dG * W_ij
+            gradient_local(:, jat) = gradient_local(:, jat) + dG * W_ij
+            sigma_local(:, :) = sigma_local(:, :) + dS * W_ij
+         end do
+         dS(:, :) = 0.0_wp
+         W_ii = p(iat) * cache%vrhs(iat)
+         gam = 1.0_wp / sqrt(2.0_wp * self%rad(izp)**2)
+         wsw = 1.0_wp / real(cache%wsc%nimg(iat, iat), wp)
+         do img = 1, cache%wsc%nimg(iat, iat)
+            vec = cache%wsc%trans(:, cache%wsc%tridx(img, iat, iat))
+            call get_damat_dir_3d(vec, gam, cache%alpha, dtrans, dGd, dSd)
+            call get_damat_rec_3d(vec, vol, cache%alpha, rtrans, dGr, dSr)
+            dS = dS + (dSd + dSr) * wsw
+         end do
+         sigma_local(:, :) = sigma_local(:, :) + dS * W_ii
+      end do
+      !$omp end do
+
+      !$omp critical
+      gradient = gradient + gradient_local
+      sigma = sigma + sigma_local
+      !$omp end critical
+
+      deallocate(gradient_local, sigma_local)
+      !$omp end parallel
+
+   end subroutine get_pT_damat_3d
 
 end module multicharge_model_eeq
