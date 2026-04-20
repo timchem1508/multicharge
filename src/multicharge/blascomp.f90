@@ -54,7 +54,7 @@ contains
 !=========================================================
 ! GEMV 111
 !=========================================================
-   pure subroutine gemv_cmp_111(list, mlist, mdiag, x, y, alpha, beta, symmetric)
+   subroutine gemv_cmp_111(list, mlist, mdiag, x, y, alpha, beta, symmetric)
       type(adjacency_list), intent(in) :: list
       real(wp), intent(in)  :: mlist(:)
       real(wp), intent(in)  :: mdiag(:)
@@ -77,6 +77,7 @@ contains
          y(:) = beta * y(:)
       end if
 
+      !$omp parallel do default(shared) private(i, k, j) reduction(+:y) schedule(static)
       do i = 1, size(list%nnl)
 
          do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
@@ -99,59 +100,55 @@ contains
          end if
 
       end do
+      !$omp end parallel do
    end subroutine gemv_cmp_111
-
 
 !=========================================================
 ! GEMV 212
 !=========================================================
-   pure subroutine gemv_cmp_212(list, mdrij, mdrji, mdrdiag, x, y, alpha, beta)
-      !> Assumes wp (working precision) and adjacency_list type 
-      !> are accessible via module or host association.
+   subroutine gemv_cmp_212(list, mdrij, mdrji, mdrdiag, x, y, alpha, beta)
       type(adjacency_list), intent(in) :: list
-      real(wp), intent(in)  :: mdrij(:,:)   ! Dimensions: (3, n_edges)
-      real(wp), intent(in)  :: mdrji(:,:)   ! Dimensions: (3, n_edges)
-      real(wp), intent(in)  :: mdrdiag(:,:) ! Dimensions: (3, nat)
-      real(wp), intent(in)  :: x(:)         ! Dimensions: (nat)
-      real(wp), intent(inout) :: y(:,:)     ! Dimensions: (3, nat)
+      real(wp), intent(in)  :: mdrij(:,:)
+      real(wp), intent(in)  :: mdrji(:,:)
+      real(wp), intent(in)  :: mdrdiag(:,:)
+      real(wp), intent(in)  :: x(:)
+      real(wp), intent(inout) :: y(:,:)
       real(wp), intent(in), optional :: alpha
       real(wp), intent(in), optional :: beta
 
       real(wp) :: a, b
       integer  :: i, j, k
 
-      ! 1. Parse optional arguments
       a = 1.0_wp
       if (present(alpha)) a = alpha
       b = 0.0_wp
       if (present(beta)) b = beta
 
-      ! 2. Apply beta scaling upfront
       if (b == 0.0_wp) then
          y(:, :) = 0.0_wp
       else if (b /= 1.0_wp) then
          y(:, :) = b * y(:, :)
       end if
 
-      ! 3. Accumulate matrix-vector product
+      !$omp parallel do default(shared) private(i, k, j) reduction(+:y) schedule(static)
       do i = 1, size(list%nnl)
-         
-         ! Off-diagonal contributions
+
          do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
             j = list%nlat(k)
-            
-            ! Contribution to y(:, i) from x(j) -> Forward edge A(:, i, j)
+
+            ! Forward edge A(:, i, j)
             y(:, i) = y(:, i) + a * mdrij(:, k) * x(j)
-            
-            ! Contribution to y(:, j) from x(i) -> Backward edge A(:, j, i)
+
+            ! Backward edge A(:, j, i)
             y(:, j) = y(:, j) + a * mdrji(:, k) * x(i)
 
          end do
 
-         ! Diagonal contribution: A(:, i, i) * x(i)
+         ! Diagonal contribution
          y(:, i) = y(:, i) + a * mdrdiag(:, i) * x(i)
-         
+
       end do
+      !$omp end parallel do
 
    end subroutine gemv_cmp_212
 
@@ -162,7 +159,7 @@ contains
 ! Matches the 9-argument signature with explicit i->j
 ! (drij) and j->i (drji) directed edge dependencies.
 !=========================================================
-   pure subroutine gemv_cmp_212_dir(list, mlist_drij, mlist_drji, mdiag, x, y, alpha, beta, symmetric)
+   subroutine gemv_cmp_212_dir(list, mlist_drij, mlist_drji, mdiag, x, y, alpha, beta, symmetric)
       type(adjacency_list), intent(in) :: list
       real(wp), intent(in)  :: mlist_drij(:,:)
       real(wp), intent(in)  :: mlist_drji(:,:)
@@ -187,15 +184,16 @@ contains
          y(:,:) = beta * y(:,:)
       end if
 
+      !$omp parallel do default(shared) private(i, k, j) reduction(+:y) schedule(static)
       do i = 1, size(list%nnl)
 
          do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
             j = list%nlat(k)
 
-            ! Contribution to node i from neighbor j (using forward edge)
+            ! Contribution to node i
             y(:, i) = y(:, i) + alpha * mlist_drij(:, k) * x(j)
 
-            ! Contribution to node j from node i (using backward edge)
+            ! Contribution to node j
             if (is_sym) then
                y(:, j) = y(:, j) + alpha * mlist_drji(:, k) * x(i)
             else
@@ -203,13 +201,12 @@ contains
             end if
          end do
 
-         ! Diagonal logic follows established pattern: applied only if symmetric
          if (is_sym) then
             y(:, i) = y(:, i) + alpha * mdiag(:, i) * x(i)
          end if
       end do
+      !$omp end parallel do
    end subroutine gemv_cmp_212_dir
-
 
 !=========================================================
 ! GEMM 122
@@ -445,123 +442,123 @@ contains
 ! Matches the 12-argument signature with explicit i->j
 ! (drij) and j->i (drji) directed edge dependencies.
 !=========================================================
-pure subroutine gemm_cmp_211_dir(list, clist, cdiag, drij, drji, ddiag, &
-                                 xrij, xrji, xdiag, alpha, beta)
-   use, intrinsic :: iso_fortran_env, only: wp => real64
-   type(adjacency_list), intent(in) :: list
-   real(wp), intent(in)    :: clist(:)          ! B off‑diagonal (i<j)
-   real(wp), intent(in)    :: cdiag(:)          ! B diagonal
-   real(wp), intent(in)    :: drij(:, :)        ! A(:,i,j) for i<j
-   real(wp), intent(in)    :: drji(:, :)        ! A(:,j,i) for i<j
-   real(wp), intent(in)    :: ddiag(:, :)       ! A(:,i,i)
-   real(wp), intent(inout) :: xrij(:, :)        ! C(:,i,j) for i<j
-   real(wp), intent(inout) :: xrji(:, :)        ! C(:,j,i) for i<j
-   real(wp), intent(inout) :: xdiag(:, :)       ! C(:,i,i)
-   real(wp), intent(in)    :: alpha, beta
-
-   integer :: i, j, k, idx_ij, idx_ik, idx_jk
-   integer :: ncomp
-   real(wp) :: A_ij(3), A_ji(3), B_ij, B_ik, B_jk, B_ii, B_jj
-
-   ncomp = size(drij, 1)   ! number of components (here 3)
-
-   ! ----- beta scaling -----
-   if (beta == 0.0_wp) then
-      xrij  = 0.0_wp
-      xrji  = 0.0_wp
-      xdiag = 0.0_wp
-   else if (beta /= 1.0_wp) then
-      xrij  = beta * xrij
-      xrji  = beta * xrji
-      xdiag = beta * xdiag
-   end if
-
-   ! ----- Off‑diagonal contributions from A(i,j) and A(j,i) -----
-   do i = 1, size(list%nnl)
-      B_ii = cdiag(i)
-      do idx_ij = list%inl(i) + 1, list%inl(i) + list%nnl(i)
-         j = list%nlat(idx_ij)
-
-         A_ij = drij(:, idx_ij)
-         A_ji = drji(:, idx_ij)
-         B_ij = clist(idx_ij)
-         B_jj = cdiag(j)
-
-         ! 1) C(i,j) += alpha * A(i,j) * B(j,j)
-         xrij(:, idx_ij) = xrij(:, idx_ij) + alpha * A_ij * B_jj
-         !    C(j,i) += alpha * A(j,i) * B(i,i)
-         xrji(:, idx_ij) = xrji(:, idx_ij) + alpha * A_ji * B_ii
-
-         ! 2) Diagonal contributions from this pair
-         !    C(i,i) += alpha * A(i,j) * B(j,i)  (B(j,i)=B_ij)
-         xdiag(:, i) = xdiag(:, i) + alpha * A_ij * B_ij
-         !    C(j,j) += alpha * A(j,i) * B(i,j)  (B(i,j)=B_ij)
-         xdiag(:, j) = xdiag(:, j) + alpha * A_ji * B_ij
-
-         ! 3) Coupling to other neighbours:
-         !    a) For every neighbour k of j (k /= i):
-         !       C(i,k) += alpha * A(i,j) * B(j,k)
-         do idx_jk = list%inl(j) + 1, list%inl(j) + list%nnl(j)
-            k = list%nlat(idx_jk)
-            if (k == i) cycle
-            B_jk = clist(idx_jk)
-            if (i < k) then
-               idx_ik = find_index(list, i, k)   ! helper function (see below)
-               xrij(:, idx_ik) = xrij(:, idx_ik) + alpha * A_ij * B_jk
-            else if (i > k) then
-               idx_ik = find_index(list, k, i)   ! stored as (k,i)
-               xrji(:, idx_ik) = xrji(:, idx_ik) + alpha * A_ij * B_jk
-            end if
-         end do
-
-         !    b) For every neighbour k of i (k /= j):
-         !       C(j,k) += alpha * A(j,i) * B(i,k)
-         do idx_ik = list%inl(i) + 1, list%inl(i) + list%nnl(i)
-            k = list%nlat(idx_ik)
-            if (k == j) cycle
-            B_ik = clist(idx_ik)
-            if (j < k) then
-               idx_jk = find_index(list, j, k)
-               xrij(:, idx_jk) = xrij(:, idx_jk) + alpha * A_ji * B_ik
-            else if (j > k) then
-               idx_jk = find_index(list, k, j)
-               xrji(:, idx_jk) = xrji(:, idx_jk) + alpha * A_ji * B_ik
-            end if
-         end do
-      end do
-   end do
-
-   ! ----- Diagonal contributions from A(i,i) -----
-   do i = 1, size(list%nnl)
-      A_ij = ddiag(:, i)          ! actually A_ii
-      B_ii = cdiag(i)
-
-      ! C(i,i) += alpha * A(i,i) * B(i,i)
-      xdiag(:, i) = xdiag(:, i) + alpha * A_ij * B_ii
-
-      ! C(i,j) += alpha * A(i,i) * B(i,j)   for j > i
-      do idx_ij = list%inl(i) + 1, list%inl(i) + list%nnl(i)
-         B_ij = clist(idx_ij)
-         xrij(:, idx_ij) = xrij(:, idx_ij) + alpha * A_ij * B_ij
-         ! Note: C(j,i) does *not* get a contribution from A(i,i)
-      end do
-   end do
-
-contains
-   ! Helper: find compressed index for pair (i,j) with i < j
-   pure function find_index(list, i, j) result(idx)
+   pure subroutine gemm_cmp_211_dir(list, clist, cdiag, drij, drji, ddiag, &
+      xrij, xrji, xdiag, alpha, beta)
+      use, intrinsic :: iso_fortran_env, only: wp => real64
       type(adjacency_list), intent(in) :: list
-      integer, intent(in) :: i, j
-      integer :: idx, k
-      do idx = list%inl(i) + 1, list%inl(i) + list%nnl(i)
-         if (list%nlat(idx) == j) return
-      end do
-      idx = 0   ! should never happen if (i,j) is a neighbour pair
-   end function
-end subroutine gemm_cmp_211_dir
+      real(wp), intent(in)    :: clist(:)          ! B off‑diagonal (i<j)
+      real(wp), intent(in)    :: cdiag(:)          ! B diagonal
+      real(wp), intent(in)    :: drij(:, :)        ! A(:,i,j) for i<j
+      real(wp), intent(in)    :: drji(:, :)        ! A(:,j,i) for i<j
+      real(wp), intent(in)    :: ddiag(:, :)       ! A(:,i,i)
+      real(wp), intent(inout) :: xrij(:, :)        ! C(:,i,j) for i<j
+      real(wp), intent(inout) :: xrji(:, :)        ! C(:,j,i) for i<j
+      real(wp), intent(inout) :: xdiag(:, :)       ! C(:,i,i)
+      real(wp), intent(in)    :: alpha, beta
 
-pure subroutine gemm_cmp_212(list, clist, cdiag, dtmpdrij, dtmpdrji, dtmpdrdiag, &
-         & dxdrij, dxdrji, dxdrdiag, alpha, beta)
+      integer :: i, j, k, idx_ij, idx_ik, idx_jk
+      integer :: ncomp
+      real(wp) :: A_ij(3), A_ji(3), B_ij, B_ik, B_jk, B_ii, B_jj
+
+      ncomp = size(drij, 1)   ! number of components (here 3)
+
+      ! ----- beta scaling -----
+      if (beta == 0.0_wp) then
+         xrij  = 0.0_wp
+         xrji  = 0.0_wp
+         xdiag = 0.0_wp
+      else if (beta /= 1.0_wp) then
+         xrij  = beta * xrij
+         xrji  = beta * xrji
+         xdiag = beta * xdiag
+      end if
+
+      ! ----- Off‑diagonal contributions from A(i,j) and A(j,i) -----
+      do i = 1, size(list%nnl)
+         B_ii = cdiag(i)
+         do idx_ij = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+            j = list%nlat(idx_ij)
+
+            A_ij = drij(:, idx_ij)
+            A_ji = drji(:, idx_ij)
+            B_ij = clist(idx_ij)
+            B_jj = cdiag(j)
+
+            ! 1) C(i,j) += alpha * A(i,j) * B(j,j)
+            xrij(:, idx_ij) = xrij(:, idx_ij) + alpha * A_ij * B_jj
+            !    C(j,i) += alpha * A(j,i) * B(i,i)
+            xrji(:, idx_ij) = xrji(:, idx_ij) + alpha * A_ji * B_ii
+
+            ! 2) Diagonal contributions from this pair
+            !    C(i,i) += alpha * A(i,j) * B(j,i)  (B(j,i)=B_ij)
+            xdiag(:, i) = xdiag(:, i) + alpha * A_ij * B_ij
+            !    C(j,j) += alpha * A(j,i) * B(i,j)  (B(i,j)=B_ij)
+            xdiag(:, j) = xdiag(:, j) + alpha * A_ji * B_ij
+
+            ! 3) Coupling to other neighbours:
+            !    a) For every neighbour k of j (k /= i):
+            !       C(i,k) += alpha * A(i,j) * B(j,k)
+            do idx_jk = list%inl(j) + 1, list%inl(j) + list%nnl(j)
+               k = list%nlat(idx_jk)
+               if (k == i) cycle
+               B_jk = clist(idx_jk)
+               if (i < k) then
+                  idx_ik = find_index(list, i, k)   ! helper function (see below)
+                  xrij(:, idx_ik) = xrij(:, idx_ik) + alpha * A_ij * B_jk
+               else if (i > k) then
+                  idx_ik = find_index(list, k, i)   ! stored as (k,i)
+                  xrji(:, idx_ik) = xrji(:, idx_ik) + alpha * A_ij * B_jk
+               end if
+            end do
+
+            !    b) For every neighbour k of i (k /= j):
+            !       C(j,k) += alpha * A(j,i) * B(i,k)
+            do idx_ik = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+               k = list%nlat(idx_ik)
+               if (k == j) cycle
+               B_ik = clist(idx_ik)
+               if (j < k) then
+                  idx_jk = find_index(list, j, k)
+                  xrij(:, idx_jk) = xrij(:, idx_jk) + alpha * A_ji * B_ik
+               else if (j > k) then
+                  idx_jk = find_index(list, k, j)
+                  xrji(:, idx_jk) = xrji(:, idx_jk) + alpha * A_ji * B_ik
+               end if
+            end do
+         end do
+      end do
+
+      ! ----- Diagonal contributions from A(i,i) -----
+      do i = 1, size(list%nnl)
+         A_ij = ddiag(:, i)          ! actually A_ii
+         B_ii = cdiag(i)
+
+         ! C(i,i) += alpha * A(i,i) * B(i,i)
+         xdiag(:, i) = xdiag(:, i) + alpha * A_ij * B_ii
+
+         ! C(i,j) += alpha * A(i,i) * B(i,j)   for j > i
+         do idx_ij = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+            B_ij = clist(idx_ij)
+            xrij(:, idx_ij) = xrij(:, idx_ij) + alpha * A_ij * B_ij
+            ! Note: C(j,i) does *not* get a contribution from A(i,i)
+         end do
+      end do
+
+   contains
+      ! Helper: find compressed index for pair (i,j) with i < j
+      pure function find_index(list, i, j) result(idx)
+         type(adjacency_list), intent(in) :: list
+         integer, intent(in) :: i, j
+         integer :: idx, k
+         do idx = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+            if (list%nlat(idx) == j) return
+         end do
+         idx = 0   ! should never happen if (i,j) is a neighbour pair
+      end function
+   end subroutine gemm_cmp_211_dir
+
+   pure subroutine gemm_cmp_212(list, clist, cdiag, dtmpdrij, dtmpdrji, dtmpdrdiag, &
+   & dxdrij, dxdrji, dxdrdiag, alpha, beta)
       !> Assumes wp (working precision) is accessible via module or host association.
       !> import :: wp
       type(adjacency_list), intent(in) :: list
@@ -569,7 +566,7 @@ pure subroutine gemm_cmp_212(list, clist, cdiag, dtmpdrij, dtmpdrji, dtmpdrdiag,
       real(wp), intent(in) :: dtmpdrij(:,:), dtmpdrji(:,:), dtmpdrdiag(:,:)
       real(wp), intent(inout) :: dxdrij(:,:), dxdrji(:,:), dxdrdiag(:,:)
       real(wp), intent(in) :: alpha, beta
-      
+
       integer :: nat, n_edges, i, j, k, e
       integer :: idx, idx_k, idx_y, y, e_k, e_y, m
       integer, allocatable :: deg(:), head(:)
