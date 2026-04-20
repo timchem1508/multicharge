@@ -186,7 +186,7 @@ module multicharge_model_type
          type(adjacency_list), intent(in), optional :: list
       end subroutine get_xvec_derivs
 
-      subroutine get_pT_dbdR(self, mol, cache, q, gradient, sigma, list)
+      subroutine get_pT_dbdR(self, mol, cache, q, gradient, sigma, alpha, list)
          import :: mchrg_model_type, structure_type, mchrg_cache, adjacency_list, wp
          !> EEQBC model type
          class(mchrg_model_type), intent(in) :: self
@@ -198,11 +198,12 @@ module multicharge_model_type
          !> Output derivatives (accumulated)
          real(wp), intent(inout) :: gradient(:, :)  ! forces (3, nat)
          real(wp), intent(inout) :: sigma(:, :)     ! stress (3, 3)
+         real(wp), intent(in), optional :: alpha
          !> Neighbour list (each unordered pair appears once)
          type(adjacency_list), intent(in), optional :: list
       end subroutine get_pT_dbdR
 
-      subroutine get_pT_damat(self, mol, cache, p, gradient, sigma, list)
+      subroutine get_pT_damat(self, mol, cache, p, gradient, sigma, alpha, list)
          import :: mchrg_model_type, structure_type, mchrg_cache, adjacency_list, wp
          !> EEQBC model type
          class(mchrg_model_type), intent(in) :: self
@@ -211,6 +212,7 @@ module multicharge_model_type
          real(wp), intent(in) :: p(:)
          real(wp), intent(inout) :: gradient(:, :)
          real(wp), intent(inout) :: sigma(:, :)
+         real(wp), intent(in), optional :: alpha
          type(adjacency_list), intent(in), optional :: list
       end subroutine get_pT_damat
 
@@ -456,18 +458,15 @@ contains
             !allocate(agrad_list(3, mol%nat), source = 0.0_wp)
             !allocate(asigma_list(3, 3), source = 0.0_wp)
             call timer%push("dadr_setup")
-            call self%get_pT_damat(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, list)
+            call self%get_pT_damat(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, alpha = 0.5_wp, list = list)
             call timer%pop
             if (verbosity_solve > 1) then
                write(output_unit, '(a, 1x, a)') "Coulomb matrix derivatives setup time : ", format_time(timer%get("dadr_setup"))
                write(output_unit, '(a)') ''
             end if
 
-            gradient = 0.5_wp * gradient
-            sigma = 0.5_wp * sigma
-
             call timer%push("dxdr_setup")
-            call self%get_pT_dbdR(mol, cache, -cache%vrhs(:mol%nat), gradient, sigma, list)
+            call self%get_pT_dbdR(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, alpha = -1.0_wp, list = list)
             call timer%pop
             if (verbosity_solve > 1) then
                write(output_unit, '(a, 1x, a)') "Electronegativity derivatives setup time : ", format_time(timer%get("dxdr_setup"))
@@ -497,13 +496,13 @@ contains
             !call gemv(cache%dxdr(:, :, :mol%nat), cache%vrhs(:mol%nat), bgrad_dir, beta=1.0_wp, alpha=1.0_wp)
             !call gemv(cache%dxdL(:, :, :mol%nat), cache%vrhs(:mol%nat), bsigma_dir, beta=1.0_wp, alpha=1.0_wp)
             !write(*, *) "BGRAD DIR:"
-            !print'(3es21.14)', bgrad_dir
+            !print'(3es21.14)', -bgrad_dir
             !write(*, *) "BSIGMA DIR:"
-            !print'(3es21.14)', bsigma_dir
+            !print'(3es21.14)', -bsigma_dir
             !write(*, *)
             !gradient = 0.0_wp
             !sigma = 0.0_wp
-            !call self%get_pT_dbdR(mol, cache, cache%vrhs(:mol%nat), gradient, sigma)
+            !call self%get_pT_dbdR(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, alpha = -1.0_wp)
             !write(*, *) "Gradient:"
             !print'(3es21.14)', gradient
             !write(*, *) "SIgma:"
@@ -514,11 +513,11 @@ contains
             !call gemv(cache%dadr(:, :, :mol%nat), cache%vrhs(:mol%nat), agrad_dir, beta=1.0_wp, alpha=1.0_wp)
             !call gemv(cache%dadL(:, :, :mol%nat), cache%vrhs(:mol%nat), asigma_dir, beta=1.0_wp, alpha=1.0_wp)
             !write(*, *) "AGRAD DIR:"
-            !print'(3es21.14)', agrad_dir
+            !print'(3es21.14)', 0.5_wp * agrad_dir
             !write(*, *) "ASIGMA DIR:"
-            !print'(3es21.14)', asigma_dir
+            !print'(3es21.14)', 0.5_wp * asigma_dir
             !write(*, *)
-            !call self%get_pT_damat(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, list)
+            !call self%get_pT_damat(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, alpha = 0.5_wp, list = list)
             !write(*, *) "Gradient:"
             !print'(3es21.14)', gradient
             !write(*, *) "SIgma:"
@@ -529,18 +528,15 @@ contains
 
 
             call timer%push("dadr_setup")
-            call self%get_pT_damat(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, list)
+            call self%get_pT_damat(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, alpha = 0.5_wp)
             call timer%pop
             if (verbosity_solve > 1) then
                write(output_unit, '(a, 1x, a)') "Coulomb matrix derivatives setup time : ", format_time(timer%get("dadr_setup"))
                write(output_unit, '(a)') ''
             end if
 
-            gradient = 0.5_wp * gradient
-            sigma = 0.5_wp * sigma
-
             call timer%push("dxdr_setup")
-            call self%get_pT_dbdR(mol, cache, -cache%vrhs(:mol%nat), gradient, sigma, list)
+            call self%get_pT_dbdR(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, alpha = -1.0_wp)
             call timer%pop
             if (verbosity_solve > 1) then
                write(output_unit, '(a, 1x, a)') "Electronegativity derivatives setup time : ", format_time(timer%get("dxdr_setup"))
@@ -603,8 +599,6 @@ contains
 
       integer :: iat
       integer :: ndim
-      real(wp), allocatable :: daqxdr(:,:,:)
-      real(wp), allocatable :: daqxdL(:,:,:)
       real(wp), allocatable :: yvec(:)
       real(wp), allocatable :: unitvec(:)
       real(wp), allocatable :: padj(:)
@@ -640,16 +634,6 @@ contains
       call timer%push("external_gradient")
 
       ! Get variables from the model cache
-      if (allocated(cache%dadr) .and. allocated(cache%dadL) &
-      & .and. allocated(cache%dxdr) .and. allocated(cache%dxdL)) then
-         allocate(daqxdr(3, mol%nat, mol%nat), &
-         & source=cache%dxdr(:, :, :mol%nat) - cache%dadr(:, :, :mol%nat))
-         allocate(daqxdL(3, 3, mol%nat), &
-         & source=cache%dxdL(:, :, :mol%nat) - cache%dadL(:, :, :mol%nat))
-      else
-         call fatal_error(error, "J-matrix and electronegativity derivatives are not allocated")
-         return
-      end if
       if (.not. allocated(cache%amat)) then
          call fatal_error(error, "J-matrix is not allocated")
          return
@@ -677,13 +661,6 @@ contains
          scale = yvecsum / (uvecsum + eps)
          allocate(padj(mol%nat))
          padj = yvec - scale * cache%uvec
-
-         ! Evaluate external gradients via adjoint contraction:
-         ! dfdr = p^T * (db/dr - dA/dr X q)
-         call gemv(daqxdr, padj, dfdr, alpha=1.0_wp, beta=0.0_wp)
-         ! dfdL = p^T * (db/dL - dA/dL X q)
-         call gemv(daqxdL, padj, dfdL, alpha=1.0_wp, beta=0.0_wp)
-
       else
          allocate(padj(ndim))
 
@@ -691,13 +668,25 @@ contains
          call print_adjoint_message(print_unit, verbosity_solve)
          call solver%solve(amat=cache%amat, xvec=dfdq_loc, vrhs=padj, new_unit=print_unit, error=error)
          if (allocated(error)) return
+      end if
 
-         ! Evaluate external gradients via adjoint contraction:
-         ! dfdr = p^T * (db/dr - dA/dr X q)
-         call gemv(daqxdr, padj, dfdr, alpha=1.0_wp, beta=0.0_wp)
-         ! dfdL = p^T * (db/dL - dA/dL X q)
-         call gemv(daqxdL, padj, dfdL, alpha=1.0_wp, beta=0.0_wp)
+      ! Evaluate external gradients via adjoint contraction:
+      ! dfdr = p^T * (db/dr - dA/dr X q)
 
+      call timer%push("dadr_setup")
+      call self%get_pT_damat(mol, cache, padj(:mol%nat), dfdr, dfdL, alpha = -1.0_wp, list = list)
+      call timer%pop
+      if (verbosity_solve > 1) then
+         write(output_unit, '(a, 1x, a)') "Coulomb matrix derivatives setup time : ", format_time(timer%get("dadr_setup"))
+         write(output_unit, '(a)') ''
+      end if
+
+      call timer%push("dxdr_setup")
+      call self%get_pT_dbdR(mol, cache, padj(:mol%nat), dfdr, dfdL, alpha = 1.0_wp, list = list)
+      call timer%pop
+      if (verbosity_solve > 1) then
+         write(output_unit, '(a, 1x, a)') "Electronegativity derivatives setup time : ", format_time(timer%get("dxdr_setup"))
+         write(output_unit, '(a)') ''
       end if
 
       ! pop dfdr timer
