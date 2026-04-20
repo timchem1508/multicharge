@@ -710,17 +710,18 @@ contains
 
    end subroutine get_damat_rec_3d
 
-   subroutine get_pT_dbdR(self, mol, cache, q, gradient, sigma, list)
+   subroutine get_pT_dbdR(self, mol, cache, q, gradient, sigma, alpha, list)
       class(eeq_model), intent(in) :: self
       type(structure_type), intent(in) :: mol
       type(mchrg_cache), intent(in) :: cache   ! contains cn, dcndr, dcndL
       real(wp), intent(in) :: q(:)
       real(wp), intent(inout) :: gradient(:, :)
       real(wp), intent(inout) :: sigma(:, :)
+      real(wp), intent(in), optional :: alpha
       type(adjacency_list), intent(in), optional :: list
 
       real(wp), parameter :: reg = 1.0e-14_wp
-      real(wp) :: tmp
+      real(wp) :: tmp, factor
       integer :: iat, izp, j
       real(wp), allocatable :: w_cn(:)
       real(wp), allocatable :: trans(:, :)
@@ -728,6 +729,8 @@ contains
       ! Thread‑private reduction arrays
       real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
 
+      factor = 1.0_wp
+      if (present(alpha)) factor = alpha
 
       allocate(w_cn(mol%nat))
       allocate(gradient_local(3, mol%nat), source=0.0_wp)
@@ -743,14 +746,13 @@ contains
       ! sum_i q_i * (db_i / dCN_i) * (dCN_i / dR)
       call self%ncoord%add_coordination_number_derivs_cut(mol, cache%trans, w_cn, gradient_local, sigma_local)
 
-      gradient(:, :) = gradient(:, :) + gradient_local(:, :)
-      sigma(:, :) = sigma(:, :) + sigma_local(:, :)
+      gradient(:, :) = gradient(:, :) + factor * gradient_local(:, :)
+      sigma(:, :) = sigma(:, :) + factor * sigma_local(:, :)
 
       deallocate(w_cn, gradient_local, sigma_local)
    end subroutine get_pT_dbdR
 
-
-   subroutine get_pT_damat(self, mol, cache, p, gradient, sigma, list)
+   subroutine get_pT_damat(self, mol, cache, p, gradient, sigma, alpha, list)
       !> EEQ model type
       class(eeq_model), intent(in) :: self
       type(structure_type), intent(in) :: mol
@@ -758,17 +760,18 @@ contains
       real(wp), intent(in) :: p(:)
       real(wp), intent(inout) :: gradient(:, :)
       real(wp), intent(inout) :: sigma(:, :)
+      real(wp), intent(in), optional :: alpha
       !> Neighbour list (each unordered pair appears once)
       type(adjacency_list), optional, intent(in) :: list
 
       if (any(mol%periodic)) then
-         call get_pT_damat_3d(self, mol, cache, p, gradient, sigma)
+         call get_pT_damat_3d(self, mol, cache, p, gradient, sigma, alpha)
       else
-         call get_pT_damat_0d(self, mol, cache, p, gradient, sigma)
+         call get_pT_damat_0d(self, mol, cache, p, gradient, sigma, alpha)
       end if
    end subroutine get_pT_damat
 
-   subroutine get_pT_damat_0d(self, mol, cache, p, gradient, sigma)
+   subroutine get_pT_damat_0d(self, mol, cache, p, gradient, sigma, alpha)
       !> EEQ model type
       class(eeq_model), intent(in) :: self
       type(structure_type), intent(in) :: mol
@@ -776,17 +779,20 @@ contains
       real(wp), intent(in) :: p(:)
       real(wp), intent(inout) :: gradient(:, :)
       real(wp), intent(inout) :: sigma(:, :)
+      real(wp), intent(in), optional :: alpha
 
       integer :: iat, jat, izp, jzp
-      real(wp) :: vec(3), r2, gam, arg, dtmp
+      real(wp) :: vec(3), r2, gam, arg, dtmp, factor
       real(wp) :: dG(3), dS(3, 3)
       real(wp) :: W_ij
       real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
       real(wp), allocatable :: dtrans(:, :)
 
+      factor = 1.0_wp
+      if (present(alpha)) factor = alpha
 
       !$omp parallel default(none) &
-      !$omp shared(cache, mol, self, p, gradient, sigma) &
+      !$omp shared(cache, mol, self, p, gradient, sigma, factor) &
       !$omp private(iat, izp, jat, jzp, gam, vec, r2, dtmp, arg) &
       !$omp private(W_ij, gradient_local, sigma_local, dG, dS)
       allocate(gradient_local(3, mol%nat))
@@ -820,8 +826,8 @@ contains
       !$omp end do
 
       !$omp critical
-      gradient = gradient + gradient_local
-      sigma = sigma + sigma_local
+      gradient = gradient + factor * gradient_local
+      sigma = sigma + factor * sigma_local
       !$omp end critical
 
       deallocate(gradient_local, sigma_local)
@@ -829,7 +835,7 @@ contains
 
    end subroutine get_pT_damat_0d
 
-   subroutine get_pT_damat_3d(self, mol, cache, p, gradient, sigma)
+   subroutine get_pT_damat_3d(self, mol, cache, p, gradient, sigma, alpha)
       !> EEQ model type
       class(eeq_model), intent(in) :: self
       type(structure_type), intent(in) :: mol
@@ -837,9 +843,10 @@ contains
       real(wp), intent(in) :: p(:)
       real(wp), intent(inout) :: gradient(:, :)
       real(wp), intent(inout) :: sigma(:, :)
+      real(wp), intent(in), optional :: alpha
 
       integer :: iat, jat, izp, jzp, img
-      real(wp) :: vec(3), r2, gam, arg, dtmp
+      real(wp) :: vec(3), r2, gam, arg, dtmp, factor
       real(wp) :: dG(3), dS(3, 3), dGd(3), dSd(3, 3), dGr(3), dSr(3, 3)
       real(wp) :: W_ij, W_ii, wsw, vol
       real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
@@ -849,9 +856,11 @@ contains
       call get_dir_trans(mol%lattice, dtrans)
       call get_rec_trans(mol%lattice, rtrans)
 
+      factor = 1.0_wp
+      if (present(alpha)) factor = alpha
 
       !$omp parallel default(none) &
-      !$omp shared(cache, mol, self, p, gradient, sigma, vol, dtrans, rtrans) &
+      !$omp shared(cache, mol, self, p, gradient, sigma, vol, dtrans, rtrans, factor) &
       !$omp private(iat, izp, jat, jzp, gam, vec, r2, dtmp, arg, wsw) &
       !$omp private(W_ii, W_ij, gradient_local, sigma_local) &
       !$omp private(dG, dS, dGd, dSd, dGr, dSr)
@@ -898,8 +907,8 @@ contains
       !$omp end do
 
       !$omp critical
-      gradient = gradient + gradient_local
-      sigma = sigma + sigma_local
+      gradient = gradient + factor * gradient_local
+      sigma = sigma + factor * sigma_local
       !$omp end critical
 
       deallocate(gradient_local, sigma_local)
