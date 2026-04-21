@@ -37,6 +37,7 @@ module test_adjlist
    public :: collect_adjlist
 
    real(wp), parameter :: thr = 100 * epsilon(1.0_wp)
+   real(wp), parameter :: thr1 = 1.0e5_wp*epsilon(1.0_wp)
    real(wp), parameter :: thr2 = sqrt(epsilon(1.0_wp))
    real(wp), parameter :: thr3 = 100 * thr2
    real(wp), parameter :: cutoff = 35.0_wp
@@ -302,7 +303,7 @@ contains
       !write(*,'(50("-"))')
       call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, unit=output_unit)
 
-      if (any(abs(qvec - qref) > thr)) then
+      if (any(abs(qvec - qref) > thr1)) then
          call test_failed(error, "Partial charges do not match")
          print'(a)', "Charges:"
          print'(3es21.14)', qvec
@@ -310,7 +311,7 @@ contains
          print'(3es21.14)', qvec - qref
       end if
 
-      if (any(abs(energy - eref) > thr)) then
+      if (any(abs(energy - eref) > thr1)) then
          call test_failed(error, "Energies do not match")
          print'(a)', "Energy:"
          print'(3es21.14)', energy

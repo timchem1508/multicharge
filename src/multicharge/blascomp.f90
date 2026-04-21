@@ -80,12 +80,8 @@ contains
          y(:) = beta * y(:)
       end if
 
-      !$omp parallel default(none) &
-      !$omp shared(list, y, x, mlist, mdiag, alpha, is_sym) & 
-      !$omp private(i, k, j, y_loc) 
       allocate(y_loc, mold = y)
       y_loc(:) = 0.0_wp
-      !$omp do schedule(runtime)
       do i = 1, size(list%nnl)
          do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
             j = list%nlat(k)
@@ -103,11 +99,8 @@ contains
             y(i) = y(i) + alpha * mdiag(i) * x(i)
          end if
       end do
-      !$omp end do
-      !$omp critical
+
       y(:) = y(:) + y_loc(:)
-      !$omp end critical
-      !$omp end parallel
 
    end subroutine gemv_cmp_111
 
@@ -140,14 +133,10 @@ contains
          y(:, :) = b * y(:, :)
       end if
 
-      !$omp parallel default(none) &
-      !$omp shared(list, y, x, mdrij, mdrji, mdrdiag, a) & 
-      !$omp private(i, k, j, y_loc) 
       
       allocate(y_loc, mold=y)
       y_loc = 0.0_wp
 
-      !$omp do schedule(runtime)
       do i = 1, size(list%nnl)
          do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
             j = list%nlat(k)
@@ -160,15 +149,10 @@ contains
          ! Diagonal contribution
          y_loc(:, i) = y_loc(:, i) + a * mdrdiag(:, i) * x(i)
       end do
-      !$omp end do
 
-      ! Step 2: Thread-safe merge
-      !$omp critical
       y = y + y_loc
-      !$omp end critical
       
       deallocate(y_loc)
-      !$omp end parallel
 
    end subroutine gemv_cmp_212
 !=========================================================
@@ -204,14 +188,9 @@ contains
          y(:,:) = beta * y(:,:)
       end if
 
-      !$omp parallel default(none) &
-      !$omp shared(list, y, x, mlist_drij, mlist_drji, mdiag, alpha, is_sym) & 
-      !$omp private(i, k, j, y_loc) 
-
       allocate(y_loc, mold=y)
       y_loc = 0.0_wp
 
-      !$omp do schedule(runtime)
       do i = 1, size(list%nnl)
          do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
             j = list%nlat(k)
@@ -230,14 +209,10 @@ contains
             y_loc(:, i) = y_loc(:, i) + alpha * mdiag(:, i) * x(i)
          end if
       end do
-      !$omp end do
 
-      !$omp critical
       y = y + y_loc
-      !$omp end critical
 
       deallocate(y_loc)
-      !$omp end parallel
 
    end subroutine gemv_cmp_212_dir
 
