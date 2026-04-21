@@ -325,38 +325,30 @@ contains
       !> Multicharge neighbourlist type
       type(adjacency_list), intent(in), optional :: list
 
-      integer :: iat, izp, img, idx, itr, jat, start_idx, end_idx
+      integer :: iat, izp, img, idx
       real(wp) :: ctmp, vec(3), rvdw, capi, wsw
       real(wp), allocatable :: dtrans(:, :)
 
       ! Thread-private array for reduction
-      real(wp), allocatable :: xvec_local(:), xtmp(:)
+      real(wp), allocatable :: xvec_local(:)
 
       if (.not. allocated(cache%xtmp)) then
-         allocate(cache%xtmp(ndim), source = 0.0_wp)
+         allocate(cache%xtmp(ndim))
       end if
 
       if (.not. allocated(cache%xvec)) then
-         allocate(cache%xvec(ndim), source = 0.0_wp)
+         allocate(cache%xvec(ndim))
       end if
 
       cache%xvec(:) = 0.0_wp
-      !$omp parallel default(none)  &
+      !$omp parallel do default(none) schedule(runtime) &
       !$omp shared(mol, self, cache) &
-      !$omp private(iat, izp, xtmp)
-      allocate(xtmp, mold=cache%xtmp)
-      !$omp do schedule(runtime)
+      !$omp private(iat, izp)
       do iat = 1, mol%nat
          izp = mol%id(iat)
-         xtmp(iat) = -self%chi(izp) + self%kcnchi(izp) * cache%cn(iat) &
+         cache%xtmp(iat) = -self%chi(izp) + self%kcnchi(izp) * cache%cn(iat) &
          & + self%kqchi(izp) * cache%qloc(iat)
       end do
-      !$omp end do
-      !$omp critical (get_xvec_)
-      cache%xtmp(:) = xtmp(:)
-      !$omp end critical (get_xvec_)
-      !$omp end parallel
-
 
       ! Only write the extra element if xtmp has room for it (i.e., for constrained systems)
       if (size(cache%xtmp) == mol%nat + 1) then
