@@ -66,47 +66,55 @@ contains
       integer :: i, k, j
       logical :: is_sym
 
+      real(wp), allocatable :: y_loc(:)
+
       is_sym = .true.
       if (present(symmetric)) is_sym = symmetric
 
       if (size(mlist) /= size(list%nlat)) return
 
+      ! Initialize y in parallel
       if (beta == 0.0_wp) then
          y(:) = 0.0_wp
       else if (beta /= 1.0_wp) then
          y(:) = beta * y(:)
       end if
 
-      !$omp parallel do default(shared) private(i, k, j) reduction(+:y) schedule(static)
+      !$omp parallel default(none) &
+      !$omp shared(list, y, x, mlist, mdiag, alpha, is_sym) & 
+      !$omp private(i, k, j, y_loc) 
+      allocate(y_loc, mold = y)
+      y_loc(:) = 0.0_wp
+      !$omp do schedule(runtime)
       do i = 1, size(list%nnl)
-
          do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
             j = list%nlat(k)
-
-            ! A(i,j)
+            ! A(i,j) - Protected by atomic
             y(i) = y(i) + alpha * mlist(k) * x(j)
-
-            ! Mirror entry
+            ! Mirror entry - Protected by atomic
             if (is_sym) then
                y(j) = y(j) + alpha * mlist(k) * x(i)
             else
                y(j) = y(j) - alpha * mlist(k) * x(i)
             end if
          end do
-
          ! Diagonal only for symmetric matrices
          if (is_sym) then
             y(i) = y(i) + alpha * mdiag(i) * x(i)
          end if
-
       end do
-      !$omp end parallel do
+      !$omp end do
+      !$omp critical
+      y(:) = y(:) + y_loc(:)
+      !$omp end critical
+      !$omp end parallel
+
    end subroutine gemv_cmp_111
 
 !=========================================================
 ! GEMV 212
 !=========================================================
-   subroutine gemv_cmp_212(list, mdrij, mdrji, mdrdiag, x, y, alpha, beta)
+ subroutine gemv_cmp_212(list, mdrij, mdrji, mdrdiag, x, y, alpha, beta)
       type(adjacency_list), intent(in) :: list
       real(wp), intent(in)  :: mdrij(:,:)
       real(wp), intent(in)  :: mdrji(:,:)
@@ -118,40 +126,51 @@ contains
 
       real(wp) :: a, b
       integer  :: i, j, k
+      real(wp), allocatable :: y_loc(:,:)
 
       a = 1.0_wp
       if (present(alpha)) a = alpha
       b = 0.0_wp
       if (present(beta)) b = beta
 
+      ! Step 1: Scale global y
       if (b == 0.0_wp) then
          y(:, :) = 0.0_wp
       else if (b /= 1.0_wp) then
          y(:, :) = b * y(:, :)
       end if
 
-      !$omp parallel do default(shared) private(i, k, j) reduction(+:y) schedule(static)
-      do i = 1, size(list%nnl)
+      !$omp parallel default(none) &
+      !$omp shared(list, y, x, mdrij, mdrji, mdrdiag, a) & 
+      !$omp private(i, k, j, y_loc) 
+      
+      allocate(y_loc, mold=y)
+      y_loc = 0.0_wp
 
+      !$omp do schedule(runtime)
+      do i = 1, size(list%nnl)
          do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
             j = list%nlat(k)
 
-            ! Forward edge A(:, i, j)
-            y(:, i) = y(:, i) + a * mdrij(:, k) * x(j)
-
-            ! Backward edge A(:, j, i)
-            y(:, j) = y(:, j) + a * mdrji(:, k) * x(i)
-
+            ! Update LOCAL buffer
+            y_loc(:, i) = y_loc(:, i) + a * mdrij(:, k) * x(j)
+            y_loc(:, j) = y_loc(:, j) + a * mdrji(:, k) * x(i)
          end do
 
          ! Diagonal contribution
-         y(:, i) = y(:, i) + a * mdrdiag(:, i) * x(i)
-
+         y_loc(:, i) = y_loc(:, i) + a * mdrdiag(:, i) * x(i)
       end do
-      !$omp end parallel do
+      !$omp end do
+
+      ! Step 2: Thread-safe merge
+      !$omp critical
+      y = y + y_loc
+      !$omp end critical
+      
+      deallocate(y_loc)
+      !$omp end parallel
 
    end subroutine gemv_cmp_212
-
 !=========================================================
 ! GEMV 212 DIRECTED
 !
@@ -159,7 +178,7 @@ contains
 ! Matches the 9-argument signature with explicit i->j
 ! (drij) and j->i (drji) directed edge dependencies.
 !=========================================================
-   subroutine gemv_cmp_212_dir(list, mlist_drij, mlist_drji, mdiag, x, y, alpha, beta, symmetric)
+ subroutine gemv_cmp_212_dir(list, mlist_drij, mlist_drji, mdiag, x, y, alpha, beta, symmetric)
       type(adjacency_list), intent(in) :: list
       real(wp), intent(in)  :: mlist_drij(:,:)
       real(wp), intent(in)  :: mlist_drji(:,:)
@@ -171,6 +190,7 @@ contains
 
       integer :: i, k, j
       logical :: is_sym
+      real(wp), allocatable :: y_loc(:,:)
 
       is_sym = .true.
       if (present(symmetric)) is_sym = symmetric
@@ -184,28 +204,41 @@ contains
          y(:,:) = beta * y(:,:)
       end if
 
-      !$omp parallel do default(shared) private(i, k, j) reduction(+:y) schedule(static)
-      do i = 1, size(list%nnl)
+      !$omp parallel default(none) &
+      !$omp shared(list, y, x, mlist_drij, mlist_drji, mdiag, alpha, is_sym) & 
+      !$omp private(i, k, j, y_loc) 
 
+      allocate(y_loc, mold=y)
+      y_loc = 0.0_wp
+
+      !$omp do schedule(runtime)
+      do i = 1, size(list%nnl)
          do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
             j = list%nlat(k)
 
-            ! Contribution to node i
-            y(:, i) = y(:, i) + alpha * mlist_drij(:, k) * x(j)
+            ! Update LOCAL buffer
+            y_loc(:, i) = y_loc(:, i) + alpha * mlist_drij(:, k) * x(j)
 
-            ! Contribution to node j
             if (is_sym) then
-               y(:, j) = y(:, j) + alpha * mlist_drji(:, k) * x(i)
+               y_loc(:, j) = y_loc(:, j) + alpha * mlist_drji(:, k) * x(i)
             else
-               y(:, j) = y(:, j) - alpha * mlist_drji(:, k) * x(i)
+               y_loc(:, j) = y_loc(:, j) - alpha * mlist_drji(:, k) * x(i)
             end if
          end do
 
          if (is_sym) then
-            y(:, i) = y(:, i) + alpha * mdiag(:, i) * x(i)
+            y_loc(:, i) = y_loc(:, i) + alpha * mdiag(:, i) * x(i)
          end if
       end do
-      !$omp end parallel do
+      !$omp end do
+
+      !$omp critical
+      y = y + y_loc
+      !$omp end critical
+
+      deallocate(y_loc)
+      !$omp end parallel
+
    end subroutine gemv_cmp_212_dir
 
 !=========================================================

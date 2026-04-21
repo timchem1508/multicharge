@@ -334,12 +334,15 @@ contains
       call timer%push("setup")
 
       call self%get_capacitance_matrix(mol, ndim, cache, list)
+      write (*, *) "Capacitance is calculated"
 
       ! Setup the Coulomb matrix
       call self%get_coulomb_matrix(mol, ndim, cache, list)
+      write (*, *) "A-matrix is calculated"
 
       ! Get RHS of ES equation
       call self%get_xvec(mol, ndim, cache, list)
+      write (*, *) "XVEC is calculated"
       if (.not. allocated(cache%vrhs)) then
          allocate(cache%vrhs(mol%nat + 1))
       end if

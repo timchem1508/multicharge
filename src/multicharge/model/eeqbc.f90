@@ -330,25 +330,33 @@ contains
       real(wp), allocatable :: dtrans(:, :)
 
       ! Thread-private array for reduction
-      real(wp), allocatable :: xvec_local(:)
+      real(wp), allocatable :: xvec_local(:), xtmp(:)
 
       if (.not. allocated(cache%xtmp)) then
-         allocate(cache%xtmp(ndim))
+         allocate(cache%xtmp(ndim), source = 0.0_wp)
       end if
 
       if (.not. allocated(cache%xvec)) then
-         allocate(cache%xvec(ndim))
+         allocate(cache%xvec(ndim), source = 0.0_wp)
       end if
 
       cache%xvec(:) = 0.0_wp
-      !$omp parallel do default(none) schedule(runtime) &
+      !$omp parallel default(none)  &
       !$omp shared(mol, self, cache) &
-      !$omp private(iat, izp)
+      !$omp private(iat, izp, xtmp)
+      allocate(xtmp, mold=cache%xtmp)
+      !$omp do schedule(runtime)
       do iat = 1, mol%nat
          izp = mol%id(iat)
-         cache%xtmp(iat) = -self%chi(izp) + self%kcnchi(izp) * cache%cn(iat) &
+         xtmp(iat) = -self%chi(izp) + self%kcnchi(izp) * cache%cn(iat) &
          & + self%kqchi(izp) * cache%qloc(iat)
       end do
+      !$omp end do
+      !$omp critical (get_xvec_)
+      cache%xtmp(:) = xtmp(:)
+      !$omp end critical (get_xvec_)
+      !$omp end parallel
+
 
       ! Only write the extra element if xtmp has room for it (i.e., for constrained systems)
       if (size(cache%xtmp) == mol%nat + 1) then
