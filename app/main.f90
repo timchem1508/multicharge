@@ -95,7 +95,6 @@ program main
    end if
 
    
-
    ! Create neighbour list if requested
    if (use_nlist) then
       call timer%push("nlist")
@@ -151,7 +150,6 @@ program main
    if (verbosity > 1) then
       write(output_unit, '(a, 1x, a)') "Get coordination number time : ", format_time(timer%get("update"))
    end if
-
    call model%solve(mol, solver, cache, error, &
       & energy, gradient, sigma, qvec, dqdr, dqdL, list, verbosity=verbosity, unit=output_unit)
 
