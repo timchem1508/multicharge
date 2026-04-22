@@ -268,19 +268,9 @@ contains
       energy(:) = 0.0_wp
       allocate (qref(mol%nat))
       allocate (qvec(mol%nat))
-
       allocate(amat_dir(mol%nat, mol%nat), amat_list(mol%nat, mol%nat))
 
       call model%update(mol, cache, trans, grad=.false.)
-      !call model%get_capacitance_matrix(mol, mol%nat, cache)
-      !call model%get_xvec( mol, mol%nat, cache)
-      !call model%get_coulomb_matrix(mol, mol%nat, cache)
-      !amat_dir(:,:) = cache%amat
-      !write(*,*) "DIRECT AMAT"
-      !print'(12es21.14)', amat_dir
-      !write(*,*) "DIRECT XVEC"
-      !write(*,'(es21.14)') cache%xvec
-      !write(*,'(50("-"))')
       call model%solve(mol, solver, cache, error, energy=eref, qvec=qref, unit=output_unit)
 
 
@@ -292,15 +282,6 @@ contains
       allocate(list)
       call new_adjacency_list(list, mol, cutoff , .false.)
       call model%update(mol, cache, trans, grad=.false., list=list)
-      !call model%get_capacitance_matrix(mol, mol%nat, cache, list=list)
-      !call model%get_xvec( mol, mol%nat, cache, list=list)
-      !call model%get_coulomb_matrix(mol, mol%nat, cache)
-      !amat_dir(:,:) = cache%amat
-      !write(*,*) "DIRECT AMAT"
-      !print'(12es21.14)', amat_dir
-      !write(*,*) "LIST XVEC"
-      !write(*,'(es21.14)') cache%xvec
-      !write(*,'(50("-"))')
       call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, unit=output_unit)
 
       if (any(abs(qvec - qref) > thr1)) then
@@ -477,9 +458,7 @@ contains
       do iat = 1, mol%nat
          dcdrdiag(:, iat) = cache1%dcdr(:, iat, iat)
       end do
-      !write(*, *) "DCDR DIAGONAL DIRECT"
-      !print'(3es21.14)', dcdrdiag
-      !write(*, *)
+
       if (allocated(error)) return
 
       allocate(cache2)
@@ -492,11 +471,6 @@ contains
       call model%solve(mol, solver, cache2, error, &
       & gradient=gradient, sigma=sigma, list=list, unit=output_unit)
       if (allocated(error)) return
-
-      !write(*, *) "DCDR DIAGONAL LIST"
-      !print'(3es21.14)', cache2%dcdrdiag
-      !write(*, *)
-
 
       if (any(abs(gradient(:, :) - numgrad(:, :)) > thr3)) then
          call test_failed(error, "Derivative of energy does not match")
@@ -519,81 +493,6 @@ contains
       end if
 
    end subroutine test_numgrad_periodic
-
-   subroutine test_dadr(error, mol, model)
-
-
-      !> Molecular structure data
-      type(structure_type), intent(inout) :: mol
-
-      !> Electronegativity equilibration model
-      class(mchrg_model_type), intent(in) :: model
-
-      !> Error handling
-      type(error_type), allocatable, intent(out) :: error
-
-      ! Solver variables
-      class(mchrg_solver_type), allocatable :: solver
-      class(mchrg_solver_input), allocatable :: solver_input
-      real(wp) :: tol = 1.0e-15_wp
-      integer :: maxiter = 1000
-      integer :: verbosity = 0
-
-      integer :: iat, ic, jat, kat, ndim
-      real(wp) :: thr2_local
-      real(wp), parameter :: step = 1.0e-6_wp
-      real(wp), allocatable :: trans(:, :)
-      real(wp), allocatable :: qvec(:), numgrad(:, :, :),  numtrace(:, :)
-      real(wp), allocatable :: amatr1(:, :), amatr2(:, :), amatl1(:, :), amatl2(:, :)
-      type(mchrg_cache), allocatable :: cache
-      logical :: grad = .true.
-
-      allocate(cg_input :: solver_input)
-      select type (solver_input)
-       type is (cg_input)
-         solver_input%cgtol = tol
-         solver_input%cgmiter = maxiter
-         solver_input%verbosity = verbosity
-         ndim = mol%nat
-      end select
-      call solver_maker(solver, solver_input, error)
-
-      allocate (cache)
-
-      allocate (amatr1(ndim, ndim), amatl1(ndim, ndim), amatr2(ndim, ndim), amatl2(ndim, ndim), &
-      & numtrace(3, mol%nat), numgrad(3, mol%nat, ndim), qvec(mol%nat))
-
-      ! Set tolerance higher if testing eeqbc model
-      select type (model)
-       type is (eeqbc_model)
-         thr2_local = 3.0_wp*thr2
-       class default
-         thr2_local = thr2
-      end select
-
-      call get_lattice_points(mol%periodic, mol%lattice, sqrt(epsilon(0.0_wp)), trans)
-
-      ! Obtain the vector of charges
-      call model%update(mol, cache, trans, grad=.false.)
-      call model%solve(mol, solver, cache, error, qvec=qvec, unit=output_unit)
-      if (allocated(error)) return
-
-      ! Analytical gradient
-      call model%update(mol, cache, trans, grad)
-      call model%get_capacitance_matrix(mol, ndim, cache)
-      call model%get_coulomb_derivs(mol, ndim, cache)
-
-      if (any(abs(cache%dadr(:, :, :) - numgrad(:, :, :)) > thr2_local)) then
-         call test_failed(error, "Derivative of the A matrix does not match")
-         print'(a)', "dadr:"
-         print'(3es21.12)', cache%dadr
-         print'(a)', "numgrad:"
-         print'(3es21.12)', numgrad
-         print'(a)', "diff:"
-         print'(3es21.12)', cache%dadr - numgrad
-      end if
-
-   end subroutine test_dadr
 
 !------------------------------------------------------------------------
 ! Test routines – now each builds its own adjacency list.
