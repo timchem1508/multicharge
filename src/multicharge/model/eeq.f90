@@ -744,7 +744,7 @@ contains
       end do
 
       ! sum_i q_i * (db_i / dCN_i) * (dCN_i / dR)
-      call self%ncoord%add_coordination_number_derivs_cut(mol, cache%trans, w_cn, gradient_local, sigma_local)
+      call self%ncoord%add_coordination_number_derivs(mol, cache%trans, w_cn, gradient_local, sigma_local)
 
       gradient(:, :) = gradient(:, :) + factor * gradient_local(:, :)
       sigma(:, :) = sigma(:, :) + factor * sigma_local(:, :)
