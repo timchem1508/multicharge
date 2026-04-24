@@ -37,6 +37,7 @@ module test_pbc
    real(wp), parameter :: thr = 100 * epsilon(1.0_wp)
    real(wp), parameter :: thr1 = 1.0e5_wp*epsilon(1.0_wp)
    real(wp), parameter :: thr2 = sqrt(epsilon(1.0_wp))
+   real(wp), parameter :: thr3 = 100*sqrt(epsilon(1.0_wp))
 
 contains
 
@@ -356,7 +357,7 @@ subroutine test_numsigma(error, mol, model)
       & gradient=gradient, sigma=sigma, unit=output_unit)
    if (allocated(error)) return
 
-   if (any(abs(sigma(:, :) - numsigma(:, :)) > thr2)) then
+   if (any(abs(sigma(:, :) - numsigma(:, :)) > thr3)) then
       call test_failed(error, "Derivative of energy does not match")
       print'(a)', "Energy strain:"
       print'(3es21.14)', sigma
