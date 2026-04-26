@@ -52,7 +52,7 @@ module multicharge_blascomp
 contains
 
 !=========================================================
-! GEMV 111
+! GEMV 111 - Thread-safe OMP
 !=========================================================
    subroutine gemv_cmp_111(list, mlist, mdiag, x, y, alpha, beta, symmetric)
       type(adjacency_list), intent(in) :: list
@@ -63,51 +63,65 @@ contains
       real(wp), intent(in)  :: alpha, beta
       logical, intent(in), optional :: symmetric
 
-      integer :: i, k, j
+      integer :: i, k, j, n
       logical :: is_sym
-
-      real(wp), allocatable :: y_loc(:)
+      real(wp) :: y_tmp_i
 
       is_sym = .true.
       if (present(symmetric)) is_sym = symmetric
 
+      n = size(list%nnl)
       if (size(mlist) /= size(list%nlat)) return
 
-      ! Initialize y in parallel
-      if (beta == 0.0_wp) then
-         y(:) = 0.0_wp
-      else if (beta /= 1.0_wp) then
-         y(:) = beta * y(:)
-      end if
+      ! Step 1: Parallel Initialization/Scaling
+      !$omp parallel do default(shared) private(i)
+      do i = 1, size(y)
+         if (beta == 0.0_wp) then
+            y(i) = 0.0_wp
+         else if (beta /= 1.0_wp) then
+            y(i) = y(i) * beta
+         end if
+      end do
+      !$omp end parallel do
 
-      allocate(y_loc, mold = y)
-      y_loc(:) = 0.0_wp
-      do i = 1, size(list%nnl)
+      ! Step 2: Computation with Atomics
+      !$omp parallel do default(shared) private(i, k, j, y_tmp_i)
+      do i = 1, n
+         y_tmp_i = 0.0_wp
+
+         ! Diagonal contribution (usually only for symmetric)
+         if (is_sym) then
+            y_tmp_i = y_tmp_i + alpha * mdiag(i) * x(i)
+         end if
+
          do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
             j = list%nlat(k)
-            ! A(i,j) - Protected by atomic
-            y(i) = y(i) + alpha * mlist(k) * x(j)
-            ! Mirror entry - Protected by atomic
+
+            ! Part 1: Contribution to row i (accumulate locally)
+            y_tmp_i = y_tmp_i + alpha * mlist(k) * x(j)
+
+            ! Part 2: Contribution to row j (must be atomic)
             if (is_sym) then
+               !$omp atomic
                y(j) = y(j) + alpha * mlist(k) * x(i)
             else
+               !$omp atomic
                y(j) = y(j) - alpha * mlist(k) * x(i)
             end if
          end do
-         ! Diagonal only for symmetric matrices
-         if (is_sym) then
-            y(i) = y(i) + alpha * mdiag(i) * x(i)
-         end if
-      end do
 
-      y(:) = y(:) + y_loc(:)
+         ! Apply accumulated row i results to global y
+         !$omp atomic
+         y(i) = y(i) + y_tmp_i
+      end do
+      !$omp end parallel do
 
    end subroutine gemv_cmp_111
 
 !=========================================================
-! GEMV 212
+! GEMV 212 - Thread-safe OMP
 !=========================================================
- subroutine gemv_cmp_212(list, mdrij, mdrji, mdrdiag, x, y, alpha, beta)
+   subroutine gemv_cmp_212(list, mdrij, mdrji, mdrdiag, x, y, alpha, beta)
       type(adjacency_list), intent(in) :: list
       real(wp), intent(in)  :: mdrij(:,:)
       real(wp), intent(in)  :: mdrji(:,:)
@@ -118,51 +132,59 @@ contains
       real(wp), intent(in), optional :: beta
 
       real(wp) :: a, b
-      integer  :: i, j, k
-      real(wp), allocatable :: y_loc(:,:)
+      integer  :: i, j, k, m, n, nv
 
       a = 1.0_wp
       if (present(alpha)) a = alpha
       b = 0.0_wp
       if (present(beta)) b = beta
 
+      n = size(list%nnl)
+      nv = size(y, 1)
+
       ! Step 1: Scale global y
-      if (b == 0.0_wp) then
-         y(:, :) = 0.0_wp
-      else if (b /= 1.0_wp) then
-         y(:, :) = b * y(:, :)
-      end if
+      !$omp parallel do default(shared) private(i, m)
+      do i = 1, size(y, 2)
+         do m = 1, nv
+            if (b == 0.0_wp) then
+               y(m, i) = 0.0_wp
+            else if (b /= 1.0_wp) then
+               y(m, i) = y(m, i) * b
+            end if
+         end do
+      end do
+      !$omp end parallel do
 
-      
-      allocate(y_loc, mold=y)
-      y_loc = 0.0_wp
+      ! Step 2: Compute
+      !$omp parallel do default(shared) private(i, k, j, m)
+      do i = 1, n
+         ! Diagonal contribution
+         do m = 1, nv
+            !$omp atomic
+            y(m, i) = y(m, i) + a * mdrdiag(m, i) * x(i)
+         end do
 
-      do i = 1, size(list%nnl)
          do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
             j = list%nlat(k)
 
-            ! Update LOCAL buffer
-            y_loc(:, i) = y_loc(:, i) + a * mdrij(:, k) * x(j)
-            y_loc(:, j) = y_loc(:, j) + a * mdrji(:, k) * x(i)
+            ! Atomics required for both indices because j can be
+            ! modified by other threads, and i is modified by j updates.
+            do m = 1, nv
+               !$omp atomic
+               y(m, i) = y(m, i) + a * mdrij(m, k) * x(j)
+               !$omp atomic
+               y(m, j) = y(m, j) + a * mdrji(m, k) * x(i)
+            end do
          end do
-
-         ! Diagonal contribution
-         y_loc(:, i) = y_loc(:, i) + a * mdrdiag(:, i) * x(i)
       end do
-
-      y = y + y_loc
-      
-      deallocate(y_loc)
+      !$omp end parallel do
 
    end subroutine gemv_cmp_212
+
 !=========================================================
-! GEMV 212 DIRECTED
-!
-! Y = Beta * Y + Alpha * M * X
-! Matches the 9-argument signature with explicit i->j
-! (drij) and j->i (drji) directed edge dependencies.
+! GEMV 212 DIRECTED - Thread-safe OMP
 !=========================================================
- subroutine gemv_cmp_212_dir(list, mlist_drij, mlist_drji, mdiag, x, y, alpha, beta, symmetric)
+   subroutine gemv_cmp_212_dir(list, mlist_drij, mlist_drji, mdiag, x, y, alpha, beta, symmetric)
       type(adjacency_list), intent(in) :: list
       real(wp), intent(in)  :: mlist_drij(:,:)
       real(wp), intent(in)  :: mlist_drji(:,:)
@@ -172,47 +194,60 @@ contains
       real(wp), intent(in)  :: alpha, beta
       logical, intent(in), optional :: symmetric
 
-      integer :: i, k, j
+      integer :: i, k, j, m, n, nv
       logical :: is_sym
-      real(wp), allocatable :: y_loc(:,:)
 
       is_sym = .true.
       if (present(symmetric)) is_sym = symmetric
 
+      n = size(list%nnl)
+      nv = size(y, 1)
+
       if (size(mlist_drij, 2) /= size(list%nlat)) return
       if (size(mlist_drji, 2) /= size(list%nlat)) return
 
-      if (beta == 0.0_wp) then
-         y(:,:) = 0.0_wp
-      else if (beta /= 1.0_wp) then
-         y(:,:) = beta * y(:,:)
-      end if
+      ! Step 1: Scale global y
+      !$omp parallel do default(shared) private(i, m)
+      do i = 1, size(y, 2)
+         do m = 1, nv
+            if (beta == 0.0_wp) then
+               y(m, i) = 0.0_wp
+            else if (beta /= 1.0_wp) then
+               y(m, i) = y(m, i) * beta
+            end if
+         end do
+      end do
+      !$omp end parallel do
 
-      allocate(y_loc, mold=y)
-      y_loc = 0.0_wp
+      ! Step 2: Compute
+      !$omp parallel do default(shared) private(i, k, j, m)
+      do i = 1, n
+         ! Diagonal contribution
+         if (is_sym) then
+            do m = 1, nv
+               !$omp atomic
+               y(m, i) = y(m, i) + alpha * mdiag(m, i) * x(i)
+            end do
+         end if
 
-      do i = 1, size(list%nnl)
          do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
             j = list%nlat(k)
 
-            ! Update LOCAL buffer
-            y_loc(:, i) = y_loc(:, i) + alpha * mlist_drij(:, k) * x(j)
+            do m = 1, nv
+               !$omp atomic
+               y(m, i) = y(m, i) + alpha * mlist_drij(m, k) * x(j)
 
-            if (is_sym) then
-               y_loc(:, j) = y_loc(:, j) + alpha * mlist_drji(:, k) * x(i)
-            else
-               y_loc(:, j) = y_loc(:, j) - alpha * mlist_drji(:, k) * x(i)
-            end if
+               if (is_sym) then
+                  !$omp atomic
+                  y(m, j) = y(m, j) + alpha * mlist_drji(m, k) * x(i)
+               else
+                  !$omp atomic
+                  y(m, j) = y(m, j) - alpha * mlist_drji(m, k) * x(i)
+               end if
+            end do
          end do
-
-         if (is_sym) then
-            y_loc(:, i) = y_loc(:, i) + alpha * mdiag(:, i) * x(i)
-         end if
       end do
-
-      y = y + y_loc
-
-      deallocate(y_loc)
+      !$omp end parallel do
 
    end subroutine gemv_cmp_212_dir
 
