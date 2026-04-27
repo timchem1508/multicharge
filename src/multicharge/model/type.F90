@@ -376,6 +376,7 @@ contains
          call solver%solve(amat=cache%amat, alist=cache%alist, adiag=cache%adiag, xvec=unitvec, &
          & vrhs=cache%uvec, list=list, new_unit=print_unit, error=error)
          call print_constrained_system_message(print_unit, verbosity_solve, 'v')
+
          ! Constrained response: A*uvec = chi
          call solver%solve(amat=cache%amat, alist=cache%alist, adiag=cache%adiag, xvec=-cache%xvec, &
          & vrhs=vvec, list=list, new_unit=print_unit, error=error)

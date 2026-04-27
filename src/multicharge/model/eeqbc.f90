@@ -1076,6 +1076,7 @@ contains
 
       cache%amat(:, :) = 0.0_wp
 
+
       !$omp parallel default(none) &
       !$omp shared(cache, mol, self, dtrans)  &
       !$omp private(iat, izp, jat, jzp, gam, vec, dtmp, ctmp, norm_cn) &
@@ -1133,6 +1134,7 @@ contains
          cache%amat(1:mol%nat + 1, mol%nat + 1) = 1.0_wp
          cache%amat(mol%nat + 1, mol%nat + 1) = 0.0_wp
       end if
+
    end subroutine get_amat_3d
 
    subroutine get_amat_3d_list(self, mol, list, cache)
@@ -1205,6 +1207,7 @@ contains
       !$omp end critical (get_amat_3d_list_)
       deallocate(alist_local, adiag_local)
       !$omp end parallel
+
    end subroutine get_amat_3d_list
 
 !> Real-space contribution to the Coulomb matrix for the EEQBC model.
@@ -2234,6 +2237,10 @@ contains
       real(wp), allocatable :: dtrans(:, :)
       real(wp), allocatable :: clist_local(:), cdiag_local(:)
 
+
+      !DEBUG
+      real(wp), allocatable :: cmat(:, :)
+
       call get_dir_trans(mol%lattice, dtrans)
 
       clist(:) = 0.0_wp
@@ -2260,7 +2267,6 @@ contains
             capj = self%cap(jzp)
 
             ! Weight for equivalent images (Wigner-Seitz)
-            if (list%nimg(kat) == 0) cycle
             wsw = 1.0_wp / real(list%nimg(kat), wp)
             do img = 1, list%nimg(kat)
                ! Translation vector is now stored in list%trans indexed by list%tridx
