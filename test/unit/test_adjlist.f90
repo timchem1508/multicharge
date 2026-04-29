@@ -181,7 +181,7 @@ contains
 
       ! Build adjacency list
       allocate(list)
-      call new_adjacency_list(list, mol, cutoff, .false.)
+      call new_adjacency_list(list, mol, cutoff)
 
       call model%update(mol, cache, trans, grad=.false., list=list)
       call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, unit=output_unit)
@@ -280,7 +280,7 @@ contains
       deallocate(cache)
       allocate(cache)
       allocate(list)
-      call new_adjacency_list(list, mol, 29.0_wp, .false.)
+      call new_adjacency_list(list, mol, 29.0_wp)
       call model%update(mol, cache, trans, grad=.false., list=list)
       call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, unit=output_unit)
 
@@ -366,7 +366,7 @@ contains
       allocate(list)
       gradient = 0.0_wp
       sigma(:, :) = 0.0_wp
-      call new_adjacency_list(list, mol, cutoff, .false.)
+      call new_adjacency_list(list, mol, cutoff)
       call model%update(mol, cache2, trans, grad=.true., list=list)
 
       call model%solve(mol, solver, cache2, error, &
@@ -465,7 +465,7 @@ contains
       allocate(list)
       gradient = 0.0_wp
       sigma(:, :) = 0.0_wp
-      call new_adjacency_list(list, mol, 29.0_wp, .false.)
+      call new_adjacency_list(list, mol, 29.0_wp)
       call model%update(mol, cache2, trans, grad=.true., list=list)
 
       call model%solve(mol, solver, cache2, error, &
