@@ -20,11 +20,11 @@ program main
    use mctc_cutoff, only: get_lattice_points
    use mctc_ncoord, only: adjacency_list, new_adjacency_list
    use multicharge, only: mchrg_model_type, mchrg_model, mchrg_cache, new_eeq2019_model, &
-      & new_eeqbc2025_model, get_multicharge_version, &
-      & write_ascii_model, write_ascii_properties, write_ascii_results
+   & new_eeqbc2025_model, get_multicharge_version, &
+   & write_ascii_model, write_ascii_properties, write_ascii_results
    use multicharge_output, only: json_results
    use multicharge_solver, only: new_mchrg_solver, mchrg_solver_type, direct_solver, &
-      & cg_solver, mchrg_solver_input, cg_input, direct_input
+   & cg_solver, mchrg_solver_input, cg_input, direct_input
 
 
    implicit none
@@ -41,7 +41,7 @@ program main
    type(mchrg_cache), allocatable :: cache
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
-   logical :: grad, egrad, qgrad, json, exist, use_nlist, compl
+   logical :: grad, egrad, qgrad, json, exist, use_nlist
    real(wp), allocatable :: trans(:, :)
    real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
    real(wp), allocatable :: qvec(:)
@@ -53,8 +53,8 @@ program main
 
    call timer%push("total")
 
-   call get_arguments(input, model_id, use_nlist, cutoff, compl, input_format, egrad, qgrad, charge, json, &
-                      solver_input, verbosity, error)
+   call get_arguments(input, model_id, use_nlist, cutoff, input_format, egrad, qgrad, charge, json, &
+      solver_input, verbosity, error)
    if (allocated(error)) then
       write(error_unit, '(a)') error%message
       error stop
@@ -94,12 +94,12 @@ program main
       end if
    end if
 
-   
+
    ! Create neighbour list if requested
    if (use_nlist) then
       call timer%push("nlist")
       allocate(list)
-      call new_adjacency_list(list, mol, cutoff, compl)
+      call new_adjacency_list(list, mol, cutoff)
       call timer%pop
       write(output_unit, '(a, 1x, a)') "Neighbour list generation time :", format_time(timer%get("nlist"))
    end if
@@ -151,7 +151,7 @@ program main
       write(output_unit, '(a, 1x, a)') "Get coordination number time : ", format_time(timer%get("update"))
    end if
    call model%solve(mol, solver, cache, error, &
-      & energy, gradient, sigma, qvec, dqdr, dqdL, list, verbosity=verbosity, unit=output_unit)
+   & energy, gradient, sigma, qvec, dqdr, dqdL, list, verbosity=verbosity, unit=output_unit)
 
    if (allocated(error)) then
       write(error_unit, '(a)') error%message
@@ -176,261 +176,255 @@ program main
 
 contains
 
-subroutine help(unit)
-   integer, intent(in) :: unit
+   subroutine help(unit)
+      integer, intent(in) :: unit
 
-   write(unit, '(a, *(1x, a))') &
-      "Usage: "//prog_name//" [options] <input>"
+      write(unit, '(a, *(1x, a))') &
+         "Usage: "//prog_name//" [options] <input>"
 
-   write(unit, '(a)') &
-      "", &
-      "Electronegativity equilibration model for atomic charges and", &
-      "higher multipole moments", &
-      ""
+      write(unit, '(a)') &
+         "", &
+         "Electronegativity equilibration model for atomic charges and", &
+         "higher multipole moments", &
+         ""
 
-   write(unit, '(2x, a, t45, a)') &
-      "-m, -model, --model <model>", "Choose the charge model (eeq or eeqbc)", &
-      "-i, -input, --input <format>", "Hint for the format of the input file", &
-      "-c, -charge, --charge <value>", "Provide the molecular charge", &
-      "-solver, --solver <type>", "Provide the partial charge solver: 'cg' or 'direct' (default)", &
-      "-it, -maxiter, --maxiter <int>", "Provide the maximal number of CG iterations", &
-      "-tol, -tolerance, --tolerance <real>", "Provide the tolerance of the solver", &
-      "-g, -eg, -grad, --grad, -egrad, --egrad", "Evaluate molecular energy gradient and virial.", &
-      "-qg, -qgrad, --qgrad", "Evaluate molecular charge gradient and virial.", &
-      "-v, -verbose, --verbose", "Show more", &
-      "-s, -silent, --silent", "Show less", &
-      "-j, -json, --json", "Provide output in JSON format to the file 'multicharge.json'", &
-      "-version, --version", "Print program version and exit", &
-      "-h, -help, --help", "Show this help message"
+      write(unit, '(2x, a, t45, a)') &
+         "-m, -model, --model <model>", "Choose the charge model (eeq or eeqbc)", &
+         "-i, -input, --input <format>", "Hint for the format of the input file", &
+         "-c, -charge, --charge <value>", "Provide the molecular charge", &
+         "-solver, --solver <type>", "Provide the partial charge solver: 'cg' or 'direct' (default)", &
+         "-it, -maxiter, --maxiter <int>", "Provide the maximal number of CG iterations", &
+         "-tol, -tolerance, --tolerance <real>", "Provide the tolerance of the solver", &
+         "-g, -eg, -grad, --grad, -egrad, --egrad", "Evaluate molecular energy gradient and virial.", &
+         "-qg, -qgrad, --qgrad", "Evaluate molecular charge gradient and virial.", &
+         "-v, -verbose, --verbose", "Show more", &
+         "-s, -silent, --silent", "Show less", &
+         "-j, -json, --json", "Provide output in JSON format to the file 'multicharge.json'", &
+         "-version, --version", "Print program version and exit", &
+         "-h, -help, --help", "Show this help message"
 
-   write(unit, '(a)')
+      write(unit, '(a)')
 
-end subroutine help
+   end subroutine help
 
-subroutine version(unit)
-   integer, intent(in) :: unit
-   character(len=:), allocatable :: version_string
+   subroutine version(unit)
+      integer, intent(in) :: unit
+      character(len=:), allocatable :: version_string
 
-   call get_multicharge_version(string=version_string)
-   write(unit, '(a, *(1x, a))') &
+      call get_multicharge_version(string=version_string)
+      write(unit, '(a, *(1x, a))') &
       & prog_name, "version", version_string
 
-end subroutine version
+   end subroutine version
 
-subroutine get_arguments(input, model_id, use_nlist, cutoff, complete_nlist, &
+   subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
    & input_format, egrad, qgrad, charge, json, solver_input, verbosity, error)
 
-   !> Input file name
-   character(len=:), allocatable :: input
+      !> Input file name
+      character(len=:), allocatable :: input
 
-   !> ID of choosen model type
-   integer, intent(out) :: model_id
+      !> ID of choosen model type
+      integer, intent(out) :: model_id
 
-   !> Flag for neighbour list creation
-   logical, intent(out) :: use_nlist
+      !> Flag for neighbour list creation
+      logical, intent(out) :: use_nlist
 
-   !> Nlist cutoff
-   real(wp), intent(out) :: cutoff
+      !> Nlist cutoff
+      real(wp), intent(out) :: cutoff
 
-   !> Complete neighbourlist flag
-   logical, intent(out) :: complete_nlist
+      !> Input file format
+      integer, allocatable, intent(out) :: input_format
 
-   !> Input file format
-   integer, allocatable, intent(out) :: input_format
+      !> Evaluate energy gradient
+      logical, intent(out) :: egrad
 
-   !> Evaluate energy gradient
-   logical, intent(out) :: egrad
+      !> Evaluate charge gradient
+      logical, intent(out) :: qgrad
 
-   !> Evaluate charge gradient
-   logical, intent(out) :: qgrad
+      !> Charge
+      real(wp), allocatable, intent(out) :: charge
 
-   !> Charge
-   real(wp), allocatable, intent(out) :: charge
+      !> Provide JSON output
+      logical, intent(out) :: json
 
-   !> Provide JSON output
-   logical, intent(out) :: json
+      !> Solver args
+      class(mchrg_solver_input), allocatable, intent(out) :: solver_input
 
-   !> Solver args
-   class(mchrg_solver_input), allocatable, intent(out) :: solver_input
+      !> Verbosity number
+      integer, allocatable :: verbosity
 
-   !> Verbosity number
-   integer, allocatable :: verbosity
-   
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
+      !> Error handling
+      type(error_type), allocatable, intent(out) :: error
 
-   integer :: iarg, narg, iostat
-   character(len=:), allocatable :: arg
+      integer :: iarg, narg, iostat
+      character(len=:), allocatable :: arg
 
-   character(len=:), allocatable :: solver_name
-   integer, allocatable :: maxiter
-   real(wp), allocatable :: tol
+      character(len=:), allocatable :: solver_name
+      integer, allocatable :: maxiter
+      real(wp), allocatable :: tol
 
-   model_id = mchrg_model%eeq2019
-   use_nlist = .false.
-   egrad = .false.
-   qgrad = .false.
-   json = .false.
-   complete_nlist = .false.
-   cutoff = 29.0_wp
-   iarg = 0
-   verbosity = 1
-   narg = command_argument_count()
+      model_id = mchrg_model%eeq2019
+      use_nlist = .false.
+      egrad = .false.
+      qgrad = .false.
+      json = .false.
+      cutoff = 29.0_wp
+      iarg = 0
+      verbosity = 1
+      narg = command_argument_count()
 
-   do while(iarg < narg)
-      iarg = iarg + 1
-      call get_argument(iarg, arg)
-      select case(arg)
-      case("-h", "-help", "--help")
-         call help(output_unit)
-         stop
-      case("-version", "--version")
-         call version(output_unit)
-         stop
-      case("-v", "-verbose", "--verbose")
-         verbosity = verbosity + 1
-      case("-s", "-silent", "--silent")
-         verbosity = verbosity - 1   
-      case default
-         if (.not. allocated(input)) then
-            call move_alloc(arg, input)
-            cycle
-         end if
-         call fatal_error(error, "Too many positional arguments present")
-         exit
-      case("-m", "-model", "--model")
+      do while(iarg < narg)
          iarg = iarg + 1
          call get_argument(iarg, arg)
-         if (.not. allocated(arg)) then
-            call fatal_error(error, "Missing argument for model")
+         select case(arg)
+          case("-h", "-help", "--help")
+            call help(output_unit)
+            stop
+          case("-version", "--version")
+            call version(output_unit)
+            stop
+          case("-v", "-verbose", "--verbose")
+            verbosity = verbosity + 1
+          case("-s", "-silent", "--silent")
+            verbosity = verbosity - 1
+          case default
+            if (.not. allocated(input)) then
+               call move_alloc(arg, input)
+               cycle
+            end if
+            call fatal_error(error, "Too many positional arguments present")
             exit
-         end if
-         if (arg == "eeq2019" .or. arg == "eeq") then
-            model_id = mchrg_model%eeq2019
-         else if (arg == "eeqbc2025" .or. arg == "eeqbc") then
-            model_id = mchrg_model%eeqbc2025
-         else
-            call fatal_error(error, "Invalid model")
-            exit
-         end if
-      case("-i", "-input", "--input")
-         iarg = iarg + 1
-         call get_argument(iarg, arg)
-         if (.not. allocated(arg)) then
-            call fatal_error(error, "Missing argument for input format")
-            exit
-         end if
-         input_format = get_filetype("."//arg)
-      case("-c", "-charge", "--charge")
-         iarg = iarg + 1
-         call get_argument(iarg, arg)
-         if (.not. allocated(arg)) then
-            call fatal_error(error, "Missing argument for charge")
-            exit
-         end if
-         allocate(charge)
-         read(arg, *, iostat=iostat) charge
-         if (iostat /= 0) then
-            call fatal_error(error, "Invalid charge value")
-            exit
-         end if
-      case("-g", "-eg", "-grad", "--grad", "-egrad", "--egrad")
-         egrad = .true.
-      case("-qg", "-qgrad", "--qgrad")
-         qgrad = .true.
-      case("-j", "-json", "--json")
-         json = .true.
-      case("-solver", "--solver")
-         if (allocated(solver_name)) then
-            call fatal_error(error, "Cannot use multiple solvers")
-            exit
-         end if
-         iarg = iarg + 1
-         call get_argument(iarg, solver_name)
-         if (solver_name == "DIRECT" .or. solver_name == "direct") then
-            allocate(direct_input :: solver_input)
-         end if
-         if (solver_name == "CG" .or. solver_name == "cg") then
-            allocate(cg_input :: solver_input)
-         end if
-      case("-it", "-maxiter", "--maxiter")
-         allocate(maxiter)
-         iarg = iarg + 1
-         call get_argument(iarg, arg)
-         read(arg, *, iostat=iostat) maxiter
-         if (iostat /= 0) then
-            call fatal_error(error, "Invalid maximal number of iterations")
-            exit
-         end if
-      case("-tol", "-tolerance", "--tolerance")
-         allocate(tol)
-         iarg = iarg + 1
-         call get_argument(iarg, arg)
-         read(arg, *, iostat=iostat) tol
-         if (iostat /= 0) then 
-            call fatal_error(error, "Invalid tolerance")
-            exit
-         end if 
-      case("-nlist", "-list", "--nlist")
-         use_nlist = .true.
-      case("-cut", "-cutoff", "--cutoff")
-         iarg = iarg + 1
-         call get_argument(iarg, arg)
-         read(arg, *, iostat=iostat) cutoff
-         if (iostat /= 0) then 
-            call fatal_error(error, "Invalid neighbourlist cutoff")
-            exit
-         end if 
-      case("-complete", "-cmplt", "--complete")
-         complete_nlist = .true.
-      end select
-   end do
+          case("-m", "-model", "--model")
+            iarg = iarg + 1
+            call get_argument(iarg, arg)
+            if (.not. allocated(arg)) then
+               call fatal_error(error, "Missing argument for model")
+               exit
+            end if
+            if (arg == "eeq2019" .or. arg == "eeq") then
+               model_id = mchrg_model%eeq2019
+            else if (arg == "eeqbc2025" .or. arg == "eeqbc") then
+               model_id = mchrg_model%eeqbc2025
+            else
+               call fatal_error(error, "Invalid model")
+               exit
+            end if
+          case("-i", "-input", "--input")
+            iarg = iarg + 1
+            call get_argument(iarg, arg)
+            if (.not. allocated(arg)) then
+               call fatal_error(error, "Missing argument for input format")
+               exit
+            end if
+            input_format = get_filetype("."//arg)
+          case("-c", "-charge", "--charge")
+            iarg = iarg + 1
+            call get_argument(iarg, arg)
+            if (.not. allocated(arg)) then
+               call fatal_error(error, "Missing argument for charge")
+               exit
+            end if
+            allocate(charge)
+            read(arg, *, iostat=iostat) charge
+            if (iostat /= 0) then
+               call fatal_error(error, "Invalid charge value")
+               exit
+            end if
+          case("-g", "-eg", "-grad", "--grad", "-egrad", "--egrad")
+            egrad = .true.
+          case("-qg", "-qgrad", "--qgrad")
+            qgrad = .true.
+          case("-j", "-json", "--json")
+            json = .true.
+          case("-solver", "--solver")
+            if (allocated(solver_name)) then
+               call fatal_error(error, "Cannot use multiple solvers")
+               exit
+            end if
+            iarg = iarg + 1
+            call get_argument(iarg, solver_name)
+            if (solver_name == "DIRECT" .or. solver_name == "direct") then
+               allocate(direct_input :: solver_input)
+            end if
+            if (solver_name == "CG" .or. solver_name == "cg") then
+               allocate(cg_input :: solver_input)
+            end if
+          case("-it", "-maxiter", "--maxiter")
+            allocate(maxiter)
+            iarg = iarg + 1
+            call get_argument(iarg, arg)
+            read(arg, *, iostat=iostat) maxiter
+            if (iostat /= 0) then
+               call fatal_error(error, "Invalid maximal number of iterations")
+               exit
+            end if
+          case("-tol", "-tolerance", "--tolerance")
+            allocate(tol)
+            iarg = iarg + 1
+            call get_argument(iarg, arg)
+            read(arg, *, iostat=iostat) tol
+            if (iostat /= 0) then
+               call fatal_error(error, "Invalid tolerance")
+               exit
+            end if
+          case("-nlist", "-list", "--nlist")
+            use_nlist = .true.
+          case("-cut", "-cutoff", "--cutoff")
+            iarg = iarg + 1
+            call get_argument(iarg, arg)
+            read(arg, *, iostat=iostat) cutoff
+            if (iostat /= 0) then
+               call fatal_error(error, "Invalid neighbourlist cutoff")
+               exit
+            end if
+         end select
+      end do
 
-   ! Charge gradient cannot be evaluated using cg solver.
-   if (qgrad) then
-      select type (solver_input)
-      type is (cg_input)
-         call fatal_error(error, "Charge gradient cannot be evaluated using cg solver.")
-         return
-      end select
-   end if 
-
-   if ((allocated(maxiter) .or. allocated(tol)) .and. .not. allocated(solver_input)) then
-      call fatal_error(error, "Maximal number of iterations and tolerance cannot be used alonwise the cg solver.")
-      return
-   end if
-
-   ! Default solver is direct
-   if (.not. allocated(solver_input)) then
-      allocate(direct_input :: solver_input) 
-   end if
-
-   select type(solver_input)
-   type is (cg_input)
-   if (allocated(maxiter)) then
-      solver_input%cgmiter = maxiter
-   end if
-   if (allocated(tol)) then
-      solver_input%cgtol = tol
-   end if
-   if (allocated(verbosity)) then
-      solver_input%verbosity = verbosity
-   end if
-      solver_input%use_nlist = use_nlist
-   type is (direct_input)
-   if (allocated(verbosity)) then
-      solver_input%verbosity = verbosity
-   end if  
-   end select
-   
-
-   if (.not. allocated(input)) then
-      if (.not. allocated(error)) then
-         call help(output_unit)
-         error stop
+      ! Charge gradient cannot be evaluated using cg solver.
+      if (qgrad) then
+         select type (solver_input)
+          type is (cg_input)
+            call fatal_error(error, "Charge gradient cannot be evaluated using cg solver.")
+            return
+         end select
       end if
-   end if
 
-end subroutine get_arguments
+      if ((allocated(maxiter) .or. allocated(tol)) .and. .not. allocated(solver_input)) then
+         call fatal_error(error, "Maximal number of iterations and tolerance cannot be used alonwise the cg solver.")
+         return
+      end if
+
+      ! Default solver is direct
+      if (.not. allocated(solver_input)) then
+         allocate(direct_input :: solver_input)
+      end if
+
+      select type(solver_input)
+       type is (cg_input)
+         if (allocated(maxiter)) then
+            solver_input%cgmiter = maxiter
+         end if
+         if (allocated(tol)) then
+            solver_input%cgtol = tol
+         end if
+         if (allocated(verbosity)) then
+            solver_input%verbosity = verbosity
+         end if
+         solver_input%use_nlist = use_nlist
+       type is (direct_input)
+         if (allocated(verbosity)) then
+            solver_input%verbosity = verbosity
+         end if
+      end select
+
+
+      if (.not. allocated(input)) then
+         if (.not. allocated(error)) then
+            call help(output_unit)
+            error stop
+         end if
+      end if
+
+   end subroutine get_arguments
 
 end program main
