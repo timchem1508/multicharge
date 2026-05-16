@@ -69,9 +69,6 @@ contains
       end do
 
       call move_alloc(trans, self%trans)
-
-      
-
    end subroutine new_wignerseitz_cell
 
    subroutine get_pairs(iws, trans, rij, list)
