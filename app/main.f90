@@ -197,6 +197,8 @@ contains
          "-tol, -tolerance, --tolerance <real>", "Provide the tolerance of the solver", &
          "-g, -eg, -grad, --grad, -egrad, --egrad", "Evaluate molecular energy gradient and virial.", &
          "-qg, -qgrad, --qgrad", "Evaluate molecular charge gradient and virial.", &
+         "-list, -nlist, --nlist", "Use neighbour list for solver (not compatible with charge gradient)", &
+         "-cut, -cutoff, --cutoff <real>", "Cutoff for neighbour list generation (default: 29.0)", &
          "-v, -verbose, --verbose", "Show more", &
          "-s, -silent, --silent", "Show less", &
          "-j, -json, --json", "Provide output in JSON format to the file 'multicharge.json'", &

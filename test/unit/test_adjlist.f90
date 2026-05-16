@@ -39,8 +39,7 @@ module test_adjlist
    real(wp), parameter :: thr = 100 * epsilon(1.0_wp)
    real(wp), parameter :: thr1 = 1.0e5_wp*epsilon(1.0_wp)
    real(wp), parameter :: thr2 = sqrt(epsilon(1.0_wp))
-   real(wp), parameter :: thr3 = 100 * thr2
-   real(wp), parameter :: cutoff = 35.0_wp
+   real(wp), parameter :: cutoff = 29.0_wp
 
 contains
 
@@ -62,7 +61,8 @@ contains
       & new_unittest("eeqbc-energy-ice", test_eeqbc_e_ice), &
       & new_unittest("eeqbc-energy-ice-supercell", test_eeqbc_e_ice222), &
       & new_unittest("eeqbc-gradient-co2", test_eeqbc_g_co2), &
-      & new_unittest("eeqbc-gradient-ice", test_eeqbc_g_ice) &
+      & new_unittest("eeqbc-gradient-ice", test_eeqbc_g_ice), &
+      & new_unittest("eeqbc-gradient-ice-supercell", test_eeqbc_g_ice222) &
       & ]
 
    end subroutine collect_adjlist
@@ -374,7 +374,7 @@ contains
       if (allocated(error)) return
 
 
-      if (any(abs(gradient(:, :) - numgrad(:, :)) > thr3)) then
+      if (any(abs(gradient(:, :) - numgrad(:, :)) > thr2)) then
          call test_failed(error, "Derivative of energy does not match")
          print'(a)', "Energy gradient:"
          print'(3es21.14)', gradient
@@ -384,7 +384,7 @@ contains
          print'(3es21.14)', gradient - numgrad
       end if
 
-      if (any(abs(sigma(:, :) - numsigma(:, :)) > thr3)) then
+      if (any(abs(sigma(:, :) - numsigma(:, :)) > thr2)) then
          call test_failed(error, "Derivative of energy does not match")
          print'(a)', "Energy sigma:"
          print'(3es21.14)', sigma
@@ -472,7 +472,7 @@ contains
       & gradient=gradient, sigma=sigma, list=list, unit=output_unit)
       if (allocated(error)) return
 
-      if (any(abs(gradient(:, :) - numgrad(:, :)) > thr3)) then
+      if (any(abs(gradient(:, :) - numgrad(:, :)) > thr2)) then
          call test_failed(error, "Derivative of energy does not match")
          print'(a)', "Energy gradient:"
          print'(3es21.14)', gradient
@@ -482,7 +482,7 @@ contains
          print'(3es21.14)', gradient - numgrad
       end if
 
-      if (any(abs(sigma(:, :) - numsigma(:, :)) > thr3)) then
+      if (any(abs(sigma(:, :) - numsigma(:, :)) > thr2)) then
          call test_failed(error, "Derivative of energy does not match")
          print'(a)', "Energy sigma:"
          print'(3es21.14)', sigma
@@ -768,5 +768,22 @@ contains
       call gen_test_periodic(error, mol, model)
 
    end subroutine test_eeqbc_e_ice222
+
+   subroutine test_eeqbc_g_ice222(error)
+
+      !> Error handling
+      type(error_type), allocatable, intent(out) :: error
+
+      type(structure_type) :: mol
+      class(mchrg_model_type), allocatable :: model
+      integer, parameter :: supercell(*) = [2, 2, 2]
+
+      call get_structure(mol, "ICE10", "vi")
+      call make_supercell(mol, supercell)
+      call new_eeqbc2025_model(mol, model, error)
+      if (allocated(error)) return
+      call test_numgrad_periodic(error, mol, model)
+
+   end subroutine test_eeqbc_g_ice222
 
 end module test_adjlist
