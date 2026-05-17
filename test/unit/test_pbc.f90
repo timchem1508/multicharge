@@ -1029,7 +1029,7 @@ subroutine test_dfdr(error, mol, dfdq, model)
    allocate (cache)
 
    allocate (dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat), &
-      & gradient(3, mol%nat), sigma(3, mol%nat), dfdr(3, mol%nat))
+      & gradient(3, mol%nat), sigma(3, 3), dfdr(3, mol%nat))
 
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 

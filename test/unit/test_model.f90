@@ -1000,7 +1000,7 @@ contains
       allocate(cache)
 
       allocate (dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat), &
-      & gradient(3, mol%nat), sigma(3, mol%nat), dfdr(3, mol%nat))
+      & gradient(3, mol%nat), sigma(3, 3), dfdr(3, mol%nat))
 
       if (size(dfdq) /= mol%nat) then
          call test_failed(error, "Size of dfdq does not match number of atoms")
