@@ -65,13 +65,18 @@ contains
 
       integer :: i, k, j, n
       logical :: is_sym
-      real(wp) :: y_tmp_i
+      real(wp) :: y_tmp_i, a
 
       is_sym = .true.
       if (present(symmetric)) is_sym = symmetric
 
       n = size(list%nnl)
       if (size(mlist) /= size(list%nlat)) return
+      if (is_sym) then
+         a = alpha
+      else
+         a = -alpha
+      end if
 
       ! Step 1: Parallel Initialization/Scaling
       !$omp parallel do default(shared) private(i)
@@ -90,24 +95,17 @@ contains
          y_tmp_i = 0.0_wp
 
          ! Diagonal contribution (usually only for symmetric)
-         if (is_sym) then
-            y_tmp_i = y_tmp_i + alpha * mdiag(i) * x(i)
-         end if
+         y_tmp_i = y_tmp_i + a * mdiag(i) * x(i)
 
          do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
             j = list%nlat(k)
 
             ! Part 1: Contribution to row i (accumulate locally)
-            y_tmp_i = y_tmp_i + alpha * mlist(k) * x(j)
+            y_tmp_i = y_tmp_i + a * mlist(k) * x(j)
 
             ! Part 2: Contribution to row j (must be atomic)
-            if (is_sym) then
-               !$omp atomic
-               y(j) = y(j) + alpha * mlist(k) * x(i)
-            else
-               !$omp atomic
-               y(j) = y(j) - alpha * mlist(k) * x(i)
-            end if
+            !$omp atomic
+            y(j) = y(j) + a * mlist(k) * x(i)
          end do
 
          ! Apply accumulated row i results to global y
