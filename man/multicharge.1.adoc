@@ -42,7 +42,7 @@ Evaluate molecular charge gradient and virial
 Use neighbour list for solver (not compatible with charge gradient)
 
 *-cut, -cutoff, --cutoff* _real_::
-Cutoff for neighbour list generation (default: 29.0)
+Cutoff for neighbour list generation in Bohrs (default: 29.0 Bohr)
 
 *-v, -verbose, --verbose*::
 Show more output
