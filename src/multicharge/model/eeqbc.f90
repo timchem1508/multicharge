@@ -352,8 +352,8 @@ contains
 
                ! Check if the neighbor is a periodic image of the atom itself
                wsw = 1.0_wp / real(list%selfnimg(iat), wp)
-               do img = 1, list%selfnimg(iat)
-                  vec = list%trans(:, list%selftridx(img, iat))
+               do img = list%sitr(iat) + 1, list%sitr(iat) + list%selfnimg(iat)
+                  vec = list%trans(:, list%selftridx(img))
                   call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, ctmp)
                   xvec_local(iat) = xvec_local(iat) - wsw * ctmp * cache%xtmp(iat)
                end do
@@ -859,15 +859,16 @@ contains
                dxdrji_local(:, kat) = dxdrji_local(:, kat) + (cache%xtmp(jat) - cache%xtmp(iat)) * cache%dcdrji(:, kat)
 
                ! Periodic images: lattice derivative contributions from capacitance matrix
-               do img = 1, list%nimg(kat)
-                  vec = mol%xyz(:, jat) - mol%xyz(:, iat) + list%trans(:, list%tridx(img, kat))
+               do img = list%itr(kat) + 1, list%itr(kat) + list%nimg(kat)
+                  vec = mol%xyz(:, jat) - mol%xyz(:, iat) + list%trans(:, list%tridx(img))
                   call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
                   dxdL_local(:, :, iat) = dxdL_local(:, :, iat) - wsw * dS * cache%xtmp(jat)
                end do
             else
+               wsw = 1.0_wp / real(list%selfnimg(iat), wp)
                ! Self‑interaction (iat == jat) – periodic images of the same atom
-               do img = 1, list%nimg(kat)
-                  vec = list%trans(:, list%tridx(img, kat))
+               do img = list%sitr(iat) + 1, list%sitr(iat) + list%selfnimg(iat)
+                  vec = list%trans(:, list%selftridx(img))
                   call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, ctmp)
                   ctmp = ctmp * wsw
                   ! EN derivative contributions
@@ -1179,8 +1180,8 @@ contains
             radj = self%rad(jzp) * (1.0_wp - self%kcnrad * norm_cn)
             gam = 1.0_wp / sqrt(radi**2 + radj**2)
 
-            do img = 1, list%nimg(kat)
-               vec = mol%xyz(:, jat) - mol%xyz(:, iat) + list%trans(:, list%tridx(img, kat))
+            do img = list%itr(kat) + 1, list%itr(kat) + list%nimg(kat)
+               vec = mol%xyz(:, jat) - mol%xyz(:, iat) + list%trans(:, list%tridx(img))
                call get_amat_dir_3d(vec, gam, dtrans, self%kbc, rvdw, capi, capj, dtmp)
                alist_local(kat) = alist_local(kat) + dtmp * wsw
             end do
@@ -1190,8 +1191,8 @@ contains
          rvdw = self%rvdw(izp, izp)
          wsw = 1.0_wp / real(list%selfnimg(iat), wp)
          gam = 1.0_wp / sqrt(2.0_wp * radi**2)
-         do img = 1, list%selfnimg(iat)
-            vec = list%trans(:, list%selftridx(img, iat))
+         do img = list%sitr(iat) + 1, list%sitr(iat) + list%selfnimg(iat)
+            vec = list%trans(:, list%selftridx(img))
             call get_amat_dir_3d(vec, gam, dtrans, self%kbc, rvdw, capi, capi, dtmp)
             adiag_local(iat) = adiag_local(iat) + dtmp * wsw
          end do
@@ -1831,8 +1832,8 @@ contains
             ! Lattice derivative of interaction width
             dgamdL(:, :) = (pre_i * cache%dcndL(:, :, iat) + pre_j * cache%dcndL(:, :, jat))
 
-            do img = 1, list%nimg(kat)
-               vec = mol%xyz(:, jat) - mol%xyz(:, iat) + list%trans(:, list%tridx(img, kat))
+            do img = list%itr(kat) + 1, list%itr(kat) + list%nimg(kat)
+               vec = mol%xyz(:, jat) - mol%xyz(:, iat) + list%trans(:, list%tridx(img))
 
                call get_damat_dir(vec, dtrans, capi, capj, rvdw, self%kbc, gam, dG, dS, dgam)
                dG = dG * wsw
@@ -1892,8 +1893,9 @@ contains
             pre_i = -2.0_wp * radi * dradi * gam**3.0_wp
             dtmp = -sqrt2pi * dradi / (radi**2) * cache%vrhs(iat)
 
-            do img = 1, list%nimg(kat)
-               vec = list%trans(:, list%tridx(img, kat))
+            wsw = 1.0_wp / real(list%nimg(kat), wp)
+            do img = list%itr(kat) + 1, list%itr(kat) + list%nimg(kat)
+               vec = list%trans(:, list%tridx(img))
                call get_damat_dir(vec, dtrans, capi, capi, rvdw, self%kbc, gam, dG, dS, dgam)
                dgam = dgam * wsw
 
@@ -2268,9 +2270,9 @@ contains
 
             ! Weight for equivalent images (Wigner-Seitz)
             wsw = 1.0_wp / real(list%nimg(kat), wp)
-            do img = 1, list%nimg(kat)
+            do img = list%itr(kat) + 1, list%itr(kat) + list%nimg(kat)
                ! Translation vector is now stored in list%trans indexed by list%tridx
-               vec = mol%xyz(:, iat) - mol%xyz(:, jat) - list%trans(:, list%tridx(img, kat))
+               vec = mol%xyz(:, iat) - mol%xyz(:, jat) - list%trans(:, list%tridx(img))
 
                call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, tmp)
 
@@ -2286,9 +2288,9 @@ contains
          rvdw = self%rvdw(izp, izp)
          wsw = 1.0_wp / real(list%selfnimg(iat), wp)
          ! Self-interaction with periodic images (Diagonal only)
-         do img = 1, list%selfnimg(iat)
+         do img = list%sitr(iat) + 1, list%sitr(iat) + list%selfnimg(iat)
             !write(*, *) 'iat=', iat, 'img=', img, 'nimg=', list%selfnimg(iat)
-            vec = list%trans(:, list%selftridx(img, iat))
+            vec = list%trans(:, list%selftridx(img))
 
             call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, tmp)
             cdiag_local(iat) = cdiag_local(iat) + tmp * wsw
@@ -2624,9 +2626,9 @@ contains
             if (list%nimg(kat) == 0) cycle
             wsw = 1.0_wp / real(list%nimg(kat), wp)
 
-            do img = 1, list%nimg(kat)
+            do img = list%itr(kat) + 1, list%itr(kat) + list%nimg(kat)
 
-               vec = mol%xyz(:, jat) - mol%xyz(:, iat) + list%trans(:, list%tridx(img, kat))
+               vec = mol%xyz(:, jat) - mol%xyz(:, iat) + list%trans(:, list%tridx(img))
                call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
 
                ! Diagonal elements
@@ -2638,8 +2640,8 @@ contains
          end do
          rvdw = self%rvdw(izp, izp)
          wsw = 1.0_wp / real(list%selfnimg(iat), wp)
-         do img = 1, list%selfnimg(iat)
-            vec = list%trans(:, list%selftridx(img, iat))
+         do img = list%sitr(iat) + 1, list%sitr(iat) + list%selfnimg(iat)
+            vec = list%trans(:, list%selftridx(img))
             call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, dG, dS)
             dcdL_local(:, :, iat) = dcdL_local(:, :, iat) + dS * wsw
          end do
@@ -3205,8 +3207,8 @@ contains
          capi = self%cap(izp)
          rvdw = self%rvdw(izp, izp)
          wsw = 1.0_wp / real(list%selfnimg(iat), wp)
-         do img = 1, list%selfnimg(iat)
-            rij = list%trans(:, list%selftridx(img, iat))
+         do img = list%sitr(iat) + 1, list%sitr(iat) + list%selfnimg(iat)
+            rij = list%trans(:, list%selftridx(img))
             call get_cpair_dir(self%kbc, rij, dtrans, rvdw, capi, capi, ctmp)
             ctmp = ctmp * wsw
             v(iat) = v(iat) - ctmp * q(iat)
@@ -3244,9 +3246,9 @@ contains
 
          rvdw = self%rvdw(izp, izp)
          wsw = 1.0_wp / real(list%selfnimg(iat), wp)
-         do img = 1, list%selfnimg(iat)
+         do img = list%sitr(iat) + 1, list%sitr(iat) + list%selfnimg(iat)
             ! The vector is just the lattice translation for self-images
-            vec = list%trans(:, list%selftridx(img, iat))
+            vec = list%trans(:, list%selftridx(img))
             call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, dG, dS)
 
             ! translations, so we only need to update the lattice tensor (sigma).
@@ -3263,9 +3265,9 @@ contains
                wsw = 1.0_wp / real(list%nimg(kat), wp)
 
                ! 2. Loop over images for BOTH coordinate gradient and lattice sigma
-               do img = 1, list%nimg(kat)
+               do img = list%itr(kat) + 1, list%itr(kat) + list%nimg(kat)
                   ! Vector including lattice translation
-                  vec = mol%xyz(:, jat) - mol%xyz(:, iat) + list%trans(:, list%tridx(img, kat))
+                  vec = mol%xyz(:, jat) - mol%xyz(:, iat) + list%trans(:, list%tridx(img))
 
                   call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
 
@@ -3753,8 +3755,8 @@ contains
             dradj = -self%rad(jzp) * self%kcnrad * norm_cn
             gam = 1.0_wp / sqrt(radi**2 + radj**2)
 
-            do img = 1, list%nimg(kat)
-               vec = mol%xyz(:, jat) - mol%xyz(:, iat) + list%trans(:, list%tridx(img, kat))
+            do img = list%itr(kat) + 1, list%itr(kat) + list%nimg(kat)
+               vec = mol%xyz(:, jat) - mol%xyz(:, iat) + list%trans(:, list%tridx(img))
                call get_damat_dir(vec, dtrans, capi, capj, rvdw, self%kbc, gam, dG, dS, dgam)
 
                !$omp atomic
@@ -3789,8 +3791,8 @@ contains
          rvdw = self%rvdw(izp, izp)
          wsw = 1.0_wp / real(list%selfnimg(iat), wp)
 
-         do img = 1, list%selfnimg(iat)
-            vec = list%trans(:, list%selftridx(img, iat))
+         do img = list%sitr(iat) + 1, list%sitr(iat) + list%selfnimg(iat)
+            vec = list%trans(:, list%selftridx(img))
             call get_damat_dir(vec, dtrans, capi, capi, rvdw, self%kbc, gam, dG, dS, dgam)
             sigma_local(:, :) = sigma_local(:, :) + dS * wsw * W_ii
             !$omp atomic
