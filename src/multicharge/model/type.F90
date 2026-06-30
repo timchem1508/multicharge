@@ -225,28 +225,28 @@ module multicharge_model_type
 contains
 
 !> Generate direct lattice translation vectors within a supercell of 2×2×2 repetitions.
-   subroutine get_dir_trans(lattice, trans)
-      !> Lattice parameters (3×3 matrix)
-      real(wp), intent(in) :: lattice(:, :)
+   subroutine get_dir_trans(mol, trans, cutoff)
+      !> Molecular structure data
+      type(structure_type), intent(in) :: mol
       !> Output translation vectors (3 × N) where N = 2×2×2 = 8
       real(wp), allocatable, intent(out) :: trans(:, :)
-      integer, parameter :: rep(3) = [2, 2, 2]
+      real(wp), intent(in) :: cutoff
 
-      call get_lattice_points(lattice, rep, .true., trans)
+      call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
    end subroutine get_dir_trans
 
 !> Generate reciprocal lattice translation vectors within a supercell of 2×2×2 repetitions.
-   subroutine get_rec_trans(lattice, trans)
-      !> Lattice parameters (3×3 matrix)
-      real(wp), intent(in) :: lattice(:, :)
+   subroutine get_rec_trans(mol, trans, cutoff)
+      !> Molecular structure data
+      type(structure_type), intent(in) :: mol
       !> Output translation vectors in reciprocal space (3 × N) where N = 2×2×2 = 8
       real(wp), allocatable, intent(out) :: trans(:, :)
-      integer, parameter :: rep(3) = [2, 2, 2]
+      real(wp), intent(in) :: cutoff
       real(wp) :: rec_lat(3, 3)
 
-      rec_lat = twopi * transpose(matinv_3x3(lattice))
-      call get_lattice_points(rec_lat, rep, .false., trans)
+      rec_lat = twopi * transpose(matinv_3x3(mol%lattice))
+      call get_lattice_points(mol%periodic, rec_lat, cutoff, trans)
 
    end subroutine get_rec_trans
 

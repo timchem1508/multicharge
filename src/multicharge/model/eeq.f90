@@ -60,6 +60,7 @@ module multicharge_model_eeq
    real(wp), parameter :: sqrtpi = sqrt(pi)
    real(wp), parameter :: sqrt2pi = sqrt(2.0_wp/pi)
    real(wp), parameter :: eps = sqrt(epsilon(0.0_wp))
+   real(wp), parameter :: cutoff = 15.0_wp
 
 contains
 
@@ -335,8 +336,8 @@ contains
       amat(:, :) = 0.0_wp
 
       vol = abs(matdet_3x3(mol%lattice))
-      call get_dir_trans(mol%lattice, dtrans)
-      call get_rec_trans(mol%lattice, rtrans)
+      call get_dir_trans(mol, dtrans, cutoff)
+      call get_rec_trans(mol, rtrans, cutoff)
 
       !$omp parallel default(none) &
       !$omp shared(amat, mol, self, wsc, dtrans, rtrans, alpha, vol) &
@@ -577,8 +578,8 @@ contains
       dadL(:, :, :) = 0.0_wp
 
       vol = abs(matdet_3x3(mol%lattice))
-      call get_dir_trans(mol%lattice, dtrans)
-      call get_rec_trans(mol%lattice, rtrans)
+      call get_dir_trans(mol, dtrans, cutoff)
+      call get_rec_trans(mol, rtrans, cutoff)
 
       !$omp parallel default(none) &
       !$omp shared(mol, self, wsc, alpha, vol, dtrans, rtrans, qvec) &
@@ -853,8 +854,8 @@ contains
       real(wp), allocatable :: dtrans(:, :), rtrans(:, :)
 
       vol = abs(matdet_3x3(mol%lattice))
-      call get_dir_trans(mol%lattice, dtrans)
-      call get_rec_trans(mol%lattice, rtrans)
+      call get_dir_trans(mol, dtrans, cutoff)
+      call get_rec_trans(mol, rtrans, cutoff)
 
       factor = 1.0_wp
       if (present(alpha)) factor = alpha
