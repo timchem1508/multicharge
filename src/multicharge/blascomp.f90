@@ -89,8 +89,9 @@ contains
       end do
       !$omp end parallel do
 
-      ! Step 2: Computation with Atomics
-      !$omp parallel do default(shared) private(i, k, j, y_tmp_i)
+      ! Step 2: Computation WITHOUT Atomics
+      ! Notice the addition of `reduction(+:y)` here
+      !$omp parallel do default(shared) private(i, k, j, y_tmp_i) reduction(+:y)
       do i = 1, n
          y_tmp_i = 0.0_wp
 
@@ -100,16 +101,16 @@ contains
          do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
             j = list%nlat(k)
 
-            ! Part 1: Contribution to row i (accumulate locally)
+            ! Part 1: Contribution to row i (accumulated locally in scalar)
             y_tmp_i = y_tmp_i + a * mlist(k) * x(j)
 
-            ! Part 2: Contribution to row j (must be atomic)
-            !$omp atomic
+            ! Part 2: Contribution to row j
+            ! Safe without atomics because reduction(+:y) gives each thread
+            ! its own private copy of 'y' to update, merging them at the end.
             y(j) = y(j) + a * mlist(k) * x(i)
          end do
 
-         ! Apply accumulated row i results to global y
-         !$omp atomic
+         ! Apply accumulated row i results to the thread-private y
          y(i) = y(i) + y_tmp_i
       end do
       !$omp end parallel do
@@ -117,7 +118,7 @@ contains
    end subroutine gemv_cmp_111
 
 !=========================================================
-! GEMV 212 - Thread-safe OMP
+! GEMV 212 - Thread-safe OMP (Atomics Removed)
 !=========================================================
    subroutine gemv_cmp_212(list, mdrij, mdrji, mdrdiag, x, y, alpha, beta)
       type(adjacency_list), intent(in) :: list
@@ -153,24 +154,22 @@ contains
       end do
       !$omp end parallel do
 
-      ! Step 2: Compute
-      !$omp parallel do default(shared) private(i, k, j, m)
+      ! Step 2: Compute WITHOUT Atomics
+      ! Added reduction(+:y) to handle safe multi-thread accumulation
+      !$omp parallel do default(shared) private(i, k, j, m) reduction(+:y)
       do i = 1, n
          ! Diagonal contribution
          do m = 1, nv
-            !$omp atomic
             y(m, i) = y(m, i) + a * mdrdiag(m, i) * x(i)
          end do
 
          do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
             j = list%nlat(k)
 
-            ! Atomics required for both indices because j can be
-            ! modified by other threads, and i is modified by j updates.
+            ! No atomics required. The reduction clause ensures each thread
+            ! updates its private copy of y safely.
             do m = 1, nv
-               !$omp atomic
                y(m, i) = y(m, i) + a * mdrij(m, k) * x(j)
-               !$omp atomic
                y(m, j) = y(m, j) + a * mdrji(m, k) * x(i)
             end do
          end do
@@ -180,7 +179,7 @@ contains
    end subroutine gemv_cmp_212
 
 !=========================================================
-! GEMV 212 DIRECTED - Thread-safe OMP
+! GEMV 212 DIRECTED - Thread-safe OMP (Atomics Removed)
 !=========================================================
    subroutine gemv_cmp_212_dir(list, mlist_drij, mlist_drji, mdiag, x, y, alpha, beta, symmetric)
       type(adjacency_list), intent(in) :: list
@@ -217,13 +216,13 @@ contains
       end do
       !$omp end parallel do
 
-      ! Step 2: Compute
-      !$omp parallel do default(shared) private(i, k, j, m)
+      ! Step 2: Compute WITHOUT Atomics
+      ! Added reduction(+:y) to handle safe multi-thread accumulation
+      !$omp parallel do default(shared) private(i, k, j, m) reduction(+:y)
       do i = 1, n
          ! Diagonal contribution
          if (is_sym) then
             do m = 1, nv
-               !$omp atomic
                y(m, i) = y(m, i) + alpha * mdiag(m, i) * x(i)
             end do
          end if
@@ -232,14 +231,12 @@ contains
             j = list%nlat(k)
 
             do m = 1, nv
-               !$omp atomic
                y(m, i) = y(m, i) + alpha * mlist_drij(m, k) * x(j)
 
+               ! Safe to branch inside the reduction loop without atomics
                if (is_sym) then
-                  !$omp atomic
                   y(m, j) = y(m, j) + alpha * mlist_drji(m, k) * x(i)
                else
-                  !$omp atomic
                   y(m, j) = y(m, j) - alpha * mlist_drji(m, k) * x(i)
                end if
             end do
