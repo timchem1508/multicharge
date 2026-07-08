@@ -1001,24 +1001,21 @@ contains
       integer :: iat, jat, kat, izp, jzp
       real(wp) :: vec(3), r2, gam2, tmp, norm_cn, radi, radj
 
-      ! Thread-private array for reduction
-      real(wp), allocatable :: alist_local(:), adiag_local(:)
-
+      ! Zero out global shared target arrays upfront
       cache%alist(:) = 0.0_wp
       cache%adiag(:) = 0.0_wp
 
       !$omp parallel default(none) &
       !$omp shared(cache, mol, self, list) &
-      !$omp private(iat, izp, jat, kat, jzp, gam2, vec, r2, tmp) &
-      !$omp private(norm_cn, radi, radj, alist_local, adiag_local)
-      allocate(alist_local, source=cache%alist)
-      allocate(adiag_local, source=cache%adiag)
+      !$omp private(iat, izp, jat, kat, jzp, gam2, vec, r2, tmp, norm_cn, radi, radj)
+
       !$omp do schedule(runtime)
       do iat = 1, mol%nat
          izp = mol%id(iat)
          ! Effective charge width of i
          norm_cn = 1.0_wp / self%avg_cn(izp)**self%norm_exp
          radi = self%rad(izp) * (1.0_wp - self%kcnrad * cache%cn(iat) * norm_cn)
+
          do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
             jat = list%nlat(kat)
             jzp = mol%id(jat)
@@ -1030,19 +1027,14 @@ contains
             ! Coulomb interaction of Gaussian charges
             gam2 = 1.0_wp / (radi**2 + radj**2)
             tmp = erf(sqrt(r2 * gam2)) / sqrt(r2) * cache%clist(kat)
-            alist_local(kat) = tmp
+            cache%alist(kat) = tmp
          end do
+
          ! Effective hardness
          tmp = self%eta(izp) + self%kqeta(izp) * cache%qloc(iat) + sqrt2pi / radi
-         adiag_local(iat) = adiag_local(iat) + tmp * cache%cdiag(iat) + 1.0_wp
+         cache%adiag(iat) = tmp * cache%cdiag(iat) + 1.0_wp
       end do
       !$omp end do
-      !$omp critical (get_amat_0d_list_)
-      cache%alist(:) = cache%alist + alist_local
-      cache%adiag(:) = cache%adiag + adiag_local
-      !$omp end critical (get_amat_0d_list_)
-      deallocate(alist_local)
-      deallocate(adiag_local)
       !$omp end parallel
 
    end subroutine get_amat_0d_list
@@ -2077,7 +2069,6 @@ contains
       end if
 
    end subroutine get_cmat_0d
-
 !> Build the bond capacitance matrix for a non‑periodic system.
    subroutine get_cmat_0d_list(self, mol, list, clist, cdiag)
       !> EEQBC model type
@@ -2094,18 +2085,15 @@ contains
       integer :: iat, jat, kat, izp, jzp
       real(wp) :: vec(3), rvdw, tmp, capi, capj, r1
 
-      ! Thread-private array for reduction
-      real(wp), allocatable :: clist_local(:), cdiag_local(:)
-
+      ! Zero out global shared target arrays upfront
       clist(:) = 0.0_wp
       cdiag(:) = 0.0_wp
 
       !$omp parallel default(none) &
-      !$omp shared(clist, cdiag, mol, list, self) &
-      !$omp private(iat, kat, izp, jat, jzp) &
-      !$omp private(vec, r1, rvdw, tmp, capi, capj, clist_local, cdiag_local)
-      allocate(clist_local, source=clist)
-      allocate(cdiag_local, source=cdiag)
+      !$omp shared(clist, mol, list, self) &
+      !$omp private(iat, kat, izp, jat, jzp, vec, r1, rvdw, tmp, capi, capj) &
+      !$omp reduction(+:cdiag)
+
       !$omp do schedule(runtime)
       do iat = 1, mol%nat
          izp = mol%id(iat)
@@ -2120,20 +2108,15 @@ contains
 
             call get_cpair(self%kbc, tmp, r1, rvdw, capi, capj)
 
-            ! Off-diagonal elements
-            clist_local(kat) = -tmp
-            ! Diagonal elements
-            cdiag_local(iat) = cdiag_local(iat) + tmp
-            cdiag_local(jat) = cdiag_local(jat) + tmp
+            ! Safe direct write (kat is unique per thread)
+            clist(kat) = -tmp
+
+            ! Safe reduction writes (tracked in thread-local array copies)
+            cdiag(iat) = cdiag(iat) + tmp
+            cdiag(jat) = cdiag(jat) + tmp
          end do
       end do
       !$omp end do
-      !$omp critical (get_cmat_0d_list_)
-      clist(:) = clist + clist_local
-      cdiag(:) = cdiag + cdiag_local
-      !$omp end critical (get_cmat_0d_list_)
-      deallocate(clist_local)
-      deallocate(cdiag_local)
       !$omp end parallel
 
    end subroutine get_cmat_0d_list

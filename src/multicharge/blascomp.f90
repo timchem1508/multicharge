@@ -78,7 +78,6 @@ contains
          a = -alpha
       end if
 
-      ! Step 1: Parallel Initialization/Scaling
       !$omp parallel do default(shared) private(i)
       do i = 1, size(y)
          if (beta == 0.0_wp) then
@@ -89,8 +88,6 @@ contains
       end do
       !$omp end parallel do
 
-      ! Step 2: Computation WITHOUT Atomics
-      ! Notice the addition of `reduction(+:y)` here
       !$omp parallel do default(shared) private(i, k, j, y_tmp_i) reduction(+:y)
       do i = 1, n
          y_tmp_i = 0.0_wp
@@ -105,8 +102,6 @@ contains
             y_tmp_i = y_tmp_i + a * mlist(k) * x(j)
 
             ! Part 2: Contribution to row j
-            ! Safe without atomics because reduction(+:y) gives each thread
-            ! its own private copy of 'y' to update, merging them at the end.
             y(j) = y(j) + a * mlist(k) * x(i)
          end do
 
@@ -141,7 +136,6 @@ contains
       n = size(list%nnl)
       nv = size(y, 1)
 
-      ! Step 1: Scale global y
       !$omp parallel do default(shared) private(i, m)
       do i = 1, size(y, 2)
          do m = 1, nv
@@ -154,20 +148,13 @@ contains
       end do
       !$omp end parallel do
 
-      ! Step 2: Compute WITHOUT Atomics
-      ! Added reduction(+:y) to handle safe multi-thread accumulation
       !$omp parallel do default(shared) private(i, k, j, m) reduction(+:y)
       do i = 1, n
-         ! Diagonal contribution
          do m = 1, nv
             y(m, i) = y(m, i) + a * mdrdiag(m, i) * x(i)
          end do
-
          do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
             j = list%nlat(k)
-
-            ! No atomics required. The reduction clause ensures each thread
-            ! updates its private copy of y safely.
             do m = 1, nv
                y(m, i) = y(m, i) + a * mdrij(m, k) * x(j)
                y(m, j) = y(m, j) + a * mdrji(m, k) * x(i)
@@ -203,7 +190,6 @@ contains
       if (size(mlist_drij, 2) /= size(list%nlat)) return
       if (size(mlist_drji, 2) /= size(list%nlat)) return
 
-      ! Step 1: Scale global y
       !$omp parallel do default(shared) private(i, m)
       do i = 1, size(y, 2)
          do m = 1, nv
@@ -216,8 +202,6 @@ contains
       end do
       !$omp end parallel do
 
-      ! Step 2: Compute WITHOUT Atomics
-      ! Added reduction(+:y) to handle safe multi-thread accumulation
       !$omp parallel do default(shared) private(i, k, j, m) reduction(+:y)
       do i = 1, n
          ! Diagonal contribution
