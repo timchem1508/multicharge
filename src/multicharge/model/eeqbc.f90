@@ -1120,6 +1120,7 @@ contains
 
    end subroutine get_amat_3d
 
+   !> Build the Coulomb matrix for a periodic system using CSR adjacency list.
    subroutine get_amat_3d_list(self, mol, list, cache)
       class(eeqbc_model), intent(in) :: self
       type(structure_type), intent(in) :: mol
@@ -1129,19 +1130,19 @@ contains
 
       integer :: iat, jat, izp, jzp, img, kat
       real(wp) :: vec(3), gam, dtmp, capi, capj, radi, radj, norm_cn, rvdw, wsw
+      real(wp) :: atmp, adiag_tmp
       real(wp), allocatable :: dtrans(:, :)
-      real(wp), allocatable :: alist_local(:), adiag_local(:)
 
+      call get_dir_trans(mol, dtrans, cutoff)
+
+      ! Zero out global shared target arrays upfront
       cache%alist(:) = 0.0_wp
       cache%adiag(:) = 0.0_wp
-      call get_dir_trans(mol, dtrans, cutoff)
 
       !$omp parallel default(none) &
       !$omp shared(cache, mol, self, list, dtrans) &
-      !$omp private(iat, izp, jat, jzp, gam, vec, dtmp, norm_cn) &
-      !$omp private(radi, radj, capi, capj, rvdw, wsw, alist_local, adiag_local, img, kat)
-      allocate(alist_local, source=cache%alist)
-      allocate(adiag_local, source=cache%adiag)
+      !$omp private(iat, izp, jat, jzp, gam, vec, dtmp, norm_cn, radi, radj) &
+      !$omp private(capi, capj, rvdw, wsw, img, kat, atmp, adiag_tmp)
 
       !$omp do schedule(runtime)
       do iat = 1, mol%nat
@@ -1150,45 +1151,52 @@ contains
          radi = self%rad(izp) * (1.0_wp - self%kcnrad * cache%cn(iat) * norm_cn)
          capi = self%cap(izp)
 
+         ! Initialize scalar accumulator for the diagonal of this atom
+         adiag_tmp = 0.0_wp
+
          do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
+            if (list%nimg(kat) == 0) cycle
+
             jat = list%nlat(kat)
             jzp = mol%id(jat)
             capj = self%cap(jzp)
             rvdw = self%rvdw(izp, jzp)
-            if (list%nimg(kat) == 0) cycle
             wsw = 1.0_wp / real(list%nimg(kat), wp)
 
             norm_cn = cache%cn(jat) / self%avg_cn(jzp)**self%norm_exp
             radj = self%rad(jzp) * (1.0_wp - self%kcnrad * norm_cn)
             gam = 1.0_wp / sqrt(radi**2 + radj**2)
 
+            ! Accumulate image contributions in a local scalar
+            atmp = 0.0_wp
             do img = list%itr(kat) + 1, list%itr(kat) + list%nimg(kat)
                vec = mol%xyz(:, jat) - mol%xyz(:, iat) + list%trans(:, list%tridx(img))
                call get_amat_dir_3d(vec, gam, dtrans, self%kbc, rvdw, capi, capj, dtmp)
-               alist_local(kat) = alist_local(kat) + dtmp * wsw
+               atmp = atmp + dtmp * wsw
             end do
+
+            ! Single safe direct write to main memory
+            cache%alist(kat) = atmp
          end do
 
          ! Diagonal Coulomb interaction terms (Self-Image)
          rvdw = self%rvdw(izp, izp)
          wsw = 1.0_wp / real(list%selfnimg(iat), wp)
          gam = 1.0_wp / sqrt(2.0_wp * radi**2)
+
          do img = list%sitr(iat) + 1, list%sitr(iat) + list%selfnimg(iat)
             vec = list%trans(:, list%selftridx(img))
             call get_amat_dir_3d(vec, gam, dtrans, self%kbc, rvdw, capi, capi, dtmp)
-            adiag_local(iat) = adiag_local(iat) + dtmp * wsw
+            adiag_tmp = adiag_tmp + dtmp * wsw
          end do
 
          ! Effective hardness
          dtmp = self%eta(izp) + self%kqeta(izp) * cache%qloc(iat) + sqrt2pi / radi
-         adiag_local(iat) = adiag_local(iat) + cache%cdiag(iat) * dtmp + 1.0_wp
+
+         ! Single safe direct write (iat is thread-exclusive)
+         cache%adiag(iat) = adiag_tmp + cache%cdiag(iat) * dtmp + 1.0_wp
       end do
       !$omp end do
-      !$omp critical (get_amat_3d_list_)
-      cache%alist(:) = cache%alist + alist_local
-      cache%adiag(:) = cache%adiag + adiag_local
-      !$omp end critical (get_amat_3d_list_)
-      deallocate(alist_local, adiag_local)
       !$omp end parallel
 
    end subroutine get_amat_3d_list
@@ -2069,7 +2077,9 @@ contains
       end if
 
    end subroutine get_cmat_0d
-!> Build the bond capacitance matrix for a non‑periodic system.
+
+
+   !> Build the bond capacitance matrix for a non‑periodic system.
    subroutine get_cmat_0d_list(self, mol, list, clist, cdiag)
       !> EEQBC model type
       class(eeqbc_model), intent(in) :: self
@@ -2207,26 +2217,19 @@ contains
       real(wp), intent(out) :: cdiag(:)
 
       integer :: iat, jat, izp, jzp, img, kat
-      real(wp) :: vec(3), rvdw, tmp, capi, capj, wsw
+      real(wp) :: vec(3), rvdw, tmp, capi, capj, wsw, ctmp
       real(wp), allocatable :: dtrans(:, :)
-      real(wp), allocatable :: clist_local(:), cdiag_local(:)
-
-
-      !DEBUG
-      real(wp), allocatable :: cmat(:, :)
 
       call get_dir_trans(mol, dtrans, cutoff)
 
+      ! Zero out global shared target arrays upfront
       clist(:) = 0.0_wp
       cdiag(:) = 0.0_wp
 
       !$omp parallel default(none) &
-      !$omp shared(clist, cdiag, mol, list, self, dtrans) &
-      !$omp private(iat, izp, jat, kat, jzp, img) &
-      !$omp private(vec, rvdw, tmp, capi, capj, wsw, clist_local, cdiag_local)
-
-      allocate(clist_local(size(clist)), source=0.0_wp)
-      allocate(cdiag_local(size(cdiag)), source=0.0_wp)
+      !$omp shared(clist, mol, list, self, dtrans) &
+      !$omp private(iat, izp, jat, kat, jzp, img, vec, rvdw, tmp, capi, capj, wsw, ctmp) &
+      !$omp reduction(+:cdiag)
 
       !$omp do schedule(runtime)
       do iat = 1, mol%nat
@@ -2242,40 +2245,42 @@ contains
 
             ! Weight for equivalent images (Wigner-Seitz)
             wsw = 1.0_wp / real(list%nimg(kat), wp)
+
+            ! Initialize scalar accumulator for off-diagonal
+            ctmp = 0.0_wp
+
             do img = list%itr(kat) + 1, list%itr(kat) + list%nimg(kat)
                ! Translation vector is now stored in list%trans indexed by list%tridx
                vec = mol%xyz(:, iat) - mol%xyz(:, jat) - list%trans(:, list%tridx(img))
 
                call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, tmp)
 
-               ! Off-diagonal elements
-               clist_local(kat) = clist_local(kat) - tmp * wsw
-               ! Diagonal elements (standard pair)
-               cdiag_local(iat) = cdiag_local(iat) + tmp * wsw
-               cdiag_local(jat) = cdiag_local(jat) + tmp * wsw
+               ! Accumulate off-diagonal elements in local scalar
+               ctmp = ctmp - tmp * wsw
+
+               ! Diagonal elements (Safe reduction writes)
+               cdiag(iat) = cdiag(iat) + tmp * wsw
+               cdiag(jat) = cdiag(jat) + tmp * wsw
             end do
 
+            ! Safe direct write (kat is unique per thread)
+            clist(kat) = ctmp
 
          end do
+
          rvdw = self%rvdw(izp, izp)
          wsw = 1.0_wp / real(list%selfnimg(iat), wp)
+
          ! Self-interaction with periodic images (Diagonal only)
          do img = list%sitr(iat) + 1, list%sitr(iat) + list%selfnimg(iat)
             !write(*, *) 'iat=', iat, 'img=', img, 'nimg=', list%selfnimg(iat)
             vec = list%trans(:, list%selftridx(img))
 
             call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, tmp)
-            cdiag_local(iat) = cdiag_local(iat) + tmp * wsw
+            cdiag(iat) = cdiag(iat) + tmp * wsw
          end do
       end do
       !$omp end do
-
-      !$omp critical (get_cmat_3d_)
-      clist(:) = clist + clist_local
-      cdiag(:) = cdiag + cdiag_local
-      !$omp end critical (get_cmat_3d_)
-
-      deallocate(clist_local, cdiag_local)
       !$omp end parallel
 
    end subroutine get_cmat_3d_list
