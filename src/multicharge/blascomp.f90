@@ -92,10 +92,11 @@ contains
       do i = 1, n
          y_tmp_i = 0.0_wp
 
-         ! Diagonal contribution (usually only for symmetric)
+         ! Diagonal contribution
          y_tmp_i = y_tmp_i + a * mdiag(i) * x(i)
 
-         do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+         ! Slot +1 is j = i; off-diagonal interactions start at +2
+         do k = list%inl(i) + 2, list%inl(i) + list%nnl(i)
             j = list%nlat(k)
 
             ! Part 1: Contribution to row i (accumulated locally in scalar)
@@ -153,7 +154,8 @@ contains
          do m = 1, nv
             y(m, i) = y(m, i) + a * mdrdiag(m, i) * x(i)
          end do
-         do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+         ! Slot +1 is j = i; off-diagonal interactions start at +2
+         do k = list%inl(i) + 2, list%inl(i) + list%nnl(i)
             j = list%nlat(k)
             do m = 1, nv
                y(m, i) = y(m, i) + a * mdrij(m, k) * x(j)
@@ -211,7 +213,8 @@ contains
             end do
          end if
 
-         do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+         ! Slot +1 is j = i; off-diagonal interactions start at +2
+         do k = list%inl(i) + 2, list%inl(i) + list%nnl(i)
             j = list%nlat(k)
 
             do m = 1, nv

@@ -1016,7 +1016,7 @@ contains
          norm_cn = 1.0_wp / self%avg_cn(izp)**self%norm_exp
          radi = self%rad(izp) * (1.0_wp - self%kcnrad * cache%cn(iat) * norm_cn)
 
-         do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
+         do kat = list%inl(iat) + 2, list%inl(iat) + list%nnl(iat)
             jat = list%nlat(kat)
             jzp = mol%id(jat)
             vec = mol%xyz(:, jat) - mol%xyz(:, iat)
@@ -2108,7 +2108,7 @@ contains
       do iat = 1, mol%nat
          izp = mol%id(iat)
          capi = self%cap(izp)
-         do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
+         do kat = list%inl(iat) + 2, list%inl(iat) + list%nnl(iat)
             jat = list%nlat(kat)
             jzp = mol%id(jat)
             vec = mol%xyz(:, jat) - mol%xyz(:, iat)
