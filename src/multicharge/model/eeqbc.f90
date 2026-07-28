@@ -579,7 +579,7 @@ contains
          dtmpdrdiag(:, iat) = self%kqchi(izp) * cache%dqlocdrdiag(:, iat) + dtmpdrdiag(:, iat)
          dtmpdL(:, :, iat) = self%kqchi(izp) * cache%dqlocdL(:, :, iat) + dtmpdL(:, :, iat)
 
-         do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
+         do kat = list%inl(iat) + 1, list%inl(iat+1) - 1
             jat = list%nlat(kat)
             jzp = mol%id(jat)
             ! Since jat > iat, kat represents the pair (iat, jat)
@@ -602,7 +602,7 @@ contains
       !$omp private(iat, jat, kat, vec)
       !$omp do schedule(runtime)
       do iat = 1, mol%nat
-         do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
+         do kat = list%inl(iat) + 1, list%inl(iat+1) - 1
             jat = list%nlat(kat)
 
             ! Diagonal updates (Correct for symmetric list jat > iat)
@@ -838,7 +838,7 @@ contains
          capi = self%cap(izp)
 
          ! Loop over all neighbours, including self‑images
-         do kat = list%inl(iat) + 1, list%inl(iat) + list%nnl(iat)
+         do kat = list%inl(iat) + 1, list%inl(iat+1) - 1
             jat = list%nlat(kat)
             jzp = mol%id(jat)
             capj = self%cap(jzp)
@@ -1488,7 +1488,7 @@ contains
          dradi = -self%rad(izp) * self%kcnrad * norm_cn
 
          start_kat = list%inl(iat) + 1
-         finish_kat = list%inl(iat) + list%nnl(iat)
+         finish_kat = list%inl(iat+1) - 1
 
          do kat = start_kat, finish_kat
             jat = list%nlat(kat)
@@ -1815,7 +1815,7 @@ contains
          capi = self%cap(izp)
 
          start_kat = list%inl(iat) + 1
-         finish_kat = list%inl(iat) + list%nnl(iat)
+         finish_kat = list%inl(iat+1) - 1
 
          do kat = start_kat, finish_kat
             jat = list%nlat(kat)
