@@ -336,8 +336,8 @@ contains
       amat(:, :) = 0.0_wp
 
       vol = abs(matdet_3x3(mol%lattice))
-      call get_dir_trans(mol, dtrans, cutoff)
-      call get_rec_trans(mol, rtrans, cutoff)
+      call get_dir_trans(mol, dtrans)
+      call get_rec_trans(mol, rtrans)
 
       !$omp parallel default(none) &
       !$omp shared(amat, mol, self, wsc, dtrans, rtrans, alpha, vol) &
@@ -578,8 +578,8 @@ contains
       dadL(:, :, :) = 0.0_wp
 
       vol = abs(matdet_3x3(mol%lattice))
-      call get_dir_trans(mol, dtrans, cutoff)
-      call get_rec_trans(mol, rtrans, cutoff)
+      call get_dir_trans(mol, dtrans)
+      call get_rec_trans(mol, rtrans)
 
       !$omp parallel default(none) &
       !$omp shared(mol, self, wsc, alpha, vol, dtrans, rtrans, qvec) &
@@ -854,8 +854,8 @@ contains
       real(wp), allocatable :: dtrans(:, :), rtrans(:, :)
 
       vol = abs(matdet_3x3(mol%lattice))
-      call get_dir_trans(mol, dtrans, cutoff)
-      call get_rec_trans(mol, rtrans, cutoff)
+      call get_dir_trans(mol, dtrans)
+      call get_rec_trans(mol, rtrans)
 
       factor = 1.0_wp
       if (present(alpha)) factor = alpha

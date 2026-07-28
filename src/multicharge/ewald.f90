@@ -77,29 +77,20 @@ contains
       real(wp), intent(out) :: alpha
 
       real(wp) :: alpl, alpr, rlen, dlen, diff
-      real(wp) :: eff_dlen, eff_rlen
       real(wp), parameter :: alpha0 = 1.0e-8_wp
       integer, parameter :: niter = 30
       integer :: ibs, stat
 
-      ! Calculate effective isotropic lengths to prevent extreme mismatches
-      ! in highly anisotropic unit cells.
-      eff_dlen = volume**(1.0_wp / 3.0_wp)
-      eff_rlen = twopi / eff_dlen
-
-      ! Bound the minimum lengths by the isotropic equivalents
-      rlen = max(sqrt(minval(sum(rec_lat(:,:)**2, dim=1))), eff_rlen)
-      dlen = max(sqrt(minval(sum(lattice(:,:)**2, dim=1))), eff_dlen)
+      rlen = sqrt(minval(sum(rec_lat(:,:)**2, dim=1)))
+      dlen = sqrt(minval(sum(lattice(:,:)**2, dim=1)))
 
       stat = 0
       alpha = alpha0
       diff = rec_dir_diff(alpha, get_rec_term_3d, rlen, dlen, volume)
-
       do while (diff < -tolerance .and. alpha <= huge(1.0_wp))
          alpha = 2.0_wp * alpha
          diff = rec_dir_diff(alpha, get_rec_term_3d, rlen, dlen, volume)
       end do
-
       if (alpha > huge(1.0_wp)) then
          stat = 1
       elseif (alpha == alpha0) then
@@ -138,9 +129,7 @@ contains
       end if
 
       if (stat /= 0) then
-         ! Fallback to analytical optimal alpha for an isotropic cell
-         ! rather than a hardcoded scalar if convergence fails.
-         alpha = sqrt(pi) / eff_dlen
+         alpha = 0.25_wp
       end if
 
    end subroutine search_alpha
@@ -187,15 +176,8 @@ contains
 
       !> Real space term
       real(wp) :: dval
-      real(wp) :: arg
 
-      arg = alpha * rr
-      ! Guard against IEEE underflow exceptions
-      if (arg > 26.0_wp) then
-         dval = 0.0_wp
-      else
-         dval = erfc(arg)/rr
-      end if
+      dval = erfc(alpha*rr)/rr
 
    end function get_dir_term
 
@@ -215,15 +197,8 @@ contains
 
       !> Reciprocal term
       real(wp) :: rval
-      real(wp) :: arg
 
-      arg = 0.25_wp * gg * gg / (alpha**2)
-      ! Guard against IEEE underflow exceptions
-      if (arg > 700.0_wp) then
-         rval = 0.0_wp
-      else
-         rval = 4.0_wp*pi*exp(-arg)/(vol*gg*gg)
-      end if
+      rval = 4.0_wp*pi*(exp(-0.25_wp*gg*gg/(alpha**2))/(vol*gg*gg))
 
    end function get_rec_term_3d
 

@@ -230,9 +230,14 @@ contains
       type(structure_type), intent(in) :: mol
       !> Output translation vectors (3 × N) where N = 2×2×2 = 8
       real(wp), allocatable, intent(out) :: trans(:, :)
-      real(wp), intent(in) :: cutoff
+      real(wp), intent(in), optional :: cutoff
+      integer, parameter :: rep(3) = [2, 2, 2]
 
-      call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
+      if (present(cutoff)) then
+         call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
+      else
+         call get_lattice_points(mol%lattice, rep, .true., trans)
+      end if
 
    end subroutine get_dir_trans
 
@@ -242,11 +247,16 @@ contains
       type(structure_type), intent(in) :: mol
       !> Output translation vectors in reciprocal space (3 × N) where N = 2×2×2 = 8
       real(wp), allocatable, intent(out) :: trans(:, :)
-      real(wp), intent(in) :: cutoff
+      real(wp), intent(in), optional :: cutoff
+      integer, parameter :: rep(3) = [2, 2, 2]
       real(wp) :: rec_lat(3, 3)
 
-      rec_lat = twopi * transpose(matinv_3x3(mol%lattice))
-      call get_lattice_points(mol%periodic, rec_lat, cutoff, trans)
+      rec_lat = twopi*transpose(matinv_3x3(mol%lattice))
+      if (present(cutoff)) then
+         call get_lattice_points(mol%periodic, rec_lat, cutoff, trans)
+      else
+         call get_lattice_points(rec_lat, rep, .false., trans)
+      end if
 
    end subroutine get_rec_trans
 
