@@ -55,9 +55,17 @@ contains
       real(wp) :: vol, rec_lat(3, 3)
 
       vol = abs(matdet_3x3(lattice))
+      if (vol <= 0.0_wp) then
+         ! Fallback for collapsed/singular matrices
+         alpha = 0.25_wp
+         return
+      end if
+
       rec_lat = twopi*transpose(matinv_3x3(lattice))
 
       call search_alpha(lattice, rec_lat, vol, eps, alpha)
+
+      write(*, *) "alpha = ", alpha
 
    end subroutine get_alpha
 
@@ -80,9 +88,27 @@ contains
       real(wp), parameter :: alpha0 = 1.0e-8_wp
       integer, parameter :: niter = 30
       integer :: ibs, stat
+      real(wp) :: row_lengths(3), rec_lengths(3)
+      integer :: i
 
-      rlen = sqrt(minval(sum(rec_lat(:,:)**2, dim=1)))
-      dlen = sqrt(minval(sum(lattice(:,:)**2, dim=1)))
+      ! Compute individual lengths of the lattice row vectors
+      do i = 1, 3
+         row_lengths(i) = sqrt(sum(lattice(i,:)**2))
+         rec_lengths(i) = sqrt(sum(rec_lat(i,:)**2))
+      end do
+
+      ! Robust bounds: Avoid vacuum-inflated axes by filtering out exceptionally large lengths
+      ! (e.g., in anisotropic slab setups where c >> a,b)
+      dlen = minval(row_lengths)
+      if (maxval(row_lengths) > 3.0_wp * dlen) then
+         ! If anisotropic, ignore the giant vacuum axis for the real-space safety bound
+         dlen = minval(row_lengths, mask = (row_lengths < maxval(row_lengths)))
+      end if
+
+      rlen = minval(rec_lengths)
+      if (maxval(rec_lengths) > 3.0_wp * rlen) then
+         rlen = minval(rec_lengths, mask = (rec_lengths < maxval(rec_lengths)))
+      end if
 
       stat = 0
       alpha = alpha0
@@ -135,9 +161,7 @@ contains
    end subroutine search_alpha
 
 !> Returns the difference in the decrease of the real and reciprocal parts of the
-!> Ewald sum. In order to make the real space part shorter than the reciprocal
-!> space part, the values are taken at different distances for the real and the
-!> reciprocal space parts.
+!> Ewald sum.
    pure function rec_dir_diff(alpha, get_rec_term, rlen, dlen, volume) result(diff)
 
       !> Parameter for the Ewald summation
@@ -165,37 +189,22 @@ contains
    end function rec_dir_diff
 
 !> Returns the max. value of a term in the real space part of the Ewald summation
-!> for a given vector length.
    pure function get_dir_term(rr, alpha) result(dval)
 
-      !> Length of the real space vector
       real(wp), intent(in) :: rr
-
-      !> Parameter of the Ewald summation
       real(wp), intent(in) :: alpha
-
-      !> Real space term
       real(wp) :: dval
 
       dval = erfc(alpha*rr)/rr
 
    end function get_dir_term
 
-
 !> Returns the max. value of a term in the reciprocal space part of the Ewald
-!> summation for a given vector length.
    pure function get_rec_term_3d(gg, alpha, vol) result(rval)
 
-      !> Length of the reciprocal space vector
       real(wp), intent(in) :: gg
-
-      !> Parameter of the Ewald summation
       real(wp), intent(in) :: alpha
-
-      !> Volume of the real space unit cell
       real(wp), intent(in) :: vol
-
-      !> Reciprocal term
       real(wp) :: rval
 
       rval = 4.0_wp*pi*(exp(-0.25_wp*gg*gg/(alpha**2))/(vol*gg*gg))
