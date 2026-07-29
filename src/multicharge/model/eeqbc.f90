@@ -3967,7 +3967,7 @@ contains
       real(wp), optional, intent(in) :: betain
 
       real(wp) :: alpha, beta
-      integer :: iat, jat, kat, izp, jzp, start_kat, finish_kat, img
+      integer :: iat, jat, kat, izp, jzp, kat_diag, img
       real(wp) :: vec(3), r2, gam, dtmp, capi, capj, dgam, rvdw, wsw, factor
       real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), rij(3), ctmp
       real(wp) :: W_ii, W_jj, W_ij, norm_cn
@@ -3990,8 +3990,8 @@ contains
 
       !$omp parallel do default(none) schedule(runtime) &
       !$omp shared(cache, mol, list, self, p, dtrans, alpha, beta) &
-      !$omp private(iat, kat, izp, jat, jzp, gam, vec, r2, dtmp, radi, radj, dradi, dradj, dG, dS, norm_cn) &
-      !$omp private(start_kat, finish_kat, W_ii, W_jj, W_ij, wsw, capi, capj, rvdw, img, dgam) &
+      !$omp private(iat, kat, kat_diag, izp, jat, jzp, gam, vec, r2, dtmp, radi, radj, dradi, dradj, dG, dS, norm_cn) &
+      !$omp private(W_ii, W_jj, W_ij, wsw, capi, capj, rvdw, img, dgam) &
       !$omp reduction(+:cnacc, qlocacc, gradient_local, sigma_local)
       do iat = 1, mol%nat
          izp = mol%id(iat)
@@ -4057,10 +4057,12 @@ contains
 
          gam = 1.0_wp / sqrt(2.0_wp * radi**2)
          rvdw = self%rvdw(izp, izp)
-         if (list%nimg(list%inl(iat)) > 1) then
-            wsw = 1.0_wp / real(list%nimg(list%inl(iat)) - 1, wp)
+         kat_diag = list%inl(iat)
 
-            do img = list%itr(list%inl(iat)), list%itr(list%inl(iat+1)) - 1
+         if (list%nimg(kat_diag) > 1) then
+            wsw = 1.0_wp / real(list%nimg(kat_diag) - 1, wp)
+
+            do img = list%itr(kat_diag) + 1, list%itr(kat_diag + 1) - 1
                vec = list%trans(:, list%tridx(img))
                call get_damat_dir(vec, dtrans, capi, capi, rvdw, self%kbc, gam, dG, dS, dgam)
                sigma_local(:, :) = sigma_local(:, :) + dS * wsw * W_ii * alpha
@@ -4068,9 +4070,14 @@ contains
 
                call get_damat_dc_dir(vec, dtrans, capi, capi, rvdw, self%kbc, gam, dG, dS)
                sigma_local(:, :) = sigma_local(:, :) - W_ii * dS * wsw * alpha
-               call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, dG, dS)
+            end do
+         end if
 
-               ! translations, so we only need to update the lattice tensor (sigma).
+         if (list%nimg(kat_diag) > 1) then
+            wsw = 1.0_wp / real(list%nimg(kat_diag) - 1, wp)
+            do img = list%itr(kat_diag) + 1, list%itr(kat_diag + 1) - 1
+               vec = list%trans(:, list%tridx(img))
+               call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, dG, dS)
                sigma_local(:, :) = sigma_local(:, :) - p(iat) * cache%xtmp(iat) * dS * wsw * beta
             end do
          end if
@@ -4079,7 +4086,7 @@ contains
          gradient_local(:, iat) = gradient_local(:, iat) + dtmp * cache%dcdrdiag(:, iat) * alpha &
          & + p(iat) * cache%xtmp(iat) * cache%dcdrdiag(:, iat) * beta
          sigma_local(:, :) = sigma_local(:, :) + dtmp * cache%dcdL(:, :, iat) * alpha &
-         & + p(iat) * cache%xtmp(iat) * cache%dcdL(:, :, iat)
+         & + p(iat) * cache%xtmp(iat) * cache%dcdL(:, :, iat) * beta
       end do
       !$omp end parallel do
 
@@ -4094,21 +4101,25 @@ contains
 
       !$omp parallel do default(none) schedule(runtime) &
       !$omp shared(mol, self, list, dtrans, v, p, cnacc, qlocacc, beta) &
-      !$omp private(iat, izp, capi, rvdw, wsw, img, rij, ctmp)
+      !$omp private(iat, izp, kat_diag, capi, rvdw, wsw, img, rij, ctmp)
       do iat = 1, mol%nat
          izp = mol%id(iat)
          capi = self%cap(izp)
          rvdw = self%rvdw(izp, izp)
-         wsw = 1.0_wp / real(list%nimg(list%inl(iat)) - 1, wp)
+         kat_diag = list%inl(iat)
 
-         ! Step 1: Accumulate corrections into v(iat)
-         do img = list%itr(list%inl(iat)), list%itr(list%inl(iat+1))-1
-            rij = list%trans(:, list%tridx(img))
-            call get_cpair_dir(self%kbc, rij, dtrans, rvdw, capi, capi, ctmp)
-            ctmp = ctmp * wsw
+         if (list%nimg(kat_diag) > 1) then
+            wsw = 1.0_wp / real(list%nimg(kat_diag) - 1, wp)
 
-            v(iat) = v(iat) - ctmp * p(iat)
-         end do
+            ! Step 1: Accumulate corrections into v(iat)
+            do img = list%itr(kat_diag) + 1, list%itr(kat_diag + 1) - 1
+               rij = list%trans(:, list%tridx(img))
+               call get_cpair_dir(self%kbc, rij, dtrans, rvdw, capi, capi, ctmp)
+               ctmp = ctmp * wsw
+
+               v(iat) = v(iat) - ctmp * p(iat)
+            end do
+         end if
 
          ! Step 2: Compute weights immediately (Loop Fusion)
          cnacc(iat)   = cnacc(iat) + v(iat) * self%kcnchi(izp) * beta
