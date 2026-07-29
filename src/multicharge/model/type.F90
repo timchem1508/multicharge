@@ -450,13 +450,6 @@ contains
                write(output_unit, '(a)') ''
             end if
 
-            call timer%push("dxdr_setup")
-            call self%get_pT_dbdR(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, alpha = -1.0_wp, list = list)
-            call timer%pop
-            if (verbosity_solve > 1) then
-               write(output_unit, '(a, 1x, a)') "Electronegativity derivatives setup time : ", format_time(timer%get("dxdr_setup"))
-               write(output_unit, '(a)') ''
-            end if
          else
             call timer%push("dadr_setup")
             call self%get_pT_damat(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, alpha = 0.5_wp)

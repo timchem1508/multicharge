@@ -3043,19 +3043,12 @@ contains
             ! Recalculate pair derivatives
             call get_dcpair(self%kbc, vec, rvdw, capi, capj, dG, dS)
 
-            ! Matches dxdrdiag updates:
-            ! grad(i) += q(i) * chi(j) * dCij/dRi
-            ! grad(j) += q(j) * chi(i) * dCji/dRj
             gradient_local(:, iat) = gradient_local(:, iat) + q(iat) * cache%xtmp(jat) * dG
             gradient_local(:, jat) = gradient_local(:, jat) - q(jat) * cache%xtmp(iat) * dG
 
-            ! Matches dxdrij/ji updates (Off-diagonal projected on q):
-            ! grad(j) += q(i) * (chi(i) - chi(j)) * dCij/dRi
-            ! grad(i) += q(j) * (chi(j) - chi(i)) * dCji/dRj
             gradient_local(:, jat) = gradient_local(:, jat) + q(iat) * (cache%xtmp(iat) - cache%xtmp(jat)) * dG
             gradient_local(:, iat) = gradient_local(:, iat) - q(jat) * (cache%xtmp(jat) - cache%xtmp(iat)) * dG
 
-            ! Project onto Sigma (Stress/Lattice)
             sigma_local(:, :) = sigma_local(:, :) + q(iat) * cache%xtmp(jat) * spread(dG, 1, 3) * spread(-vec, 2, 3)
             sigma_local(:, :) = sigma_local(:, :) + q(jat) * cache%xtmp(iat) * spread(dG, 1, 3) * spread(-vec, 2, 3)
          end do
@@ -3351,7 +3344,7 @@ contains
          if (any(mol%periodic)) then
             call get_pT_damat_3d_list(self, mol, list, cache, p, gradient, sigma, alpha)
          else
-            call get_pT_damat_0d_list(self, mol, list, cache, p, gradient, sigma, alpha)
+            call get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain=0.5_wp, betain=-1.0_wp)
          end if
       end if
 
@@ -3382,7 +3375,6 @@ contains
       hard = 0.0_wp
       effchrg = 0.0_wp
 
-      ! Allocate the local arrays ONCE before the parallel region
       allocate(gradient_local(3, mol%nat), source=0.0_wp)
       allocate(sigma_local(3, 3), source=0.0_wp)
 
@@ -3820,5 +3812,144 @@ contains
 
       deallocate(gradient_local, sigma_local, hard, effchrg, dtrans)
    end subroutine get_pT_damat_3d_list
+
+   subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain, betain)
+      class(eeqbc_model), intent(in) :: self
+      type(structure_type), intent(in) :: mol
+      type(adjacency_list), intent(in) :: list
+      type(mchrg_cache), intent(in) :: cache
+      real(wp), intent(in) :: p(:)
+      real(wp), intent(inout) :: gradient(:, :)
+      real(wp), intent(inout) :: sigma(:, :)
+      real(wp), optional, intent(in) :: alphain
+      real(wp), optional, intent(in) :: betain
+
+      real(wp) :: alpha, beta
+      integer :: iat, jat, kat, izp, jzp, start_kat, finish_kat
+      real(wp) :: vec(3), r2, gam, arg, dtmp, norm_cn, factor
+      real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3)
+      real(wp) :: W_ii, W_jj, W_ij
+      real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
+      real(wp), allocatable :: v(:), qlocacc(:), cnacc(:)
+      real(wp), allocatable :: dtrans(:, :)
+
+      alpha = 1.0_wp
+      if (present(alphain)) alpha = alphain
+      beta = 1.0_wp
+      if (present(betain)) beta = betain
+
+      allocate(dtrans, source=list%trans)
+      allocate(qlocacc(mol%nat), cnacc(mol%nat))
+      qlocacc = 0.0_wp
+      cnacc = 0.0_wp
+
+      allocate(gradient_local(3, mol%nat), source=0.0_wp)
+      allocate(sigma_local(3, 3), source=0.0_wp)
+
+      !$omp parallel do default(none) schedule(runtime) &
+      !$omp shared(cache, mol, self, p, list, alpha, beta) &
+      !$omp private(iat, jat, izp, jzp, gam, vec, r2, dtmp, norm_cn, arg) &
+      !$omp private(radi, radj, dradi, dradj, dG, dS, W_ii, W_jj, W_ij) &
+      !$omp reduction(+:cnacc, qlocacc, gradient_local, sigma_local)
+
+      do iat = 1, mol%nat
+         izp = mol%id(iat)
+         norm_cn = 1.0_wp / self%avg_cn(izp)**self%norm_exp
+         radi = self%rad(izp) * (1.0_wp - self%kcnrad * cache%cn(iat) * norm_cn)
+         dradi = -self%rad(izp) * self%kcnrad * norm_cn
+
+         W_ii = p(iat) * cache%vrhs(iat)
+
+         do kat = list%inl(iat) + 1, list%inl(iat + 1) - 1
+            jat = list%nlat(kat)
+            jzp = mol%id(jat)
+            vec = mol%xyz(:, jat) - mol%xyz(:, iat)
+            r2 = dot_product(vec, vec)
+
+            W_jj = p(jat) * cache%vrhs(jat)
+            W_ij = p(iat) * cache%vrhs(jat) + p(jat) * cache%vrhs(iat)
+
+            norm_cn = 1.0_wp / self%avg_cn(jzp)**self%norm_exp
+            radj = self%rad(jzp) * (1.0_wp - self%kcnrad * cache%cn(jat) * norm_cn)
+            dradj = -self%rad(jzp) * self%kcnrad * norm_cn
+
+            gam = 1.0_wp / sqrt(radi**2 + radj**2)
+            arg = gam * gam * r2
+            dtmp = 2.0_wp * exp(-arg) / (sqrtpi)
+
+            ! Accumulate scalar weights for CN derivatives
+            cnacc(iat) = cnacc(iat) - (dtmp * radi * dradi * gam**3.0_wp) * cache%clist(kat) * W_ij * alpha
+            cnacc(jat) = cnacc(jat) - (dtmp * radj * dradj * gam**3.0_wp) * cache%clist(kat) * W_ij * alpha
+
+            ! 1. Explicit Geometry Derivative
+            dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) - erf(sqrt(arg)) / (r2 * sqrt(r2))
+            dG = dtmp * vec
+            dS = spread(dG, 1, 3) * spread(vec, 2, 3)
+
+            gradient_local(:, iat) = gradient_local(:, iat) - dG * cache%clist(kat) * W_ij * alpha
+            gradient_local(:, jat) = gradient_local(:, jat) + dG * cache%clist(kat) * W_ij * alpha
+            sigma_local(:, :)   = sigma_local(:, :)   + dS * cache%clist(kat) * W_ij * alpha
+
+            ! 3 & 4. Capacitance derivatives
+            call get_dcpair(self%kbc, vec, self%rvdw(izp, jzp), self%cap(izp), self%cap(jzp), dG, dS)
+            dtmp = erf(sqrt(r2) * gam) / sqrt(r2)
+            gradient_local(:, iat) = gradient_local(:, iat) + dtmp * dG * W_ij * alpha &
+            & + p(iat) * cache%xtmp(jat) * dG * beta &
+            & - p(jat) * (cache%xtmp(jat) - cache%xtmp(iat)) * dG * beta
+
+            gradient_local(:, jat) = gradient_local(:, jat) - dtmp * dG * W_ij * alpha &
+            & - p(jat) * cache%xtmp(iat) * dG * beta &
+            & + p(iat) * (cache%xtmp(iat) - cache%xtmp(jat)) * dG * beta
+
+            sigma_local(:, :)   = sigma_local(:, :)   - dtmp * W_ij * dS * alpha &
+            & - p(iat) * cache%xtmp(jat) * dS * beta &
+            & - p(jat) * cache%xtmp(iat) * dS * beta
+
+            dtmp = (self%eta(jzp) + self%kqeta(jzp) * cache%qloc(jat) + sqrt2pi / radj)
+            gradient_local(:, iat) = gradient_local(:, iat) - dtmp * dG * W_jj * alpha
+            dtmp = (self%eta(izp) + self%kqeta(izp) * cache%qloc(iat) + sqrt2pi / radi)
+            gradient_local(:, jat) = gradient_local(:, jat) + dtmp * dG * W_ii * alpha
+         end do
+
+         ! 5. Diagonal weight accumulation
+         qlocacc(iat) = qlocacc(iat) + self%kqeta(izp) * W_ii * cache%cdiag(iat) * alpha
+         cnacc(iat) = cnacc(iat) - sqrt2pi * dradi / (radi**2) * W_ii * cache%cdiag(iat) * alpha
+
+         ! 6. Intrinsic capacitance
+         dtmp = (self%eta(izp) + self%kqeta(izp) * cache%qloc(iat) + sqrt2pi / radi) * W_ii
+         gradient_local(:, iat) = gradient_local(:, iat) + dtmp * cache%dcdrdiag(:, iat) * alpha &
+         & + p(iat) * cache%xtmp(iat) * cache%dcdrdiag(:, iat) * beta
+
+         sigma_local(:, :)   = sigma_local(:, :)   + dtmp * cache%dcdL(:, :, iat) * alpha &
+         & + p(iat) * cache%xtmp(iat) * cache%dcdL(:, :, iat) * beta
+      end do
+      !$omp end parallel do
+
+      allocate(v(mol%nat))
+      call gemv_cmp(list, cache%clist, cache%cdiag, p, v, alpha=1.0_wp, beta=0.0_wp)
+
+      !$omp parallel do default(none) schedule(runtime) &
+      !$omp shared(mol, self, v, p, cnacc, qlocacc, beta) &
+      !$omp private(iat)
+      do iat = 1, mol%nat
+         cnacc(iat)   = cnacc(iat) + v(iat) * self%kcnchi(mol%id(iat)) * beta
+         qlocacc(iat) = qlocacc(iat) + v(iat) * self%kqchi(mol%id(iat)) * beta
+      end do
+      !$omp end parallel do
+
+      gradient = gradient + gradient_local
+      sigma = sigma + sigma_local
+
+      gradient_local = 0.0_wp
+      sigma_local = 0.0_wp
+
+      call self%ncoord%add_coordination_number_derivs_list(mol, dtrans, cnacc, gradient_local, sigma_local, list)
+      call self%ncoord_en%add_coordination_number_derivs_list(mol, dtrans, qlocacc, gradient_local, sigma_local, list)
+
+      gradient = gradient + gradient_local
+      sigma = sigma + sigma_local
+
+      deallocate(gradient_local, sigma_local, qlocacc, cnacc, dtrans, v)
+   end subroutine get_grad_0d_list
 
 end module multicharge_model_eeqbc
