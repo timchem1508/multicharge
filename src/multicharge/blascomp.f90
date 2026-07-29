@@ -70,7 +70,7 @@ contains
       is_sym = .true.
       if (present(symmetric)) is_sym = symmetric
 
-      n = size(list%nnl)
+      n = size(list%inl) - 1
       if (size(mlist) /= size(list%nlat)) return
       if (is_sym) then
          a = alpha
@@ -134,7 +134,7 @@ contains
       b = 0.0_wp
       if (present(beta)) b = beta
 
-      n = size(list%nnl)
+      n = size(list%inl) - 1
       nv = size(y, 1)
 
       !$omp parallel do default(shared) private(i, m)
@@ -186,7 +186,7 @@ contains
       is_sym = .true.
       if (present(symmetric)) is_sym = symmetric
 
-      n = size(list%nnl)
+      n = size(list%inl) - 1
       nv = size(y, 1)
 
       if (size(mlist_drij, 2) /= size(list%nlat)) return
@@ -259,13 +259,13 @@ contains
          y(:,:) = beta * y(:,:)
       end if
 
-      do i = 1, size(list%nnl)
+      do i = 1, size(list%inl) - 1
 
          if (is_sym) then
             y(:, i) = y(:, i) + alpha * mdiag(i) * x(:, i)
          end if
 
-         do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+         do k = list%inl(i) + 1, list%inl(i+1) - 1
             j = list%nlat(k)
 
             y(:, i) = y(:, i) + alpha * mlist(k) * x(:, j)
@@ -306,13 +306,13 @@ contains
          y(:,:) = beta * y(:,:)
       end if
 
-      do i = 1, size(list%nnl)
+      do i = 1, size(list%inl) - 1
 
          if (is_sym) then
             y(:, i) = y(:, i) + alpha * mdiag(:, i) * x(:, i)
          end if
 
-         do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+         do k = list%inl(i) + 1, list%inl(i+1) -1
             j = list%nlat(k)
 
             y(:, i) = y(:, i) + alpha * mlist(:, k) * x(:, j)
@@ -353,13 +353,13 @@ contains
          y(:,:,:) = beta * y(:,:,:)
       end if
 
-      do i = 1, size(list%nnl)
+      do i = 1, size(list%inl) - 1
 
          ! Diagonal contribution
          y(:,:,i) = y(:,:,i) + alpha * cdiag(i) * x(:,:,i)
 
          ! Off-diagonal neighbours
-         do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+         do k = list%inl(i) + 1, list%inl(i+1) - 1
             j = list%nlat(k)
 
             ! Y_i += X_j * C(j,i)
@@ -416,7 +416,7 @@ contains
          dx_diag(:,:) = beta * dx_diag(:,:)
       end if
 
-      do i = 1, size(list%nnl)
+      do i = 1, size(list%inl) - 1
 
          !==================================================
          ! DIAGONAL
@@ -425,7 +425,7 @@ contains
             ! symmetric result
             dx_diag(:,i) = dx_diag(:,i) + alpha * dtmp_diag(:,i) * cdiag(i)
 
-            do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+            do k = list%inl(i) + 1, list%inl(i+1) - 1
                j = list%nlat(k)
                dx_diag(:,i) = dx_diag(:,i) + alpha * dtmp_list(:,k) * clist(k)
                dx_diag(:,j) = dx_diag(:,j) + alpha * dtmp_list(:,k) * clist(k)
@@ -438,7 +438,7 @@ contains
          !==================================================
          ! OFF-DIAGONAL
          !==================================================
-         do k = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+         do k = list%inl(i) + 1, list%inl(i+1) - 1
             j = list%nlat(k)
 
             if (is_sym) then
@@ -499,9 +499,9 @@ contains
       end if
 
       ! ----- Off‑diagonal contributions from A(i,j) and A(j,i) -----
-      do i = 1, size(list%nnl)
+      do i = 1, size(list%inl) - 1
          B_ii = cdiag(i)
-         do idx_ij = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+         do idx_ij = list%inl(i) + 1, list%inl(i+1) - 1
             j = list%nlat(idx_ij)
 
             A_ij = drij(:, idx_ij)
@@ -523,7 +523,7 @@ contains
             ! 3) Coupling to other neighbours:
             !    a) For every neighbour k of j (k /= i):
             !       C(i,k) += alpha * A(i,j) * B(j,k)
-            do idx_jk = list%inl(j) + 1, list%inl(j) + list%nnl(j)
+            do idx_jk = list%inl(j) + 1, list%inl(j+1) - 1
                k = list%nlat(idx_jk)
                if (k == i) cycle
                B_jk = clist(idx_jk)
@@ -538,7 +538,7 @@ contains
 
             !    b) For every neighbour k of i (k /= j):
             !       C(j,k) += alpha * A(j,i) * B(i,k)
-            do idx_ik = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+            do idx_ik = list%inl(i) + 1, list%inl(i+1) - 1
                k = list%nlat(idx_ik)
                if (k == j) cycle
                B_ik = clist(idx_ik)
@@ -554,7 +554,7 @@ contains
       end do
 
       ! ----- Diagonal contributions from A(i,i) -----
-      do i = 1, size(list%nnl)
+      do i = 1, size(list%inl) - 1
          A_ij = ddiag(:, i)          ! actually A_ii
          B_ii = cdiag(i)
 
@@ -562,7 +562,7 @@ contains
          xdiag(:, i) = xdiag(:, i) + alpha * A_ij * B_ii
 
          ! C(i,j) += alpha * A(i,i) * B(i,j)   for j > i
-         do idx_ij = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+         do idx_ij = list%inl(i) + 1, list%inl(i+1) - 1
             B_ij = clist(idx_ij)
             xrij(:, idx_ij) = xrij(:, idx_ij) + alpha * A_ij * B_ij
             ! Note: C(j,i) does *not* get a contribution from A(i,i)
@@ -575,7 +575,7 @@ contains
          type(adjacency_list), intent(in) :: list
          integer, intent(in) :: i, j
          integer :: idx, k
-         do idx = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+         do idx = list%inl(i) + 1, list%inl(i+1) - 1
             if (list%nlat(idx) == j) return
          end do
          idx = 0   ! should never happen if (i,j) is a neighbour pair
@@ -603,7 +603,7 @@ contains
       integer, allocatable :: mod_list(:)
       integer :: num_mod
 
-      nat = size(list%nnl)
+      nat = size(list%inl) - 1
       n_edges = size(list%nlat)
 
       ! 1. Apply beta scaling upfront
@@ -619,7 +619,10 @@ contains
 
       ! 2. Build full symmetric neighbor list for O(1) reverse lookups
       allocate(deg(nat))
-      deg = list%nnl
+
+      do i = 1, nat
+         deg(i) = list%inl(i+1) - list%inl(i) - 1
+      end do
       do e = 1, n_edges
          j = list%nlat(e)
          deg(j) = deg(j) + 1
@@ -637,7 +640,7 @@ contains
 
       deg = head(1:nat) ! Reuse deg array as insertion pointers
       do i = 1, nat
-         do e = list%inl(i) + 1, list%inl(i) + list%nnl(i)
+         do e = list%inl(i) + 1, list%inl(i+1) - 1
             j = list%nlat(e)
 
             ! Forward edge (i -> j)
