@@ -344,7 +344,7 @@ contains
          call get_dir_trans(mol, dtrans, cutoff)
 
          if (present(list)) then
-            !$omp parallel do default(none) schedule(runtime) &
+            !$omp parallel do default(none) schedule(dynamic, 32) &
             !$omp shared(mol, self, list, cache, dtrans) &
             !$omp private(iat, izp, img, wsw, capi, vec, rvdw, ctmp)
             do iat = 1, mol%nat
@@ -353,11 +353,11 @@ contains
                rvdw = self%rvdw(izp, izp)
 
                ! Execute only if periodic self-images exist (nimg > 1, since index 1 is identity R=0)
-               if (list%itr(list%inl(iat+1)) - list%itr(list%inl(iat)) > 1) then
-                  wsw = 1.0_wp / real(list%itr(list%inl(iat+1)) - list%itr(list%inl(iat)), wp)
+               if (list%nimg(list%inl(iat)) > 1) then
+                  wsw = 1.0_wp / real(list%nimg(list%inl(iat)) - 1, wp)
 
-                  ! Skip identity image at list%itr(list%inl(iat)) and loop through R /= 0 images
-                  do img = list%itr(list%inl(iat)), list%itr(list%inl(iat+1)) - 1
+                  ! Skip identity image at list%itr(kat) and loop through R /= 0 images
+                  do img = list%itr(list%inl(iat)) + 1, list%itr(list%inl(iat) + 1) - 1
                      vec = list%trans(:, list%tridx(img))
                      call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, ctmp)
 
@@ -367,6 +367,7 @@ contains
                end if
             end do
             !$omp end parallel do
+
 
          else
             !$omp parallel do default(none) schedule(runtime) &
@@ -1129,7 +1130,7 @@ contains
 
    end subroutine get_amat_3d
 
-   !> Build the Coulomb matrix for a periodic system using CSR adjacency list.
+!> Build the Coulomb matrix for a periodic system using CSR adjacency list.
    subroutine get_amat_3d_list(self, mol, list, cache)
       class(eeqbc_model), intent(in) :: self
       type(structure_type), intent(in) :: mol
@@ -1137,7 +1138,7 @@ contains
       !> Multicharge cache
       type(mchrg_cache), intent(inout) :: cache
 
-      integer :: iat, jat, izp, jzp, img, kat
+      integer :: iat, jat, izp, jzp, img, kat, kat_diag
       real(wp) :: vec(3), gam, dtmp, capi, capj, radi, radj, norm_cn, rvdw, wsw
       real(wp) :: atmp, adiag_tmp
       real(wp), allocatable :: dtrans(:, :)
@@ -1150,10 +1151,10 @@ contains
 
       !$omp parallel default(none) &
       !$omp shared(cache, mol, self, list, dtrans) &
-      !$omp private(iat, izp, jat, jzp, gam, vec, dtmp, norm_cn, radi, radj) &
-      !$omp private(capi, capj, rvdw, wsw, img, kat, atmp, adiag_tmp)
+      !$omp private(iat, izp, kat, kat_diag, jat, jzp, gam, vec, dtmp, norm_cn, radi, radj) &
+      !$omp private(capi, capj, rvdw, wsw, img, atmp, adiag_tmp)
 
-      !$omp do schedule(runtime)
+      !$omp do schedule(dynamic, 32)
       do iat = 1, mol%nat
          izp = mol%id(iat)
          norm_cn = 1.0_wp / self%avg_cn(izp)**self%norm_exp
@@ -1164,13 +1165,13 @@ contains
          adiag_tmp = 0.0_wp
 
          do kat = list%inl(iat) + 1, list%inl(iat+1) - 1
-            if (list%itr(kat+1)-list%itr(kat) == 0) cycle
+            if (list%nimg(kat) == 0) cycle
 
             jat = list%nlat(kat)
             jzp = mol%id(jat)
             capj = self%cap(jzp)
             rvdw = self%rvdw(izp, jzp)
-            wsw = 1.0_wp / real(list%itr(kat+1)-list%itr(kat) , wp)
+            wsw = 1.0_wp / real(list%nimg(kat), wp)
 
             norm_cn = cache%cn(jat) / self%avg_cn(jzp)**self%norm_exp
             radj = self%rad(jzp) * (1.0_wp - self%kcnrad * norm_cn)
@@ -1191,13 +1192,14 @@ contains
          ! Diagonal Coulomb interaction terms (Self-Image)
          gam = 1.0_wp / sqrt(2.0_wp * radi**2)
          rvdw = self%rvdw(izp, izp)
+         kat_diag = list%inl(iat)
 
          ! Execute only if periodic self-images exist (nimg > 1, since index 1 is identity R=0)
-         if (list%itr(list%inl(iat+1)) - list%itr(list%inl(iat)) > 1) then
-            wsw = 1.0_wp / real(list%itr(list%inl(iat+1)) - list%itr(list%inl(iat)), wp)
+         if (list%nimg(kat_diag) > 1) then
+            wsw = 1.0_wp / real(list%nimg(kat_diag) - 1, wp)
 
-            ! Skip identity image at list%itr(list%inl(iat)) and loop through R /= 0 images
-            do img = list%itr(list%inl(iat)), list%itr(list%inl(iat+1)) - 1
+            ! Skip identity image at list%itr(kat_diag) and loop through R /= 0 images
+            do img = list%itr(kat_diag) + 1, list%itr(kat_diag + 1) - 1
                vec = list%trans(:, list%tridx(img))
                call get_amat_dir_3d(vec, gam, dtrans, self%kbc, rvdw, capi, capi, dtmp)
                adiag_tmp = adiag_tmp + dtmp * wsw
@@ -2230,7 +2232,7 @@ contains
       !> Output diagonal elements capacitance matrix in compressed format, size of mol%nat
       real(wp), intent(out) :: cdiag(:)
 
-      integer :: iat, jat, izp, jzp, img, kat
+      integer :: iat, jat, izp, jzp, img, kat, kat_diag
       real(wp) :: vec(3), rvdw, tmp, capi, capj, wsw, ctmp
       real(wp), allocatable :: dtrans(:, :)
 
@@ -2242,10 +2244,10 @@ contains
 
       !$omp parallel default(none) &
       !$omp shared(clist, mol, list, self, dtrans) &
-      !$omp private(iat, izp, jat, kat, jzp, img, vec, rvdw, tmp, capi, capj, wsw, ctmp) &
+      !$omp private(iat, izp, jat, kat, kat_diag, jzp, img, vec, rvdw, tmp, capi, capj, wsw, ctmp) &
       !$omp reduction(+:cdiag)
 
-      !$omp do schedule(runtime)
+      !$omp do schedule(dynamic, 32)
       do iat = 1, mol%nat
          izp = mol%id(iat)
          capi = self%cap(izp)
@@ -2288,13 +2290,14 @@ contains
          ! 2. Self-interaction with periodic images R /= 0 (j = iat)
          ! ------------------------------------------------------------------
          rvdw = self%rvdw(izp, izp)
+         kat_diag = list%inl(iat)
 
-         ! Execute only if periodic self-images exist (nimg > 1, since index 1 is identity R=0)
-         if (list%itr(list%inl(iat+1)) - list%itr(list%inl(iat)) > 1) then
-            wsw = 1.0_wp / real(list%itr(list%inl(iat+1)) - list%itr(list%inl(iat)), wp)
+         ! Execute only if periodic self-images exist (> 1 since index 1 is identity R=0)
+         if (list%itr(kat_diag + 1) - list%itr(kat_diag) > 1) then
+            wsw = 1.0_wp / real(list%itr(kat_diag + 1) - list%itr(kat_diag) - 1, wp)
 
-            ! Skip identity image at list%itr(list%inl(iat)) and loop through R /= 0 images
-            do img = list%itr(list%inl(iat)), list%itr(list%inl(iat+1)) - 1
+            ! Skip identity image at list%itr(kat_diag) and loop through R /= 0 images
+            do img = list%itr(kat_diag) + 1, list%itr(kat_diag + 1) - 1
                vec = list%trans(:, list%tridx(img))
 
                call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, tmp)
@@ -2375,7 +2378,7 @@ contains
       real(wp), intent(in) :: capj
       !> Derivative w.r.t. atomic position (3)
       real(wp), intent(out) :: dgpair(3)
-      !> Derivative w.r.t. lattice parameters (3×3)
+      !> Derivative w.r.t. lattice parameters (3��3)
       real(wp), intent(out) :: dspair(3, 3)
 
       real(wp) :: r1, arg, dtmp
@@ -2399,7 +2402,7 @@ contains
       type(structure_type), intent(in) :: mol
       !> Derivative of capacitance matrix w.r.t. atomic positions (3 × nat × ndim)
       real(wp), intent(out) :: dcdr(:, :, :)
-      !> Derivative of capacitance matrix w.r.t. lattice parameters (3 × 3 × ndim)
+      !> Derivative of capacitance matrix w.r.t. lattice parameters (3 × 3 �� ndim)
       real(wp), intent(out) :: dcdL(:, :, :)
 
       integer :: iat, jat, izp, jzp
