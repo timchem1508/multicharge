@@ -344,7 +344,7 @@ contains
          call get_dir_trans(mol, dtrans, cutoff)
 
          if (present(list)) then
-            !$omp parallel do default(none) schedule(dynamic, 32) &
+            !$omp parallel do default(none) schedule(runtime) &
             !$omp shared(mol, self, list, cache, dtrans) &
             !$omp private(iat, izp, img, wsw, capi, vec, rvdw, ctmp)
             do iat = 1, mol%nat
@@ -1138,7 +1138,7 @@ contains
       !> Multicharge cache
       type(mchrg_cache), intent(inout) :: cache
 
-      integer :: iat, jat, izp, jzp, img, kat, kat_diag
+      integer :: iat, jat, izp, jzp, img, kat
       real(wp) :: vec(3), gam, dtmp, capi, capj, radi, radj, norm_cn, rvdw, wsw
       real(wp) :: atmp, adiag_tmp
       real(wp), allocatable :: dtrans(:, :)
@@ -1151,10 +1151,10 @@ contains
 
       !$omp parallel default(none) &
       !$omp shared(cache, mol, self, list, dtrans) &
-      !$omp private(iat, izp, kat, kat_diag, jat, jzp, gam, vec, dtmp, norm_cn, radi, radj) &
+      !$omp private(iat, izp, kat, jat, jzp, gam, vec, dtmp, norm_cn, radi, radj) &
       !$omp private(capi, capj, rvdw, wsw, img, atmp, adiag_tmp)
 
-      !$omp do schedule(dynamic, 32)
+      !$omp do schedule(runtime)
       do iat = 1, mol%nat
          izp = mol%id(iat)
          norm_cn = 1.0_wp / self%avg_cn(izp)**self%norm_exp
@@ -1185,21 +1185,19 @@ contains
                atmp = atmp + dtmp * wsw
             end do
 
-            ! Single safe direct write to main memory
             cache%alist(kat) = atmp
          end do
 
          ! Diagonal Coulomb interaction terms (Self-Image)
          gam = 1.0_wp / sqrt(2.0_wp * radi**2)
          rvdw = self%rvdw(izp, izp)
-         kat_diag = list%inl(iat)
 
          ! Execute only if periodic self-images exist (nimg > 1, since index 1 is identity R=0)
-         if (list%nimg(kat_diag) > 1) then
-            wsw = 1.0_wp / real(list%nimg(kat_diag) - 1, wp)
+         if (list%nimg(list%inl(iat)) > 1) then
+            wsw = 1.0_wp / real(list%nimg(list%inl(iat)) - 1, wp)
 
-            ! Skip identity image at list%itr(kat_diag) and loop through R /= 0 images
-            do img = list%itr(kat_diag) + 1, list%itr(kat_diag + 1) - 1
+            ! Skip identity image at list%itr(list%inl(iat)) and loop through R /= 0 images
+            do img = list%itr(list%inl(iat)) + 1, list%itr(list%inl(iat) + 1) - 1
                vec = list%trans(:, list%tridx(img))
                call get_amat_dir_3d(vec, gam, dtrans, self%kbc, rvdw, capi, capi, dtmp)
                adiag_tmp = adiag_tmp + dtmp * wsw
@@ -2232,7 +2230,7 @@ contains
       !> Output diagonal elements capacitance matrix in compressed format, size of mol%nat
       real(wp), intent(out) :: cdiag(:)
 
-      integer :: iat, jat, izp, jzp, img, kat, kat_diag
+      integer :: iat, jat, izp, jzp, img, kat
       real(wp) :: vec(3), rvdw, tmp, capi, capj, wsw, ctmp
       real(wp), allocatable :: dtrans(:, :)
 
@@ -2244,25 +2242,22 @@ contains
 
       !$omp parallel default(none) &
       !$omp shared(clist, mol, list, self, dtrans) &
-      !$omp private(iat, izp, jat, kat, kat_diag, jzp, img, vec, rvdw, tmp, capi, capj, wsw, ctmp) &
+      !$omp private(iat, izp, jat, kat, jzp, img, vec, rvdw, tmp, capi, capj, wsw, ctmp) &
       !$omp reduction(+:cdiag)
-
-      !$omp do schedule(dynamic, 32)
+      !$omp do schedule(runtime)
       do iat = 1, mol%nat
          izp = mol%id(iat)
          capi = self%cap(izp)
 
-         ! ------------------------------------------------------------------
-         ! 1. Off-diagonal neighbor pairs (jat /= iat)
-         ! ------------------------------------------------------------------
+         ! 1. Off-diagonal neighbour pairs (jat /= iat)
          do kat = list%inl(iat) + 1, list%inl(iat+1) - 1
+            if (list%nimg(kat) == 0) cycle
+
             jat = list%nlat(kat)
             jzp = mol%id(jat)
-            rvdw = self%rvdw(izp, jzp)
             capj = self%cap(jzp)
-
-            ! Weight for equivalent Wigner-Seitz images
-            wsw = 1.0_wp / real(list%itr(kat+1) - list%itr(kat), wp)
+            rvdw = self%rvdw(izp, jzp)
+            wsw = 1.0_wp / real(list%nimg(kat), wp)
 
             ! Initialize scalar accumulator for off-diagonal element
             ctmp = 0.0_wp
@@ -2286,18 +2281,13 @@ contains
 
          end do
 
-         ! ------------------------------------------------------------------
          ! 2. Self-interaction with periodic images R /= 0 (j = iat)
-         ! ------------------------------------------------------------------
-         rvdw = self%rvdw(izp, izp)
-         kat_diag = list%inl(iat)
+         if (list%nimg(list%inl(iat)) > 1) then
+            rvdw = self%rvdw(izp, izp)
+            wsw  = 1.0_wp / real(list%nimg(list%inl(iat)) - 1, wp)
 
-         ! Execute only if periodic self-images exist (> 1 since index 1 is identity R=0)
-         if (list%itr(kat_diag + 1) - list%itr(kat_diag) > 1) then
-            wsw = 1.0_wp / real(list%itr(kat_diag + 1) - list%itr(kat_diag) - 1, wp)
-
-            ! Skip identity image at list%itr(kat_diag) and loop through R /= 0 images
-            do img = list%itr(kat_diag) + 1, list%itr(kat_diag + 1) - 1
+            ! Skip identity image at list%itr(list%inl(iat)) and loop through R /= 0 images
+            do img = list%itr(list%inl(iat)) + 1, list%itr(list%inl(iat) + 1) - 1
                vec = list%trans(:, list%tridx(img))
 
                call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, tmp)
@@ -2832,7 +2822,7 @@ contains
                dcndrdiag_local(:,iat) = dcndrdiag_local(:,iat) + countd
                dcndL_local(:, :, iat) = dcndL_local(:, :, iat) + sigma
 
-               ! Accumulate terms for the neighbor atom (j), avoiding double counting for self-images
+               ! Accumulate terms for the neighbour atom (j), avoiding double counting for self-images
                if (iat /= jat) then
                   cn_local(jat) = cn_local(jat) + countf * self%directed_factor
                   dcndrdiag_local(:,jat) = dcndrdiag_local(:,jat) - countd * self%directed_factor
@@ -3846,11 +3836,14 @@ contains
       qlocacc = 0.0_wp
       cnacc = 0.0_wp
 
+      allocate(v(mol%nat))
+      call gemv_cmp(list, cache%clist, cache%cdiag, p, v, alpha=1.0_wp, beta=0.0_wp)
+
       allocate(gradient_local(3, mol%nat), source=0.0_wp)
       allocate(sigma_local(3, 3), source=0.0_wp)
 
       !$omp parallel do default(none) schedule(runtime) &
-      !$omp shared(cache, mol, self, p, list, alpha, beta) &
+      !$omp shared(cache, mol, self, p, v, list, alpha, beta) &
       !$omp private(iat, jat, izp, jzp, gam, vec, r2, dtmp, norm_cn, arg) &
       !$omp private(radi, radj, dradi, dradj, dG, dS, W_ii, W_jj, W_ij) &
       !$omp reduction(+:cnacc, qlocacc, gradient_local, sigma_local)
@@ -3915,8 +3908,10 @@ contains
          end do
 
          ! 5. Diagonal weight accumulation
-         qlocacc(iat) = qlocacc(iat) + self%kqeta(izp) * W_ii * cache%cdiag(iat) * alpha
-         cnacc(iat) = cnacc(iat) - sqrt2pi * dradi / (radi**2) * W_ii * cache%cdiag(iat) * alpha
+         qlocacc(iat) = qlocacc(iat) + self%kqeta(izp) * W_ii * cache%cdiag(iat) * alpha &
+         & + v(iat) * self%kqchi(mol%id(iat)) * beta
+         cnacc(iat) = cnacc(iat) - sqrt2pi * dradi / (radi**2) * W_ii * cache%cdiag(iat) * alpha &
+         & + v(iat) * self%kcnchi(mol%id(iat)) * beta
 
          ! 6. Intrinsic capacitance
          dtmp = (self%eta(izp) + self%kqeta(izp) * cache%qloc(iat) + sqrt2pi / radi) * W_ii
@@ -3925,18 +3920,6 @@ contains
 
          sigma_local(:, :)   = sigma_local(:, :)   + dtmp * cache%dcdL(:, :, iat) * alpha &
          & + p(iat) * cache%xtmp(iat) * cache%dcdL(:, :, iat) * beta
-      end do
-      !$omp end parallel do
-
-      allocate(v(mol%nat))
-      call gemv_cmp(list, cache%clist, cache%cdiag, p, v, alpha=1.0_wp, beta=0.0_wp)
-
-      !$omp parallel do default(none) schedule(runtime) &
-      !$omp shared(mol, self, v, p, cnacc, qlocacc, beta) &
-      !$omp private(iat)
-      do iat = 1, mol%nat
-         cnacc(iat)   = cnacc(iat) + v(iat) * self%kcnchi(mol%id(iat)) * beta
-         qlocacc(iat) = qlocacc(iat) + v(iat) * self%kqchi(mol%id(iat)) * beta
       end do
       !$omp end parallel do
 
@@ -3967,7 +3950,7 @@ contains
       real(wp), optional, intent(in) :: betain
 
       real(wp) :: alpha, beta
-      integer :: iat, jat, kat, izp, jzp, kat_diag, img
+      integer :: iat, jat, kat, izp, jzp, img
       real(wp) :: vec(3), r2, gam, dtmp, capi, capj, dgam, rvdw, wsw, factor
       real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), rij(3), ctmp
       real(wp) :: W_ii, W_jj, W_ij, norm_cn
@@ -3988,10 +3971,13 @@ contains
       allocate(gradient_local(3, mol%nat), source=0.0_wp)
       allocate(sigma_local(3, 3), source=0.0_wp)
 
+      allocate(v(mol%nat))
+      call gemv_cmp(list, cache%clist, cache%cdiag, p, v, alpha=1.0_wp, beta=0.0_wp)
+
       !$omp parallel do default(none) schedule(runtime) &
-      !$omp shared(cache, mol, list, self, p, dtrans, alpha, beta) &
-      !$omp private(iat, kat, kat_diag, izp, jat, jzp, gam, vec, r2, dtmp, radi, radj, dradi, dradj, dG, dS, norm_cn) &
-      !$omp private(W_ii, W_jj, W_ij, wsw, capi, capj, rvdw, img, dgam) &
+      !$omp shared(cache, mol, list, self, p, v, dtrans, alpha, beta) &
+      !$omp private(iat, kat, izp, jat, jzp, gam, vec, r2, dtmp, radi, radj, dradi, dradj, dG, dS, norm_cn) &
+      !$omp private(W_ii, W_jj, W_ij, wsw, capi, capj, rvdw, img, dgam, ctmp) &
       !$omp reduction(+:cnacc, qlocacc, gradient_local, sigma_local)
       do iat = 1, mol%nat
          izp = mol%id(iat)
@@ -4052,17 +4038,13 @@ contains
          end do
 
          ! Diagonal corrections
-         qlocacc(iat) = qlocacc(iat) + self%kqeta(izp) * W_ii * cache%cdiag(iat) * alpha
-         cnacc(iat) = cnacc(iat) - sqrt2pi * dradi / (radi**2) * W_ii * cache%cdiag(iat) * alpha
-
          gam = 1.0_wp / sqrt(2.0_wp * radi**2)
          rvdw = self%rvdw(izp, izp)
-         kat_diag = list%inl(iat)
 
-         if (list%nimg(kat_diag) > 1) then
-            wsw = 1.0_wp / real(list%nimg(kat_diag) - 1, wp)
+         if (list%nimg(list%inl(iat)) > 1) then
+            wsw = 1.0_wp / real(list%nimg(list%inl(iat)) - 1, wp)
 
-            do img = list%itr(kat_diag) + 1, list%itr(kat_diag + 1) - 1
+            do img = list%itr(list%inl(iat)) + 1, list%itr(list%inl(iat) + 1) - 1
                vec = list%trans(:, list%tridx(img))
                call get_damat_dir(vec, dtrans, capi, capi, rvdw, self%kbc, gam, dG, dS, dgam)
                sigma_local(:, :) = sigma_local(:, :) + dS * wsw * W_ii * alpha
@@ -4070,17 +4052,21 @@ contains
 
                call get_damat_dc_dir(vec, dtrans, capi, capi, rvdw, self%kbc, gam, dG, dS)
                sigma_local(:, :) = sigma_local(:, :) - W_ii * dS * wsw * alpha
+
+               call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, dG, dS)
+               sigma_local(:, :) = sigma_local(:, :) - p(iat) * cache%xtmp(iat) * dS * wsw * beta
+
+               call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, ctmp)
+               ctmp = ctmp * wsw
+
+               v(iat) = v(iat) - ctmp * p(iat)
             end do
          end if
 
-         if (list%nimg(kat_diag) > 1) then
-            wsw = 1.0_wp / real(list%nimg(kat_diag) - 1, wp)
-            do img = list%itr(kat_diag) + 1, list%itr(kat_diag + 1) - 1
-               vec = list%trans(:, list%tridx(img))
-               call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, dG, dS)
-               sigma_local(:, :) = sigma_local(:, :) - p(iat) * cache%xtmp(iat) * dS * wsw * beta
-            end do
-         end if
+         qlocacc(iat) = qlocacc(iat) + self%kqeta(izp) * W_ii * cache%cdiag(iat) * alpha &
+         & + v(iat) * self%kqchi(izp) * beta
+         cnacc(iat) = cnacc(iat) - sqrt2pi * dradi / (radi**2) * W_ii * cache%cdiag(iat) * alpha &
+         & + v(iat) * self%kcnchi(izp) * beta
 
          dtmp = (self%eta(izp) + self%kqeta(izp) * cache%qloc(iat) + sqrt2pi / radi) * W_ii
          gradient_local(:, iat) = gradient_local(:, iat) + dtmp * cache%dcdrdiag(:, iat) * alpha &
@@ -4095,37 +4081,6 @@ contains
 
       gradient_local = 0.0_wp
       sigma_local = 0.0_wp
-
-      allocate(v(mol%nat))
-      call gemv_cmp(list, cache%clist, cache%cdiag, p, v, alpha=1.0_wp, beta=0.0_wp)
-
-      !$omp parallel do default(none) schedule(runtime) &
-      !$omp shared(mol, self, list, dtrans, v, p, cnacc, qlocacc, beta) &
-      !$omp private(iat, izp, kat_diag, capi, rvdw, wsw, img, rij, ctmp)
-      do iat = 1, mol%nat
-         izp = mol%id(iat)
-         capi = self%cap(izp)
-         rvdw = self%rvdw(izp, izp)
-         kat_diag = list%inl(iat)
-
-         if (list%nimg(kat_diag) > 1) then
-            wsw = 1.0_wp / real(list%nimg(kat_diag) - 1, wp)
-
-            ! Step 1: Accumulate corrections into v(iat)
-            do img = list%itr(kat_diag) + 1, list%itr(kat_diag + 1) - 1
-               rij = list%trans(:, list%tridx(img))
-               call get_cpair_dir(self%kbc, rij, dtrans, rvdw, capi, capi, ctmp)
-               ctmp = ctmp * wsw
-
-               v(iat) = v(iat) - ctmp * p(iat)
-            end do
-         end if
-
-         ! Step 2: Compute weights immediately (Loop Fusion)
-         cnacc(iat)   = cnacc(iat) + v(iat) * self%kcnchi(izp) * beta
-         qlocacc(iat) = qlocacc(iat) + v(iat) * self%kqchi(izp) * beta
-      end do
-      !$omp end parallel do
 
       call self%ncoord%add_coordination_number_derivs_list(mol, dtrans, cnacc, gradient_local, sigma_local, list)
       call self%ncoord_en%add_coordination_number_derivs_list(mol, dtrans, qlocacc, gradient_local, sigma_local, list)
