@@ -81,8 +81,8 @@ module multicharge_model_type
       !> Calculate Coulomb matrix derivatives
       procedure(get_coulomb_derivs), deferred :: get_coulomb_derivs
       !> Calculate capcaity-corrected EN derivatives
-      procedure(get_pT_dbdR), deferred :: get_pT_dbdR
-      procedure(get_pT_damat), deferred :: get_pT_damat
+      procedure(get_grad), deferred :: get_grad
+
    end type mchrg_model_type
 
    abstract interface
@@ -186,26 +186,9 @@ module multicharge_model_type
          type(adjacency_list), intent(in), optional :: list
       end subroutine get_xvec_derivs
 
-      subroutine get_pT_dbdR(self, mol, cache, q, gradient, sigma, alpha, list)
+      subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta, list)
          import :: mchrg_model_type, structure_type, mchrg_cache, adjacency_list, wp
-         !> EEQBC model type
-         class(mchrg_model_type), intent(in) :: self
-         !> Molecular structure data
-         type(structure_type), intent(in) :: mol
-         type(mchrg_cache), intent(in) :: cache
-         !> Input vectors
-         real(wp), intent(in) :: q(:)          ! dE/db (size nat)
-         !> Output derivatives (accumulated)
-         real(wp), intent(inout) :: gradient(:, :)  ! forces (3, nat)
-         real(wp), intent(inout) :: sigma(:, :)     ! stress (3, 3)
-         real(wp), intent(in), optional :: alpha
-         !> Neighbour list (each unordered pair appears once)
-         type(adjacency_list), intent(in), optional :: list
-      end subroutine get_pT_dbdR
-
-      subroutine get_pT_damat(self, mol, cache, p, gradient, sigma, alpha, list)
-         import :: mchrg_model_type, structure_type, mchrg_cache, adjacency_list, wp
-         !> EEQBC model type
+         !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
          type(structure_type), intent(in) :: mol
          type(mchrg_cache), intent(in) :: cache
@@ -213,8 +196,10 @@ module multicharge_model_type
          real(wp), intent(inout) :: gradient(:, :)
          real(wp), intent(inout) :: sigma(:, :)
          real(wp), intent(in), optional :: alpha
-         type(adjacency_list), intent(in), optional :: list
-      end subroutine get_pT_damat
+         real(wp), intent(in), optional :: beta
+         !> Neighbour list (each unordered pair appears once)
+         type(adjacency_list), optional, intent(in) :: list
+      end subroutine get_grad
 
    end interface
 
@@ -441,32 +426,8 @@ contains
       if (grad) then
          call timer%push("gradient")
 
-         if (present(list)) then
-            call timer%push("dadr_setup")
-            call self%get_pT_damat(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, alpha = 0.5_wp, list = list)
-            call timer%pop
-            if (verbosity_solve > 1) then
-               write(output_unit, '(a, 1x, a)') "Coulomb matrix derivatives setup time : ", format_time(timer%get("dadr_setup"))
-               write(output_unit, '(a)') ''
-            end if
+         call self%get_grad(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, alpha = 0.5_wp, beta=-1.0_wp, list = list)
 
-         else
-            call timer%push("dadr_setup")
-            call self%get_pT_damat(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, alpha = 0.5_wp)
-            call timer%pop
-            if (verbosity_solve > 1) then
-               write(output_unit, '(a, 1x, a)') "Coulomb matrix derivatives setup time : ", format_time(timer%get("dadr_setup"))
-               write(output_unit, '(a)') ''
-            end if
-
-            call timer%push("dxdr_setup")
-            call self%get_pT_dbdR(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, alpha = -1.0_wp)
-            call timer%pop
-            if (verbosity_solve > 1) then
-               write(output_unit, '(a, 1x, a)') "Electronegativity derivatives setup time : ", format_time(timer%get("dxdr_setup"))
-               write(output_unit, '(a)') ''
-            end if
-         end if
          ! pop gradient timer
          call timer%pop
          call print_gradient_time(print_unit, verbosity_solve, timer%get("gradient"))
@@ -618,21 +579,7 @@ contains
       ! Evaluate external gradients via adjoint contraction:
       ! dfdr = p^T * (db/dr - dA/dr X q)
 
-      call timer%push("dadr_setup")
-      call self%get_pT_damat(mol, cache, padj(:mol%nat), dfdr, dfdL, alpha = -1.0_wp, list = list)
-      call timer%pop
-      if (verbosity_solve > 1) then
-         write(output_unit, '(a, 1x, a)') "Coulomb matrix derivatives setup time : ", format_time(timer%get("dadr_setup"))
-         write(output_unit, '(a)') ''
-      end if
-
-      call timer%push("dxdr_setup")
-      call self%get_pT_dbdR(mol, cache, padj(:mol%nat), dfdr, dfdL, alpha = 1.0_wp, list = list)
-      call timer%pop
-      if (verbosity_solve > 1) then
-         write(output_unit, '(a, 1x, a)') "Electronegativity derivatives setup time : ", format_time(timer%get("dxdr_setup"))
-         write(output_unit, '(a)') ''
-      end if
+      call self%get_grad(mol, cache, padj, dfdr, dfdL, alpha = -1.0_wp, beta=1.0_wp, list = list)
 
       ! pop dfdr timer
       call timer%pop
