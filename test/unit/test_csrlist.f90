@@ -13,13 +13,13 @@
 ! See the License for the specific language governing permissions and
 ! limitations under the License.
 
-module test_adjlist
+module test_csrlist
    use iso_fortran_env, only: output_unit
    use mctc_env, only: wp
    use mctc_env_testing, only: new_unittest, unittest_type, error_type, test_failed
    use mctc_cutoff, only: get_lattice_points
    use mctc_io_structure, only: structure_type, new
-   use mctc_ncoord, only: adjacency_list, new_adjacency_list
+   use mctc_csrlist, only: csr_list, new_csr_list
    use mstore, only: get_structure
    use multicharge_blas, only: gemv
    use multicharge_wignerseitz, only: new_wignerseitz_cell
@@ -34,7 +34,7 @@ module test_adjlist
    implicit none
    private
 
-   public :: collect_adjlist
+   public :: collect_csrlist
 
    real(wp), parameter :: thr = 100 * epsilon(1.0_wp)
    real(wp), parameter :: thr1 = 1.0e5_wp*epsilon(1.0_wp)
@@ -44,7 +44,7 @@ module test_adjlist
 contains
 
 !> Collect all exported unit tests
-   subroutine collect_adjlist(testsuite)
+   subroutine collect_csrlist(testsuite)
 
       !> Collection of tests
       type(unittest_type), allocatable, intent(out) :: testsuite(:)
@@ -65,7 +65,7 @@ contains
       & new_unittest("eeqbc-gradient-ice-supercell", test_eeqbc_g_ice222) &
       & ]
 
-   end subroutine collect_adjlist
+   end subroutine collect_csrlist
 
    subroutine solver_maker(solver, input, error)
       !> Solver type
@@ -153,7 +153,7 @@ contains
       integer :: maxiter = 1000
       integer :: verbosity = 0
 
-      type(adjacency_list), allocatable :: list
+      type(csr_list), allocatable :: list
 
       real(wp) :: trans(3, 1) = 0.0_wp
       real(wp), allocatable :: energy(:)
@@ -181,7 +181,7 @@ contains
 
       ! Build adjacency list
       allocate(list)
-      call new_adjacency_list(list, mol, cutoff)
+      call new_csr_list(list, mol, cutoff)
 
       call model%update(mol, cache, trans, grad=.false., list=list)
       call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, unit=output_unit)
@@ -229,7 +229,7 @@ contains
 
       type(mchrg_cache), allocatable :: cache
 
-      type(adjacency_list), allocatable :: list
+      type(csr_list), allocatable :: list
 
       ! Solver variables
       class(mchrg_solver_type), allocatable :: solver
@@ -280,7 +280,7 @@ contains
       deallocate(cache)
       allocate(cache)
       allocate(list)
-      call new_adjacency_list(list, mol, 29.0_wp)
+      call new_csr_list(list, mol, 29.0_wp)
       call model%update(mol, cache, trans, grad=.false., list=list)
       call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, unit=output_unit)
 
@@ -324,7 +324,7 @@ contains
       integer :: maxiter = 1000
       integer :: verbosity = 0
 
-      type(adjacency_list), allocatable :: list
+      type(csr_list), allocatable :: list
 
       integer :: iat, jat, kat, ic, ndim
       real(wp), parameter :: trans(3, 1) = 0.0_wp
@@ -366,7 +366,7 @@ contains
       allocate(list)
       gradient = 0.0_wp
       sigma(:, :) = 0.0_wp
-      call new_adjacency_list(list, mol, cutoff)
+      call new_csr_list(list, mol, cutoff)
       call model%update(mol, cache2, trans, grad=.true., list=list)
 
       call model%solve(mol, solver, cache2, error, &
@@ -416,7 +416,7 @@ contains
       integer :: maxiter = 1000
       integer :: verbosity = 0
 
-      type(adjacency_list), allocatable :: list
+      type(csr_list), allocatable :: list
 
       integer :: iat, jat, kat, ic, ndim
       real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
@@ -465,7 +465,7 @@ contains
       allocate(list)
       gradient = 0.0_wp
       sigma(:, :) = 0.0_wp
-      call new_adjacency_list(list, mol, 29.0_wp)
+      call new_csr_list(list, mol, 29.0_wp)
       call model%update(mol, cache2, trans, grad=.true., list=list)
 
       call model%solve(mol, solver, cache2, error, &
@@ -786,4 +786,4 @@ contains
 
    end subroutine test_eeqbc_g_ice222
 
-end module test_adjlist
+end module test_csrlist

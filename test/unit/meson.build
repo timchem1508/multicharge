@@ -33,7 +33,7 @@ tests = [
   'pbc',
   'wignerseitz',
   'solver',
-  'adjlist',
+  'csrlist',
 ]
 
 test_srcs = files(
