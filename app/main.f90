@@ -18,7 +18,7 @@ program main
    use mctc_env, only: error_type, fatal_error, get_argument, wp, timer_type, format_time
    use mctc_io, only: structure_type, read_structure, filetype, get_filetype
    use mctc_cutoff, only: get_lattice_points
-   use mctc_ncoord, only: adjacency_list, new_adjacency_list
+   use mctc_csrlist, only: csr_list, new_csr_list
    use multicharge, only: mchrg_model_type, mchrg_model, mchrg_cache, new_eeq2019_model, &
    & new_eeqbc2025_model, get_multicharge_version, &
    & write_ascii_model, write_ascii_properties, write_ascii_results
@@ -36,7 +36,7 @@ program main
    integer :: stat, unit, model_id
    type(error_type), allocatable :: error
    type(structure_type) :: mol
-   type(adjacency_list), allocatable :: list
+   type(csr_list), allocatable :: list
    class(mchrg_model_type), allocatable :: model
    type(mchrg_cache), allocatable :: cache
    class(mchrg_solver_type), allocatable :: solver
@@ -99,7 +99,7 @@ program main
    if (use_nlist) then
       call timer%push("nlist")
       allocate(list)
-      call new_adjacency_list(list, mol, cutoff)
+      call new_csr_list(list, mol, cutoff)
       call timer%pop
       write(output_unit, '(a, 1x, a)') "Neighbour list generation time :", format_time(timer%get("nlist"))
    end if

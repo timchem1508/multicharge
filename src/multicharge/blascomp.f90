@@ -17,7 +17,7 @@
 !> Matrix-vector and Matrix-matrix routines for CSR compressed matrices.
 module multicharge_blascomp
    use mctc_env, only : wp
-   use mctc_ncoord, only: adjacency_list
+   use mctc_csrlist, only: csr_list
    implicit none
    private
 
@@ -55,7 +55,7 @@ contains
 ! GEMV 111 - Thread-safe OMP
 !=========================================================
    subroutine gemv_cmp_111(list, mlist, mdiag, x, y, alpha, beta, symmetric)
-      type(adjacency_list), intent(in) :: list
+      type(csr_list), intent(in) :: list
       real(wp), intent(in)  :: mlist(:)
       real(wp), intent(in)  :: mdiag(:)
       real(wp), intent(in)  :: x(:)
@@ -117,7 +117,7 @@ contains
 ! GEMV 212 - Thread-safe OMP (Atomics Removed)
 !=========================================================
    subroutine gemv_cmp_212(list, mdrij, mdrji, mdrdiag, x, y, alpha, beta)
-      type(adjacency_list), intent(in) :: list
+      type(csr_list), intent(in) :: list
       real(wp), intent(in)  :: mdrij(:,:)
       real(wp), intent(in)  :: mdrji(:,:)
       real(wp), intent(in)  :: mdrdiag(:,:)
@@ -171,7 +171,7 @@ contains
 ! GEMV 212 DIRECTED - Thread-safe OMP (Atomics Removed)
 !=========================================================
    subroutine gemv_cmp_212_dir(list, mlist_drij, mlist_drji, mdiag, x, y, alpha, beta, symmetric)
-      type(adjacency_list), intent(in) :: list
+      type(csr_list), intent(in) :: list
       real(wp), intent(in)  :: mlist_drij(:,:)
       real(wp), intent(in)  :: mlist_drji(:,:)
       real(wp), intent(in)  :: mdiag(:,:)
@@ -237,7 +237,7 @@ contains
 ! GEMM 122
 !=========================================================
    pure subroutine gemm_cmp_122(list, mlist, mdiag, x, y, alpha, beta, symmetric)
-      type(adjacency_list), intent(in) :: list
+      type(csr_list), intent(in) :: list
       real(wp), intent(in)  :: mlist(:)
       real(wp), intent(in)  :: mdiag(:)
       real(wp), intent(in)  :: x(:,:)
@@ -284,7 +284,7 @@ contains
 ! GEMM 222
 !=========================================================
    pure subroutine gemm_cmp_222(list, mlist, mdiag, x, y, alpha, beta, symmetric)
-      type(adjacency_list), intent(in) :: list
+      type(csr_list), intent(in) :: list
       real(wp), intent(in)  :: mlist(:,:)
       real(wp), intent(in)  :: mdiag(:,:)
       real(wp), intent(in)  :: x(:,:)
@@ -332,7 +332,7 @@ contains
 ! where C is symmetric and stored via neighbour list
 !=========================================================
    pure subroutine gemm_cmp_133(list, clist, cdiag, x, y, alpha, beta, symmetric)
-      type(adjacency_list), intent(in) :: list
+      type(csr_list), intent(in) :: list
       real(wp), intent(in)  :: clist(:)
       real(wp), intent(in)  :: cdiag(:)
       real(wp), intent(in)  :: x(:,:,:)
@@ -391,7 +391,7 @@ contains
       dx_list, dx_diag, alpha, beta, &
       symmetric)
 
-      type(adjacency_list), intent(in) :: list
+      type(csr_list), intent(in) :: list
       real(wp), intent(in)  :: clist(:)
       real(wp), intent(in)  :: cdiag(:)
       real(wp), intent(in)  :: dtmp_list(:,:)   ! (ncomp, nnz)
@@ -470,7 +470,7 @@ contains
    pure subroutine gemm_cmp_211_dir(list, clist, cdiag, drij, drji, ddiag, &
       xrij, xrji, xdiag, alpha, beta)
       use, intrinsic :: iso_fortran_env, only: wp => real64
-      type(adjacency_list), intent(in) :: list
+      type(csr_list), intent(in) :: list
       real(wp), intent(in)    :: clist(:)          ! B off‑diagonal (i<j)
       real(wp), intent(in)    :: cdiag(:)          ! B diagonal
       real(wp), intent(in)    :: drij(:, :)        ! A(:,i,j) for i<j
@@ -572,7 +572,7 @@ contains
    contains
       ! Helper: find compressed index for pair (i,j) with i < j
       pure function find_index(list, i, j) result(idx)
-         type(adjacency_list), intent(in) :: list
+         type(csr_list), intent(in) :: list
          integer, intent(in) :: i, j
          integer :: idx, k
          do idx = list%inl(i) + 1, list%inl(i+1) - 1
@@ -586,7 +586,7 @@ contains
    & dxdrij, dxdrji, dxdrdiag, alpha, beta)
       !> Assumes wp (working precision) is accessible via module or host association.
       !> import :: wp
-      type(adjacency_list), intent(in) :: list
+      type(csr_list), intent(in) :: list
       real(wp), intent(in) :: clist(:), cdiag(:)
       real(wp), intent(in) :: dtmpdrij(:,:), dtmpdrji(:,:), dtmpdrdiag(:,:)
       real(wp), intent(inout) :: dxdrij(:,:), dxdrji(:,:), dxdrdiag(:,:)

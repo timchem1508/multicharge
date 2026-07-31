@@ -28,7 +28,7 @@ module multicharge_model_type
    use mctc_io_math, only: matinv_3x3
    use mctc_cutoff, only: get_lattice_points
    use mctc_ncoord, only: ncoord_type
-   use mctc_ncoord, only: adjacency_list
+   use mctc_csrlist, only: csr_list
    use multicharge_blas, only: gemv, symv, gemm
    use multicharge_blascomp, only: gemv_cmp
    use multicharge_lapack, only: sytrf, sytrs
@@ -88,13 +88,13 @@ module multicharge_model_type
    abstract interface
       !> Update model-dependent quantities and cache
       subroutine update(self, mol, cache, trans, grad, list)
-         import :: mchrg_model_type, structure_type, mchrg_cache, adjacency_list, wp
+         import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
          !> Structure type
          type(structure_type), intent(in) :: mol
          !> Multicharge neighbourlist type
-         type(adjacency_list), intent(in), optional :: list
+         type(csr_list), intent(in), optional :: list
          !> Multicharge cache
          !> Allocation: cn, qloc, wsc
          type(mchrg_cache), intent(inout) :: cache
@@ -106,7 +106,7 @@ module multicharge_model_type
 
       !> Capacitance matrix construction using cached CN/charge data (only for the EEQBC model)
       subroutine get_capacitance_matrix(self, mol, ndim, cache, list)
-         import :: mchrg_model_type, structure_type, mchrg_cache, adjacency_list, wp
+         import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
          !> Structure type
@@ -117,12 +117,12 @@ module multicharge_model_type
          !> Allocation: cmat, (dcdr, dcdL if cache%dcndr/L and cache%dqlocdr/L allocated)
          type(mchrg_cache), intent(inout) :: cache
          !> Multicharge neighbourlist type
-         type(adjacency_list), intent(in), optional :: list
+         type(csr_list), intent(in), optional :: list
       end subroutine get_capacitance_matrix
 
       !> Coulomb interaction matrix (A-matrix) construction
       subroutine get_coulomb_matrix(self, mol, ndim, cache, list)
-         import :: mchrg_model_type, structure_type, mchrg_cache, adjacency_list, wp
+         import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
          !> Structure type
@@ -133,13 +133,13 @@ module multicharge_model_type
          !> Allocation: amat
          type(mchrg_cache), intent(inout) :: cache
          !> Multicharge neighbourlist type
-         type(adjacency_list), intent(in), optional :: list
+         type(csr_list), intent(in), optional :: list
       end subroutine get_coulomb_matrix
 
 
       !> Coulomb matrix derivatives contracted with charges
       subroutine get_coulomb_derivs(self, mol, ndim, cache, list)
-         import :: mchrg_model_type, structure_type, mchrg_cache, adjacency_list, wp
+         import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
          !> Structure type
@@ -150,13 +150,13 @@ module multicharge_model_type
          !> Allocation: dadr, dadL
          type(mchrg_cache), intent(inout) :: cache
          !> Multicharge neighbourlist type
-         type(adjacency_list), intent(in), optional :: list
+         type(csr_list), intent(in), optional :: list
       end subroutine get_coulomb_derivs
 
       !> Electronegativity vector construction
 
       subroutine get_xvec(self, mol, ndim, cache, list)
-         import :: mchrg_model_type, mchrg_cache, structure_type, adjacency_list, wp
+         import :: mchrg_model_type, mchrg_cache, structure_type, csr_list, wp
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
          !> Structure type
@@ -167,12 +167,12 @@ module multicharge_model_type
          !> Allocation: xvec, xtmp
          type(mchrg_cache), intent(inout) :: cache
          !> Multicharge neighbourlist type
-         type(adjacency_list), intent(in), optional :: list
+         type(csr_list), intent(in), optional :: list
       end subroutine get_xvec
 
       !> Derivatives of electronegativity vector
       subroutine get_xvec_derivs(self, mol, ndim, cache, list)
-         import :: mchrg_model_type, structure_type, mchrg_cache, adjacency_list, wp
+         import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
          !> Structure type
@@ -183,11 +183,11 @@ module multicharge_model_type
          !> Allocation: dxdr, dxdL
          type(mchrg_cache), intent(inout) :: cache
          !> Multicharge neighbourlist type
-         type(adjacency_list), intent(in), optional :: list
+         type(csr_list), intent(in), optional :: list
       end subroutine get_xvec_derivs
 
       subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta, list)
-         import :: mchrg_model_type, structure_type, mchrg_cache, adjacency_list, wp
+         import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
          type(structure_type), intent(in) :: mol
@@ -198,7 +198,7 @@ module multicharge_model_type
          real(wp), intent(in), optional :: alpha
          real(wp), intent(in), optional :: beta
          !> Neighbour list (each unordered pair appears once)
-         type(adjacency_list), optional, intent(in) :: list
+         type(csr_list), optional, intent(in) :: list
       end subroutine get_grad
 
    end interface
@@ -271,7 +271,7 @@ contains
       !> Optional derivative of the atomic partial charges w.r.t. lattice vectors
       real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
       !> Neighbour list optional type
-      type(adjacency_list), intent(in), optional :: list
+      type(csr_list), intent(in), optional :: list
       !> Optional print verbossity number input flag
       integer, intent(in), optional :: verbosity
       !> Output unit
@@ -497,7 +497,7 @@ contains
       !> External gradient w.r.t. lattice vectors
       real(wp), intent(inout) :: dfdL(:,:)
       !> Neighbour list optional type
-      type(adjacency_list), intent(in), optional :: list
+      type(csr_list), intent(in), optional :: list
       !> Output unit
       integer, intent(in), optional :: unit
       !> Verbosity level
@@ -602,7 +602,7 @@ contains
       !> Optional derivative of local atomic partial charges w.r.t. lattice vectors
       real(wp), intent(out), optional :: dqlocdL(3, 3, mol%nat)
       !> Lattice points
-      type(adjacency_list), intent(in), optional :: list
+      type(csr_list), intent(in), optional :: list
       !> Optional derivative of local atomic partial charges w.r.t. atomic positions
       real(wp), intent(out), optional :: dqlocdrij(:, :), dqlocdrji(:, :), dqlocdrdiag(:, :)
 

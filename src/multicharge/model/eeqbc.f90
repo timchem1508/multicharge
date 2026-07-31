@@ -26,7 +26,7 @@ module multicharge_model_eeqbc
    use mctc_io, only: structure_type
    use mctc_io_constants, only: pi
    use mctc_ncoord, only: new_ncoord, cn_count, ncoord_type
-   use mctc_ncoord, only: adjacency_list
+   use mctc_csrlist, only: csr_list
    use multicharge_wignerseitz, only: new_wignerseitz_cell, wignerseitz_cell_type
    use multicharge_blascomp, only: gemv_cmp, gemm_cmp, gemm_cmp_212
    use multicharge_model_type, only: mchrg_model_type, get_dir_trans
@@ -179,7 +179,7 @@ contains
       !> Structure type
       type(structure_type), intent(in) :: mol
       !> Multicharge neighbourlist type
-      type(adjacency_list), intent(in), optional :: list
+      type(csr_list), intent(in), optional :: list
       !> Multicharge cache
       type(mchrg_cache), intent(inout) :: cache
       !> Lattice vectors
@@ -229,7 +229,7 @@ contains
       !> Multicharge cache
       type(mchrg_cache), intent(inout) :: cache
       !> Multicharge neighbourlist type
-      type(adjacency_list), intent(in), optional :: list
+      type(csr_list), intent(in), optional :: list
 
       if (cache%grad) then
          if (present(list)) then
@@ -300,7 +300,7 @@ contains
       !> Multicharge cache
       type(mchrg_cache), intent(inout) :: cache
       !> Multicharge neighbourlist type
-      type(adjacency_list), intent(in), optional :: list
+      type(csr_list), intent(in), optional :: list
 
       integer :: iat, izp, img, idx
       real(wp) :: ctmp, vec(3), rvdw, capi, wsw
@@ -404,7 +404,7 @@ contains
       !> Multicharge cache
       type(mchrg_cache), intent(inout) :: cache
       !> Multicharge neighbourlist type
-      type(adjacency_list), intent(in), optional :: list
+      type(csr_list), intent(in), optional :: list
 
       if (.not. allocated(cache%dcndr)) then
          allocate(cache%dcndr(3, mol%nat, mol%nat))
@@ -542,7 +542,7 @@ contains
       class(eeqbc_model), intent(in) :: self
       type(structure_type), intent(in) :: mol
       type(mchrg_cache), intent(inout) :: cache
-      type(adjacency_list), intent(in) :: list
+      type(csr_list), intent(in) :: list
 
       integer :: iat, izp, jat, kat, jzp
       real(wp) :: vec(3)
@@ -752,7 +752,7 @@ contains
       !> Multicharge cache (contains xtmp, dcdr, dcdL, etc.)
       type(mchrg_cache), intent(inout) :: cache
       !> Multicharge neighbourlist type
-      type(adjacency_list), intent(in) :: list
+      type(csr_list), intent(in) :: list
 
       integer :: iat, izp, jat, kat, jzp, img
       real(wp) :: capi, capj, vec(3), ctmp, dG(3), dS(3, 3), rvdw, wsw
@@ -908,7 +908,7 @@ contains
       !> Multicharge cache
       type(mchrg_cache), intent(inout) :: cache
       !> Multicharge neighbourlist type
-      type(adjacency_list), intent(in), optional :: list
+      type(csr_list), intent(in), optional :: list
 
 
       if (present(list)) then
@@ -1004,7 +1004,7 @@ contains
       !> Molecular structure data
       type(structure_type), intent(in) :: mol
       !> Multicharge neighbourlist type
-      type(adjacency_list), intent(in) :: list
+      type(csr_list), intent(in) :: list
       !> Multicharge cache
       type(mchrg_cache), intent(inout) :: cache
 
@@ -1134,7 +1134,7 @@ contains
    subroutine get_amat_3d_list(self, mol, list, cache)
       class(eeqbc_model), intent(in) :: self
       type(structure_type), intent(in) :: mol
-      type(adjacency_list), intent(in) :: list
+      type(csr_list), intent(in) :: list
       !> Multicharge cache
       type(mchrg_cache), intent(inout) :: cache
 
@@ -1261,7 +1261,7 @@ contains
       !> Multicharge cache
       type(mchrg_cache), intent(inout) :: cache
       !> Multicharge neighbourlist type
-      type(adjacency_list), intent(in), optional :: list
+      type(csr_list), intent(in), optional :: list
 
       real(wp), allocatable :: atrace(:,:)
 
@@ -1451,7 +1451,7 @@ contains
       !> Molecular structure data
       type(structure_type), intent(in) :: mol
       !> Multicharge neighbourlist type
-      type(adjacency_list), intent(in) :: list
+      type(csr_list), intent(in) :: list
       !> Multicharge cache
       type(mchrg_cache), intent(inout) :: cache
 
@@ -1772,7 +1772,7 @@ contains
       !> Molecular structure data
       type(structure_type), intent(in) :: mol
       !> Multicharge neighbourlist type
-      type(adjacency_list), intent(in) :: list
+      type(csr_list), intent(in) :: list
       !> Multicharge cache
       type(mchrg_cache), intent(inout) :: cache
 
@@ -2100,7 +2100,7 @@ contains
       !> Molecular structure data
       type(structure_type), intent(in) :: mol
       !> Multicharge neighbourlist type
-      type(adjacency_list), intent(in) :: list
+      type(csr_list), intent(in) :: list
       !> Output capacitance matrix in compressed format, size of list%nlat
       real(wp), intent(out) :: clist(:)
       !> Output diagonal elements capacitance matrix in compressed format, size of mol%nat
@@ -2224,7 +2224,7 @@ contains
       !> Molecular structure data
       type(structure_type), intent(in) :: mol
       !> Multicharge neighbourlist type (CSR format)
-      type(adjacency_list), intent(in) :: list
+      type(csr_list), intent(in) :: list
       !> Output capacitance matrix in compressed format, size of list%nlat
       real(wp), intent(out) :: clist(:)
       !> Output diagonal elements capacitance matrix in compressed format, size of mol%nat
@@ -2452,7 +2452,7 @@ contains
       !> Molecular structure data
       type(structure_type), intent(in) :: mol
       !> Multicharge neighbourlist type
-      type(adjacency_list), intent(in) :: list
+      type(csr_list), intent(in) :: list
       !> Multicharge cache
       type(mchrg_cache), intent(inout) :: cache
 
@@ -2588,7 +2588,7 @@ contains
    subroutine get_dcmat_3d_list(self, mol, list, cache)
       class(eeqbc_model), intent(in) :: self
       type(structure_type), intent(in) :: mol
-      type(adjacency_list), intent(in) :: list
+      type(csr_list), intent(in) :: list
       type(mchrg_cache), intent(inout) :: cache
 
       integer :: iat, jat, izp, jzp, img, kat
@@ -2787,7 +2787,7 @@ contains
       !> Derivative of the CN with respect to strain deformations.
       real(wp), intent(out) :: dcndL(:, :, :)
       !> Adjacency list for neighbourlist-based CN evaluation
-      type(adjacency_list), intent(in) :: list
+      type(csr_list), intent(in) :: list
 
       integer :: iat, jat, kat, izp, jzp, itr
       real(wp) :: r2, r1, rij(3), countf, countd(3), sigma(3, 3), cutoff2, den
@@ -2863,7 +2863,7 @@ contains
       real(wp), intent(inout) :: sigma(:, :)
       real(wp), optional, intent(in) :: alpha
       real(wp), optional, intent(in) :: beta
-      type(adjacency_list), intent(in), optional :: list
+      type(csr_list), intent(in), optional :: list
 
       if (.not. present(list)) then
          if (any(mol%periodic)) then
@@ -2885,7 +2885,7 @@ contains
    subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain, betain)
       class(eeqbc_model), intent(in) :: self
       type(structure_type), intent(in) :: mol
-      type(adjacency_list), intent(in) :: list
+      type(csr_list), intent(in) :: list
       type(mchrg_cache), intent(in) :: cache
       real(wp), intent(in) :: p(:)
       real(wp), intent(inout) :: gradient(:, :)
@@ -3148,7 +3148,7 @@ contains
    subroutine get_grad_3d_list(self, mol, list, cache, p, gradient, sigma, alphain, betain)
       class(eeqbc_model), intent(in) :: self
       type(structure_type), intent(in) :: mol
-      type(adjacency_list), intent(in) :: list
+      type(csr_list), intent(in) :: list
       type(mchrg_cache), intent(in) :: cache
       real(wp), intent(in) :: p(:)
       real(wp), intent(inout) :: gradient(:, :)

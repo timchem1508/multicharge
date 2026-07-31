@@ -19,7 +19,7 @@
 module multicharge_solver_cg
    use iso_fortran_env, only : output_unit
    use mctc_env, only: error_type, fatal_error, wp, timer_type, format_time
-   use mctc_ncoord, only: adjacency_list
+   use mctc_csrlist, only: csr_list
    use multicharge_blascomp, only: gemv_cmp
    use multicharge_blas, only: axpy, scal, dot, symv, gemv
    use multicharge_lapack, only: sytrf, sytrs
@@ -114,7 +114,7 @@ contains
       !> Flag for coupled-perturbed equations
       logical, intent(in), optional :: cpq
       !> Neighbour list optional type
-      type(adjacency_list), intent(in), optional :: list
+      type(csr_list), intent(in), optional :: list
       !> Output unit
       integer, intent(in), optional :: new_unit
       !> Error handling
