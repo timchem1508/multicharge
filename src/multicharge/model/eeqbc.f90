@@ -3044,7 +3044,7 @@ contains
       cnacc = 0.0_wp
 
       allocate(v(mol%nat))
-      call symv(cache%cmat, p, v, alpha=1.0_wp, beta=0.0_wp, uplo='l')
+      call symv(cache%cmat(:mol%nat, :mol%nat), p, v, alpha=1.0_wp, beta=0.0_wp, uplo='l')
 
       allocate(gradient_local(3, mol%nat), source=0.0_wp)
       allocate(sigma_local(3, 3), source=0.0_wp)
@@ -3328,7 +3328,7 @@ contains
       cnacc = 0.0_wp
 
       allocate(v(mol%nat))
-      call symv(cache%cmat, p, v, alpha=1.0_wp, beta=0.0_wp, uplo='l')
+      call symv(cache%cmat(:mol%nat, :mol%nat), p, v, alpha=1.0_wp, beta=0.0_wp, uplo='l')
 
       allocate(gradient_local(3, mol%nat), source=0.0_wp)
       allocate(sigma_local(3, 3), source=0.0_wp)
