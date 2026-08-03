@@ -49,7 +49,7 @@ contains
 
       testsuite = [ &
       & new_unittest("eeq-charges-cyanamide", test_eeq_q_cyanamide), &
-      ! & new_unittest("eeq-energy-formamide", test_eeq_e_formamide), &
+      & new_unittest("eeq-energy-formamide", test_eeq_e_formamide), &
       & new_unittest("eeq-dbdr-co2", test_eeq_dbdr_co2), &
       & new_unittest("eeq-dbdL-co2", test_eeq_dbdL_co2), &
       & new_unittest("eeq-dadr-ice", test_eeq_dadr_ice), &
