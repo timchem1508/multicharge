@@ -321,28 +321,13 @@ contains
       call timer%push("total")
       call timer%push("setup")
 
-      call timer%push("cmatr")
-
+      ! Setup the system matrices and vectors
       call self%get_capacitance_matrix(mol, ndim, cache, list)
-
-      call timer%pop
-      write(*, *) "Capacitance matrix setup time : ", format_time(timer%get("cmatr"))
-
-      ! Setup the Coulomb matrix
-
-      call timer%push("amat")
       call self%get_coulomb_matrix(mol, ndim, cache, list)
-      call timer%pop
-      write(*, *) "Coulomb matrix setup time : ", format_time(timer%get("amat"))
-
-      ! Get RHS of ES equation
-      call timer%push("xvec")
       call self%get_xvec(mol, ndim, cache, list)
       if (.not. allocated(cache%vrhs)) then
          allocate(cache%vrhs(mol%nat + 1))
       end if
-      call timer%pop
-      write(*, *) "Xvec setup time : ", format_time(timer%get("xvec"))
 
       ! pop setup timer
       call timer%pop
