@@ -21,8 +21,8 @@ module test_csrlist
    use mctc_io_structure, only: structure_type, new
    use mctc_csrlist, only: csr_list, new_csr_list
    use mstore, only: get_structure
+   use mctc_wignerseitz, only: new_wignerseitz_cell, wignerseitz_cell
    use multicharge_blas, only: gemv
-   use multicharge_wignerseitz, only: new_wignerseitz_cell
    use multicharge_model_type, only: mchrg_model_type
    use multicharge_model_eeqbc, only: eeqbc_model
    use multicharge_param, only: new_eeq2019_model, new_eeqbc2025_model
@@ -181,7 +181,7 @@ contains
 
       ! Build adjacency list
       allocate(list)
-      call new_csr_list(list, mol, cutoff)
+      call new_csr_list(list, mol, cutoff=cutoff)
 
       call model%update(mol, cache, trans, grad=.false., list=list)
       call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, unit=output_unit)
@@ -228,7 +228,7 @@ contains
       real(wp), allocatable :: eref(:)
 
       type(mchrg_cache), allocatable :: cache
-
+      type(wignerseitz_cell), allocatable :: wsc
       type(csr_list), allocatable :: list
 
       ! Solver variables
@@ -280,7 +280,8 @@ contains
       deallocate(cache)
       allocate(cache)
       allocate(list)
-      call new_csr_list(list, mol, 29.0_wp)
+      allocate(wsc)
+      call new_csr_list(list, mol, wsc, 29.0_wp)
       call model%update(mol, cache, trans, grad=.false., list=list)
       call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, unit=output_unit)
 
@@ -366,7 +367,7 @@ contains
       allocate(list)
       gradient = 0.0_wp
       sigma(:, :) = 0.0_wp
-      call new_csr_list(list, mol, cutoff)
+      call new_csr_list(list, mol, cutoff=cutoff)
       call model%update(mol, cache2, trans, grad=.true., list=list)
 
       call model%solve(mol, solver, cache2, error, &
@@ -417,6 +418,7 @@ contains
       integer :: verbosity = 0
 
       type(csr_list), allocatable :: list
+      type(wignerseitz_cell), allocatable :: wsc
 
       integer :: iat, jat, kat, ic, ndim
       real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
@@ -463,9 +465,10 @@ contains
 
       allocate(cache2)
       allocate(list)
+      allocate(wsc)
       gradient = 0.0_wp
       sigma(:, :) = 0.0_wp
-      call new_csr_list(list, mol, 29.0_wp)
+      call new_csr_list(list, mol, wsc, cutoff=29.0_wp)
       call model%update(mol, cache2, trans, grad=.true., list=list)
 
       call model%solve(mol, solver, cache2, error, &
