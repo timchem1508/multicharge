@@ -19,6 +19,7 @@ program main
    use mctc_io, only: structure_type, read_structure, filetype, get_filetype
    use mctc_cutoff, only: get_lattice_points
    use mctc_csrlist, only: csr_list, new_csr_list
+   use mctc_wignerseitz, only: wignerseitz_cell
    use multicharge, only: mchrg_model_type, mchrg_model, mchrg_cache, new_eeq2019_model, &
    & new_eeqbc2025_model, get_multicharge_version, &
    & write_ascii_model, write_ascii_properties, write_ascii_results
@@ -37,6 +38,7 @@ program main
    type(error_type), allocatable :: error
    type(structure_type) :: mol
    type(csr_list), allocatable :: list
+   type(wignerseitz_cell), allocatable :: wsc
    class(mchrg_model_type), allocatable :: model
    type(mchrg_cache), allocatable :: cache
    class(mchrg_solver_type), allocatable :: solver
@@ -99,7 +101,11 @@ program main
    if (use_nlist) then
       call timer%push("nlist")
       allocate(list)
-      call new_csr_list(list, mol, cutoff)
+      if (any(mol%periodic)) then
+         call new_csr_list(list, mol, wsc, cutoff)
+      else
+         call new_csr_list(list, mol, cutoff=cutoff)
+      end if
       call timer%pop
       write(output_unit, '(a, 1x, a)') "Neighbour list generation time :", format_time(timer%get("nlist"))
    end if
