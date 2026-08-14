@@ -102,6 +102,7 @@ program main
       call timer%push("nlist")
       allocate(list)
       if (any(mol%periodic)) then
+         allocate(wsc)
          call new_csr_list(list, mol, wsc, cutoff)
       else
          call new_csr_list(list, mol, cutoff=cutoff)
