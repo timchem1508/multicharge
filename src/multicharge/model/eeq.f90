@@ -748,7 +748,6 @@ contains
       real(wp) :: dG(3), dS(3, 3)
       real(wp) :: W_ij
       real(wp), allocatable :: cnacc(:), gradient_local(:, :), sigma_local(:, :)
-      real(wp), allocatable :: dtrans(:, :)
 
       real(wp), parameter :: reg = 1.0e-14_wp
 

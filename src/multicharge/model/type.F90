@@ -276,7 +276,7 @@ contains
       !> Output unit
       integer, intent(in), optional :: unit
 
-      integer :: iat, ndim, jat, kat
+      integer :: iat, ndim
 
       real(wp), allocatable :: unitvec(:)
       real(wp), allocatable :: vvec(:)
