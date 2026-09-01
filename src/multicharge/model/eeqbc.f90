@@ -295,7 +295,7 @@ contains
       !> Multicharge neighbourlist type
       type(csr_list), intent(in), optional :: list
 
-      integer :: iat, izp, img, idx
+      integer :: iat, izp, img
       real(wp) :: ctmp, vec(3), rvdw, capi, wsw
       real(wp), allocatable :: dtrans(:, :)
 
@@ -440,7 +440,7 @@ contains
       type(mchrg_cache), intent(inout) :: cache
 
       integer :: iat, izp, jat, jzp
-      real(wp) :: capi, capj, vec(3), ctmp, rvdw, dG(3), dS(3, 3)
+      real(wp) :: vec(3)
       real(wp), allocatable :: dtmpdr(:, :, :), dtmpdL(:, :, :)
 
       ! Thread-private arrays for reduction
@@ -1448,7 +1448,6 @@ contains
 
    end subroutine get_cmat_0d
 
-
    !> Build the bond capacitance matrix for a non‑periodic system.
    subroutine get_cmat_0d_list(self, mol, list, clist)
       !> EEQBC model type
@@ -1460,23 +1459,18 @@ contains
       !> Output capacitance matrix in compressed format, size of list%nlat
       real(wp), intent(out) :: clist(:)
 
-
-      real(wp), allocatable :: cdiag(:)
-
       integer :: iat, jat, kat, izp, jzp
       real(wp) :: vec(3), rvdw, tmp, capi, capj, r1
 
       ! Zero out global shared target arrays upfront
       clist(:) = 0.0_wp
-      allocate(cdiag(mol%nat))
-      cdiag(:) = 0.0_wp
 
       !$omp parallel default(none) &
       !$omp shared(clist, mol, list, self) &
-      !$omp private(iat, kat, izp, jat, jzp, vec, r1, rvdw, tmp, capi, capj) &
-      !$omp reduction(+:cdiag)
+      !$omp private(iat, kat, izp, jat, jzp, vec, r1) &
+      !$omp private(rvdw, tmp, capi, capj)
 
-      !$omp do schedule(runtime)
+      !$omp do schedule(runtime) reduction(+:clist)
       do iat = 1, mol%nat
          izp = mol%id(iat)
          capi = self%cap(izp)
@@ -1494,15 +1488,12 @@ contains
             clist(kat) = -tmp
 
             ! Safe reduction writes (tracked in thread-local array copies)
-            cdiag(iat) = cdiag(iat) + tmp
-            cdiag(jat) = cdiag(jat) + tmp
+            clist(list%inl(iat)) = clist(list%inl(iat)) + tmp
+            clist(list%inl(jat)) = clist(list%inl(jat)) + tmp
          end do
-         clist(list%inl(iat)) = cdiag(iat)
       end do
       !$omp end do
       !$omp end parallel
-
-      deallocate(cdiag)
 
    end subroutine get_cmat_0d_list
 
@@ -1589,9 +1580,6 @@ contains
       !> Output capacitance matrix in compressed format, size of list%nlat
       real(wp), intent(out) :: clist(:)
 
-
-      real(wp), allocatable :: cdiag(:)
-
       integer :: iat, jat, izp, jzp, img, kat
       real(wp) :: vec(3), rvdw, tmp, capi, capj, wsw, ctmp
       real(wp), allocatable :: dtrans(:, :)
@@ -1600,13 +1588,11 @@ contains
 
       ! Zero out global shared target arrays upfront
       clist(:) = 0.0_wp
-      allocate(cdiag(mol%nat))
-      cdiag(:) = 0.0_wp
 
       !$omp parallel default(none) &
-      !$omp shared(clist, mol, list, self, dtrans) &
+      !$omp shared( mol, list, self, dtrans) &
       !$omp private(iat, izp, jat, kat, jzp, img, vec, rvdw, tmp, capi, capj, wsw, ctmp) &
-      !$omp reduction(+:cdiag)
+      !$omp reduction(+:clist)
       !$omp do schedule(runtime)
       do iat = 1, mol%nat
          izp = mol%id(iat)
@@ -1634,9 +1620,9 @@ contains
                ! Accumulate off-diagonal elements in local scalar
                ctmp = ctmp - tmp * wsw
 
-               ! Diagonal elements (Safe reduction writes)
-               cdiag(iat) = cdiag(iat) + tmp * wsw
-               cdiag(jat) = cdiag(jat) + tmp * wsw
+               ! Diagonal elements
+               clist(list%inl(iat)) = clist(list%inl(iat)) + tmp * wsw
+               clist(list%inl(jat)) = clist(list%inl(jat)) + tmp * wsw
             end do
 
             ! Safe direct write (kat is unique per thread)
@@ -1654,16 +1640,13 @@ contains
             vec = list%wsc%trans(:, list%wsc%tridx_list(img))
 
             call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, tmp)
-            cdiag(iat) = cdiag(iat) + tmp * wsw
+            clist(list%inl(iat)) = clist(list%inl(iat)) + tmp * wsw
          end do
-
-         clist(list%inl(iat)) = cdiag(iat)
 
       end do
       !$omp end do
       !$omp end parallel
 
-      deallocate(cdiag)
 
    end subroutine get_cmat_3d_list
 
@@ -2050,7 +2033,7 @@ contains
       real(wp), intent(out) :: dspair(3, 3)
 
       integer :: itr
-      real(wp) :: r1, arg, dtmp, dgtmp(3), dstmp(3, 3), vec(3)
+      real(wp) :: r1, arg, dgtmp(3), dstmp(3, 3), vec(3)
 
       dgpair(:) = 0.0_wp
       dspair(:, :) = 0.0_wp
@@ -2079,7 +2062,7 @@ contains
       ! Atomic numbers / species indices
       integer :: izp, jzp
 
-      real(wp) :: den, countf, countd(3), r1, r2
+      real(wp) :: den, countd(3), r1, r2
 
       izp = mol%id(iat)
       jzp = mol%id(jat)
@@ -2124,7 +2107,7 @@ contains
       real(wp), intent(out) :: dG_ij(3), dG_ji(3)
 
       integer :: itr
-      real(wp) :: r1, arg, dtmp, dgtmpij(3), dgtmpji(3), vec(3)
+      real(wp) :: r1, dgtmpij(3), dgtmpji(3), vec(3)
 
       dG_ij(:) = 0.0_wp
       dG_ji(:) = 0.0_wp
@@ -2260,8 +2243,8 @@ contains
       real(wp), optional, intent(in) :: betain
 
       real(wp) :: alpha, beta
-      integer :: iat, jat, kat, izp, jzp, start_kat, finish_kat
-      real(wp) :: vec(3), r2, gam, arg, dtmp, norm_cn, factor
+      integer :: iat, jat, kat, izp, jzp
+      real(wp) :: vec(3), r2, gam, arg, dtmp, norm_cn
       real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3)
       real(wp) :: W_ii, W_jj, W_ij
       real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
@@ -2391,8 +2374,8 @@ contains
       real(wp), optional, intent(in) :: betain
 
       real(wp) :: alpha, beta
-      integer :: iat, jat, kat, izp, jzp, start_kat, finish_kat
-      real(wp) :: vec(3), r2, gam, arg, dtmp, norm_cn, factor
+      integer :: iat, jat, izp, jzp
+      real(wp) :: vec(3), r2, gam, arg, dtmp, norm_cn
       real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3)
       real(wp) :: W_ii, W_jj, W_ij
       real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
@@ -2524,8 +2507,8 @@ contains
 
       real(wp) :: alpha, beta
       integer :: iat, jat, kat, izp, jzp, img
-      real(wp) :: vec(3), r2, gam, dtmp, capi, capj, dgam, rvdw, wsw, factor
-      real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), rij(3), ctmp
+      real(wp) :: vec(3), r2, gam, dtmp, capi, capj, dgam, rvdw, wsw
+      real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), ctmp
       real(wp) :: W_ii, W_jj, W_ij, norm_cn
       real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
       real(wp), allocatable :: v(:), qlocacc(:), cnacc(:), dtrans(:, :)

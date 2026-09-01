@@ -50,6 +50,7 @@ contains
       type(unittest_type), allocatable, intent(out) :: testsuite(:)
 
       testsuite = [ &
+      & new_unittest("eeqbc-components-mb01", test_eeqbc_components_mb01), &
       & new_unittest("eeqbc-charges-mb01", test_eeqbc_q_mb01), &
       & new_unittest("eeqbc-charges-mb02", test_eeqbc_q_mb02), &
       & new_unittest("eeqbc-charges-actinides", test_eeqbc_q_actinides), &
@@ -124,9 +125,6 @@ contains
       call new(mol, num, xyz, lattice=lattice)
    end subroutine make_supercell
 
-!------------------------------------------------------------------------
-! General helper routines – now they accept a pre‑built adjacency list.
-!------------------------------------------------------------------------
    subroutine gen_test_molecular(error, mol, model, qref, eref)
 
       !> Error handling
@@ -209,6 +207,105 @@ contains
       end if
 
    end subroutine gen_test_molecular
+
+   subroutine test_components(error, mol, model)
+
+      !> Error handling
+      type(error_type), allocatable, intent(out) :: error
+
+      !> Molecular structure data
+      type(structure_type), intent(in) :: mol
+
+      !> Electronegativity equilibration model
+      class(mchrg_model_type), intent(in) :: model
+
+
+      type(mchrg_cache), allocatable :: cache1, cache2
+
+      ! Solver variables
+      class(mchrg_solver_type), allocatable :: solver
+      class(mchrg_solver_input), allocatable :: solver_input
+      real(wp) :: tol = 1.0e-15_wp
+      integer :: maxiter = 1000
+      integer :: verbosity = 0
+
+      type(csr_list), allocatable :: list
+
+      real(wp) :: trans(3, 1) = 0.0_wp
+      real(wp), allocatable :: cmat(:, :), amat(:, :)
+
+      integer :: iat, jat, kat, ndim
+
+      allocate(cg_input :: solver_input)
+      select type (solver_input)
+       type is (cg_input)
+         solver_input%cgtol = tol
+         solver_input%cgmiter = maxiter
+         solver_input%verbosity = verbosity
+         solver_input%use_nlist = .true.
+         ndim = mol%nat
+      end select
+      call solver_maker(solver, solver_input, error)
+
+      allocate(cache1)
+
+      call model%update(mol, cache1, trans, grad=.true.)
+      call model%solve(mol, solver, cache1, error, unit=output_unit)
+      if (allocated(error)) return
+
+      allocate(cache2)
+      allocate(list)
+
+      call new_csr_list(list, mol, cutoff=cutoff)
+      call model%update(mol, cache2, trans, grad=.true., list=list)
+
+      call model%solve(mol, solver, cache2, error, list=list, unit=output_unit)
+      if (allocated(error)) return
+
+      allocate(cmat(mol%nat, mol%nat), source=0.0_wp)
+      allocate(amat(mol%nat, mol%nat), source=0.0_wp)
+      do iat = 1, mol%nat
+         do kat = list%inl(iat), list%inl(iat+1) - 1
+            jat = list%nlat(kat)
+            cmat(iat, jat) = cache2%clist(kat)
+            cmat(jat, iat) = cache2%clist(kat)
+            amat(iat, jat) = cache2%alist(kat)
+            amat(jat, iat) = cache2%alist(kat)
+         end do
+      end do
+
+      if (any(abs(cmat(:, :) - cache1%cmat(:, :)) > thr1)) then
+         call test_failed(error, "C-matrix does not match")
+         print'(a)', "C-matrix:"
+         print'(3es21.14)', cmat
+         print'(a)', "numcmat:"
+         print'(3es21.14)', cache1%cmat
+         print'(a)', "diff:"
+         print'(3es21.14)', cmat - cache1%cmat
+      end if
+
+      if (any(abs(cache1%xvec(:) - cache2%xvec(:)) > thr1)) then
+         call test_failed(error, "x-vector does not match")
+         print'(a)', "x-vector:"
+         print'(3es21.14)', cache1%xvec
+         print'(a)', "numxvec:"
+         print'(3es21.14)', cache2%xvec
+         print'(a)', "diff:"
+         print'(3es21.14)', cache1%xvec - cache2%xvec
+      end if
+
+      if (any(abs(amat(:, :) - cache1%amat(:, :)) > thr1)) then
+         call test_failed(error, "A-matrix does not match")
+         print'(a)', "A-matrix:"
+         print'(3es21.14)', amat
+         print'(a)', "numamat:"
+         print'(3es21.14)', cache1%amat
+         print'(a)', "diff:"
+         print'(3es21.14)', amat - cache1%amat
+      end if
+
+
+   end subroutine test_components
 
    subroutine gen_test_periodic(error, mol, model)
 
@@ -500,6 +597,23 @@ contains
 !------------------------------------------------------------------------
 ! Test routines – now each builds its own adjacency list.
 !------------------------------------------------------------------------
+   subroutine test_eeqbc_components_mb01(error)
+
+      !> Error handling
+      type(error_type), allocatable, intent(out) :: error
+
+      !> Molecular structure data
+      type(structure_type) :: mol
+      class(mchrg_model_type), allocatable :: model
+
+      call get_structure(mol, "MB16-43", "01")
+
+      call new_eeqbc2025_model(mol, model, error)
+      if (allocated(error)) return
+      call test_components(error, mol, model)
+
+   end subroutine test_eeqbc_components_mb01
+
    subroutine test_eeqbc_q_mb01(error)
 
       !> Error handling
