@@ -36,15 +36,13 @@ module multicharge_solver_type
 
 
    abstract interface
-      subroutine solve(self, amat, alist, adiag, xvec, vrhs, ainv, cpq, list, new_unit, error)
+      subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error)
          import :: mchrg_solver_type, error_type, wp, csr_list
          class(mchrg_solver_type), intent(in) :: self
          !> A matrix of Ax=b system
          real(wp), intent(in), optional  :: amat(:, :)
          !> Off-diagonall elements of matrix for in compressed
          real(wp), intent(in), optional  :: alist(:)
-         !> Diagonall elements of tmatrix for in compressed
-         real(wp), intent(in), optional  :: adiag(:)
          !> Right-hand side vector
          real(wp), intent(in)  :: xvec(:)
          !> On input: initial guess; on output: solution
