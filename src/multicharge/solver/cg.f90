@@ -19,8 +19,7 @@
 module multicharge_solver_cg
    use iso_fortran_env, only : output_unit
    use mctc_env, only: error_type, fatal_error, wp, timer_type, format_time
-   use mctc_csrlist, only: csr_list
-   use multicharge_blascomp, only: gemv_cmp
+   use mctc_csrlist, only: csr_list, gemv_cmp
    use multicharge_blas, only: axpy, scal, dot, symv, gemv
    use multicharge_lapack, only: sytrf, sytrs
    use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
@@ -93,18 +92,15 @@ contains
          self%use_nlist = use_nlist_def
       end if
 
-
    end subroutine new_cg_solver
 
    !> Conjugate gradient solver procedure with diagonal preconditioner
-   subroutine solve(self, amat, alist, adiag, xvec, vrhs, ainv, cpq, list, new_unit, error)
+   subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error)
       class(cg_solver), intent(in) :: self
       !> A matrix of Ax=b system
       real(wp), intent(in), optional  :: amat(:, :)
       !> Off-diagonall elements of matrix for in compressed
       real(wp), intent(in), optional  :: alist(:)
-      !> Diagonall elements of tmatrix for in compressed
-      real(wp), intent(in), optional  :: adiag(:)
       !> Right-hand side vector
       real(wp), intent(in)  :: xvec(:)
       !> On input: initial guess; on output: solution
@@ -158,7 +154,7 @@ contains
       logical :: nlist
 
       nlist = self%use_nlist .and. .not. present(amat) .and. &
-      & present(list) .and. present(alist) .and. present(adiag)
+      & present(list) .and. present(alist)
 
       ! CG cannot compute the inverse matrix
       if (present(ainv) .or. present(cpq)) then
@@ -196,7 +192,9 @@ contains
 
       ! Diagonal preconditioner
       if (nlist) then
-         prec(:) = 1.0_wp / (adiag(:) + eps)
+         do iat = 1, ndim
+            prec(iat) = 1.0_wp / (alist(list%inl(iat)) + eps)
+         end do
       else
          do iat = 1, ndim
             prec(iat) = 1.0_wp / (amat(iat,iat) + eps)
@@ -205,7 +203,7 @@ contains
 
       ! Initial residual
       if (nlist) then
-         call gemv_cmp(list, alist, adiag, vrhs, Adir, alpha=1.0_wp, beta=0.0_wp)
+         call gemv_cmp(list, alist, vrhs, Adir, alpha=1.0_wp, beta=0.0_wp)
       else
          call symv(amat, vrhs, Adir, alpha=1.0_wp, beta=0.0_wp)
       end if
@@ -236,7 +234,7 @@ contains
 
          ! Matrix-vector product
          if (nlist) then
-            call gemv_cmp(list, alist, adiag, dir, Adir, alpha=1.0_wp, beta=0.0_wp)
+            call gemv_cmp(list, alist, dir, Adir, alpha=1.0_wp, beta=0.0_wp)
          else
             call symv(amat, dir, Adir, alpha=1.0_wp, beta=0.0_wp)
          end if
