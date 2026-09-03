@@ -1,4 +1,4 @@
-! This file is part of mctc-lib.
+! This file is part of multicharge.
 !
 ! Licensed under the Apache License, Version 2.0 (the "License");
 ! you may not use this file except in compliance with the License.
@@ -67,6 +67,8 @@ module multicharge_model_type
       procedure :: get_external_gradient
       !> Calculate local charges from electronegativity weighted CN
       procedure :: local_charge
+      !> Calculate semi-numerical Hessian and Pressure tensor
+      procedure :: get_numhess
       !> Update cache
       procedure(update), deferred :: update
       !> Calculate capacitance matrix
@@ -435,20 +437,13 @@ contains
             write(output_unit, '(a, 1x, a)') "Coulomb matrix derivatives setup time : ", format_time(timer%get("dadr_setup"))
             write(output_unit, '(a)') ''
          end if
-         allocate(daqxdr(3, mol%nat, ndim), source=0.0_wp)
-         allocate(daqxdL(3, 3, ndim), source=0.0_wp)
 
          ! pop gradient setup
          call timer%pop
          call print_gradient_header(print_unit, verbosity_solve, timer%get("setup_gradient"))
 
          call timer%push("cpq")
-         do iat = 1, mol%nat
-            daqxdr(:, :, iat) = cache%dxdr(:, :, iat) - cache%dadr(:, :, iat)
-            daqxdL(:, :, iat) = cache%dxdL(:, :, iat) - cache%dadL(:, :, iat)
-         end do
-         call gemm(daqxdr, cache%ainv(:, :mol%nat), dqdr, alpha=1.0_wp)
-         call gemm(daqxdL, cache%ainv(:, :mol%nat), dqdL, alpha=1.0_wp)
+         call get_q_derivs(self, mol, solver, cache, error, dqdr, dqdL, list, unit=print_unit, verbosity=verbosity_solve)
          ! pop cpq timer
          call timer%pop
          call print_gradient_time(print_unit, verbosity_solve, timer%get("cpq"))
@@ -459,6 +454,77 @@ contains
       call print_total_time(print_unit, verbosity_solve, timer%get("total"))
 
    end subroutine solve
+
+   subroutine get_q_derivs(self, mol, solver, cache, error, dqdr, dqdL, list, unit, verbosity)
+      class(mchrg_model_type), intent(in) :: self
+      type(structure_type), intent(in) :: mol
+      class(mchrg_solver_type), intent(in) :: solver
+      type(mchrg_cache), intent(inout) :: cache
+      type(error_type), allocatable, intent(out) :: error
+      real(wp), intent(out) :: dqdr(:, :, :)
+      real(wp), intent(out) :: dqdL(:, :, :)
+      type(csr_list), intent(in), optional :: list
+      integer, intent(in), optional :: unit
+      integer, intent(in), optional :: verbosity
+
+      real(wp), allocatable :: daqxdr(:,:,:), daqxdL(:,:,:)
+      real(wp) :: scale, uvecsum
+      real(wp), allocatable :: diag(:), rhs(:), sol(:)
+      integer :: iat, ic, jc, ndim
+
+      if (allocated(cache%ainv)) then
+         ! Non-iterative solve
+         allocate(daqxdr(3, mol%nat, ndim), source=0.0_wp)
+         allocate(daqxdL(3, 3, ndim), source=0.0_wp)
+         do iat = 1, mol%nat
+            daqxdr(:, :, iat) = cache%dxdr(:, :, iat) - cache%dadr(:, :, iat)
+            daqxdL(:, :, iat) = cache%dxdL(:, :, iat) - cache%dadL(:, :, iat)
+         end do
+         call gemm(daqxdr, cache%ainv(:, :mol%nat), dqdr, alpha=1.0_wp)
+         call gemm(daqxdL, cache%ainv(:, :mol%nat), dqdL, alpha=1.0_wp)
+      else
+         ! Iterative solve
+         ! Diagonal for initial guess
+         allocate(diag(mol%nat))
+         do iat = 1, mol%nat
+            diag(iat) = cache%amat(iat, iat)
+         end do
+
+         allocate(rhs(mol%nat), sol(mol%nat))
+         uvecsum = sum(cache%uvec)
+         ! Position derivatives (dq/dR)
+         do iat = 1, mol%nat
+            do ic = 1, 3
+               ! RHS = db/dR - dA/dR * q
+               rhs(:) = cache%dxdr(ic, iat, :) - cache%dadr(ic, iat, :)
+               ! Initial guess: rhs / diag
+               sol(:) = rhs(:) / diag(:)
+               ! Solve J * m = rhs
+               call solver%solve(amat=cache%amat, xvec=rhs, vrhs=sol, &
+               & new_unit=unit, error=error)
+               ! Projection factor
+               scale = sum(sol) / uvecsum
+               ! dq/dR = m - scale * u
+               dqdr(ic, iat, :) = sol(:) - scale * cache%uvec(:)
+            end do
+         end do
+         ! Charge virial (dq/dL)
+         do ic = 1, 3
+            do jc = 1, 3
+               rhs(:) = cache%dxdL(ic, jc, :) - cache%dadL(ic, jc, :)
+               sol(:) = rhs(:) / diag(:)
+               call solver%solve(amat=cache%amat, xvec=rhs, vrhs=sol, &
+               & new_unit=unit, error=error)
+               ! Projection factor
+               scale = sum(sol) / uvecsum
+               ! dq/dL = m - scale * u
+               dqdL(ic, jc, :) = sol(:) - scale * cache%uvec(:)
+            end do
+         end do
+         deallocate(rhs, sol)
+      end if
+
+   end subroutine get_q_derivs
 
 !> Adjoint external gradient calculation using cached data
 !
@@ -572,6 +638,165 @@ contains
       call print_gradient_time(print_unit, verbosity_solve, timer%get("external_gradient"))
 
    end subroutine get_external_gradient
+
+   subroutine get_numhess(self, mol, solver, cache, error, qvec, energy, grad, sigma, &
+   & hess, press, unit, verbosity)
+      class(mchrg_model_type), intent(in) :: self
+      type(structure_type), intent(in) :: mol
+      class(mchrg_solver_type), intent(in) :: solver
+      type(mchrg_cache), intent(inout) :: cache
+      type(error_type), allocatable, intent(out) :: error
+      real(wp), intent(out) :: qvec(:)
+      real(wp), intent(out) :: energy(:)
+      real(wp), intent(out) :: grad(:, :)
+      real(wp), intent(out) :: sigma(:, :)
+      real(wp), intent(out) :: hess(:, :, :, :)
+      real(wp), intent(out) :: press(:, :, :, :)
+      integer, intent(in), optional :: unit
+      integer, intent(in), optional :: verbosity
+
+      real(wp), parameter :: step = 1.0e-6_wp
+      type(structure_type) :: mol_work
+      type(mchrg_cache), allocatable :: cache_work
+      real(wp), parameter :: trans(3, 1) = 0.0_wp
+      real(wp), allocatable :: g_plus(:, :)
+      real(wp), allocatable :: g_minus(:, :)
+      real(wp), allocatable :: s_plus(:, :)
+      real(wp), allocatable :: s_minus(:, :)
+      real(wp), allocatable :: xyz_orig(:, :)
+      integer :: jc, jat, ic, lc, kc
+      real(wp) :: eps_mat(3, 3)
+
+      hess = 0.0_wp
+      press = 0.0_wp
+
+      ! Create a mutable local copy of mol.
+      mol_work = mol
+
+      ! Store original atomic coordinates.
+      allocate(xyz_orig(3, mol_work%nat))
+      xyz_orig = mol_work%xyz
+
+      ! Evaluate unperturbed system.
+      call self%update(mol_work, cache, trans, grad=.true.)
+      call self%solve(mol_work, solver, cache, error, qvec=qvec, energy=energy, &
+      & gradient=grad, sigma=sigma, unit=unit, verbosity=verbosity)
+      if (allocated(error)) return
+
+      allocate(g_plus(3, mol_work%nat))
+      allocate(g_minus(3, mol_work%nat))
+      allocate(s_plus(3, 3))
+      allocate(s_minus(3, 3))
+
+      g_plus  = 0.0_wp
+      g_minus = 0.0_wp
+      s_plus  = 0.0_wp
+      s_minus = 0.0_wp
+
+      eps_mat(:, :) = 0.0_wp
+      do ic = 1, 3
+         eps_mat(ic, ic) = 1.0_wp
+      end do
+
+      do jat = 1, mol_work%nat
+         do jc = 1, 3
+
+            ! +step displacement
+            g_plus  = 0.0_wp
+            s_plus  = 0.0_wp
+            mol_work%xyz(jc, jat) = xyz_orig(jc, jat) + step
+            allocate(cache_work)
+            call self%update(mol_work, cache_work, trans, grad=.true.)
+            call self%solve(mol_work, solver, cache_work, error, gradient=g_plus, &
+            & sigma=s_plus, unit=unit, verbosity=verbosity)
+            deallocate(cache_work)
+
+            if (allocated(error)) then
+               mol_work%xyz = xyz_orig
+               return
+            end if
+
+            ! -step displacement
+            g_minus = 0.0_wp
+            s_minus = 0.0_wp
+            mol_work%xyz(jc, jat) = xyz_orig(jc, jat) - step
+            allocate(cache_work)
+            call self%update(mol_work, cache_work, trans, grad=.true.)
+            call self%solve(mol_work, solver, cache_work, error, gradient=g_minus, &
+            & sigma=s_minus, unit=unit, verbosity=verbosity)
+            deallocate(cache_work)
+
+            if (allocated(error)) then
+               mol_work%xyz = xyz_orig
+               return
+            end if
+
+            ! Central-difference derivative of the gradient.
+            hess(:, :, jc, jat) = (g_plus - g_minus) / (2.0_wp * step)
+
+            ! Central-difference derivative of sigma with respect to coordinates.
+            if (size(press, 4) == mol_work%nat) then
+               press(:, :, jc, jat) = (s_plus - s_minus) / (2.0_wp * step)
+            end if
+
+            ! Restore perturbed coordinate.
+            mol_work%xyz(jc, jat) = xyz_orig(jc, jat)
+
+         end do
+      end do
+
+      do kc = 1, 3
+         do lc = 1, 3
+            ! Forward strain step
+            g_plus  = 0.0_wp
+            s_plus  = 0.0_wp
+            eps_mat(lc, kc) = eps_mat(lc, kc) + step
+            mol_work%xyz(:, :) = matmul(eps_mat, xyz_orig)
+
+            allocate(cache_work)
+            call self%update(mol_work, cache_work, trans, grad=.true.)
+
+            g_plus(:, :) = 0.0_wp
+            s_plus(:, :) = 0.0_wp
+            call self%solve(mol_work, solver, cache_work, error, &
+            & gradient=g_plus, sigma=s_plus,  unit=unit, verbosity=verbosity)
+            deallocate(cache_work)
+            if (allocated(error)) return
+
+            ! Backward strain step
+            g_minus  = 0.0_wp
+            s_minus  = 0.0_wp
+            eps_mat(lc, kc) = eps_mat(lc, kc) - 2.0_wp * step
+            mol_work%xyz(:, :) = matmul(eps_mat, xyz_orig)
+
+            allocate(cache_work)
+            call self%update(mol_work, cache_work, trans, grad=.true.)
+
+            g_minus(:, :) = 0.0_wp
+            s_minus(:, :) = 0.0_wp
+            call self%solve(mol_work, solver, cache_work, error, &
+            & gradient=g_minus, sigma=s_minus,unit=unit, verbosity=verbosity)
+            deallocate(cache_work)
+            if (allocated(error)) return
+
+            ! Restore strain matrix and unperturbed geometry
+            eps_mat(lc, kc) = eps_mat(lc, kc) + step
+            mol_work%xyz(:, :) = xyz_orig
+
+            ! Compute Central Difference
+            do ic = 1, 3
+               do jc = 1, 3
+                  press(ic, jc, lc, kc) = 0.5_wp * (s_plus(ic, jc) - s_minus(ic, jc)) / step
+               end do
+            end do
+         end do
+      end do
+
+      ! Restore original geometry.
+      mol_work%xyz = xyz_orig
+
+   end subroutine get_numhess
+
 
 !> Local charges calculation
    subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL, &

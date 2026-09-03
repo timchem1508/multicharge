@@ -105,7 +105,7 @@ contains
 
    end subroutine write_ascii_properties
 
-   subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL)
+   subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, hess, press)
 
       !> Unit for output
       integer, intent(in) :: unit
@@ -118,13 +118,17 @@ contains
       real(wp), intent(in), optional :: sigma(:, :)
       real(wp), intent(in), optional :: dqdr(:,:,:)
       real(wp), intent(in), optional :: dqdL(:,:,:)
+      real(wp), intent(in), optional :: hess(:, :, :, :)
+      real(wp), intent(in), optional :: press(:, :, :, :)
 
-      integer :: iat, jat, isp, jsp
-      logical :: grad, qgrad
+      integer :: iat, jat, isp, jsp, ic, jc
+      logical :: grad, qgrad, has_hess, has_press
       character(len=1), parameter :: comp(3) = ["x", "y", "z"]
 
       grad = present(gradient) .and. present(sigma)
       qgrad = present(dqdr) .and. present(dqdL)
+      has_hess = present(hess)
+      has_press = present(press)
 
       write(unit, '(a,":", t25, es20.13, 1x, a)') &
       & "Electrostatic energy", sum(energy), "Eh"
@@ -188,6 +192,62 @@ contains
          end do
          write(unit, '(62("-"))')
          write(unit, '(a)')
+      end if
+
+      if (has_hess) then
+         write(unit, '(a,":", t25, es20.13, 1x, a)') &
+         & "Hessian matrix norm", norm2(hess), "Eh/a0^2"
+         write(unit, '(78("-"))')
+         write(unit, '(a10,1x,a4,3x,a6,1x,a4,3x,a9,1x,*(1x,a12))') &
+         & "#", "Z", "#", "A", "component", "d2E/dxdR", "d2E/dydR", "d2E/dzdR"
+         write(unit, '(78("-"))')
+         do iat = 1, mol%nat
+            isp = mol%id(iat)
+            do jat = 1, mol%nat
+               jsp = mol%id(jat)
+               do ic = 1, 3
+                  write(unit, '(i10,1x,i3,1x,a2,1x,i6,1x,i3,1x,a2,2x,a4,5x,*(2x,es11.3))') &
+                  & iat, mol%num(isp), mol%sym(isp), jat, mol%num(jsp), mol%sym(jsp), &
+                  & comp(ic), hess(:, jat, ic, iat)
+               end do
+            end do
+         end do
+         write(unit, '(78("-"))')
+         write(unit, '(a)')
+      end if
+
+      if (has_press) then
+         if (size(press, 4) == mol%nat) then
+            write(unit, '(a,":")') "Stress gradient (d sigma / d R)"
+            write(unit, '(72("-"))')
+            write(unit, '(a10,1x,a4,3x,a9,1x,a4,5x,*(1x,a10))') &
+            & "#", "Z", "component", "dR", "x", "y", "z"
+            write(unit, '(72("-"))')
+            do jat = 1, mol%nat
+               jsp = mol%id(jat)
+               do jc = 1, 3
+                  do ic = 1, 3
+                     write(unit, '(i10,1x,i3,1x,a2,2x,a4,5x,a4,5x,*(es11.3))') &
+                     & jat, mol%num(jsp), mol%sym(jsp), comp(ic), comp(jc), press(:, ic, jc, jat)
+                  end do
+               end do
+            end do
+            write(unit, '(72("-"))')
+            write(unit, '(a)')
+         else if (size(press, 4) == 3) then
+            write(unit, '(a,":")') "Elastic tensor (d sigma / d eps)"
+            write(unit, '(50("-"))')
+            write(unit, '(a15,1x,a10,1x,*(1x,a10))') "component", "strain", "x", "y", "z"
+            write(unit, '(50("-"))')
+            do ic = 1, 3
+               do jc = 1, 3
+                  write(unit, '(2x,4x,1x,a4,5x,a4,5x,*(es11.3))') &
+                  & comp(ic), comp(jc), press(:, jc, ic, 1)
+               end do
+            end do
+            write(unit, '(50("-"))')
+            write(unit, '(a)')
+         end if
       end if
 
    end subroutine write_ascii_results

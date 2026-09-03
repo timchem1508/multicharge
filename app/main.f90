@@ -43,9 +43,10 @@ program main
    type(mchrg_cache), allocatable :: cache
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
-   logical :: grad, egrad, qgrad, json, exist, use_nlist
+   logical :: grad, egrad, qgrad, json, exist, use_nlist, numeric_hessian
    real(wp), allocatable :: trans(:, :)
    real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
+   real(wp), allocatable :: hess(:, :, :, :), press(:, :, :, :)
    real(wp), allocatable :: qvec(:)
    real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: charge
@@ -55,8 +56,8 @@ program main
 
    call timer%push("total")
 
-   call get_arguments(input, model_id, use_nlist, cutoff, input_format, egrad, qgrad, charge, json, &
-      solver_input, verbosity, error)
+   call get_arguments(input, model_id, use_nlist, cutoff, input_format, egrad, qgrad, numeric_hessian, &
+      charge, json,  solver_input, verbosity, error)
    if (allocated(error)) then
       write(error_unit, '(a)') error%message
       error stop
@@ -149,16 +150,40 @@ program main
 
    grad = egrad .or. qgrad
 
-   allocate(cache)
 
-   call timer%push("update")
-   call model%update(mol, cache, trans, grad, list)
-   call timer%pop
-   if (verbosity > 1) then
-      write(output_unit, '(a, 1x, a)') "Get coordination number time : ", format_time(timer%get("update"))
+
+   if (numeric_hessian) then
+      allocate(cache)
+      call timer%push("update")
+      call model%update(mol, cache, trans, grad=.true.)
+      call timer%pop
+      if (verbosity > 1) then
+         write(output_unit, '(a, 1x, a)') "Get coordination number time : ", format_time(timer%get("update"))
+      end if
+      call timer%push("numhess")
+      allocate(gradient(3, mol%nat), sigma(3, 3))
+      gradient(:, :) = 0.0_wp
+      sigma(:, :) = 0.0_wp
+      allocate(hess(3, mol%nat, 3,  mol%nat), press(3, 3, 3, 3))
+      hess(:, :, :, :) = 0.0_wp
+      press(:, :, :, :) = 0.0_wp
+      call model%get_numhess(mol, solver, cache, error, qvec, energy, gradient, sigma,&
+      & hess, press, unit=output_unit, verbosity=verbosity)
+      call timer%pop
+      if (verbosity > 1) then
+         write(output_unit, '(a, 1x, a)') "Get numerical Hessian time : ", format_time(timer%get("numhess"))
+      end if
+   else
+      allocate(cache)
+      call timer%push("update")
+      call model%update(mol, cache, trans, grad, list)
+      call timer%pop
+      if (verbosity > 1) then
+         write(output_unit, '(a, 1x, a)') "Get coordination number time : ", format_time(timer%get("update"))
+      end if
+      call model%solve(mol, solver, cache, error, &
+      & energy, gradient, sigma, qvec, dqdr, dqdL, list, verbosity=verbosity, unit=output_unit)
    end if
-   call model%solve(mol, solver, cache, error, &
-   & energy, gradient, sigma, qvec, dqdr, dqdL, list, verbosity=verbosity, unit=output_unit)
 
    if (allocated(error)) then
       write(error_unit, '(a)') error%message
@@ -166,7 +191,8 @@ program main
    end if
 
    call write_ascii_properties(output_unit, mol, model, cache%cn, qvec)
-   call write_ascii_results(output_unit, mol, energy, gradient, sigma, dqdr, dqdL)
+   call write_ascii_results(output_unit, mol, energy, &
+      gradient, sigma, dqdr, dqdL, hess, press)
 
    call timer%pop
    if (verbosity > 1) then
@@ -227,7 +253,7 @@ contains
    end subroutine version
 
    subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
-   & input_format, egrad, qgrad, charge, json, solver_input, verbosity, error)
+   & input_format, egrad, qgrad, numeric_hessian, charge, json, solver_input, verbosity, error)
 
       !> Input file name
       character(len=:), allocatable :: input
@@ -249,6 +275,9 @@ contains
 
       !> Evaluate charge gradient
       logical, intent(out) :: qgrad
+
+      !> Numerical Hessian and Pressure tensor
+      logical, intent(out) :: numeric_hessian
 
       !> Charge
       real(wp), allocatable, intent(out) :: charge
@@ -281,6 +310,8 @@ contains
       iarg = 0
       verbosity = 1
       narg = command_argument_count()
+
+      numeric_hessian = .false.
 
       do while(iarg < narg)
          iarg = iarg + 1
@@ -386,17 +417,19 @@ contains
                call fatal_error(error, "Invalid neighbourlist cutoff")
                exit
             end if
+          case("-hess", "-numhess", "--numhess")
+            numeric_hessian = .true.
          end select
       end do
 
       ! Charge gradient cannot be evaluated using cg solver.
-      if (qgrad) then
-         select type (solver_input)
-          type is (cg_input)
-            call fatal_error(error, "Charge gradient cannot be evaluated using cg solver.")
-            return
-         end select
-      end if
+      !if (qgrad) then
+      !   select type (solver_input)
+      !    type is (cg_input)
+      !      call fatal_error(error, "Charge gradient cannot be evaluated using cg solver.")
+      !      return
+      !   end select
+      !end if
 
       if ((allocated(maxiter) .or. allocated(tol)) .and. .not. allocated(solver_input)) then
          call fatal_error(error, "Maximal number of iterations and tolerance cannot be used alonwise the cg solver.")
