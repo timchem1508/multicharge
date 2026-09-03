@@ -65,14 +65,12 @@ contains
    end subroutine new_direct_solver
 
    !> Solve method for direct solver
-   subroutine solve(self, amat, alist, adiag, xvec, vrhs, ainv, cpq, list, new_unit, error)
+   subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error)
       class(direct_solver), intent(in) :: self
       !> A matrix of Ax=b system
       real(wp), intent(in), optional  :: amat(:, :)
       !> Off-diagonall elements of matrix for in compressed
       real(wp), intent(in), optional  :: alist(:)
-      !> Diagonall elements of tmatrix for in compressed
-      real(wp), intent(in), optional  :: adiag(:)
       !> Right-hand side vector
       real(wp), intent(in)  :: xvec(:)
       !> On input: initial guess; on output: solution

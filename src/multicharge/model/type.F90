@@ -28,9 +28,8 @@ module multicharge_model_type
    use mctc_io_math, only: matinv_3x3
    use mctc_cutoff, only: get_lattice_points
    use mctc_ncoord, only: ncoord_type
-   use mctc_csrlist, only: csr_list
+   use mctc_csrlist, only: csr_list, gemv_cmp
    use multicharge_blas, only: gemv, symv, gemm
-   use multicharge_blascomp, only: gemv_cmp
    use multicharge_lapack, only: sytrf, sytrs
    use multicharge_wignerseitz, only: wignerseitz_cell_type, new_wignerseitz_cell
    use multicharge_model_cache, only: mchrg_cache
@@ -277,7 +276,7 @@ contains
       !> Output unit
       integer, intent(in), optional :: unit
 
-      integer :: iat, ndim, jat, kat
+      integer :: iat, ndim
 
       real(wp), allocatable :: unitvec(:)
       real(wp), allocatable :: vvec(:)
@@ -352,8 +351,10 @@ contains
          allocate(vvec(mol%nat))
          ! Initial guess
          if (present(list)) then
-            cache%uvec(:) = 1.0_wp / (cache%adiag(:) + eps)
-            vvec(:) = - cache%xvec(:) / (cache%adiag(:) + eps)
+            do iat = 1, mol%nat
+               cache%uvec(iat) = 1.0_wp / (cache%alist(list%inl(iat)) + eps)
+               vvec(iat) = - cache%xvec(iat) / (cache%alist(list%inl(iat)) + eps)
+            end do
          else
             do iat = 1, mol%nat
                cache%uvec(iat) = 1.0_wp / (cache%amat(iat, iat) + eps)
@@ -365,12 +366,12 @@ contains
 
          call print_constrained_system_message(print_unit, verbosity_solve, 'u')
          ! Constrained response: A*uvec = 1
-         call solver%solve(amat=cache%amat, alist=cache%alist, adiag=cache%adiag, xvec=unitvec, &
+         call solver%solve(amat=cache%amat, alist=cache%alist, xvec=unitvec, &
          & vrhs=cache%uvec, list=list, new_unit=print_unit, error=error)
          call print_constrained_system_message(print_unit, verbosity_solve, 'v')
 
          ! Constrained response: A*uvec = -xvec
-         call solver%solve(amat=cache%amat, alist=cache%alist, adiag=cache%adiag, xvec=-cache%xvec, &
+         call solver%solve(amat=cache%amat, alist=cache%alist, xvec=-cache%xvec, &
          & vrhs=vvec, list=list, new_unit=print_unit, error=error)
          uvecsum = sum(cache%uvec)
          vvecsum = sum(vvec)
@@ -392,7 +393,7 @@ contains
       if (present(energy)) then
          call timer%push("energy")
          if (present(list)) then
-            call gemv_cmp(list, cache%alist, cache%adiag, cache%vrhs, cache%xvec(:mol%nat), &
+            call gemv_cmp(list, cache%alist, cache%vrhs, cache%xvec(:mol%nat), &
             & alpha=0.5_wp, beta=-1.0_wp)
          else
             call symv(cache%amat, cache%vrhs, cache%xvec(:mol%nat), &
@@ -542,7 +543,7 @@ contains
 
          ! Constrained response: J*yvec = dfdq
          call print_adjoint_message(print_unit, verbosity_solve)
-         call solver%solve(amat=cache%amat, alist=cache%alist, adiag=cache%adiag, &
+         call solver%solve(amat=cache%amat, alist=cache%alist, &
          & xvec=dfdq, vrhs=yvec, list=list, error=error)
          if (allocated(error)) return
 
