@@ -1448,7 +1448,7 @@ contains
 
    end subroutine get_cmat_0d
 
-   !> Build the bond capacitance matrix for a non‑periodic system.
+!> Build the bond capacitance matrix for a non‑periodic system.
    subroutine get_cmat_0d_list(self, mol, list, clist)
       !> EEQBC model type
       class(eeqbc_model), intent(in) :: self
@@ -1470,7 +1470,7 @@ contains
       !$omp private(iat, kat, izp, jat, jzp, vec, r1) &
       !$omp private(rvdw, tmp, capi, capj)
 
-      !$omp do schedule(runtime) reduction(+:clist)
+      !$omp do schedule(runtime)
       do iat = 1, mol%nat
          izp = mol%id(iat)
          capi = self%cap(izp)
@@ -1487,9 +1487,14 @@ contains
             ! Safe direct write (kat is unique per thread)
             clist(kat) = -tmp
 
-            ! Safe reduction writes (tracked in thread-local array copies)
+            ! Safe direct write (iat is uniquely owned by current thread)
+            !$omp atomic update
             clist(list%inl(iat)) = clist(list%inl(iat)) + tmp
+
+            ! Atomic write to prevent race conditions on shared jat entries
+            !$omp atomic update
             clist(list%inl(jat)) = clist(list%inl(jat)) + tmp
+            !$omp end atomic
          end do
       end do
       !$omp end do
@@ -1590,9 +1595,9 @@ contains
       clist(:) = 0.0_wp
 
       !$omp parallel default(none) &
-      !$omp shared( mol, list, self, dtrans) &
-      !$omp private(iat, izp, jat, kat, jzp, img, vec, rvdw, tmp, capi, capj, wsw, ctmp) &
-      !$omp reduction(+:clist)
+      !$omp shared(clist, mol, list, self, dtrans) &
+      !$omp private(iat, izp, jat, kat, jzp, img, vec, rvdw, tmp, capi, capj, wsw, ctmp)
+
       !$omp do schedule(runtime)
       do iat = 1, mol%nat
          izp = mol%id(iat)
@@ -1621,8 +1626,11 @@ contains
                ctmp = ctmp - tmp * wsw
 
                ! Diagonal elements
+               !$omp atomic update
                clist(list%inl(iat)) = clist(list%inl(iat)) + tmp * wsw
+               !$omp atomic update
                clist(list%inl(jat)) = clist(list%inl(jat)) + tmp * wsw
+               !$omp end atomic
             end do
 
             ! Safe direct write (kat is unique per thread)
@@ -1640,7 +1648,9 @@ contains
             vec = list%wsc%trans(:, list%wsc%tridx_list(img))
 
             call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, tmp)
+            !$omp atomic update
             clist(list%inl(iat)) = clist(list%inl(iat)) + tmp * wsw
+            !$omp end atomic
          end do
 
       end do
@@ -1795,6 +1805,7 @@ contains
    end subroutine get_dcmat_0d
 
 !> Build the derivative of the bond capacitance matrix for a non‑periodic system.
+!> Build the derivative of the bond capacitance matrix for a non‑periodic system.
    subroutine get_dcmat_0d_list(self, mol, list, cache)
       !> EEQBC model type
       class(eeqbc_model), intent(in) :: self
@@ -1805,22 +1816,17 @@ contains
       !> Multicharge cache
       type(mchrg_cache), intent(inout) :: cache
 
-      integer :: iat, jat, kat, izp, jzp
+      integer :: iat, jat, kat, izp, jzp, ic, i, j
       real(wp) :: vec(3), rvdw, dG(3), dS(3, 3), capi, capj
-      real(wp), allocatable :: dcdrdiag_local(:, :), dcdL_local(:, :, :)
 
+      ! Zero out global shared target arrays upfront
       cache%dcdrdiag(:, :) = 0.0_wp
       cache%dcdL(:, :, :) = 0.0_wp
-
-      allocate(dcdrdiag_local, source=cache%dcdrdiag)
-      allocate(dcdL_local, source=cache%dcdL)
-
 
       !$omp parallel default(none) &
       !$omp shared(cache, mol, list, self) &
       !$omp private(iat, izp, jat, kat, jzp, vec, rvdw) &
-      !$omp private(dG, dS, capi, capj) &
-      !$omp reduction(+:dcdrdiag_local, dcdL_local)
+      !$omp private(dG, dS, capi, capj, ic, i, j)
 
       !$omp do schedule(runtime)
       do iat = 1, mol%nat
@@ -1835,22 +1841,31 @@ contains
 
             call get_dcpair(self%kbc, vec, rvdw, capi, capj, dG, dS)
 
-            ! Diagonal elements (Matches reference dcdr(i,i) and dcdr(j,j))
-            dcdrdiag_local(:, iat) = dcdrdiag_local(:, iat) - dG
-            dcdrdiag_local(:, jat) = dcdrdiag_local(:, jat) + dG
+            ! Atomic scalar updates for coordinate gradients (dcdrdiag)
+            do ic = 1, 3
+               !$omp atomic update
+               cache%dcdrdiag(ic, iat) = cache%dcdrdiag(ic, iat) - dG(ic)
 
-            ! Lattice derivatives
-            dcdL_local(:, :, iat) = dcdL_local(:, :, iat) + dS
-            dcdL_local(:, :, jat) = dcdL_local(:, :, jat) + dS
+               !$omp atomic update
+               cache%dcdrdiag(ic, jat) = cache%dcdrdiag(ic, jat) + dG(ic)
+            end do
+
+            ! Atomic scalar updates for strain/lattice derivatives (dcdL)
+            do j = 1, 3
+               do i = 1, 3
+                  !$omp atomic update
+                  cache%dcdL(i, j, iat) = cache%dcdL(i, j, iat) + dS(i, j)
+
+                  !$omp atomic update
+                  cache%dcdL(i, j, jat) = cache%dcdL(i, j, jat) + dS(i, j)
+               end do
+            end do
+
          end do
       end do
       !$omp end do
       !$omp end parallel
 
-      cache%dcdrdiag(:, :) = cache%dcdrdiag + dcdrdiag_local
-      cache%dcdL(:, :, :) = cache%dcdL + dcdL_local
-
-      deallocate(dcdL_local, dcdrdiag_local)
    end subroutine get_dcmat_0d_list
 
 !> Build the derivative of the bond capacitance matrix for a periodic system.
@@ -1940,23 +1955,19 @@ contains
       type(csr_list), intent(in) :: list
       type(mchrg_cache), intent(inout) :: cache
 
-      integer :: iat, jat, izp, jzp, img, kat
+      integer :: iat, jat, izp, jzp, img, kat, ic, i, j
       real(wp) :: vec(3), rvdw, dG(3), dS(3, 3), capi, capj, wsw
       real(wp), allocatable :: dtrans(:, :)
-      real(wp), allocatable :: dcdrdiag_local(:, :), dcdL_local(:, :, :)
 
       call get_dir_trans(mol, dtrans, cutoff)
 
+      ! Zero out global shared target arrays upfront
       cache%dcdrdiag(:, :) = 0.0_wp
       cache%dcdL(:, :, :) = 0.0_wp
 
-      allocate(dcdrdiag_local, source=cache%dcdrdiag)
-      allocate(dcdL_local, source=cache%dcdL)
-
       !$omp parallel default(none) &
       !$omp shared(cache, mol, list, self, dtrans) &
-      !$omp private(iat, izp, jat, kat, jzp, vec, rvdw, dG, dS, capi, capj, wsw, img) &
-      !$omp reduction(+:dcdrdiag_local, dcdL_local)
+      !$omp private(iat, izp, jat, kat, jzp, vec, rvdw, dG, dS, capi, capj, wsw, img, ic, i, j)
 
       !$omp do schedule(runtime)
       do iat = 1, mol%nat
@@ -1979,11 +1990,26 @@ contains
                vec = mol%xyz(:, jat) - mol%xyz(:, iat) + list%wsc%trans(:, list%wsc%tridx_list(img))
                call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
 
-               ! Diagonal elements
-               dcdrdiag_local(:, iat) = -dG * wsw + dcdrdiag_local(:, iat)
-               dcdrdiag_local(:, jat) = +dG * wsw + dcdrdiag_local(:, jat)
-               dcdL_local(:, :, jat) = +dS * wsw + dcdL_local(:, :, jat)
-               dcdL_local(:, :, iat) = +dS * wsw + dcdL_local(:, :, iat)
+               ! Atomic scalar updates for coordinate gradients (dcdrdiag)
+               do ic = 1, 3
+                  !$omp atomic update
+                  cache%dcdrdiag(ic, iat) = cache%dcdrdiag(ic, iat) - dG(ic) * wsw
+
+                  !$omp atomic update
+                  cache%dcdrdiag(ic, jat) = cache%dcdrdiag(ic, jat) + dG(ic) * wsw
+               end do
+
+               ! Atomic scalar updates for lattice derivatives (dcdL)
+               do j = 1, 3
+                  do i = 1, 3
+                     !$omp atomic update
+                     cache%dcdL(i, j, iat) = cache%dcdL(i, j, iat) + dS(i, j) * wsw
+
+                     !$omp atomic update
+                     cache%dcdL(i, j, jat) = cache%dcdL(i, j, jat) + dS(i, j) * wsw
+                  end do
+               end do
+
             end do
          end do
 
@@ -1998,18 +2024,21 @@ contains
             do img = list%wsc%itr_list(list%inl(iat)), list%wsc%itr_list(list%inl(iat) + 1) - 1
                vec = list%wsc%trans(:, list%wsc%tridx_list(img))
                call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, dG, dS)
-               dcdL_local(:, :, iat) = dcdL_local(:, :, iat) + dS * wsw
+
+               ! Atomic scalar updates for lattice derivatives
+               do j = 1, 3
+                  do i = 1, 3
+                     !$omp atomic update
+                     cache%dcdL(i, j, iat) = cache%dcdL(i, j, iat) + dS(i, j) * wsw
+                  end do
+               end do
+
             end do
          end if
 
       end do
       !$omp end do
       !$omp end parallel
-
-      cache%dcdrdiag(:, :) = cache%dcdrdiag + dcdrdiag_local
-      cache%dcdL(:, :, :) = cache%dcdL + dcdL_local
-
-      deallocate(dcdL_local, dcdrdiag_local)
 
    end subroutine get_dcmat_3d_list
 
