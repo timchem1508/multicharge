@@ -1,4 +1,5 @@
-! This file is part of mctc-lib.
+! This file is part of multicharge.
+! SPDX-Identifier: Apache-2.0
 !
 ! Licensed under the Apache License, Version 2.0 (the "License");
 ! you may not use this file except in compliance with the License.
@@ -19,21 +20,19 @@
 #define IK i4
 #endif
 
-!> General charge model
+!> Abstract base type and shared operations for charge models
 module multicharge_model_type
    use iso_fortran_env, only : output_unit
-   use mctc_env, only: timer_type, format_time, error_type, fatal_error, wp, ik => IK
-   use mctc_io, only: structure_type
-   use mctc_io_constants, only: pi
-   use mctc_io_math, only: matinv_3x3
-   use mctc_cutoff, only: get_lattice_points
-   use mctc_ncoord, only: ncoord_type
-   use mctc_csrlist, only: csr_list, gemv_cmp
-   use multicharge_blas, only: gemv, symv, gemm
-   use multicharge_lapack, only: sytrf, sytrs
-   use multicharge_wignerseitz, only: wignerseitz_cell_type, new_wignerseitz_cell
-   use multicharge_model_cache, only: mchrg_cache
-   use multicharge_solver_type, only: mchrg_solver_type
+   use mctc_env, only : timer_type, format_time, error_type, fatal_error, wp, ik => IK
+   use mctc_io, only : structure_type
+   use mctc_io_constants, only : pi
+   use mctc_io_math, only : matinv_3x3
+   use mctc_cutoff, only : get_lattice_points
+   use mctc_ncoord, only : ncoord_type
+   use mctc_csrlist, only : csr_list, gemv_cmp
+   use multicharge_blas, only : gemv, symv, gemm
+   use multicharge_model_cache, only : mchrg_cache
+   use multicharge_solver_type, only : mchrg_solver_type
 
    implicit none
    private
@@ -42,43 +41,62 @@ module multicharge_model_type
 
    !> Abstract multicharge model type
    type, abstract :: mchrg_model_type
+
       !> Electronegativity
       real(wp), allocatable :: chi(:)
+
       !> Charge width
       real(wp), allocatable :: rad(:)
+
       !> Chemical hardness
       real(wp), allocatable :: eta(:)
+
       !> CN scaling factor for electronegativity
       real(wp), allocatable :: kcnchi(:)
+
       !> Local charge scaling factor for electronegativity
       real(wp), allocatable :: kqchi(:)
+
       !> Local charge scaling factor for chemical hardness
       real(wp), allocatable :: kqeta(:)
+
       !> CN scaling factor for charge width
       real(wp), allocatable :: kcnrad
+
       !> Coordination number
       class(ncoord_type), allocatable :: ncoord
+
       !> Electronegativity weighted CN for local charge
       class(ncoord_type), allocatable :: ncoord_en
    contains
+
       !> Solve linear equations for the charge model
       procedure :: solve
+
       !> Get external gradient
       procedure :: get_external_gradient
+
       !> Calculate local charges from electronegativity weighted CN
       procedure :: local_charge
+
       !> Update cache
       procedure(update), deferred :: update
+
       !> Calculate capacitance matrix
       procedure(get_capacitance_matrix), deferred :: get_capacitance_matrix
+
       !> Calculate right-hand side (electronegativity)
       procedure(get_xvec), deferred :: get_xvec
+
       !> Calculate xvec Gradients
       procedure(get_xvec_derivs), deferred :: get_xvec_derivs
+
       !> Calculate Coulomb matrix
       procedure(get_coulomb_matrix), deferred :: get_coulomb_matrix
+
       !> Calculate Coulomb matrix derivatives
       procedure(get_coulomb_derivs), deferred :: get_coulomb_derivs
+
       !> Calculate capcaity-corrected EN derivatives
       procedure(get_grad), deferred :: get_grad
 
@@ -88,33 +106,44 @@ module multicharge_model_type
       !> Update model-dependent quantities and cache
       subroutine update(self, mol, cache, trans, grad, list)
          import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
+
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
+
          !> Structure type
          type(structure_type), intent(in) :: mol
+
          !> Multicharge neighbourlist type
          type(csr_list), intent(in), optional :: list
+
          !> Multicharge cache
          !> Allocation: cn, qloc, wsc
          type(mchrg_cache), intent(inout) :: cache
+
          !> Lattice vectors
          real(wp), intent(in) :: trans(:, :)
+
          !> Flag to compute derivatives (dcndr, dcndL, dqlocdr, dqlocdL)
          logical, intent(in) :: grad
       end subroutine update
 
-      !> Capacitance matrix construction using cached CN/charge data (only for the EEQBC model)
+      !> Construct a capacitance matrix using cached CN and charge data
       subroutine get_capacitance_matrix(self, mol, ndim, cache, list)
          import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
+
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
+
          !> Structure type
          type(structure_type), intent(in) :: mol
+
          !> System size
          integer, intent(in) :: ndim
+
          !> Multicharge cache
          !> Allocation: cmat, (dcdr, dcdL if cache%dcndr/L and cache%dqlocdr/L allocated)
          type(mchrg_cache), intent(inout) :: cache
+
          !> Multicharge neighbourlist type
          type(csr_list), intent(in), optional :: list
       end subroutine get_capacitance_matrix
@@ -122,15 +151,20 @@ module multicharge_model_type
       !> Coulomb interaction matrix (A-matrix) construction
       subroutine get_coulomb_matrix(self, mol, ndim, cache, list)
          import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
+
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
+
          !> Structure type
          type(structure_type), intent(in) :: mol
+
          !> System size
          integer, intent(in) :: ndim
+
          !> Multicharge cache
          !> Allocation: amat
          type(mchrg_cache), intent(inout) :: cache
+
          !> Multicharge neighbourlist type
          type(csr_list), intent(in), optional :: list
       end subroutine get_coulomb_matrix
@@ -139,32 +173,41 @@ module multicharge_model_type
       !> Coulomb matrix derivatives contracted with charges
       subroutine get_coulomb_derivs(self, mol, ndim, cache, list)
          import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
+
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
+
          !> Structure type
          type(structure_type), intent(in) :: mol
+
          !> System size
          integer, intent(in) :: ndim
+
          !> Multicharge cache
          !> Allocation: dadr, dadL
          type(mchrg_cache), intent(inout) :: cache
+
          !> Multicharge neighbourlist type
          type(csr_list), intent(in), optional :: list
       end subroutine get_coulomb_derivs
 
       !> Electronegativity vector construction
-
       subroutine get_xvec(self, mol, ndim, cache, list)
          import :: mchrg_model_type, mchrg_cache, structure_type, csr_list, wp
+
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
+
          !> Structure type
          type(structure_type), intent(in) :: mol
+
          !> System size
          integer, intent(in) :: ndim
+
          !> Multicharge cache
          !> Allocation: xvec, xtmp
          type(mchrg_cache), intent(inout) :: cache
+
          !> Multicharge neighbourlist type
          type(csr_list), intent(in), optional :: list
       end subroutine get_xvec
@@ -172,49 +215,79 @@ module multicharge_model_type
       !> Derivatives of electronegativity vector
       subroutine get_xvec_derivs(self, mol, ndim, cache, list)
          import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
+
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
+
          !> Structure type
          type(structure_type), intent(in) :: mol
+
          !> System size
          integer, intent(in) :: ndim
+
          !> Multicharge cache
          !> Allocation: dxdr, dxdL
          type(mchrg_cache), intent(inout) :: cache
+
          !> Multicharge neighbourlist type
          type(csr_list), intent(in), optional :: list
       end subroutine get_xvec_derivs
 
+      !> Calculate capacitance-corrected electronegativity derivatives
       subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta, list)
          import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
+
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
+
+         !> Structure type
          type(structure_type), intent(in) :: mol
+
+         !> Multicharge cache
          type(mchrg_cache), intent(in) :: cache
+
+         !> Charge-like contraction vector
          real(wp), intent(in) :: p(:)
+
+         !> Energy gradient
          real(wp), intent(inout) :: gradient(:, :)
+
+         !> Stress tensor
          real(wp), intent(inout) :: sigma(:, :)
+
+         !> Gradient scaling factor
          real(wp), intent(in), optional :: alpha
+
+         !> Stress scaling factor
          real(wp), intent(in), optional :: beta
+
          !> Neighbour list (each unordered pair appears once)
          type(csr_list), optional, intent(in) :: list
       end subroutine get_grad
 
    end interface
 
+   !> Twice pi
    real(wp), parameter :: twopi = 2 * pi
+
+   !> Smallest positive working-precision number
    real(wp), parameter :: eps = tiny(1.0_wp)
-   real(wp), parameter :: geom_tol = 1.0e-10_wp
 
 contains
 
-!> Generate direct lattice translation vectors within a supercell of 2×2×2 repetitions.
+
+!> Generate direct lattice translation vectors for a periodic structure
    subroutine get_dir_trans(mol, trans, cutoff)
       !> Molecular structure data
       type(structure_type), intent(in) :: mol
-      !> Output translation vectors (3 × N) where N = 2×2×2 = 8
+
+      !> Translation vectors
+      !> Shape: (3, ntrans)
       real(wp), allocatable, intent(out) :: trans(:, :)
+
+      !> Optional lattice-vector cutoff
       real(wp), intent(in), optional :: cutoff
+
       integer, parameter :: rep(3) = [2, 2, 2]
 
       if (present(cutoff)) then
@@ -225,17 +298,22 @@ contains
 
    end subroutine get_dir_trans
 
-!> Generate reciprocal lattice translation vectors within a supercell of 2×2×2 repetitions.
+!> Generate reciprocal lattice translation vectors for a periodic structure
    subroutine get_rec_trans(mol, trans, cutoff)
       !> Molecular structure data
       type(structure_type), intent(in) :: mol
-      !> Output translation vectors in reciprocal space (3 × N) where N = 2×2×2 = 8
+
+      !> Reciprocal translation vectors
+      !> Shape: (3, ntrans)
       real(wp), allocatable, intent(out) :: trans(:, :)
+
+      !> Optional reciprocal-vector cutoff
       real(wp), intent(in), optional :: cutoff
+
       integer, parameter :: rep(3) = [2, 2, 2]
       real(wp) :: rec_lat(3, 3)
 
-      rec_lat = twopi*transpose(matinv_3x3(mol%lattice))
+      rec_lat = twopi * transpose(matinv_3x3(mol%lattice))
       if (present(cutoff)) then
          call get_lattice_points(mol%periodic, rec_lat, cutoff, trans)
       else
@@ -340,8 +418,9 @@ contains
          end if
          cache%vrhs = cache%xvec
          cache%ainv = cache%amat
-         call solver%solve(amat=cache%amat, xvec=cache%xvec, vrhs=cache%vrhs, ainv=cache%ainv, &
-         & cpq=cpq, new_unit=print_unit, error=error)
+         call solver%solve(amat=cache%amat, xvec=cache%xvec, &
+         & vrhs=cache%vrhs, ainv=cache%ainv, cpq=cpq, &
+         & new_unit=print_unit, error=error)
 
       else
          if (.not. allocated(cache%uvec)) then
@@ -412,7 +491,8 @@ contains
       if (grad) then
          call timer%push("gradient")
 
-         call self%get_grad(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, alpha = 0.5_wp, beta=-1.0_wp, list = list)
+         call self%get_grad(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, &
+         & alpha=0.5_wp, beta=-1.0_wp, list=list)
 
          ! pop gradient timer
          call timer%pop
@@ -425,14 +505,18 @@ contains
          call self%get_xvec_derivs(mol, ndim, cache)
          call timer%pop
          if (verbosity_solve > 1) then
-            write(output_unit, '(a, 1x, a)') "Electronegativity derivatives setup time : ", format_time(timer%get("dxdr_setup"))
+            write(output_unit, '(a, 1x, a)') &
+            & "Electronegativity derivatives setup time : ", &
+            & format_time(timer%get("dxdr_setup"))
             write(output_unit, '(a)') ''
          end if
          call timer%push("dadr_setup")
          call self%get_coulomb_derivs(mol, ndim, cache)
          call timer%pop
          if (verbosity_solve > 1) then
-            write(output_unit, '(a, 1x, a)') "Coulomb matrix derivatives setup time : ", format_time(timer%get("dadr_setup"))
+            write(output_unit, '(a, 1x, a)') &
+            & "Coulomb matrix derivatives setup time : ", &
+            & format_time(timer%get("dadr_setup"))
             write(output_unit, '(a)') ''
          end if
          allocate(daqxdr(3, mol%nat, ndim), source=0.0_wp)
@@ -440,7 +524,8 @@ contains
 
          ! pop gradient setup
          call timer%pop
-         call print_gradient_header(print_unit, verbosity_solve, timer%get("setup_gradient"))
+         call print_gradient_header(print_unit, verbosity_solve, &
+         & timer%get("setup_gradient"))
 
          call timer%push("cpq")
          do iat = 1, mol%nat
@@ -465,7 +550,8 @@ contains
 !> This routine evaluates dF/dR and dF/dL from the derivative of the
 !> objective w.r.t. charges (dF/dq), avoiding explicit differentiation
 !> of the charge solution by solving an adjoint system.
-   subroutine get_external_gradient(self, mol, solver, cache, error, dfdq, dfdr, dfdL, list, unit, verbosity)
+   subroutine get_external_gradient(self, mol, solver, cache, error, &
+   & dfdq, dfdr, dfdL, list, unit, verbosity)
       !> Electronegativity equilibration model
       class(mchrg_model_type), intent(in) :: self
       !> Molecular structure data
@@ -481,7 +567,7 @@ contains
       !> External gradient w.r.t. positions
       real(wp), intent(inout) :: dfdr(:, :)
       !> External gradient w.r.t. lattice vectors
-      real(wp), intent(inout) :: dfdL(:,:)
+      real(wp), intent(inout) :: dfdL(:, :)
       !> Neighbour list optional type
       type(csr_list), intent(in), optional :: list
       !> Output unit
@@ -522,7 +608,8 @@ contains
       call timer%push("setup_external")
       call timer%pop
 
-      call print_gradient_header(print_unit, verbosity_solve, timer%get("setup_external"))
+      call print_gradient_header(print_unit, verbosity_solve, &
+      & timer%get("setup_external"))
       call timer%push("external_gradient")
 
       ! Get variables from the model cache
@@ -558,18 +645,21 @@ contains
 
          ! Direct solution: J*yvec = dfdq
          call print_adjoint_message(print_unit, verbosity_solve)
-         call solver%solve(amat=cache%amat, xvec=dfdq_loc, vrhs=padj, new_unit=print_unit, error=error)
+         call solver%solve(amat=cache%amat, xvec=dfdq_loc, vrhs=padj, &
+         & new_unit=print_unit, error=error)
          if (allocated(error)) return
       end if
 
       ! Evaluate external gradients via adjoint contraction:
       ! dfdr = p^T * (db/dr - dA/dr X q)
 
-      call self%get_grad(mol, cache, padj, dfdr, dfdL, alpha = -1.0_wp, beta=1.0_wp, list = list)
+      call self%get_grad(mol, cache, padj, dfdr, dfdL, alpha=-1.0_wp, &
+      & beta=1.0_wp, list=list)
 
       ! pop dfdr timer
       call timer%pop
-      call print_gradient_time(print_unit, verbosity_solve, timer%get("external_gradient"))
+      call print_gradient_time(print_unit, verbosity_solve, &
+      & timer%get("external_gradient"))
 
    end subroutine get_external_gradient
 
@@ -578,19 +668,33 @@ contains
    & list, dqlocdrij, dqlocdrji, dqlocdrdiag)
       !> Electronegativity equilibration model
       class(mchrg_model_type), intent(in) :: self
+
       !> Molecular structure data
       type(structure_type), intent(in) :: mol
+
+      !> Lattice translation vectors
       real(wp), intent(in) :: trans(:, :)
+
       !> Local atomic partial charges
       real(wp), intent(out) :: qloc(:)
+
       !> Optional derivative of local atomic partial charges w.r.t. atomic positions
       real(wp), intent(out), optional :: dqlocdr(3, mol%nat, mol%nat)
+
       !> Optional derivative of local atomic partial charges w.r.t. lattice vectors
       real(wp), intent(out), optional :: dqlocdL(3, 3, mol%nat)
+
       !> Lattice points
       type(csr_list), intent(in), optional :: list
-      !> Optional derivative of local atomic partial charges w.r.t. atomic positions
-      real(wp), intent(out), optional :: dqlocdrij(:, :), dqlocdrji(:, :), dqlocdrdiag(:, :)
+
+      !> Optional derivative with respect to the first atom in each pair
+      real(wp), intent(out), optional :: dqlocdrij(:, :)
+
+      !> Optional derivative with respect to the second atom in each pair
+      real(wp), intent(out), optional :: dqlocdrji(:, :)
+
+      !> Optional derivative with respect to the diagonal atom in each pair
+      real(wp), intent(out), optional :: dqlocdrdiag(:, :)
 
       qloc = 0.0_wp
       if (present(dqlocdr) .and. present(dqlocdL)) then
@@ -607,8 +711,9 @@ contains
       ! Get the electronegativity weighted CN for local charge
       ! Derivatives depend only in this CN
       if (allocated(self%ncoord_en)) then
-         call self%ncoord_en%get_coordination_number(mol, trans, qloc, dcndr=dqlocdr, &
-         & dcndrij=dqlocdrij, dcndrji=dqlocdrji, dcndrdiag=dqlocdrdiag, dcndL=dqlocdL, list=list)
+         call self%ncoord_en%get_coordination_number(mol, trans, qloc, &
+         & dcndr=dqlocdr, dcndrij=dqlocdrij, dcndrji=dqlocdrji, &
+         & dcndrdiag=dqlocdrdiag, dcndL=dqlocdL, list=list)
       end if
 
       ! Distribute the total charge equally
@@ -618,8 +723,14 @@ contains
 
 !> Print header for charge equilibration solver
    subroutine print_solve_header(unit, verbosity, timer)
-      integer, intent(in) :: unit, verbosity
-      real(wp):: timer
+      !> Output unit
+      integer, intent(in) :: unit
+
+      !> Verbosity level
+      integer, intent(in) :: verbosity
+
+      !> Elapsed setup time
+      real(wp), intent(in) :: timer
 
       if (verbosity > 0) then
          write(unit, '(54("-"))')
@@ -635,8 +746,14 @@ contains
 
 !> Print header for gradient calculations
    subroutine print_gradient_header(unit, verbosity, timer)
-      integer, intent(in) :: unit, verbosity
-      real(wp):: timer
+      !> Output unit
+      integer, intent(in) :: unit
+
+      !> Verbosity level
+      integer, intent(in) :: verbosity
+
+      !> Elapsed gradient setup time
+      real(wp), intent(in) :: timer
 
       if (verbosity > 0) then
          write(unit, '(54("-"))')
@@ -652,7 +769,13 @@ contains
 
 !> Print message for constrained system solves
    subroutine print_constrained_system_message(unit, verbosity, vector)
-      integer, intent(in) :: unit, verbosity
+      !> Output unit
+      integer, intent(in) :: unit
+
+      !> Verbosity level
+      integer, intent(in) :: verbosity
+
+      !> Constrained-system identifier
       character, intent(in) :: vector
 
       if (verbosity > 0) then
@@ -669,7 +792,11 @@ contains
 
 !> Print message for adjoint system solve
    subroutine print_adjoint_message(unit, verbosity)
-      integer, intent(in) :: unit, verbosity
+      !> Output unit
+      integer, intent(in) :: unit
+
+      !> Verbosity level
+      integer, intent(in) :: verbosity
 
       if (verbosity > 0) then
          write(unit, '(a)') 'Solving adjoint system: J*y = dfdq'
@@ -679,8 +806,14 @@ contains
 
 !> Print gradient calculation time
    subroutine print_gradient_time(unit, verbosity, timer)
-      integer, intent(in) :: unit, verbosity
-      real(wp):: timer
+      !> Output unit
+      integer, intent(in) :: unit
+
+      !> Verbosity level
+      integer, intent(in) :: verbosity
+
+      !> Elapsed gradient calculation time
+      real(wp), intent(in) :: timer
 
       if (verbosity > 1) then
          write(unit, '(a, 1x, a)') "Gradient calculation time : ", format_time(timer)
@@ -688,10 +821,16 @@ contains
       end if
    end subroutine print_gradient_time
 
-!> Print gradient calculation time
+!> Print energy calculation time
    subroutine print_energy_time(unit, verbosity, timer)
-      integer, intent(in) :: unit, verbosity
-      real(wp):: timer
+      !> Output unit
+      integer, intent(in) :: unit
+
+      !> Verbosity level
+      integer, intent(in) :: verbosity
+
+      !> Elapsed energy calculation time
+      real(wp), intent(in) :: timer
 
       if (verbosity > 1) then
          write(unit, '(a, 1x, a)') "Energy calculation time : ", format_time(timer)
@@ -701,8 +840,14 @@ contains
 
 !> Print total solve time
    subroutine print_total_time(unit, verbosity, timer)
-      integer, intent(in) :: unit, verbosity
-      real(wp):: timer
+      !> Output unit
+      integer, intent(in) :: unit
+
+      !> Verbosity level
+      integer, intent(in) :: verbosity
+
+      !> Elapsed total solve time
+      real(wp), intent(in) :: timer
 
       if (verbosity > 1) then
          write(unit, '(a, 1x, a)') "Total solve time : ", format_time(timer)
