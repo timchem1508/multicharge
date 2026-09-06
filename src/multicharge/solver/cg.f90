@@ -18,55 +18,74 @@
 
 module multicharge_solver_cg
    use iso_fortran_env, only : output_unit
-   use mctc_env, only: error_type, fatal_error, wp, timer_type, format_time
-   use mctc_csrlist, only: csr_list, gemv_cmp
-   use multicharge_blas, only: axpy, scal, dot, symv, gemv
-   use multicharge_lapack, only: sytrf, sytrs
-   use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
+   use mctc_env, only : error_type, fatal_error, format_time, timer_type, wp
+   use mctc_csrlist, only : csr_list, gemv_cmp
+   use multicharge_blas, only : axpy, dot, scal, symv
+   use multicharge_solver_type, only : mchrg_solver_input, mchrg_solver_type
    implicit none
    private
 
    public :: cg_solver, new_cg_solver, cg_input
 
-   !> Input for CG solver
+   !> Input configuration for the conjugate-gradient solver
    type, extends(mchrg_solver_input) :: cg_input
-      !> Maximal number of iterations
+      !> Maximum number of iterations
       integer, allocatable :: cgmiter
+
       !> Convergence tolerance
       real(wp), allocatable :: cgtol
+
       !> Output verbosity
       integer, allocatable :: verbosity
-      !> Flag for neighbour list usage
+
+      !> Whether to use a neighbour-list representation
       logical, allocatable :: use_nlist
-      !> Use iterative CG solver
+
+      !> Whether to use the iterative conjugate-gradient solver
       logical :: cg = .true.
    end type cg_input
 
-   !> CG solver with Jacobi preconditioner
+   !> Conjugate-gradient solver with a Jacobi preconditioner
    type, extends(mchrg_solver_type) :: cg_solver
+      !> Maximum number of iterations
       integer, allocatable :: cgmiter
+
+      !> Convergence tolerance
       real(wp), allocatable :: cgtol
+
+      !> Output verbosity
       integer, allocatable :: verbosity
+
+      !> Whether to use a neighbour-list representation
       logical, allocatable :: use_nlist
    contains
+      !> Solve the linear system iteratively
       procedure :: solve
    end type cg_solver
 
+   !> Positive number used to prevent division by zero
    real(wp), parameter :: eps = tiny(1.0_wp)
 
-   ! Default values
+   !> Default maximum number of iterations
    integer, parameter :: cgmiter_def = 1000
+
+   !> Default convergence tolerance
    real(wp), parameter :: cgtol_def = 1.0e-15_wp
+
+   !> Default output verbosity
    integer, parameter :: verbosity_def = 0
+
+   !> Default neighbour-list usage
    logical, parameter :: use_nlist_def = .false.
 
 contains
 
-   !> Creation a new CG solver based on the input
+   !> Construct a conjugate-gradient solver from its input configuration
    subroutine new_cg_solver(self, input)
-      !> CG solver type
+      !> Conjugate-gradient solver instance
       class(cg_solver), intent(out) :: self
-      !> CG input type
+
+      !> Conjugate-gradient solver configuration
       type(cg_input), intent(in) :: input
 
       self%need_pos_def = .true.
@@ -94,25 +113,35 @@ contains
 
    end subroutine new_cg_solver
 
-   !> Conjugate gradient solver procedure with diagonal preconditioner
+   !> Solve a linear system with a diagonally preconditioned CG method
    subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error)
+      !> Conjugate-gradient solver instance
       class(cg_solver), intent(in) :: self
-      !> A matrix of Ax=b system
-      real(wp), intent(in), optional  :: amat(:, :)
-      !> Off-diagonall elements of matrix for in compressed
-      real(wp), intent(in), optional  :: alist(:)
+
+      !> Dense coefficient matrix of the linear system
+      real(wp), intent(in), optional :: amat(:, :)
+
+      !> Coefficient matrix values in compressed-row storage
+      real(wp), intent(in), optional :: alist(:)
+
       !> Right-hand side vector
-      real(wp), intent(in)  :: xvec(:)
+      real(wp), intent(in) :: xvec(:)
+
       !> On input: initial guess; on output: solution
       real(wp), intent(inout), contiguous :: vrhs(:)
+
       !> Inverse matrix
       real(wp), intent(out), optional :: ainv(:, :)
-      !> Flag for coupled-perturbed equations
+
+      !> Whether to solve coupled-perturbed equations
       logical, intent(in), optional :: cpq
-      !> Neighbour list optional type
+
+      !> Optional neighbour-list representation of the matrix
       type(csr_list), intent(in), optional :: list
+
       !> Output unit
       integer, intent(in), optional :: new_unit
+
       !> Error handling
       type(error_type), allocatable, intent(out) :: error
 

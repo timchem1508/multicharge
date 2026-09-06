@@ -22,22 +22,25 @@
 !> and S. Grimme, *J. Chem. Phys.*, **2019**, 150, 154122.
 !> DOI: [10.1063/1.5090222](https://dx.doi.org/10.1063/1.5090222)
 !> Multicharge model for electronegativity equilibration (EEQ)
+
+!> Electronegativity-equilibration charge model
 module multicharge_model_eeq
-   use mctc_env, only: error_type, wp
-   use mctc_io, only: structure_type
-   use mctc_io_constants, only: pi
-   use mctc_io_math, only: matdet_3x3
-   use mctc_ncoord, only: new_ncoord, cn_count
-   use multicharge_wignerseitz, only: wignerseitz_cell_type, new_wignerseitz_cell
-   use mctc_csrlist, only: csr_list
-   use multicharge_ewald, only: get_alpha
-   use multicharge_model_type, only: mchrg_model_type, get_dir_trans, get_rec_trans
-   use multicharge_model_cache, only: mchrg_cache
+   use mctc_env, only : error_type, wp
+   use mctc_io, only : structure_type
+   use mctc_io_constants, only : pi
+   use mctc_io_math, only : matdet_3x3
+   use mctc_ncoord, only : new_ncoord, cn_count
+   use multicharge_wignerseitz, only : wignerseitz_cell_type, new_wignerseitz_cell
+   use mctc_csrlist, only : csr_list
+   use multicharge_ewald, only : get_alpha
+   use multicharge_model_type, only : mchrg_model_type, get_dir_trans, get_rec_trans
+   use multicharge_model_cache, only : mchrg_cache
    implicit none
    private
 
    public :: eeq_model, new_eeq_model
 
+   !> EEQ model operations on shared charge-model parameters
    type, extends(mchrg_model_type) :: eeq_model
    contains
       !> Update and allocate cache
@@ -56,15 +59,19 @@ module multicharge_model_eeq
       procedure :: get_grad
    end type eeq_model
 
-
    real(wp), parameter :: sqrtpi = sqrt(pi)
+
    real(wp), parameter :: sqrt2pi = sqrt(2.0_wp/pi)
+
    real(wp), parameter :: eps = sqrt(epsilon(0.0_wp))
+
    real(wp), parameter :: cutoff = 15.0_wp
+
 
 contains
 
-!> Constructor for the EEQ model.
+
+!> Construct an EEQ model from element-wise parameters
    subroutine new_eeq_model(self, mol, error, chi, rad, eta, kcnchi, &
    & cutoff, cn_exp, rcov, cn_max)
       !> Electronegativity equilibration model

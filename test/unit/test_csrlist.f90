@@ -13,22 +13,23 @@
 ! See the License for the specific language governing permissions and
 ! limitations under the License.
 
+!> Unit tests for CSR-list based multicharge calculations
 module test_csrlist
-   use iso_fortran_env, only: output_unit
-   use mctc_env, only: wp
-   use mctc_env_testing, only: new_unittest, unittest_type, error_type, test_failed
-   use mctc_cutoff, only: get_lattice_points
-   use mctc_io_structure, only: structure_type, new
-   use mctc_csrlist, only: csr_list, new_csr_list
-   use mstore, only: get_structure
-   use mctc_wignerseitz, only: new_wignerseitz_cell, wignerseitz_cell
-   use multicharge_blas, only: gemv
-   use multicharge_model_type, only: mchrg_model_type
-   use multicharge_model_eeqbc, only: eeqbc_model
-   use multicharge_param, only: new_eeq2019_model, new_eeqbc2025_model
-   use multicharge_model_cache, only: mchrg_cache
-   use multicharge_charge, only: get_charges, get_eeq_charges, get_eeqbc_charges
-   use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
+   use iso_fortran_env, only : output_unit
+   use mctc_env, only : wp
+   use mctc_env_testing, only : new_unittest, unittest_type, error_type, test_failed
+   use mctc_cutoff, only : get_lattice_points
+   use mctc_io_structure, only : structure_type, new
+   use mctc_csrlist, only : csr_list, new_csr_list
+   use mstore, only : get_structure
+   use mctc_wignerseitz, only : new_wignerseitz_cell, wignerseitz_cell
+   use multicharge_blas, only : gemv
+   use multicharge_model_type, only : mchrg_model_type
+   use multicharge_model_eeqbc, only : eeqbc_model
+   use multicharge_param, only : new_eeq2019_model, new_eeqbc2025_model
+   use multicharge_model_cache, only : mchrg_cache
+   use multicharge_charge, only : get_charges, get_eeq_charges, get_eeqbc_charges
+   use multicharge_solver_type, only : mchrg_solver_type, mchrg_solver_input
    use multicharge_solver_direct, only : direct_solver, new_direct_solver, direct_input
    use multicharge_solver_cg, only : cg_solver, new_cg_solver, cg_input
    implicit none
@@ -36,14 +37,23 @@ module test_csrlist
 
    public :: collect_csrlist
 
+   !> Tight tolerance for direct numerical comparisons
    real(wp), parameter :: thr = 100 * epsilon(1.0_wp)
+
+   !> Tolerance for neighbour-list and dense-matrix comparisons
    real(wp), parameter :: thr1 = 1.0e5_wp*epsilon(1.0_wp)
+
+   !> Tolerance for numerical derivatives
    real(wp), parameter :: thr2 = sqrt(epsilon(1.0_wp))
+
+   !> Neighbour-list cutoff used by shared test helpers
    real(wp), parameter :: cutoff = 29.0_wp
+
 
 contains
 
-!> Collect all exported unit tests
+
+   !> Collect all exported unit tests
    subroutine collect_csrlist(testsuite)
 
       !> Collection of tests
@@ -68,11 +78,15 @@ contains
 
    end subroutine collect_csrlist
 
+   !> Construct a solver from its polymorphic input configuration
    subroutine solver_maker(solver, input, error)
+
       !> Solver type
       class(mchrg_solver_type), intent(out), allocatable :: solver
+
       !> Solver input
       class(mchrg_solver_input), intent(in) :: input
+
       !> Error handling
       type(error_type), allocatable, intent(out) :: error
 
@@ -98,8 +112,13 @@ contains
 
    end subroutine solver_maker
 
+   !> Replicate a structure along each lattice-vector direction
    subroutine make_supercell(mol, rep)
+
+      !> Structure to replicate
       type(structure_type), intent(inout) :: mol
+
+      !> Replication factors along the three lattice vectors
       integer, intent(in) :: rep(3)
 
       real(wp), allocatable :: xyz(:, :), lattice(:, :)

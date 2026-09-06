@@ -22,31 +22,34 @@
 !> *J. Chem. Phys.*, **2025**, 162, 214109.
 !> DOI: [10.1063/5.0268978](https://dx.doi.org/10.1063/5.0268978)
 module multicharge_model_eeqbc
-   use mctc_env, only: timer_type, format_time, error_type, wp
-   use mctc_io, only: structure_type
-   use mctc_io_constants, only: pi
-   use mctc_ncoord, only: new_ncoord, cn_count, ncoord_type
-   use mctc_csrlist, only: csr_list, gemv_cmp
-   use multicharge_wignerseitz, only: new_wignerseitz_cell, wignerseitz_cell_type
-   use multicharge_blascomp, only: gemm_cmp, gemm_cmp_212
-   use multicharge_model_type, only: mchrg_model_type, get_dir_trans
-   use multicharge_blas, only: gemv, gemm, symv
-   use multicharge_model_cache, only: mchrg_cache
+   use mctc_env, only : error_type, wp
+   use mctc_io, only : structure_type
+   use mctc_io_constants, only : pi
+   use mctc_ncoord, only : cn_count, new_ncoord, ncoord_type
+   use mctc_csrlist, only : csr_list, gemv_cmp
+   use multicharge_wignerseitz, only : new_wignerseitz_cell, wignerseitz_cell_type
+   use multicharge_model_type, only : get_dir_trans, mchrg_model_type
+   use multicharge_blas, only : gemm, gemv, symv
+   use multicharge_model_cache, only : mchrg_cache
    implicit none
    private
 
    public :: eeqbc_model, new_eeqbc_model
 
-   !> EEQBC model type, extends base mchrg_model_type.
+   !> EEQBC model type extending the shared charge-model state
    type, extends(mchrg_model_type) :: eeqbc_model
       !> Bond capacitance parameters
       real(wp), allocatable :: cap(:)
+
       !> Average coordination number
       real(wp), allocatable :: avg_cn(:)
+
       !> Exponent of error function in bond capacitance
       real(wp) :: kbc
+
       !> Exponent of the distance/CN normalization
       real(wp) :: norm_exp
+
       !> Van der Waals radii matrix (nat × nat)
       real(wp), allocatable :: rvdw(:, :)
    contains
@@ -93,7 +96,8 @@ module multicharge_model_eeqbc
 
 contains
 
-!> Constructor for the EEQBC model.
+
+!> Construct an EEQBC model from element-wise parameters
    subroutine new_eeqbc_model(self, mol, error, chi, rad, &
    & eta, kcnchi, kqchi, kqeta, kcnrad, cap, avg_cn, rvdw, &
    & kbc, cutoff, cn_exp, rcov, en, cn_max, norm_exp)
@@ -172,7 +176,7 @@ contains
 
    end subroutine new_eeqbc_model
 
-!> Update coordination numbers and local charges, and set up Wigner–Seitz cell if periodic.
+!> Update coordination numbers and local charges, and set up the Wigner-Seitz cell if periodic
    subroutine update(self, mol, cache, trans, grad, list)
       !> EEQBC model type
       class(eeqbc_model), intent(in) :: self
@@ -283,6 +287,7 @@ contains
 
    end subroutine get_capacitance_matrix
 
+!> Build the electronegativity vector, including local-charge corrections
    subroutine get_xvec(self, mol, ndim, cache, list)
       !> EEQBC model type
       class(eeqbc_model), intent(in) :: self
@@ -385,7 +390,7 @@ contains
 
    end subroutine get_xvec
 
-!> Compute derivatives of the electronegativity vector with respect to atomic positions and lattice parameters.
+!> Compute electronegativity-vector derivatives with respect to positions and lattice parameters
    subroutine get_xvec_derivs(self, mol, ndim, cache, list)
       !> EEQBC model type
       class(eeqbc_model), intent(in) :: self
@@ -516,7 +521,7 @@ contains
 
    end subroutine get_xvec_derivs_0d
 
-!> Compute derivatives of the electronegativity vector for peridoic system.
+!> Compute electronegativity-vector derivatives for a periodic system
    subroutine get_xvec_derivs_3d(self, mol, ndim, cache)
       !> EEQBC model type
       class(eeqbc_model), intent(in) :: self
@@ -628,7 +633,7 @@ contains
 
    end subroutine get_xvec_derivs_3d
 
-!> Assemble the Coulomb matrix (periodic or non‑periodic) including bond capacitance contributions.
+!> Assemble the Coulomb matrix, including bond-capacitance contributions
    subroutine get_coulomb_matrix(self, mol, ndim, cache, list)
       !> EEQBC model type
       class(eeqbc_model), intent(in) :: self
@@ -857,10 +862,13 @@ contains
 
    end subroutine get_amat_3d
 
-!> Build the Coulomb matrix for a periodic system using CSR adjacency list.
+!> Build the Coulomb matrix for a periodic system using a CSR adjacency list
    subroutine get_amat_3d_list(self, mol, list, cache)
+      !> EEQBC model type
       class(eeqbc_model), intent(in) :: self
+      !> Molecular structure data
       type(structure_type), intent(in) :: mol
+      !> Multicharge neighbourlist type
       type(csr_list), intent(in) :: list
       !> Multicharge cache
       type(mchrg_cache), intent(inout) :: cache
@@ -1805,7 +1813,6 @@ contains
    end subroutine get_dcmat_0d
 
 !> Build the derivative of the bond capacitance matrix for a non‑periodic system.
-!> Build the derivative of the bond capacitance matrix for a non‑periodic system.
    subroutine get_dcmat_0d_list(self, mol, list, cache)
       !> EEQBC model type
       class(eeqbc_model), intent(in) :: self
@@ -2062,7 +2069,7 @@ contains
       real(wp), intent(out) :: dspair(3, 3)
 
       integer :: itr
-      real(wp) :: r1, arg, dgtmp(3), dstmp(3, 3), vec(3)
+      real(wp) :: r1, dgtmp(3), dstmp(3, 3), vec(3)
 
       dgpair(:) = 0.0_wp
       dspair(:, :) = 0.0_wp
@@ -2232,15 +2239,25 @@ contains
 
    end subroutine get_dcndiag_list
 
+!> Accumulate the gradient and stress contributions of the EEQBC model
    subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta, list)
+      !> EEQBC model type
       class(eeqbc_model), intent(in) :: self
+      !> Molecular structure data
       type(structure_type), intent(in) :: mol
+      !> Multicharge cache
       type(mchrg_cache), intent(in) :: cache
+      !> Solution vector
       real(wp), intent(in) :: p(:)
+      !> Cartesian gradient
       real(wp), intent(inout) :: gradient(:, :)
+      !> Lattice stress contribution
       real(wp), intent(inout) :: sigma(:, :)
+      !> Optional gradient prefactor
       real(wp), optional, intent(in) :: alpha
+      !> Optional electronegativity prefactor
       real(wp), optional, intent(in) :: beta
+      !> Optional neighbourlist
       type(csr_list), intent(in), optional :: list
 
       if (.not. present(list)) then
@@ -2260,15 +2277,25 @@ contains
    end subroutine get_grad
 
 
+!> Accumulate gradient and stress contributions for a non-periodic CSR system
    subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain, betain)
+      !> EEQBC model type
       class(eeqbc_model), intent(in) :: self
+      !> Molecular structure data
       type(structure_type), intent(in) :: mol
+      !> Multicharge neighbourlist type
       type(csr_list), intent(in) :: list
+      !> Multicharge cache
       type(mchrg_cache), intent(in) :: cache
+      !> Solution vector
       real(wp), intent(in) :: p(:)
+      !> Cartesian gradient
       real(wp), intent(inout) :: gradient(:, :)
+      !> Lattice stress contribution
       real(wp), intent(inout) :: sigma(:, :)
+      !> Optional gradient prefactor
       real(wp), optional, intent(in) :: alphain
+      !> Optional electronegativity prefactor
       real(wp), optional, intent(in) :: betain
 
       real(wp) :: alpha, beta
@@ -2392,14 +2419,23 @@ contains
       deallocate(gradient_local, sigma_local, qlocacc, cnacc, dtrans, v)
    end subroutine get_grad_0d_list
 
+!> Accumulate gradient and stress contributions for a non-periodic system
    subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
+      !> EEQBC model type
       class(eeqbc_model), intent(in) :: self
+      !> Molecular structure data
       type(structure_type), intent(in) :: mol
+      !> Multicharge cache
       type(mchrg_cache), intent(in) :: cache
+      !> Solution vector
       real(wp), intent(in) :: p(:)
+      !> Cartesian gradient
       real(wp), intent(inout) :: gradient(:, :)
+      !> Lattice stress contribution
       real(wp), intent(inout) :: sigma(:, :)
+      !> Optional gradient prefactor
       real(wp), optional, intent(in) :: alphain
+      !> Optional electronegativity prefactor
       real(wp), optional, intent(in) :: betain
 
       real(wp) :: alpha, beta
@@ -2523,15 +2559,25 @@ contains
    end subroutine get_grad_0d
 
 
+!> Accumulate gradient and stress contributions for a periodic CSR system
    subroutine get_grad_3d_list(self, mol, list, cache, p, gradient, sigma, alphain, betain)
+      !> EEQBC model type
       class(eeqbc_model), intent(in) :: self
+      !> Molecular structure data
       type(structure_type), intent(in) :: mol
+      !> Multicharge neighbourlist type
       type(csr_list), intent(in) :: list
+      !> Multicharge cache
       type(mchrg_cache), intent(in) :: cache
+      !> Solution vector
       real(wp), intent(in) :: p(:)
+      !> Cartesian gradient
       real(wp), intent(inout) :: gradient(:, :)
+      !> Lattice stress contribution
       real(wp), intent(inout) :: sigma(:, :)
+      !> Optional gradient prefactor
       real(wp), optional, intent(in) :: alphain
+      !> Optional electronegativity prefactor
       real(wp), optional, intent(in) :: betain
 
       real(wp) :: alpha, beta
@@ -2676,14 +2722,23 @@ contains
       deallocate(gradient_local, sigma_local, qlocacc, cnacc, dtrans, v)
    end subroutine get_grad_3d_list
 
+!> Accumulate gradient and stress contributions for a periodic system
    subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
+      !> EEQBC model type
       class(eeqbc_model), intent(in) :: self
+      !> Molecular structure data
       type(structure_type), intent(in) :: mol
+      !> Multicharge cache
       type(mchrg_cache), intent(in) :: cache
+      !> Solution vector
       real(wp), intent(in) :: p(:)
+      !> Cartesian gradient
       real(wp), intent(inout) :: gradient(:, :)
+      !> Lattice stress contribution
       real(wp), intent(inout) :: sigma(:, :)
+      !> Optional gradient prefactor
       real(wp), optional, intent(in) :: alphain
+      !> Optional electronegativity prefactor
       real(wp), optional, intent(in) :: betain
 
       real(wp) :: alpha, beta

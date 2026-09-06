@@ -17,29 +17,32 @@
 !> Provides implementation of the direct solver using LAPACK for symmetric indefinite systems.
 
 module multicharge_solver_direct
-   use iso_fortran_env, only: output_unit
-   use mctc_env, only: error_type, fatal_error, wp, timer_type, timer_type, format_time
-   use mctc_csrlist, only: csr_list
-   use multicharge_blas, only: symv
-   use multicharge_lapack, only: sytrf, sytrs, sytri
-   use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
+   use iso_fortran_env, only : output_unit
+   use mctc_env, only : error_type, fatal_error, format_time, timer_type, wp
+   use mctc_csrlist, only : csr_list
+   use multicharge_blas, only : symv
+   use multicharge_lapack, only : sytrf, sytri, sytrs
+   use multicharge_solver_type, only : mchrg_solver_input, mchrg_solver_type
    implicit none
    private
 
    public :: direct_solver, direct_input, new_direct_solver
 
-   !> Input for Direct solver
+   !> Input configuration for the direct solver
    type, extends(mchrg_solver_input) :: direct_input
-      ! Use Direct solver
+      !> Whether to use the direct solver
       logical :: direct = .true.
-      ! Verbosity
+
+      !> Optional output verbosity
       integer, allocatable :: verbosity
    end type direct_input
 
-   !> Direct solver using LAPACK
+   !> Direct LAPACK solver for symmetric indefinite systems
    type, extends(mchrg_solver_type) :: direct_solver
+      !> Output verbosity
       integer, allocatable :: verbosity
    contains
+      !> Solve the linear system directly
       procedure :: solve
    end type direct_solver
 
@@ -48,11 +51,12 @@ module multicharge_solver_direct
 
 contains
 
-   !> New direct solver construction
+   !> Construct a direct solver from its input configuration
    subroutine new_direct_solver(self, input)
-      !> Direct solver type
+      !> Direct solver instance
       class(direct_solver), intent(out) :: self
-      !> Direct input type
+
+      !> Direct solver configuration
       type(direct_input), intent(in) :: input
 
       self%need_pos_def = .false.
@@ -64,34 +68,48 @@ contains
 
    end subroutine new_direct_solver
 
-   !> Solve method for direct solver
+   !> Solve a dense symmetric linear system using LAPACK
    subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error)
+      !> Direct solver instance
       class(direct_solver), intent(in) :: self
-      !> A matrix of Ax=b system
-      real(wp), intent(in), optional  :: amat(:, :)
-      !> Off-diagonall elements of matrix for in compressed
-      real(wp), intent(in), optional  :: alist(:)
+
+      !> Dense coefficient matrix of the linear system
+      real(wp), intent(in), optional :: amat(:, :)
+
+      !> Coefficient matrix values in compressed-row storage
+      real(wp), intent(in), optional :: alist(:)
+
       !> Right-hand side vector
-      real(wp), intent(in)  :: xvec(:)
+      real(wp), intent(in) :: xvec(:)
+
       !> On input: initial guess; on output: solution
       real(wp), intent(inout), contiguous :: vrhs(:)
-      !> Inverse matrix – not computed by CG, but required by interface
+
+      !> Inverse coefficient matrix
       real(wp), intent(out), optional :: ainv(:, :)
-      !> Flag for coupled-perturbed equations
+
+      !> Whether to solve coupled-perturbed equations
       logical, intent(in), optional :: cpq
-      !> Neighbour list optional type
+
+      !> Optional neighbour-list representation of the matrix
       type(csr_list), intent(in), optional :: list
+
       !> Output unit (optional)
       integer, intent(in), optional :: new_unit
+
       !> Error handling
       type(error_type), allocatable, intent(out) :: error
 
-      real(wp), allocatable :: invmat(:,:)
+      real(wp), allocatable :: invmat(:, :)
       integer, allocatable :: ipiv(:)
-      integer  :: local_info
+
+      integer :: local_info
       integer :: ndim, ic, jc
-      logical :: want_cpq
+
       integer :: unit
+
+      logical :: want_cpq
+
       type(timer_type) :: timer
 
       if (self%verbosity > 1) call timer%push("total")
@@ -164,7 +182,9 @@ contains
 
    end subroutine solve
 
+!> Print the direct solver banner
    subroutine write_direct_solver(unit)
+      !> Output unit
       integer, intent(in) :: unit
 
       write(unit, '(a)') "Using Direct Solver"
@@ -174,7 +194,10 @@ contains
 
    !> Print final summary
    subroutine print_direct_final(unit, timer, verbosity)
+      !> Output unit
       integer, intent(in) :: unit, verbosity
+
+      !> Timer holding the accumulated execution time
       type(timer_type), intent(in) :: timer
 
       if (verbosity > 1) then
