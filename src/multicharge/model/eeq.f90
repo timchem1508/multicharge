@@ -281,7 +281,6 @@ contains
       integer :: iat, jat, izp, jzp
       real(wp) :: vec(3), r2, gam, tmp
 
-      ! Thread-private array for reduction
       real(wp), allocatable :: amat_local(:, :)
 
       amat(:, :) = 0.0_wp
@@ -337,7 +336,6 @@ contains
       real(wp) :: vec(3), gam, wsw, dtmp, rtmp, vol
       real(wp), allocatable :: dtrans(:, :), rtrans(:, :)
 
-      ! Thread-private array for reduction
       real(wp), allocatable :: amat_local(:, :)
 
       amat(:, :) = 0.0_wp
@@ -506,7 +504,6 @@ contains
       integer :: iat, jat, izp, jzp
       real(wp) :: vec(3), r2, gam, arg, dtmp, dG(3), dS(3, 3)
 
-      ! Thread-private arrays for reduction
       real(wp), allocatable :: atrace_local(:, :)
       real(wp), allocatable :: dadr_local(:, :, :), dadL_local(:, :, :)
 
@@ -576,7 +573,6 @@ contains
       real(wp) :: dGd(3), dSd(3, 3), dGr(3), dSr(3, 3)
       real(wp), allocatable :: dtrans(:, :), rtrans(:, :)
 
-      ! Thread-private arrays for reduction
       real(wp), allocatable :: atrace_local(:, :)
       real(wp), allocatable :: dadr_local(:, :, :), dadL_local(:, :, :)
 

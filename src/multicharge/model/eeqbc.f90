@@ -1463,14 +1463,16 @@ contains
       integer :: iat, jat, kat, izp, jzp
       real(wp) :: vec(3), rvdw, tmp, capi, capj, r1
 
+      real(wp), allocatable :: clist_local(:)
+
       ! Zero out global shared target arrays upfront
       clist(:) = 0.0_wp
 
       !$omp parallel default(none) &
-      !$omp shared(mol, list, self) &
+      !$omp shared(clist, mol, list, self) &
       !$omp private(iat, kat, izp, jat, jzp, vec, r1) &
-      !$omp private(rvdw, tmp, capi, capj) &
-      !$omp reduction(+:clist)
+      !$omp private(rvdw, tmp, capi, capj, clist_local)
+      allocate(clist_local, source=clist)
 
       !$omp do schedule(runtime)
       do iat = 1, mol%nat
@@ -1485,13 +1487,16 @@ contains
             capj = self%cap(jzp)
 
             call get_cpair(self%kbc, tmp, r1, rvdw, capi, capj)
-            clist(kat) = -tmp
+            clist_local(kat) = -tmp
 
-            clist(list%inl(iat)) = clist(list%inl(iat)) + tmp
-            clist(list%inl(jat)) = clist(list%inl(jat)) + tmp
+            clist_local(list%inl(iat)) = clist_local(list%inl(iat)) + tmp
+            clist_local(list%inl(jat)) = clist_local(list%inl(jat)) + tmp
          end do
       end do
       !$omp end do
+      !$omp critical
+      clist = clist + clist_local
+      !$omp end critical
       !$omp end parallel
 
    end subroutine get_cmat_0d_list
@@ -1560,7 +1565,7 @@ contains
       !$omp end critical (get_cmat_3d_)
       deallocate(cmat_local)
       !$omp end parallel
-      !
+
       if (size(cmat, 1) == mol%nat + 1) then
          cmat(mol%nat + 1, mol%nat + 1) = 1.0_wp
       end if
@@ -1581,6 +1586,7 @@ contains
       integer :: iat, jat, izp, jzp, img, kat
       real(wp) :: vec(3), rvdw, tmp, capi, capj, wsw, ctmp
       real(wp), allocatable :: dtrans(:, :)
+      real(wp), allocatable :: clist_local(:)
 
       call get_dir_trans(mol, dtrans, cutoff)
 
@@ -1588,10 +1594,12 @@ contains
       clist(:) = 0.0_wp
 
       !$omp parallel default(none) &
-      !$omp shared(mol, list, self, dtrans) &
+      !$omp shared(clist, mol, list, self, dtrans) &
       !$omp private(iat, izp, jat, kat, jzp, img) &
       !$omp private(vec, rvdw, tmp, capi, capj, wsw, ctmp) &
-      !$omp reduction(+:clist)
+      !$omp private(clist_local)
+
+      allocate(clist_local, source = clist)
 
       !$omp do schedule(runtime)
       do iat = 1, mol%nat
@@ -1621,12 +1629,12 @@ contains
                ctmp = ctmp - tmp * wsw
 
                ! Diagonal elements
-               clist(list%inl(iat)) = clist(list%inl(iat)) + tmp * wsw
-               clist(list%inl(jat)) = clist(list%inl(jat)) + tmp * wsw
+               clist_local(list%inl(iat)) = clist_local(list%inl(iat)) + tmp * wsw
+               clist_local(list%inl(jat)) = clist_local(list%inl(jat)) + tmp * wsw
             end do
 
             ! Safe direct write (kat is unique per thread)
-            clist(kat) = ctmp
+            clist_local(kat) = ctmp
 
          end do
 
@@ -1640,13 +1648,15 @@ contains
             vec = list%wsc%trans(:, list%wsc%tridx_list(img))
 
             call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, tmp)
-            clist(list%inl(iat)) = clist(list%inl(iat)) + tmp * wsw
+            clist_local(list%inl(iat)) = clist_local(list%inl(iat)) + tmp * wsw
          end do
 
       end do
       !$omp end do
+      !$omp critical
+      clist = clist + clist_local
+      !$omp end critical
       !$omp end parallel
-
 
    end subroutine get_cmat_3d_list
 
@@ -1752,14 +1762,14 @@ contains
       dcdr(:, :, :) = 0.0_wp
       dcdL(:, :, :) = 0.0_wp
 
-      allocate(dcdr_local, source=dcdr)
-      allocate(dcdL_local, source=dcdL)
-
       !$omp parallel default(none) &
       !$omp shared(dcdr, dcdL, mol, self) &
       !$omp private(iat, izp, jat, jzp, r2, vec, rvdw) &
       !$omp private(dG, dS, dtmp, arg, capi, capj) &
-      !$omp reduction(+:dcdr_local, dcdL_local)
+      !$omp private(dcdr_local, dcdL_local)
+
+      allocate(dcdr_local, source=dcdr)
+      allocate(dcdL_local, source=dcdL)
 
       !$omp do schedule(runtime)
       do iat = 1, mol%nat
@@ -1784,12 +1794,12 @@ contains
          end do
       end do
       !$omp end do
-      !$omp end parallel
 
+      !$omp critical
       dcdr(:, :, :) = dcdr + dcdr_local
       dcdL(:, :, :) = dcdL + dcdL_local
-
-      deallocate(dcdL_local, dcdr_local)
+      !$omp end critical
+      !$omp end parallel
 
    end subroutine get_dcmat_0d
 
@@ -1813,14 +1823,14 @@ contains
       cache%dcdrdiag(:, :) = 0.0_wp
       cache%dcdL(:, :, :) = 0.0_wp
 
-      allocate(dcdrdiag, source=cache%dcdrdiag)
-      allocate(dcdL, source=cache%dcdL)
-
       !$omp parallel default(none) &
-      !$omp shared(mol, list, self) &
+      !$omp shared(cache, mol, list, self) &
       !$omp private(iat, izp, jat, kat, jzp, vec, rvdw) &
       !$omp private(dG, dS, capi, capj, ic, i, j) &
-      !$omp reduction(+:dcdrdiag, dcdL)
+      !$omp private(dcdrdiag, dcdL)
+
+      allocate(dcdrdiag, source=cache%dcdrdiag)
+      allocate(dcdL, source=cache%dcdL)
 
       !$omp do schedule(runtime)
       do iat = 1, mol%nat
@@ -1846,13 +1856,13 @@ contains
          end do
       end do
       !$omp end do
+
+      !$omp critical
+      cache%dcdrdiag(:, :) = cache%dcdrdiag(:, :) + dcdrdiag(:, :)
+      cache%dcdL(:, :, :) = cache%dcdL(:, :, :) + dcdL(:, :, :)
+      !$omp end critical
+
       !$omp end parallel
-
-      cache%dcdrdiag(:, :) = dcdrdiag(:, :)
-      cache%dcdL(:, :, :) = dcdL(:, :, :)
-
-      deallocate(dcdrdiag)
-      deallocate(dcdL)
 
    end subroutine get_dcmat_0d_list
 
@@ -1880,14 +1890,14 @@ contains
       dcdr(:, :, :) = 0.0_wp
       dcdL(:, :, :) = 0.0_wp
 
-      allocate(dcdr_local, source=dcdr)
-      allocate(dcdL_local, source=dcdL)
-
       !$omp parallel default(none) &
       !$omp shared(dcdr, dcdL, mol, self, dtrans, wsc) &
       !$omp private(iat, izp, jat, jzp, r2, vec, rvdw) &
       !$omp private(dG, dS, dtmp, arg, capi, capj, wsw) &
-      !$omp reduction(+:dcdr_local, dcdL_local)
+      !$omp private(dcdr_local, dcdL_local)
+
+      allocate(dcdr_local, source=dcdr)
+      allocate(dcdL_local, source=dcdL)
 
       !$omp do schedule(runtime)
       do iat = 1, mol%nat
@@ -1926,12 +1936,13 @@ contains
          end do
       end do
       !$omp end do
+
+      !$omp critical
+      dcdr(:, :, :) = dcdr(:, :, :) + dcdr_local
+      dcdL(:, :, :) = dcdL(:, :, :) + dcdL_local
+      !$omp end critical
+
       !$omp end parallel
-
-      dcdr(:, :, :) = dcdr + dcdr_local
-      dcdL(:, :, :) = dcdL + dcdL_local
-
-      deallocate(dcdL_local, dcdr_local)
 
    end subroutine get_dcmat_3d
 
@@ -1954,14 +1965,13 @@ contains
       cache%dcdrdiag(:, :) = 0.0_wp
       cache%dcdL(:, :, :) = 0.0_wp
 
-      allocate(dcdrdiag, source=cache%dcdrdiag)
-      allocate(dcdL, source=cache%dcdL)
-
       !$omp parallel default(none) &
-      !$omp shared(mol, list, self, dtrans) &
+      !$omp shared(cache, mol, list, self, dtrans) &
       !$omp private(iat, izp, jat, kat, jzp, vec, rvdw) &
       !$omp private(dG, dS, capi, capj, wsw, img, ic, i, j) &
-      !$omp reduction(+:dcdrdiag, dcdL)
+      !$omp private(dcdrdiag, dcdL)
+      allocate(dcdrdiag, source=cache%dcdrdiag)
+      allocate(dcdL, source=cache%dcdL)
 
       !$omp do schedule(runtime)
       do iat = 1, mol%nat
@@ -2007,12 +2017,13 @@ contains
 
       end do
       !$omp end do
+
+      !$omp critical
+      cache%dcdrdiag(:, :) = cache%dcdrdiag(:, :) + dcdrdiag(:, :)
+      cache%dcdL(:, :, :) = cache%dcdL(:, :, :) + dcdL(:, :, :)
+      !$omp end critical
+
       !$omp end parallel
-
-      cache%dcdrdiag(:, :) = dcdrdiag(:, :)
-      cache%dcdL(:, :, :) = dcdL(:, :, :)
-
-      deallocate(dcdrdiag, dcdL)
 
    end subroutine get_dcmat_3d_list
 
