@@ -14,7 +14,7 @@
 ! limitations under the License.
 
 !> @file multicharge/model/type.f90
-!> Provides a general base class for the charge models
+!> Provides a general base class for charge models
 
 #ifndef IK
 #define IK i4
@@ -88,7 +88,7 @@ module multicharge_model_type
       !> Calculate right-hand side (electronegativity)
       procedure(get_xvec), deferred :: get_xvec
 
-      !> Calculate xvec Gradients
+      !> Calculate electronegativity-vector gradients
       procedure(get_xvec_derivs), deferred :: get_xvec_derivs
 
       !> Calculate Coulomb matrix
@@ -97,7 +97,7 @@ module multicharge_model_type
       !> Calculate Coulomb matrix derivatives
       procedure(get_coulomb_derivs), deferred :: get_coulomb_derivs
 
-      !> Calculate capcaity-corrected EN derivatives
+      !> Calculate capacitance-corrected electronegativity derivatives
       procedure(get_grad), deferred :: get_grad
 
    end type mchrg_model_type
@@ -116,8 +116,7 @@ module multicharge_model_type
          !> Multicharge neighbourlist type
          type(csr_list), intent(in), optional :: list
 
-         !> Multicharge cache
-         !> Allocation: cn, qloc, wsc
+         !> Multicharge cache containing CN, local charges, and a Wigner-Seitz cell
          type(mchrg_cache), intent(inout) :: cache
 
          !> Lattice vectors
@@ -140,8 +139,7 @@ module multicharge_model_type
          !> System size
          integer, intent(in) :: ndim
 
-         !> Multicharge cache
-         !> Allocation: cmat, (dcdr, dcdL if cache%dcndr/L and cache%dqlocdr/L allocated)
+         !> Multicharge cache holding the capacitance matrix and optional derivatives
          type(mchrg_cache), intent(inout) :: cache
 
          !> Multicharge neighbourlist type
@@ -161,8 +159,7 @@ module multicharge_model_type
          !> System size
          integer, intent(in) :: ndim
 
-         !> Multicharge cache
-         !> Allocation: amat
+         !> Multicharge cache holding the Coulomb matrix
          type(mchrg_cache), intent(inout) :: cache
 
          !> Multicharge neighbourlist type
@@ -183,8 +180,7 @@ module multicharge_model_type
          !> System size
          integer, intent(in) :: ndim
 
-         !> Multicharge cache
-         !> Allocation: dadr, dadL
+         !> Multicharge cache holding Coulomb-matrix derivatives
          type(mchrg_cache), intent(inout) :: cache
 
          !> Multicharge neighbourlist type
@@ -204,8 +200,7 @@ module multicharge_model_type
          !> System size
          integer, intent(in) :: ndim
 
-         !> Multicharge cache
-         !> Allocation: xvec, xtmp
+         !> Multicharge cache holding the electronegativity vector and workspace
          type(mchrg_cache), intent(inout) :: cache
 
          !> Multicharge neighbourlist type
@@ -225,8 +220,7 @@ module multicharge_model_type
          !> System size
          integer, intent(in) :: ndim
 
-         !> Multicharge cache
-         !> Allocation: dxdr, dxdL
+         !> Multicharge cache holding electronegativity-vector derivatives
          type(mchrg_cache), intent(inout) :: cache
 
          !> Multicharge neighbourlist type
@@ -268,7 +262,7 @@ module multicharge_model_type
    end interface
 
    !> Twice pi
-   real(wp), parameter :: twopi = 2 * pi
+   real(wp), parameter :: twopi = 2.0_wp * pi
 
    !> Smallest positive working-precision number
    real(wp), parameter :: eps = tiny(1.0_wp)
@@ -325,32 +319,46 @@ contains
 !> Top-level solve routine with optional persistent cache
    subroutine solve(self, mol, solver, cache, error, &
    & energy, gradient, sigma, qvec, dqdr, dqdL, list, verbosity, unit)
-      !> Electronegativity equilibration model
-      class(mchrg_model_type), intent(in):: self
+
+      !> Electronegativity-equilibration model
+      class(mchrg_model_type), intent(in) :: self
+
       !> Molecular structure data
       type(structure_type), intent(in) :: mol
+
       !> The solver instance
       class(mchrg_solver_type), intent(in) :: solver
+
       !> Cache handling
       type(mchrg_cache), intent(inout) :: cache
+
       !> Error handling
       type(error_type), allocatable, intent(out) :: error
+
       !> Optional atomic partial charges result
       real(wp), intent(out), contiguous, optional :: qvec(:)
+
       !> Optional electrostatic energy result
       real(wp), intent(inout), contiguous, optional :: energy(:)
+
       !> Optional gradient for electrostatic energy
       real(wp), intent(inout), contiguous, optional :: gradient(:, :)
+
       !> Optional stress tensor for electrostatic energy
       real(wp), intent(inout), contiguous, optional :: sigma(:, :)
+
       !> Optional derivative of the atomic partial charges w.r.t. atomic positions
       real(wp), intent(out), contiguous, optional :: dqdr(:, :, :)
+
       !> Optional derivative of the atomic partial charges w.r.t. lattice vectors
       real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
+
       !> Neighbour list optional type
       type(csr_list), intent(in), optional :: list
+
       !> Optional print verbossity number input flag
       integer, intent(in), optional :: verbosity
+
       !> Output unit
       integer, intent(in), optional :: unit
 
@@ -361,8 +369,8 @@ contains
       real(wp) :: uvecsum
       real(wp) :: vvecsum
       real(wp) :: lambda
-      real(wp), allocatable :: daqxdr(:,:,:)
-      real(wp), allocatable :: daqxdL(:,:,:)
+      real(wp), allocatable :: daqxdr(:, :, :)
+      real(wp), allocatable :: daqxdL(:, :, :)
 
       logical :: grad, cpq
       logical :: add_lagr = .true.
@@ -386,8 +394,8 @@ contains
          print_unit = output_unit
       end if
 
-      ! The cg_solver requires postive definite system
-      if (solver%need_pos_def .eqv. .true.) then
+      ! The CG solver requires a positive-definite system
+      if (solver%need_pos_def) then
          ndim = mol%nat
          add_lagr = .false.
       else
@@ -412,7 +420,7 @@ contains
       ! Print header
       call print_solve_header(print_unit, verbosity_solve, timer%get("setup"))
 
-      if (add_lagr .eqv. .true.) then
+      if (add_lagr) then
          if (.not. allocated(cache%ainv)) then
             allocate(cache%ainv(ndim, ndim))
          end if
@@ -547,38 +555,48 @@ contains
 
 !> Adjoint external gradient calculation using cached data
 !
-!> This routine evaluates dF/dR and dF/dL from the derivative of the
-!> objective w.r.t. charges (dF/dq), avoiding explicit differentiation
+!> This routine evaluates dF/dR and dF/dL from the derivative of the objective
+!> w.r.t. charges (dF/dq), avoiding explicit differentiation
 !> of the charge solution by solving an adjoint system.
    subroutine get_external_gradient(self, mol, solver, cache, error, &
    & dfdq, dfdr, dfdL, list, unit, verbosity)
-      !> Electronegativity equilibration model
+
+      !> Electronegativity-equilibration model
       class(mchrg_model_type), intent(in) :: self
+
       !> Molecular structure data
       type(structure_type), intent(in) :: mol
+
       !> Solver instance
       class(mchrg_solver_type), intent(in) :: solver
+
       !> Cache handling
       type(mchrg_cache), intent(inout) :: cache
+
       !> Error handling
       type(error_type), allocatable, intent(out) :: error
+
       !> Derivative of the objective w.r.t. atomic partial charges
       real(wp), intent(in) :: dfdq(:)
+
       !> External gradient w.r.t. positions
       real(wp), intent(inout) :: dfdr(:, :)
+
       !> External gradient w.r.t. lattice vectors
       real(wp), intent(inout) :: dfdL(:, :)
+
       !> Neighbour list optional type
       type(csr_list), intent(in), optional :: list
+
       !> Output unit
       integer, intent(in), optional :: unit
+
       !> Verbosity level
       integer, intent(in), optional :: verbosity
 
       integer :: iat
       integer :: ndim
       real(wp), allocatable :: yvec(:)
-      real(wp), allocatable :: unitvec(:)
       real(wp), allocatable :: padj(:)
       real(wp), allocatable :: dfdq_loc(:)
       real(wp) :: uvecsum
