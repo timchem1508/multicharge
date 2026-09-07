@@ -601,7 +601,8 @@ contains
             do img = 1, cache%wsc%nimg(iat, jat)
                vec = mol%xyz(:, jat) - mol%xyz(:, iat) + cache%wsc%trans(:, cache%wsc%tridx(img, jat, iat))
                call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
-               dxdL_local(:, :, iat) = dxdL_local(:, :, iat) - wsw * dS * cache%xtmp(jat)
+               dxdL_local(:, :, iat) = dxdL_local(:, :, iat) &
+               & - wsw * dS * (cache%xtmp(iat) - cache%xtmp(jat))
             end do
          end do
          dxdL_local(:, :, iat) = dxdL_local(:, :, iat) + cache%xtmp(iat) * cache%dcdL(:, :, iat)
@@ -1449,32 +1450,24 @@ contains
 
    end subroutine get_cmat_0d
 
-!> Build the bond capacitance matrix for a non‑periodic system.
    subroutine get_cmat_0d_list(self, mol, list, clist)
-      !> EEQBC model type
       class(eeqbc_model), intent(in) :: self
-      !> Molecular structure data
       type(structure_type), intent(in) :: mol
-      !> Multicharge neighbourlist type
       type(csr_list), intent(in) :: list
-      !> Output capacitance matrix in compressed format, size of list%nlat
       real(wp), intent(out) :: clist(:)
 
       integer :: iat, jat, kat, izp, jzp
       real(wp) :: vec(3), rvdw, tmp, capi, capj, r1
+      real(wp) :: diag(mol%nat)
 
-      real(wp), allocatable :: clist_local(:)
-
-      ! Zero out global shared target arrays upfront
       clist(:) = 0.0_wp
+      diag(:) = 0.0_wp
 
       !$omp parallel default(none) &
-      !$omp shared(clist, mol, list, self) &
-      !$omp private(iat, kat, izp, jat, jzp, vec, r1) &
-      !$omp private(rvdw, tmp, capi, capj, clist_local)
-      allocate(clist_local, source=clist)
+      !$omp shared(clist, mol, list, self, diag) &
+      !$omp private(iat, kat, izp, jat, jzp, vec, r1, rvdw, tmp, capi, capj)
 
-      !$omp do schedule(runtime)
+      !$omp do schedule(runtime) reduction(+:diag)
       do iat = 1, mol%nat
          izp = mol%id(iat)
          capi = self%cap(izp)
@@ -1487,16 +1480,20 @@ contains
             capj = self%cap(jzp)
 
             call get_cpair(self%kbc, tmp, r1, rvdw, capi, capj)
-            clist_local(kat) = -tmp
 
-            clist_local(list%inl(iat)) = clist_local(list%inl(iat)) + tmp
-            clist_local(list%inl(jat)) = clist_local(list%inl(jat)) + tmp
+            clist(kat) = -tmp
+            diag(iat) = diag(iat) + tmp
+            diag(jat) = diag(jat) + tmp
          end do
       end do
       !$omp end do
-      !$omp critical
-      clist = clist + clist_local
-      !$omp end critical
+
+      !$omp do schedule(static)
+      do iat = 1, mol%nat
+         clist(list%inl(iat)) = diag(iat)
+      end do
+      !$omp end do
+
       !$omp end parallel
 
    end subroutine get_cmat_0d_list
@@ -1586,22 +1583,19 @@ contains
       integer :: iat, jat, izp, jzp, img, kat
       real(wp) :: vec(3), rvdw, tmp, capi, capj, wsw, ctmp
       real(wp), allocatable :: dtrans(:, :)
-      real(wp), allocatable :: clist_local(:)
+      real(wp) :: diag(mol%nat)
 
       call get_dir_trans(mol, dtrans, cutoff)
 
-      ! Zero out global shared target arrays upfront
       clist(:) = 0.0_wp
+      diag(:) = 0.0_wp
 
       !$omp parallel default(none) &
-      !$omp shared(clist, mol, list, self, dtrans) &
+      !$omp shared(clist, mol, list, self, dtrans, diag) &
       !$omp private(iat, izp, jat, kat, jzp, img) &
-      !$omp private(vec, rvdw, tmp, capi, capj, wsw, ctmp) &
-      !$omp private(clist_local)
+      !$omp private(vec, rvdw, tmp, capi, capj, wsw, ctmp)
 
-      allocate(clist_local, source = clist)
-
-      !$omp do schedule(runtime)
+      !$omp do schedule(runtime) reduction(+:diag)
       do iat = 1, mol%nat
          izp = mol%id(iat)
          capi = self%cap(izp)
@@ -1616,46 +1610,41 @@ contains
             rvdw = self%rvdw(izp, jzp)
             wsw = 1.0_wp / real(list%wsc%nimg_list(kat), wp)
 
-            ! Initialize scalar accumulator for off-diagonal element
             ctmp = 0.0_wp
 
-            ! Loop over translation images for pair kat
             do img = list%wsc%itr_list(kat), list%wsc%itr_list(kat+1) - 1
                vec = mol%xyz(:, iat) - mol%xyz(:, jat) - list%wsc%trans(:, list%wsc%tridx_list(img))
 
                call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, tmp)
 
-               ! Accumulate off-diagonal elements in local scalar
                ctmp = ctmp - tmp * wsw
-
-               ! Diagonal elements
-               clist_local(list%inl(iat)) = clist_local(list%inl(iat)) + tmp * wsw
-               clist_local(list%inl(jat)) = clist_local(list%inl(jat)) + tmp * wsw
+               diag(iat) = diag(iat) + tmp * wsw
+               diag(jat) = diag(jat) + tmp * wsw
             end do
 
-            ! Safe direct write (kat is unique per thread)
-            clist_local(kat) = ctmp
+            clist(kat) = ctmp
 
          end do
 
          ! 2. Self-interaction with periodic images R /= 0 (j = iat)
-
          rvdw = self%rvdw(izp, izp)
          wsw  = 1.0_wp / real(list%wsc%nimg_list(list%inl(iat)), wp)
 
-         ! Skip identity image at list%wsc%itr_list(list%inl(iat)) and loop through R /= 0 images
          do img = list%wsc%itr_list(list%inl(iat)), list%wsc%itr_list(list%inl(iat) + 1) - 1
             vec = list%wsc%trans(:, list%wsc%tridx_list(img))
-
             call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, tmp)
-            clist_local(list%inl(iat)) = clist_local(list%inl(iat)) + tmp * wsw
+            diag(iat) = diag(iat) + tmp * wsw
          end do
 
       end do
       !$omp end do
-      !$omp critical
-      clist = clist + clist_local
-      !$omp end critical
+
+      !$omp do schedule(static)
+      do iat = 1, mol%nat
+         clist(list%inl(iat)) = diag(iat)
+      end do
+      !$omp end do
+
       !$omp end parallel
 
    end subroutine get_cmat_3d_list
@@ -1893,11 +1882,7 @@ contains
       !$omp parallel default(none) &
       !$omp shared(dcdr, dcdL, mol, self, dtrans, wsc) &
       !$omp private(iat, izp, jat, jzp, r2, vec, rvdw) &
-      !$omp private(dG, dS, dtmp, arg, capi, capj, wsw) &
-      !$omp private(dcdr_local, dcdL_local)
-
-      allocate(dcdr_local, source=dcdr)
-      allocate(dcdL_local, source=dcdL)
+      !$omp private(dG, dS, dtmp, arg, capi, capj, wsw)
 
       !$omp do schedule(runtime)
       do iat = 1, mol%nat
@@ -1914,16 +1899,21 @@ contains
                call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
 
                ! Off-diagonal elements
-               dcdr_local(:, iat, jat) = +dG * wsw + dcdr_local(:, iat, jat)
-               dcdr_local(:, jat, iat) = -dG * wsw + dcdr_local(:, jat, iat)
+               dcdr(:, iat, jat) = +dG * wsw
+               dcdr(:, jat, iat) = -dG * wsw
                ! Diagonal elements
-               dcdr_local(:, iat, iat) = -dG * wsw + dcdr_local(:, iat, iat)
-               dcdr_local(:, jat, jat) = +dG * wsw + dcdr_local(:, jat, jat)
-               dcdL_local(:, :, jat) = +dS * wsw + dcdL_local(:, :, jat)
-               dcdL_local(:, :, iat) = +dS * wsw + dcdL_local(:, :, iat)
+               dcdr(:, iat, iat) = -dG * wsw
+               dcdr(:, jat, jat) = +dG * wsw
+               dcdL(:, :, jat) = +dS * wsw
+               dcdL(:, :, iat) = +dS * wsw
             end do
          end do
+      end do
+      !$omp end do
 
+      !$omp do schedule(static)
+      do iat = 1, mol%nat
+         dcdr(:, iat, iat) = -sum(dcdr(:, iat, :), dim=2)
          rvdw = self%rvdw(izp, izp)
          wsw = 1.0_wp / real(wsc%nimg(iat, iat), wp)
          do img = 1, wsc%nimg(iat, iat)
@@ -1932,15 +1922,10 @@ contains
             call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, dG, dS)
 
             ! Positive diagonal elements
-            dcdL_local(:, :, iat) = +dS * wsw + dcdL_local(:, :, iat)
+            dcdL(:, :, iat) = +dS * wsw + dcdL(:, :, iat)
          end do
       end do
       !$omp end do
-
-      !$omp critical
-      dcdr(:, :, :) = dcdr(:, :, :) + dcdr_local
-      dcdL(:, :, :) = dcdL(:, :, :) + dcdL_local
-      !$omp end critical
 
       !$omp end parallel
 
@@ -2347,17 +2332,18 @@ contains
             ! 3 & 4. Capacitance derivatives
             call get_dcpair(self%kbc, vec, self%rvdw(izp, jzp), self%cap(izp), self%cap(jzp), dG, dS)
             dtmp = erf(sqrt(r2) * gam) / sqrt(r2)
-            gradient_local(:, iat) = gradient_local(:, iat) + dtmp * dG * W_ij * alpha &
-            & + p(iat) * cache%xtmp(jat) * dG * beta &
-            & - p(jat) * (cache%xtmp(jat) - cache%xtmp(iat)) * dG * beta
+
+            sigma_local(:, :)   = sigma_local(:, :)   - dtmp * W_ij * dS * alpha &
+            & - p(iat) * cache%xtmp(jat) * dS * beta &
+            & - p(jat) * cache%xtmp(iat) * dS * beta
 
             gradient_local(:, jat) = gradient_local(:, jat) - dtmp * dG * W_ij * alpha &
             & - p(jat) * cache%xtmp(iat) * dG * beta &
             & + p(iat) * (cache%xtmp(iat) - cache%xtmp(jat)) * dG * beta
 
-            sigma_local(:, :)   = sigma_local(:, :)   - dtmp * W_ij * dS * alpha &
-            & - p(iat) * cache%xtmp(jat) * dS * beta &
-            & - p(jat) * cache%xtmp(iat) * dS * beta
+            gradient_local(:, iat) = gradient_local(:, iat) + dtmp * dG * W_ij * alpha &
+            & + p(iat) * cache%xtmp(jat) * dG * beta &
+            & - p(jat) * (cache%xtmp(jat) - cache%xtmp(iat)) * dG * beta
 
             dtmp = (self%eta(jzp) + self%kqeta(jzp) * cache%qloc(jat) + sqrt2pi / radj)
             gradient_local(:, iat) = gradient_local(:, iat) - dtmp * dG * W_jj * alpha
@@ -2486,17 +2472,20 @@ contains
             ! 3 & 4. Capacitance derivatives
             call get_dcpair(self%kbc, vec, self%rvdw(izp, jzp), self%cap(izp), self%cap(jzp), dG, dS)
             dtmp = erf(sqrt(r2) * gam) / sqrt(r2)
-            gradient_local(:, iat) = gradient_local(:, iat) + dtmp * dG * W_ij * alpha &
-            & + p(iat) * cache%xtmp(jat) * dG * beta &
-            & - p(jat) * (cache%xtmp(jat) - cache%xtmp(iat)) * dG * beta
+
+            sigma_local(:, :)   = sigma_local(:, :)   - dtmp * W_ij * dS * alpha &
+            & - p(iat) * cache%xtmp(jat) * dS * beta &
+            & - p(jat) * cache%xtmp(iat) * dS * beta
+
 
             gradient_local(:, jat) = gradient_local(:, jat) - dtmp * dG * W_ij * alpha &
             & - p(jat) * cache%xtmp(iat) * dG * beta &
             & + p(iat) * (cache%xtmp(iat) - cache%xtmp(jat)) * dG * beta
 
-            sigma_local(:, :)   = sigma_local(:, :)   - dtmp * W_ij * dS * alpha &
-            & - p(iat) * cache%xtmp(jat) * dS * beta &
-            & - p(jat) * cache%xtmp(iat) * dS * beta
+            gradient_local(:, iat) = gradient_local(:, iat) + dtmp * dG * W_ij * alpha &
+            & + p(iat) * cache%xtmp(jat) * dG * beta &
+            & - p(jat) * (cache%xtmp(jat) - cache%xtmp(iat)) * dG * beta
+
 
             dtmp = (self%eta(jzp) + self%kqeta(jzp) * cache%qloc(jat) + sqrt2pi / radj)
             gradient_local(:, iat) = gradient_local(:, iat) - dtmp * dG * W_jj * alpha
@@ -2621,9 +2610,9 @@ contains
                sigma_local(:, :) = sigma_local(:, :) + dS * wsw * W_ij * alpha
 
                call get_damat_dc_dir(vec, dtrans, capi, capj, rvdw, self%kbc, gam, dG, dS)
-               gradient_local(:, iat) = gradient_local(:, iat) + dG * wsw * W_ij * alpha
-               gradient_local(:, jat) = gradient_local(:, jat) - dG * wsw * W_ij * alpha
                sigma_local(:, :)   = sigma_local(:, :) - W_ij * dS * wsw * alpha
+               gradient_local(:, jat) = gradient_local(:, jat) - dG * wsw * W_ij * alpha
+               gradient_local(:, iat) = gradient_local(:, iat) + dG * wsw * W_ij * alpha
 
                call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
                dtmp = (self%eta(jzp) + self%kqeta(jzp) * cache%qloc(jat) + sqrt2pi / radj)
@@ -2783,9 +2772,9 @@ contains
 
                ! 2. A-matrix capacitance terms
                call get_damat_dc_dir(vec, dtrans, capi, capj, rvdw, self%kbc, gam, dG, dS)
-               gradient_local(:, iat) = gradient_local(:, iat) + dG * wsw * W_ij * alpha
-               gradient_local(:, jat) = gradient_local(:, jat) - dG * wsw * W_ij * alpha
                sigma_local(:, :)   = sigma_local(:, :)   - W_ij * dS * wsw * alpha
+               gradient_local(:, jat) = gradient_local(:, jat) - dG * wsw * W_ij * alpha
+               gradient_local(:, iat) = gradient_local(:, iat) + dG * wsw * W_ij * alpha
 
                ! 3. Pair capacitance (b-vector) and hardness terms
                call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
