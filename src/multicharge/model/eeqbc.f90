@@ -448,7 +448,6 @@ contains
       real(wp) :: vec(3)
       real(wp), allocatable :: dtmpdr(:, :, :), dtmpdL(:, :, :)
 
-      ! Thread-private arrays for reduction
       real(wp), allocatable :: dxdr_local(:, :, :), dxdL_local(:, :, :)
       real(wp), allocatable :: dtmpdr_local(:, :, :), dtmpdL_local(:, :, :)
 
@@ -537,7 +536,6 @@ contains
       real(wp), allocatable :: dtmpdr(:, :, :), dtmpdL(:, :, :)
       real(wp), allocatable :: dtrans(:, :)
 
-      ! Thread-private arrays for reduction
       real(wp), allocatable :: dxdr_local(:, :, :), dxdL_local(:, :, :)
       real(wp), allocatable :: dtmpdr_local(:, :, :), dtmpdL_local(:, :, :)
 
@@ -682,7 +680,6 @@ contains
       integer :: iat, jat, izp, jzp
       real(wp) :: vec(3), r2, gam2, tmp, norm_cn, radi, radj
 
-      ! Thread-private array for reduction
       real(wp), allocatable :: amat_local(:, :)
 
       cache%amat(:, :) = 0.0_wp
@@ -794,7 +791,6 @@ contains
       real(wp) :: vec(3), r1, gam, dtmp, ctmp, capi, capj, radi, radj, norm_cn, rvdw, wsw
       real(wp), allocatable :: dtrans(:, :)
 
-      ! Thread-private array for reduction
       real(wp), allocatable :: amat_local(:, :)
 
       call get_dir_trans(mol, dtrans, cutoff)
@@ -1047,7 +1043,6 @@ contains
       real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), dgamdL(3, 3)
       real(wp), allocatable :: dgamdr(:, :)
 
-      ! Thread-private arrays for reduction
       real(wp), allocatable :: atrace_local(:, :)
       real(wp), allocatable :: dadr_local(:, :, :), dadL_local(:, :, :)
 
@@ -1173,7 +1168,6 @@ contains
       real(wp) :: dgamdL(3, 3), capi, capj
       real(wp), allocatable :: dgamdr(:, :), dtrans(:, :)
 
-      ! Thread-private arrays for reduction
       real(wp), allocatable :: atrace_local(:, :)
       real(wp), allocatable :: dadr_local(:, :, :), dadL_local(:, :, :)
 
@@ -1412,7 +1406,6 @@ contains
       integer :: iat, jat, izp, jzp
       real(wp) :: vec(3), rvdw, tmp, capi, capj, r1
 
-      ! Thread-private array for reduction
       real(wp), allocatable :: cmat_local(:, :)
 
       cmat(:, :) = 0.0_wp
@@ -1474,9 +1467,10 @@ contains
       clist(:) = 0.0_wp
 
       !$omp parallel default(none) &
-      !$omp shared(clist, mol, list, self) &
+      !$omp shared(mol, list, self) &
       !$omp private(iat, kat, izp, jat, jzp, vec, r1) &
-      !$omp private(rvdw, tmp, capi, capj)
+      !$omp private(rvdw, tmp, capi, capj) &
+      !$omp reduction(+:clist)
 
       !$omp do schedule(runtime)
       do iat = 1, mol%nat
@@ -1491,18 +1485,10 @@ contains
             capj = self%cap(jzp)
 
             call get_cpair(self%kbc, tmp, r1, rvdw, capi, capj)
-
-            ! Safe direct write (kat is unique per thread)
             clist(kat) = -tmp
 
-            ! Safe direct write (iat is uniquely owned by current thread)
-            !$omp atomic update
             clist(list%inl(iat)) = clist(list%inl(iat)) + tmp
-
-            ! Atomic write to prevent race conditions on shared jat entries
-            !$omp atomic update
             clist(list%inl(jat)) = clist(list%inl(jat)) + tmp
-            !$omp end atomic
          end do
       end do
       !$omp end do
@@ -1525,7 +1511,6 @@ contains
       real(wp) :: vec(3), rvdw, tmp, capi, capj, wsw
       real(wp), allocatable :: dtrans(:, :)
 
-      ! Thread-private array for reduction
       real(wp), allocatable :: cmat_local(:, :)
 
       call get_dir_trans(mol, dtrans, cutoff)
@@ -1603,8 +1588,10 @@ contains
       clist(:) = 0.0_wp
 
       !$omp parallel default(none) &
-      !$omp shared(clist, mol, list, self, dtrans) &
-      !$omp private(iat, izp, jat, kat, jzp, img, vec, rvdw, tmp, capi, capj, wsw, ctmp)
+      !$omp shared(mol, list, self, dtrans) &
+      !$omp private(iat, izp, jat, kat, jzp, img) &
+      !$omp private(vec, rvdw, tmp, capi, capj, wsw, ctmp) &
+      !$omp reduction(+:clist)
 
       !$omp do schedule(runtime)
       do iat = 1, mol%nat
@@ -1634,11 +1621,8 @@ contains
                ctmp = ctmp - tmp * wsw
 
                ! Diagonal elements
-               !$omp atomic update
                clist(list%inl(iat)) = clist(list%inl(iat)) + tmp * wsw
-               !$omp atomic update
                clist(list%inl(jat)) = clist(list%inl(jat)) + tmp * wsw
-               !$omp end atomic
             end do
 
             ! Safe direct write (kat is unique per thread)
@@ -1656,9 +1640,7 @@ contains
             vec = list%wsc%trans(:, list%wsc%tridx_list(img))
 
             call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, tmp)
-            !$omp atomic update
             clist(list%inl(iat)) = clist(list%inl(iat)) + tmp * wsw
-            !$omp end atomic
          end do
 
       end do
@@ -1765,7 +1747,6 @@ contains
       integer :: iat, jat, izp, jzp
       real(wp) :: vec(3), r2, rvdw, dtmp, arg, dG(3), dS(3, 3), capi, capj
 
-      ! Thread-private arrays for reduction
       real(wp), allocatable :: dcdr_local(:, :, :), dcdL_local(:, :, :)
 
       dcdr(:, :, :) = 0.0_wp
@@ -1826,14 +1807,20 @@ contains
       integer :: iat, jat, kat, izp, jzp, ic, i, j
       real(wp) :: vec(3), rvdw, dG(3), dS(3, 3), capi, capj
 
+      real(wp), allocatable :: dcdrdiag(:, :), dcdL(:, :, :)
+
       ! Zero out global shared target arrays upfront
       cache%dcdrdiag(:, :) = 0.0_wp
       cache%dcdL(:, :, :) = 0.0_wp
 
+      allocate(dcdrdiag, source=cache%dcdrdiag)
+      allocate(dcdL, source=cache%dcdL)
+
       !$omp parallel default(none) &
-      !$omp shared(cache, mol, list, self) &
+      !$omp shared(mol, list, self) &
       !$omp private(iat, izp, jat, kat, jzp, vec, rvdw) &
-      !$omp private(dG, dS, capi, capj, ic, i, j)
+      !$omp private(dG, dS, capi, capj, ic, i, j) &
+      !$omp reduction(+:dcdrdiag, dcdL)
 
       !$omp do schedule(runtime)
       do iat = 1, mol%nat
@@ -1848,30 +1835,24 @@ contains
 
             call get_dcpair(self%kbc, vec, rvdw, capi, capj, dG, dS)
 
-            ! Atomic scalar updates for coordinate gradients (dcdrdiag)
-            do ic = 1, 3
-               !$omp atomic update
-               cache%dcdrdiag(ic, iat) = cache%dcdrdiag(ic, iat) - dG(ic)
+            ! updates for coordinate gradients (dcdrdiag)
+            dcdrdiag(:, iat) = dcdrdiag(:, iat) - dG(:)
+            dcdrdiag(:, jat) = dcdrdiag(:, jat) + dG(:)
 
-               !$omp atomic update
-               cache%dcdrdiag(ic, jat) = cache%dcdrdiag(ic, jat) + dG(ic)
-            end do
-
-            ! Atomic scalar updates for strain/lattice derivatives (dcdL)
-            do j = 1, 3
-               do i = 1, 3
-                  !$omp atomic update
-                  cache%dcdL(i, j, iat) = cache%dcdL(i, j, iat) + dS(i, j)
-
-                  !$omp atomic update
-                  cache%dcdL(i, j, jat) = cache%dcdL(i, j, jat) + dS(i, j)
-               end do
-            end do
+            ! updates for strain/lattice derivatives (dcdL)
+            dcdL(:, :, iat) = dcdL(:, :, iat) + dS(:, :)
+            dcdL(:, :, jat) = dcdL(:, :, jat) + dS(:, :)
 
          end do
       end do
       !$omp end do
       !$omp end parallel
+
+      cache%dcdrdiag(:, :) = dcdrdiag(:, :)
+      cache%dcdL(:, :, :) = dcdL(:, :, :)
+
+      deallocate(dcdrdiag)
+      deallocate(dcdL)
 
    end subroutine get_dcmat_0d_list
 
@@ -1892,7 +1873,6 @@ contains
       real(wp) :: vec(3), r2, rvdw, dtmp, arg, dG(3), dS(3, 3), capi, capj, wsw
       real(wp), allocatable :: dtrans(:, :)
 
-      ! Thread-private arrays for reduction
       real(wp), allocatable :: dcdr_local(:, :, :), dcdL_local(:, :, :)
 
       call get_dir_trans(mol, dtrans, cutoff)
@@ -1966,24 +1946,28 @@ contains
       real(wp) :: vec(3), rvdw, dG(3), dS(3, 3), capi, capj, wsw
       real(wp), allocatable :: dtrans(:, :)
 
+      real(wp), allocatable :: dcdrdiag(:, :), dcdL(:, :, :)
+
       call get_dir_trans(mol, dtrans, cutoff)
 
       ! Zero out global shared target arrays upfront
       cache%dcdrdiag(:, :) = 0.0_wp
       cache%dcdL(:, :, :) = 0.0_wp
 
+      allocate(dcdrdiag, source=cache%dcdrdiag)
+      allocate(dcdL, source=cache%dcdL)
+
       !$omp parallel default(none) &
-      !$omp shared(cache, mol, list, self, dtrans) &
-      !$omp private(iat, izp, jat, kat, jzp, vec, rvdw, dG, dS, capi, capj, wsw, img, ic, i, j)
+      !$omp shared(mol, list, self, dtrans) &
+      !$omp private(iat, izp, jat, kat, jzp, vec, rvdw) &
+      !$omp private(dG, dS, capi, capj, wsw, img, ic, i, j) &
+      !$omp reduction(+:dcdrdiag, dcdL)
 
       !$omp do schedule(runtime)
       do iat = 1, mol%nat
          izp = mol%id(iat)
          capi = self%cap(izp)
 
-         ! ------------------------------------------------------------------
-         ! 1. Off-diagonal neighbor pairs (jat /= iat)
-         ! ------------------------------------------------------------------
          do kat = list%inl(iat) + 1, list%inl(iat+1) - 1
             if (list%wsc%nimg_list(kat) == 0) cycle
 
@@ -1997,32 +1981,17 @@ contains
                vec = mol%xyz(:, jat) - mol%xyz(:, iat) + list%wsc%trans(:, list%wsc%tridx_list(img))
                call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
 
-               ! Atomic scalar updates for coordinate gradients (dcdrdiag)
-               do ic = 1, 3
-                  !$omp atomic update
-                  cache%dcdrdiag(ic, iat) = cache%dcdrdiag(ic, iat) - dG(ic) * wsw
+               ! Updates for coordinate gradients (dcdrdiag)
+               dcdrdiag(:, iat) = dcdrdiag(:, iat) - dG(:) * wsw
+               dcdrdiag(:, jat) = dcdrdiag(:, jat) + dG(:) * wsw
 
-                  !$omp atomic update
-                  cache%dcdrdiag(ic, jat) = cache%dcdrdiag(ic, jat) + dG(ic) * wsw
-               end do
-
-               ! Atomic scalar updates for lattice derivatives (dcdL)
-               do j = 1, 3
-                  do i = 1, 3
-                     !$omp atomic update
-                     cache%dcdL(i, j, iat) = cache%dcdL(i, j, iat) + dS(i, j) * wsw
-
-                     !$omp atomic update
-                     cache%dcdL(i, j, jat) = cache%dcdL(i, j, jat) + dS(i, j) * wsw
-                  end do
-               end do
+               ! Updates for lattice derivatives (dcdL)
+               dcdL(:, :, iat) = dcdL(:, :, iat) + dS(:, :) * wsw
+               dcdL(:, :, jat) = dcdL(:, :, jat) + dS(:, :) * wsw
 
             end do
          end do
 
-         ! ------------------------------------------------------------------
-         ! 2. Self-interaction with periodic images R /= 0 (j = iat)
-         ! ------------------------------------------------------------------
          rvdw = self%rvdw(izp, izp)
          if (list%wsc%nimg_list(list%inl(iat)) > 0) then
             wsw = 1.0_wp / real(list%wsc%nimg_list(list%inl(iat)), wp)
@@ -2031,21 +2000,19 @@ contains
             do img = list%wsc%itr_list(list%inl(iat)), list%wsc%itr_list(list%inl(iat) + 1) - 1
                vec = list%wsc%trans(:, list%wsc%tridx_list(img))
                call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, dG, dS)
-
-               ! Atomic scalar updates for lattice derivatives
-               do j = 1, 3
-                  do i = 1, 3
-                     !$omp atomic update
-                     cache%dcdL(i, j, iat) = cache%dcdL(i, j, iat) + dS(i, j) * wsw
-                  end do
-               end do
-
+               ! Updates for lattice derivatives
+               dcdL(:, :, iat) = dcdL(:, :, iat) + dS(:, :) * wsw
             end do
          end if
 
       end do
       !$omp end do
       !$omp end parallel
+
+      cache%dcdrdiag(:, :) = dcdrdiag(:, :)
+      cache%dcdL(:, :, :) = dcdL(:, :, :)
+
+      deallocate(dcdrdiag, dcdL)
 
    end subroutine get_dcmat_3d_list
 
@@ -2177,7 +2144,6 @@ contains
       integer :: iat, jat, kat, izp, jzp, itr
       real(wp) :: r2, r1, rij(3), countf, countd(3), sigma(3, 3), cutoff2, den
 
-      ! Thread-private arrays for reduction
       real(wp), allocatable :: cn_local(:)
       real(wp), allocatable :: dcndrdiag_local(:, :),  dcndL_local(:, :, :)
 
@@ -2598,7 +2564,6 @@ contains
       qlocacc = 0.0_wp
       cnacc = 0.0_wp
 
-      ! Allocate reduction targets
       allocate(gradient_local(3, mol%nat), source=0.0_wp)
       allocate(sigma_local(3, 3), source=0.0_wp)
 
