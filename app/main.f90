@@ -168,7 +168,7 @@ program main
       hess(:, :, :, :) = 0.0_wp
       press(:, :, :, :) = 0.0_wp
       call model%get_numhess(mol, solver, cache, error, qvec, energy, gradient, sigma,&
-      & hess, press, unit=output_unit, verbosity=verbosity)
+      & hess, press, list=list, unit=output_unit, verbosity=verbosity)
       call timer%pop
       if (verbosity > 1) then
          write(output_unit, '(a, 1x, a)') "Get numerical Hessian time : ", format_time(timer%get("numhess"))

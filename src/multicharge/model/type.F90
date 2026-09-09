@@ -28,7 +28,7 @@ module multicharge_model_type
    use mctc_io_math, only: matinv_3x3
    use mctc_cutoff, only: get_lattice_points
    use mctc_ncoord, only: ncoord_type
-   use mctc_csrlist, only: csr_list, gemv_cmp
+   use mctc_csrlist, only: csr_list, gemv_cmp, new_csr_list
    use multicharge_blas, only: gemv, symv, gemm
    use multicharge_lapack, only: sytrf, sytrs
    use multicharge_wignerseitz, only: wignerseitz_cell_type, new_wignerseitz_cell
@@ -443,7 +443,8 @@ contains
          call print_gradient_header(print_unit, verbosity_solve, timer%get("setup_gradient"))
 
          call timer%push("cpq")
-         call get_q_derivs(self, mol, solver, cache, error, dqdr, dqdL, list, unit=print_unit, verbosity=verbosity_solve)
+         call get_q_derivs(self, mol, solver, cache, error, ndim, &
+         & dqdr, dqdL, list, unit=print_unit, verbosity=verbosity_solve)
          ! pop cpq timer
          call timer%pop
          call print_gradient_time(print_unit, verbosity_solve, timer%get("cpq"))
@@ -455,12 +456,13 @@ contains
 
    end subroutine solve
 
-   subroutine get_q_derivs(self, mol, solver, cache, error, dqdr, dqdL, list, unit, verbosity)
+   subroutine get_q_derivs(self, mol, solver, cache, error, ndim, dqdr, dqdL, list, unit, verbosity)
       class(mchrg_model_type), intent(in) :: self
       type(structure_type), intent(in) :: mol
       class(mchrg_solver_type), intent(in) :: solver
       type(mchrg_cache), intent(inout) :: cache
       type(error_type), allocatable, intent(out) :: error
+      integer, intent(in) :: ndim
       real(wp), intent(out) :: dqdr(:, :, :)
       real(wp), intent(out) :: dqdL(:, :, :)
       type(csr_list), intent(in), optional :: list
@@ -470,7 +472,7 @@ contains
       real(wp), allocatable :: daqxdr(:,:,:), daqxdL(:,:,:)
       real(wp) :: scale, uvecsum
       real(wp), allocatable :: diag(:), rhs(:), sol(:)
-      integer :: iat, ic, jc, ndim
+      integer :: iat, ic, jc
 
       if (allocated(cache%ainv)) then
          ! Non-iterative solve
@@ -640,7 +642,7 @@ contains
    end subroutine get_external_gradient
 
    subroutine get_numhess(self, mol, solver, cache, error, qvec, energy, grad, sigma, &
-   & hess, press, unit, verbosity)
+   & hess, press, list, unit, verbosity)
       class(mchrg_model_type), intent(in) :: self
       type(structure_type), intent(in) :: mol
       class(mchrg_solver_type), intent(in) :: solver
@@ -652,12 +654,14 @@ contains
       real(wp), intent(out) :: sigma(:, :)
       real(wp), intent(out) :: hess(:, :, :, :)
       real(wp), intent(out) :: press(:, :, :, :)
+      type(csr_list), intent(in), optional :: list
       integer, intent(in), optional :: unit
       integer, intent(in), optional :: verbosity
 
       real(wp), parameter :: step = 1.0e-6_wp
       type(structure_type) :: mol_work
       type(mchrg_cache), allocatable :: cache_work
+      type(csr_list), allocatable :: list_work
       real(wp), parameter :: trans(3, 1) = 0.0_wp
       real(wp), allocatable :: g_plus(:, :)
       real(wp), allocatable :: g_minus(:, :)
@@ -678,9 +682,9 @@ contains
       xyz_orig = mol_work%xyz
 
       ! Evaluate unperturbed system.
-      call self%update(mol_work, cache, trans, grad=.true.)
+      call self%update(mol_work, cache, trans, grad=.true., list=list)
       call self%solve(mol_work, solver, cache, error, qvec=qvec, energy=energy, &
-      & gradient=grad, sigma=sigma, unit=unit, verbosity=verbosity)
+      & gradient=grad, sigma=sigma, list=list, unit=unit, verbosity=verbosity)
       if (allocated(error)) return
 
       allocate(g_plus(3, mol_work%nat))
@@ -706,9 +710,18 @@ contains
             s_plus  = 0.0_wp
             mol_work%xyz(jc, jat) = xyz_orig(jc, jat) + step
             allocate(cache_work)
-            call self%update(mol_work, cache_work, trans, grad=.true.)
-            call self%solve(mol_work, solver, cache_work, error, gradient=g_plus, &
-            & sigma=s_plus, unit=unit, verbosity=verbosity)
+            if (present(list)) then
+               allocate(list_work)
+               call new_csr_list(list_work, mol_work)
+               call self%update(mol_work, cache_work, trans, grad=.true., list=list_work)
+               call self%solve(mol_work, solver, cache_work, error, gradient=g_plus, &
+               & sigma=s_plus, list=list_work, unit=unit, verbosity=verbosity)
+               deallocate(list_work)
+            else
+               call self%update(mol_work, cache_work, trans, grad=.true.)
+               call self%solve(mol_work, solver, cache_work, error, gradient=g_plus, &
+               & sigma=s_plus, unit=unit, verbosity=verbosity)
+            end if
             deallocate(cache_work)
 
             if (allocated(error)) then
@@ -721,9 +734,18 @@ contains
             s_minus = 0.0_wp
             mol_work%xyz(jc, jat) = xyz_orig(jc, jat) - step
             allocate(cache_work)
-            call self%update(mol_work, cache_work, trans, grad=.true.)
-            call self%solve(mol_work, solver, cache_work, error, gradient=g_minus, &
-            & sigma=s_minus, unit=unit, verbosity=verbosity)
+            if (present(list)) then
+               allocate(list_work)
+               call new_csr_list(list_work, mol_work)
+               call self%update(mol_work, cache_work, trans, grad=.true., list=list_work)
+               call self%solve(mol_work, solver, cache_work, error, gradient=g_minus, &
+               & sigma=s_minus, list=list_work, unit=unit, verbosity=verbosity)
+               deallocate(list_work)
+            else
+               call self%update(mol_work, cache_work, trans, grad=.true.)
+               call self%solve(mol_work, solver, cache_work, error, gradient=g_minus, &
+               & sigma=s_minus, unit=unit, verbosity=verbosity)
+            end if
             deallocate(cache_work)
 
             if (allocated(error)) then
@@ -754,12 +776,18 @@ contains
             mol_work%xyz(:, :) = matmul(eps_mat, xyz_orig)
 
             allocate(cache_work)
-            call self%update(mol_work, cache_work, trans, grad=.true.)
-
-            g_plus(:, :) = 0.0_wp
-            s_plus(:, :) = 0.0_wp
-            call self%solve(mol_work, solver, cache_work, error, &
-            & gradient=g_plus, sigma=s_plus,  unit=unit, verbosity=verbosity)
+            if (present(list)) then
+               allocate(list_work)
+               call new_csr_list(list_work, mol_work)
+               call self%update(mol_work, cache_work, trans, grad=.true., list=list_work)
+               call self%solve(mol_work, solver, cache_work, error, &
+               & gradient=g_plus, sigma=s_plus, list=list_work, unit=unit, verbosity=verbosity)
+               deallocate(list_work)
+            else
+               call self%update(mol_work, cache_work, trans, grad=.true.)
+               call self%solve(mol_work, solver, cache_work, error, &
+               & gradient=g_plus, sigma=s_plus, unit=unit, verbosity=verbosity)
+            end if
             deallocate(cache_work)
             if (allocated(error)) return
 
@@ -770,12 +798,18 @@ contains
             mol_work%xyz(:, :) = matmul(eps_mat, xyz_orig)
 
             allocate(cache_work)
-            call self%update(mol_work, cache_work, trans, grad=.true.)
-
-            g_minus(:, :) = 0.0_wp
-            s_minus(:, :) = 0.0_wp
-            call self%solve(mol_work, solver, cache_work, error, &
-            & gradient=g_minus, sigma=s_minus,unit=unit, verbosity=verbosity)
+            if (present(list)) then
+               allocate(list_work)
+               call new_csr_list(list_work, mol_work)
+               call self%update(mol_work, cache_work, trans, grad=.true., list=list_work)
+               call self%solve(mol_work, solver, cache_work, error, &
+               & gradient=g_minus, sigma=s_minus, list=list_work, unit=unit, verbosity=verbosity)
+               deallocate(list_work)
+            else
+               call self%update(mol_work, cache_work, trans, grad=.true.)
+               call self%solve(mol_work, solver, cache_work, error, &
+               & gradient=g_minus, sigma=s_minus, unit=unit, verbosity=verbosity)
+            end if
             deallocate(cache_work)
             if (allocated(error)) return
 
