@@ -1635,7 +1635,6 @@ contains
 
    end subroutine get_cmat_3d_list
 
-
 !> Compute the bond capacitance between two atoms based on distance.
    subroutine get_cpair(kbc, cpair, r1, rvdw, capi, capj)
       !> Bond capacitance exponent
@@ -1774,7 +1773,7 @@ contains
 
       !$omp end parallel
 
-      dcdL(:, :, :) = dcdL_acc
+      dcdL(:, :, 1:mol%nat) = dcdL_acc
       deallocate(dcdL_acc)
 
    end subroutine get_dcmat_0d
@@ -1851,12 +1850,12 @@ contains
       real(wp), allocatable :: dtrans(:, :)
       real(wp), allocatable :: dcdL_acc(:, :, :)
 
-      call get_dir_trans(mol, dtrans, cutoff)
-
       dcdr(:, :, :) = 0.0_wp
       dcdL(:, :, :) = 0.0_wp
 
       allocate(dcdL_acc(3, 3, mol%nat), source=0.0_wp)
+
+      call get_dir_trans(mol, dtrans, cutoff)
 
       !$omp parallel default(none) &
       !$omp shared(dcdr, mol, self, dtrans, wsc) &
@@ -1903,7 +1902,7 @@ contains
 
       !$omp end parallel
 
-      dcdL(:, :, :) = dcdL_acc
+      dcdL(:, :, 1:mol%nat) = dcdL_acc
       deallocate(dcdL_acc)
 
    end subroutine get_dcmat_3d
