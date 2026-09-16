@@ -21,16 +21,16 @@ module multicharge_blascomp
    implicit none
    private
 
-   public :: gemv_cmp, gemm_cmp, gemv_cmp_212, gemm_cmp_212
+   public :: spmv_csr, gemm_cmp, spmv_csr_212, gemm_cmp_212
 
-   interface gemv_cmp
-      module procedure gemv_cmp_111
-      module procedure gemv_cmp_212
-   end interface gemv_cmp
+   interface spmv_csr
+      module procedure spmv_csr_111
+      module procedure spmv_csr_212
+   end interface spmv_csr
 
-   interface gemv_cmp_212
-      module procedure gemv_cmp_212
-   end interface gemv_cmp_212
+   interface spmv_csr_212
+      module procedure spmv_csr_212
+   end interface spmv_csr_212
 
    interface gemm_cmp
       module procedure gemm_cmp_122
@@ -54,7 +54,7 @@ contains
 !=========================================================
 ! GEMV 111 - Thread-safe OMP
 !=========================================================
-   subroutine gemv_cmp_111(list, mlist, mdiag, x, y, alpha, beta, symmetric)
+   subroutine spmv_csr_111(list, mlist, mdiag, x, y, alpha, beta, symmetric)
       type(csr_list), intent(in) :: list
       real(wp), intent(in)  :: mlist(:)
       real(wp), intent(in)  :: mdiag(:)
@@ -111,12 +111,12 @@ contains
       end do
       !$omp end parallel do
 
-   end subroutine gemv_cmp_111
+   end subroutine spmv_csr_111
 
 !=========================================================
 ! GEMV 212 - Thread-safe OMP (Atomics Removed)
 !=========================================================
-   subroutine gemv_cmp_212(list, mdrij, mdrji, mdrdiag, x, y, alpha, beta)
+   subroutine spmv_csr_212(list, mdrij, mdrji, mdrdiag, x, y, alpha, beta)
       type(csr_list), intent(in) :: list
       real(wp), intent(in)  :: mdrij(:,:)
       real(wp), intent(in)  :: mdrji(:,:)
@@ -165,12 +165,12 @@ contains
       end do
       !$omp end parallel do
 
-   end subroutine gemv_cmp_212
+   end subroutine spmv_csr_212
 
 !=========================================================
 ! GEMV 212 DIRECTED - Thread-safe OMP (Atomics Removed)
 !=========================================================
-   subroutine gemv_cmp_212_dir(list, mlist_drij, mlist_drji, mdiag, x, y, alpha, beta, symmetric)
+   subroutine spmv_csr_212_dir(list, mlist_drij, mlist_drji, mdiag, x, y, alpha, beta, symmetric)
       type(csr_list), intent(in) :: list
       real(wp), intent(in)  :: mlist_drij(:,:)
       real(wp), intent(in)  :: mlist_drji(:,:)
@@ -231,7 +231,7 @@ contains
       end do
       !$omp end parallel do
 
-   end subroutine gemv_cmp_212_dir
+   end subroutine spmv_csr_212_dir
 
 !=========================================================
 ! GEMM 122

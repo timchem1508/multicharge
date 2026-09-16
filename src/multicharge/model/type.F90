@@ -29,7 +29,7 @@ module multicharge_model_type
    use mctc_io_math, only : matinv_3x3
    use mctc_cutoff, only : get_lattice_points
    use mctc_ncoord, only : ncoord_type
-   use mctc_csrlist, only : csr_list, gemv_cmp
+   use mctc_csrlist, only : csr_list, spmv_csr
    use multicharge_blas, only : gemv, symv, gemm
    use multicharge_model_cache, only : mchrg_cache
    use multicharge_solver_type, only : mchrg_solver_type
@@ -480,7 +480,7 @@ contains
       if (present(energy)) then
          call timer%push("energy")
          if (present(list)) then
-            call gemv_cmp(list, cache%alist, cache%vrhs, cache%xvec(:mol%nat), &
+            call spmv_csr(list, cache%alist, cache%vrhs, cache%xvec(:mol%nat), &
             & alpha=0.5_wp, beta=-1.0_wp)
          else
             call symv(cache%amat, cache%vrhs, cache%xvec(:mol%nat), &

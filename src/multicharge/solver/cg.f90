@@ -19,7 +19,7 @@
 module multicharge_solver_cg
    use iso_fortran_env, only : output_unit
    use mctc_env, only : error_type, fatal_error, format_time, timer_type, wp
-   use mctc_csrlist, only : csr_list, gemv_cmp
+   use mctc_csrlist, only : csr_list, spmv_csr
    use multicharge_blas, only : axpy, dot, scal, symv
    use multicharge_solver_type, only : mchrg_solver_input, mchrg_solver_type
    implicit none
@@ -232,7 +232,7 @@ contains
 
       ! Initial residual
       if (nlist) then
-         call gemv_cmp(list, alist, vrhs, Adir, alpha=1.0_wp, beta=0.0_wp)
+         call spmv_csr(list, alist, vrhs, Adir, alpha=1.0_wp, beta=0.0_wp)
       else
          call symv(amat, vrhs, Adir, alpha=1.0_wp, beta=0.0_wp)
       end if
@@ -263,7 +263,7 @@ contains
 
          ! Matrix-vector product
          if (nlist) then
-            call gemv_cmp(list, alist, dir, Adir, alpha=1.0_wp, beta=0.0_wp)
+            call spmv_csr(list, alist, dir, Adir, alpha=1.0_wp, beta=0.0_wp)
          else
             call symv(amat, dir, Adir, alpha=1.0_wp, beta=0.0_wp)
          end if
