@@ -22,7 +22,7 @@
 !> *J. Chem. Phys.*, **2025**, 162, 214109.
 !> DOI: [10.1063/5.0268978](https://dx.doi.org/10.1063/5.0268978)
 module multicharge_model_eeqbc
-   use mctc_env, only : error_type, wp
+   use mctc_env, only : error_type, wp, i8
    use mctc_io, only : structure_type
    use mctc_io_constants, only : pi
    use mctc_ncoord, only : cn_count, new_ncoord, ncoord_type
@@ -248,7 +248,7 @@ subroutine get_capacitance_matrix(self, mol, ndim, cache, list)
    if (present(list)) then
       ! Allocate cmat
       if (.not. allocated(cache%clist)) then
-         allocate(cache%clist(size(list%nlat)))
+         allocate(cache%clist(size(list%nlat, kind=i8)))
       end if
       ! Neighbour list routines
       if (any(mol%periodic)) then
@@ -648,7 +648,7 @@ subroutine get_coulomb_matrix(self, mol, ndim, cache, list)
    if (present(list)) then
       ! Allocate amat
       if (.not. allocated(cache%alist)) then
-         allocate(cache%alist(size(list%nlat)))
+         allocate(cache%alist(size(list%nlat, kind=i8)))
       end if
       if (any(mol%periodic)) then
          call get_amat_3d_list(self, mol, list, cache)
@@ -738,7 +738,8 @@ subroutine get_amat_0d_list(self, mol, list, cache)
    !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
 
-   integer :: iat, jat, kat, izp, jzp
+   integer(i8) :: kat
+   integer :: iat, jat, izp, jzp
    real(wp) :: vec(3), r2, gam2, tmp, norm_cn, radi, radj
 
    ! Zero out global shared target arrays upfront
@@ -869,7 +870,8 @@ subroutine get_amat_3d_list(self, mol, list, cache)
    !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
 
-   integer :: iat, jat, izp, jzp, img, kat
+   integer :: iat, jat, izp, jzp
+   integer(i8) :: kat, img
    real(wp) :: vec(3), gam, dtmp, capi, capj, radi, radj, norm_cn, rvdw, wsw
    real(wp) :: atmp, adiag_tmp
    real(wp), allocatable :: dtrans(:, :)
@@ -1445,12 +1447,17 @@ end subroutine get_cmat_0d
 
 !> Build the bond capacitance matrix for a non‑periodic system.
 subroutine get_cmat_0d_list(self, mol, list, clist)
+   !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
+   !> Molecular structure data
    type(structure_type), intent(in) :: mol
+   !> CSR list of neighbours
    type(csr_list), intent(in) :: list
+   !> Output capacitance list
    real(wp), intent(out) :: clist(:)
 
-   integer :: iat, jat, kat, izp, jzp
+   integer :: iat, jat, izp, jzp
+   integer(i8) :: kat
    real(wp) :: vec(3), rvdw, tmp, capi, capj, r1
    real(wp) :: diag(mol%nat)
 
@@ -1493,9 +1500,13 @@ subroutine get_cmat_0d_list(self, mol, list, clist)
 end subroutine get_cmat_0d_list
 
 subroutine get_cmat_3d(self, mol, wsc, cmat)
+   !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
+   !> Molecular structure data
    type(structure_type), intent(in) :: mol
+   !> Wigner-Seitz cell
    type(wignerseitz_cell_type), intent(in) :: wsc
+   !> Output capacitance matrix
    real(wp), intent(out) :: cmat(:, :)
 
    integer :: iat, jat, izp, jzp, img
@@ -1566,7 +1577,8 @@ subroutine get_cmat_3d_list(self, mol, list, clist)
    !> Output capacitance matrix in compressed format, size of list%nlat
    real(wp), intent(out) :: clist(:)
 
-   integer :: iat, jat, izp, jzp, img, kat
+   integer :: iat, jat, izp, jzp
+   integer(i8) :: kat, img
    real(wp) :: vec(3), rvdw, tmp, capi, capj, wsw, ctmp
    real(wp), allocatable :: dtrans(:, :)
    real(wp) :: diag(mol%nat)
@@ -1789,7 +1801,9 @@ subroutine get_dcmat_0d_list(self, mol, list, cache)
    !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
 
-   integer :: iat, jat, kat, izp, jzp, ic, i, j
+   integer :: iat, jat, izp, jzp, ic, i, j
+   integer(i8) :: kat
+
    real(wp) :: vec(3), rvdw, dG(3), dS(3, 3), capi, capj
 
    real(wp), allocatable :: dcdrdiag(:, :), dcdL(:, :, :)
@@ -1913,7 +1927,8 @@ subroutine get_dcmat_3d_list(self, mol, list, cache)
    type(csr_list), intent(in) :: list
    type(mchrg_cache), intent(inout) :: cache
 
-   integer :: iat, jat, izp, jzp, img, kat
+   integer :: iat, jat, izp, jzp
+   integer(i8) :: kat, img
    real(wp) :: vec(3), rvdw, dG(3), dS(3, 3), capi, capj, wsw
    real(wp), allocatable :: dtrans(:, :)
    real(wp), allocatable :: dcdrdiag_acc(:, :), dcdL_acc(:, :, :)
@@ -2103,7 +2118,8 @@ subroutine get_dcndiag_list(self, mol, trans, cn, dcndrdiag, dcndL, list)
    !> Adjacency list for neighbourlist-based CN evaluation
    type(csr_list), intent(in) :: list
 
-   integer :: iat, jat, kat, izp, jzp, itr
+   integer :: iat, jat, izp, jzp, itr
+   integer(i8) :: kat
    real(wp) :: r2, r1, rij(3), countf, countd(3), sigma(3, 3), cutoff2, den
 
    real(wp), allocatable :: cn_local(:)
@@ -2227,7 +2243,8 @@ subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain,
    real(wp), optional, intent(in) :: betain
 
    real(wp) :: alpha, beta
-   integer :: iat, jat, kat, izp, jzp
+   integer :: iat, jat, izp, jzp
+   integer(i8) :: kat
    real(wp) :: vec(3), r2, gam, arg, dtmp, norm_cn
    real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3)
    real(wp) :: W_ii, W_jj, W_ij
@@ -2509,7 +2526,8 @@ subroutine get_grad_3d_list(self, mol, list, cache, p, gradient, sigma, alphain,
    real(wp), optional, intent(in) :: betain
 
    real(wp) :: alpha, beta
-   integer :: iat, jat, kat, izp, jzp, img
+   integer :: iat, jat, izp, jzp
+   integer(i8) :: kat, img
    real(wp) :: vec(3), r2, gam, dtmp, capi, capj, dgam, rvdw, wsw
    real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), ctmp
    real(wp) :: W_ii, W_jj, W_ij, norm_cn
