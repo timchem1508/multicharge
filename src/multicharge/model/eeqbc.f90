@@ -52,33 +52,33 @@ module multicharge_model_eeqbc
 
       !> Van der Waals radii matrix (nat × nat)
       real(wp), allocatable :: rvdw(:, :)
-   contains
-      !> Update and allocate cache
-      procedure :: update
-      !> Calculate capacitance matrix
-      procedure :: get_capacitance_matrix
-      !> Calculate Coulomb matrix
-      procedure :: get_coulomb_matrix
-      !> Calculate derivatives of Coulomb matrix multiplied by charge
-      procedure :: get_coulomb_derivs
-      !> Calculate right-hand side (electronegativity vector)
-      procedure :: get_xvec
-      !> Calculate derivatives of EN vector
-      procedure :: get_xvec_derivs
-      !> Calculate constraint matrix (molecular)
-      procedure :: get_cmat_0d
-      !> Calculate constraint matrix (molecular) using neighbour list
-      procedure :: get_cmat_0d_list
-      !> Calculate full constraint matrix (periodic)
-      procedure :: get_cmat_3d
-      !> Calculate constraint matrix derivatives (molecular)
-      procedure :: get_dcmat_0d
-      !> Calculate constraint matrix derivatives (molecular) using neighbour list
-      procedure :: get_dcmat_0d_list
-      !> Calculate constraint matrix derivatives (periodic)
-      procedure :: get_dcmat_3d
-      !> Calculate gradient
-      procedure :: get_grad
+contains
+ !> Update and allocate cache
+procedure :: update
+ !> Calculate capacitance matrix
+procedure :: get_capacitance_matrix
+ !> Calculate Coulomb matrix
+procedure :: get_coulomb_matrix
+ !> Calculate derivatives of Coulomb matrix multiplied by charge
+procedure :: get_coulomb_derivs
+ !> Calculate right-hand side (electronegativity vector)
+procedure :: get_xvec
+ !> Calculate derivatives of EN vector
+procedure :: get_xvec_derivs
+ !> Calculate constraint matrix (molecular)
+procedure :: get_cmat_0d
+ !> Calculate constraint matrix (molecular) using neighbour list
+procedure :: get_cmat_0d_list
+ !> Calculate full constraint matrix (periodic)
+procedure :: get_cmat_3d
+ !> Calculate constraint matrix derivatives (molecular)
+procedure :: get_dcmat_0d
+ !> Calculate constraint matrix derivatives (molecular) using neighbour list
+procedure :: get_dcmat_0d_list
+ !> Calculate constraint matrix derivatives (periodic)
+procedure :: get_dcmat_3d
+ !> Calculate gradient
+procedure :: get_grad
    end type eeqbc_model
 
    real(wp), parameter :: sqrtpi = sqrt(pi)
