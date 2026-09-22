@@ -71,37 +71,37 @@ module multicharge_model_type
 
       !> Electronegativity weighted CN for local charge
       class(ncoord_type), allocatable :: ncoord_en
-   contains
+contains
 
-      !> Solve linear equations for the charge model
-      procedure :: solve
+ !> Solve linear equations for the charge model
+procedure :: solve
 
-      !> Get external gradient
-      procedure :: get_external_gradient
+ !> Get external gradient
+procedure :: get_external_gradient
 
-      !> Calculate local charges from electronegativity weighted CN
-      procedure :: local_charge
+ !> Calculate local charges from electronegativity weighted CN
+procedure :: local_charge
 
-      !> Update cache
-      procedure(update), deferred :: update
+ !> Update cache
+procedure(update), deferred :: update
 
-      !> Calculate capacitance matrix
-      procedure(get_capacitance_matrix), deferred :: get_capacitance_matrix
+ !> Calculate capacitance matrix
+procedure(get_capacitance_matrix), deferred :: get_capacitance_matrix
 
-      !> Calculate right-hand side (electronegativity)
-      procedure(get_xvec), deferred :: get_xvec
+ !> Calculate right-hand side (electronegativity)
+procedure(get_xvec), deferred :: get_xvec
 
-      !> Calculate electronegativity-vector gradients
-      procedure(get_xvec_derivs), deferred :: get_xvec_derivs
+ !> Calculate electronegativity-vector gradients
+procedure(get_xvec_derivs), deferred :: get_xvec_derivs
 
-      !> Calculate Coulomb matrix
-      procedure(get_coulomb_matrix), deferred :: get_coulomb_matrix
+ !> Calculate Coulomb matrix
+procedure(get_coulomb_matrix), deferred :: get_coulomb_matrix
 
-      !> Calculate Coulomb matrix derivatives
-      procedure(get_coulomb_derivs), deferred :: get_coulomb_derivs
+ !> Calculate Coulomb matrix derivatives
+procedure(get_coulomb_derivs), deferred :: get_coulomb_derivs
 
-      !> Calculate capacitance-corrected electronegativity derivatives
-      procedure(get_grad), deferred :: get_grad
+ !> Calculate capacitance-corrected electronegativity derivatives
+procedure(get_grad), deferred :: get_grad
 
    end type mchrg_model_type
 
@@ -277,609 +277,609 @@ contains
 
 
 !> Generate direct lattice translation vectors for a periodic structure
-   subroutine get_dir_trans(mol, trans, cutoff)
-      !> Molecular structure data
-      type(structure_type), intent(in) :: mol
+subroutine get_dir_trans(mol, trans, cutoff)
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
 
-      !> Translation vectors
-      !> Shape: (3, ntrans)
-      real(wp), allocatable, intent(out) :: trans(:, :)
+   !> Translation vectors
+   !> Shape: (3, ntrans)
+   real(wp), allocatable, intent(out) :: trans(:, :)
 
-      !> Optional lattice-vector cutoff
-      real(wp), intent(in), optional :: cutoff
+   !> Optional lattice-vector cutoff
+   real(wp), intent(in), optional :: cutoff
 
-      integer, parameter :: rep(3) = [2, 2, 2]
+   integer, parameter :: rep(3) = [2, 2, 2]
 
-      if (present(cutoff)) then
-         call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
-      else
-         call get_lattice_points(mol%lattice, rep, .true., trans)
-      end if
+   if (present(cutoff)) then
+      call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
+   else
+      call get_lattice_points(mol%lattice, rep, .true., trans)
+   end if
 
-   end subroutine get_dir_trans
+end subroutine get_dir_trans
 
 !> Generate reciprocal lattice translation vectors for a periodic structure
-   subroutine get_rec_trans(mol, trans, cutoff)
-      !> Molecular structure data
-      type(structure_type), intent(in) :: mol
+subroutine get_rec_trans(mol, trans, cutoff)
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
 
-      !> Reciprocal translation vectors
-      !> Shape: (3, ntrans)
-      real(wp), allocatable, intent(out) :: trans(:, :)
+   !> Reciprocal translation vectors
+   !> Shape: (3, ntrans)
+   real(wp), allocatable, intent(out) :: trans(:, :)
 
-      !> Optional reciprocal-vector cutoff
-      real(wp), intent(in), optional :: cutoff
+   !> Optional reciprocal-vector cutoff
+   real(wp), intent(in), optional :: cutoff
 
-      integer, parameter :: rep(3) = [2, 2, 2]
-      real(wp) :: rec_lat(3, 3)
+   integer, parameter :: rep(3) = [2, 2, 2]
+   real(wp) :: rec_lat(3, 3)
 
-      rec_lat = twopi * transpose(matinv_3x3(mol%lattice))
-      if (present(cutoff)) then
-         call get_lattice_points(mol%periodic, rec_lat, cutoff, trans)
-      else
-         call get_lattice_points(rec_lat, rep, .false., trans)
-      end if
+   rec_lat = twopi * transpose(matinv_3x3(mol%lattice))
+   if (present(cutoff)) then
+      call get_lattice_points(mol%periodic, rec_lat, cutoff, trans)
+   else
+      call get_lattice_points(rec_lat, rep, .false., trans)
+   end if
 
-   end subroutine get_rec_trans
+end subroutine get_rec_trans
 
 !> Top-level solve routine with optional persistent cache
-   subroutine solve(self, mol, solver, cache, error, &
+subroutine solve(self, mol, solver, cache, error, &
    & energy, gradient, sigma, qvec, dqdr, dqdL, list, efield, verbosity, unit)
 
-      !> Electronegativity-equilibration model
-      class(mchrg_model_type), intent(in) :: self
+   !> Electronegativity-equilibration model
+   class(mchrg_model_type), intent(in) :: self
 
-      !> Molecular structure data
-      type(structure_type), intent(in) :: mol
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
 
-      !> The solver instance
-      class(mchrg_solver_type), intent(in) :: solver
+   !> The solver instance
+   class(mchrg_solver_type), intent(in) :: solver
 
-      !> Cache handling
-      type(mchrg_cache), intent(inout) :: cache
+   !> Cache handling
+   type(mchrg_cache), intent(inout) :: cache
 
-      !> Error handling
-      type(error_type), allocatable, intent(out) :: error
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
 
-      !> Optional atomic partial charges result
-      real(wp), intent(out), contiguous, optional :: qvec(:)
+   !> Optional atomic partial charges result
+   real(wp), intent(out), contiguous, optional :: qvec(:)
 
-      !> Optional electrostatic energy result
-      real(wp), intent(inout), contiguous, optional :: energy(:)
+   !> Optional electrostatic energy result
+   real(wp), intent(inout), contiguous, optional :: energy(:)
 
-      !> Optional gradient for electrostatic energy
-      real(wp), intent(inout), contiguous, optional :: gradient(:, :)
+   !> Optional gradient for electrostatic energy
+   real(wp), intent(inout), contiguous, optional :: gradient(:, :)
 
-      !> Optional stress tensor for electrostatic energy
-      real(wp), intent(inout), contiguous, optional :: sigma(:, :)
+   !> Optional stress tensor for electrostatic energy
+   real(wp), intent(inout), contiguous, optional :: sigma(:, :)
 
-      !> Optional derivative of the atomic partial charges w.r.t. atomic positions
-      real(wp), intent(out), contiguous, optional :: dqdr(:, :, :)
+   !> Optional derivative of the atomic partial charges w.r.t. atomic positions
+   real(wp), intent(out), contiguous, optional :: dqdr(:, :, :)
 
-      !> Optional derivative of the atomic partial charges w.r.t. lattice vectors
-      real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
+   !> Optional derivative of the atomic partial charges w.r.t. lattice vectors
+   real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
 
-      !> Neighbour list optional type
-      type(csr_list), intent(in), optional :: list
+   !> Neighbour list optional type
+   type(csr_list), intent(in), optional :: list
 
-      !> Optional external electric field
-      real(wp), intent(in), contiguous, optional :: efield(:)
+   !> Optional external electric field
+   real(wp), intent(in), contiguous, optional :: efield(:)
 
-      !> Optional print verbossity number input flag
-      integer, intent(in), optional :: verbosity
+   !> Optional print verbossity number input flag
+   integer, intent(in), optional :: verbosity
 
-      !> Output unit
-      integer, intent(in), optional :: unit
+   !> Output unit
+   integer, intent(in), optional :: unit
 
-      integer :: iat, ndim
+   integer :: iat, ndim
 
-      real(wp), allocatable :: unitvec(:)
-      real(wp), allocatable :: vvec(:)
-      real(wp) :: uvecsum
-      real(wp) :: vvecsum
-      real(wp) :: lambda
-      real(wp), allocatable :: daqxdr(:, :, :)
-      real(wp), allocatable :: daqxdL(:, :, :)
+   real(wp), allocatable :: unitvec(:)
+   real(wp), allocatable :: vvec(:)
+   real(wp) :: uvecsum
+   real(wp) :: vvecsum
+   real(wp) :: lambda
+   real(wp), allocatable :: daqxdr(:, :, :)
+   real(wp), allocatable :: daqxdL(:, :, :)
 
-      logical :: grad, cpq
-      logical :: add_lagr = .true.
-      type(timer_type) :: timer
-      integer :: print_unit, verbosity_solve
+   logical :: grad, cpq
+   logical :: add_lagr = .true.
+   type(timer_type) :: timer
+   integer :: print_unit, verbosity_solve
 
 
-      ! Calculate gradient if the respective arrays are present
-      grad = present(gradient) .and. present(sigma)
-      cpq = present(dqdr) .and. present(dqdL)
+   ! Calculate gradient if the respective arrays are present
+   grad = present(gradient) .and. present(sigma)
+   cpq = present(dqdr) .and. present(dqdL)
 
-      if (.not. present(verbosity)) then
-         verbosity_solve = 0
-      else
-         verbosity_solve = verbosity
+   if (.not. present(verbosity)) then
+      verbosity_solve = 0
+   else
+      verbosity_solve = verbosity
+   end if
+
+   if (present(unit)) then
+      print_unit = unit
+   else
+      print_unit = output_unit
+   end if
+
+   ! The CG solver requires a positive-definite system
+   if (solver%need_pos_def) then
+      ndim = mol%nat
+      add_lagr = .false.
+   else
+      ndim = mol%nat + 1
+      add_lagr = .true.
+   end if
+
+   call timer%push("total")
+   call timer%push("setup")
+
+   ! Setup the system matrices and vectors
+   call self%get_capacitance_matrix(mol, ndim, cache, list)
+   call self%get_coulomb_matrix(mol, ndim, cache, list)
+   call self%get_xvec(mol, ndim, cache, list, efield)
+   if (.not. allocated(cache%vrhs)) then
+      allocate(cache%vrhs(mol%nat + 1))
+   end if
+
+   ! pop setup timer
+   call timer%pop
+
+   ! Print header
+   call print_solve_header(print_unit, verbosity_solve, timer%get("setup"))
+
+   if (add_lagr) then
+      if (.not. allocated(cache%ainv)) then
+         allocate(cache%ainv(ndim, ndim))
       end if
-
-      if (present(unit)) then
-         print_unit = unit
-      else
-         print_unit = output_unit
-      end if
-
-      ! The CG solver requires a positive-definite system
-      if (solver%need_pos_def) then
-         ndim = mol%nat
-         add_lagr = .false.
-      else
-         ndim = mol%nat + 1
-         add_lagr = .true.
-      end if
-
-      call timer%push("total")
-      call timer%push("setup")
-
-      ! Setup the system matrices and vectors
-      call self%get_capacitance_matrix(mol, ndim, cache, list)
-      call self%get_coulomb_matrix(mol, ndim, cache, list)
-      call self%get_xvec(mol, ndim, cache, list, efield)
-      if (.not. allocated(cache%vrhs)) then
-         allocate(cache%vrhs(mol%nat + 1))
-      end if
-
-      ! pop setup timer
-      call timer%pop
-
-      ! Print header
-      call print_solve_header(print_unit, verbosity_solve, timer%get("setup"))
-
-      if (add_lagr) then
-         if (.not. allocated(cache%ainv)) then
-            allocate(cache%ainv(ndim, ndim))
-         end if
-         cache%vrhs = cache%xvec
-         cache%ainv = cache%amat
-         call solver%solve(amat=cache%amat, xvec=cache%xvec, &
+      cache%vrhs = cache%xvec
+      cache%ainv = cache%amat
+      call solver%solve(amat=cache%amat, xvec=cache%xvec, &
          & vrhs=cache%vrhs, ainv=cache%ainv, cpq=cpq, &
          & new_unit=print_unit, error=error)
 
+   else
+      if (.not. allocated(cache%uvec)) then
+         allocate(cache%uvec(mol%nat))
+      end if
+      allocate(unitvec(mol%nat))
+      allocate(vvec(mol%nat))
+      ! Initial guess
+      if (present(list)) then
+         do iat = 1, mol%nat
+            cache%uvec(iat) = 1.0_wp / (cache%alist(list%inl(iat)) + eps)
+            vvec(iat) = - cache%xvec(iat) / (cache%alist(list%inl(iat)) + eps)
+         end do
       else
-         if (.not. allocated(cache%uvec)) then
-            allocate(cache%uvec(mol%nat))
-         end if
-         allocate(unitvec(mol%nat))
-         allocate(vvec(mol%nat))
-         ! Initial guess
-         if (present(list)) then
-            do iat = 1, mol%nat
-               cache%uvec(iat) = 1.0_wp / (cache%alist(list%inl(iat)) + eps)
-               vvec(iat) = - cache%xvec(iat) / (cache%alist(list%inl(iat)) + eps)
-            end do
-         else
-            do iat = 1, mol%nat
-               cache%uvec(iat) = 1.0_wp / (cache%amat(iat, iat) + eps)
-               vvec(iat) = - cache%xvec(iat) / (cache%amat(iat, iat) + eps)
-            end do
-         end if
+         do iat = 1, mol%nat
+            cache%uvec(iat) = 1.0_wp / (cache%amat(iat, iat) + eps)
+            vvec(iat) = - cache%xvec(iat) / (cache%amat(iat, iat) + eps)
+         end do
+      end if
 
-         unitvec = 1.0_wp
+      unitvec = 1.0_wp
 
-         call print_constrained_system_message(print_unit, verbosity_solve, 'u')
-         ! Constrained response: A*uvec = 1
-         call solver%solve(amat=cache%amat, alist=cache%alist, xvec=unitvec, &
+      call print_constrained_system_message(print_unit, verbosity_solve, 'u')
+      ! Constrained response: A*uvec = 1
+      call solver%solve(amat=cache%amat, alist=cache%alist, xvec=unitvec, &
          & vrhs=cache%uvec, list=list, new_unit=print_unit, error=error)
-         call print_constrained_system_message(print_unit, verbosity_solve, 'v')
+      call print_constrained_system_message(print_unit, verbosity_solve, 'v')
 
-         ! Constrained response: A*uvec = -xvec
-         call solver%solve(amat=cache%amat, alist=cache%alist, xvec=-cache%xvec, &
+      ! Unconstrained response: A*uvec = -xvec
+      call solver%solve(amat=cache%amat, alist=cache%alist, xvec=-cache%xvec, &
          & vrhs=vvec, list=list, new_unit=print_unit, error=error)
-         uvecsum = sum(cache%uvec)
-         vvecsum = sum(vvec)
-         ! Lagrangian multiplier
-         lambda = - (mol%charge + vvecsum) / (uvecsum + eps)
+      uvecsum = sum(cache%uvec)
+      vvecsum = sum(vvec)
+      ! Lagrangian multiplier
+      lambda = - (mol%charge + vvecsum) / (uvecsum + eps)
 
-         ! Projection of uvec on vvec
-         cache%vrhs(:mol%nat) = -vvec - lambda * cache%uvec
-         cache%vrhs(mol%nat + 1) = lambda
+      ! Projection of uvec on vvec
+      cache%vrhs(:mol%nat) = -vvec - lambda * cache%uvec
+      cache%vrhs(mol%nat + 1) = lambda
 
-      end if
+   end if
 
-      ! Partial charges if present
-      if (present(qvec)) then
-         qvec(:) = cache%vrhs(:mol%nat)
-      end if
+   ! Partial charges if present
+   if (present(qvec)) then
+      qvec(:) = cache%vrhs(:mol%nat)
+   end if
 
-      ! Electrostatic energy if present
-      if (present(energy)) then
-         call timer%push("energy")
-         if (present(list)) then
-            call spmv_csr(list, cache%alist, cache%vrhs, cache%xvec(:mol%nat), &
+   ! Electrostatic energy if present
+   if (present(energy)) then
+      call timer%push("energy")
+      if (present(list)) then
+         call spmv_csr(list, cache%alist, cache%vrhs, cache%xvec(:mol%nat), &
             & alpha=0.5_wp, beta=-1.0_wp)
-         else
-            call symv(cache%amat, cache%vrhs, cache%xvec(:mol%nat), &
+      else
+         call symv(cache%amat, cache%vrhs, cache%xvec(:mol%nat), &
             & alpha=0.5_wp, beta=-1.0_wp, uplo='l')
-         end if
-         if (ndim > mol%nat) then
-            ! Correct xvec to exclude constraint term
-            cache%xvec(:mol%nat) = cache%xvec(:mol%nat) - 0.5_wp * cache%vrhs(mol%nat + 1)
-         end if
-         energy(:) = energy(:) + cache%vrhs(:mol%nat) * cache%xvec(:mol%nat)
-         call timer%pop
-         call print_energy_time(print_unit, verbosity_solve, timer%get("energy"))
       end if
+      if (ndim > mol%nat) then
+         ! Correct xvec to exclude constraint term
+         cache%xvec(:mol%nat) = cache%xvec(:mol%nat) - 0.5_wp * cache%vrhs(mol%nat + 1)
+      end if
+      energy(:) = energy(:) + cache%vrhs(:mol%nat) * cache%xvec(:mol%nat)
+      call timer%pop
+      call print_energy_time(print_unit, verbosity_solve, timer%get("energy"))
+   end if
 
-      ! Calculate gradients if requested
-      if (grad) then
-         call timer%push("gradient")
+   ! Calculate gradients if requested
+   if (grad) then
+      call timer%push("gradient")
 
-         call self%get_grad(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, &
+      call self%get_grad(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, &
          & alpha=0.5_wp, beta=-1.0_wp, list=list)
 
-         ! pop gradient timer
-         call timer%pop
-         call print_gradient_time(print_unit, verbosity_solve, timer%get("gradient"))
-      end if
+      ! pop gradient timer
+      call timer%pop
+      call print_gradient_time(print_unit, verbosity_solve, timer%get("gradient"))
+   end if
 
-      ! Calculate charge derivatives if requested
-      if (cpq) then
-         call timer%push("dxdr_setup")
-         call self%get_xvec_derivs(mol, ndim, cache)
-         call timer%pop
-         if (verbosity_solve > 1) then
-            write(output_unit, '(a, 1x, a)') &
+   ! Calculate charge derivatives if requested
+   if (cpq) then
+      call timer%push("dxdr_setup")
+      call self%get_xvec_derivs(mol, ndim, cache)
+      call timer%pop
+      if (verbosity_solve > 1) then
+         write(output_unit, '(a, 1x, a)') &
             & "Electronegativity derivatives setup time : ", &
             & format_time(timer%get("dxdr_setup"))
-            write(output_unit, '(a)') ''
-         end if
-         call timer%push("dadr_setup")
-         call self%get_coulomb_derivs(mol, ndim, cache)
-         call timer%pop
-         if (verbosity_solve > 1) then
-            write(output_unit, '(a, 1x, a)') &
+         write(output_unit, '(a)') ''
+      end if
+      call timer%push("dadr_setup")
+      call self%get_coulomb_derivs(mol, ndim, cache)
+      call timer%pop
+      if (verbosity_solve > 1) then
+         write(output_unit, '(a, 1x, a)') &
             & "Coulomb matrix derivatives setup time : ", &
             & format_time(timer%get("dadr_setup"))
-            write(output_unit, '(a)') ''
-         end if
-         allocate(daqxdr(3, mol%nat, ndim), source=0.0_wp)
-         allocate(daqxdL(3, 3, ndim), source=0.0_wp)
+         write(output_unit, '(a)') ''
+      end if
+      allocate(daqxdr(3, mol%nat, ndim), source=0.0_wp)
+      allocate(daqxdL(3, 3, ndim), source=0.0_wp)
 
-         ! pop gradient setup
-         call timer%pop
-         call print_gradient_header(print_unit, verbosity_solve, &
+      ! pop gradient setup
+      call timer%pop
+      call print_gradient_header(print_unit, verbosity_solve, &
          & timer%get("setup_gradient"))
 
-         call timer%push("cpq")
-         do iat = 1, mol%nat
-            daqxdr(:, :, iat) = cache%dxdr(:, :, iat) - cache%dadr(:, :, iat)
-            daqxdL(:, :, iat) = cache%dxdL(:, :, iat) - cache%dadL(:, :, iat)
-         end do
-         call gemm(daqxdr, cache%ainv(:, :mol%nat), dqdr, alpha=1.0_wp)
-         call gemm(daqxdL, cache%ainv(:, :mol%nat), dqdL, alpha=1.0_wp)
-         ! pop cpq timer
-         call timer%pop
-         call print_gradient_time(print_unit, verbosity_solve, timer%get("cpq"))
-      end if
-
-      ! pop total solve timer
+      call timer%push("cpq")
+      do iat = 1, mol%nat
+         daqxdr(:, :, iat) = cache%dxdr(:, :, iat) - cache%dadr(:, :, iat)
+         daqxdL(:, :, iat) = cache%dxdL(:, :, iat) - cache%dadL(:, :, iat)
+      end do
+      call gemm(daqxdr, cache%ainv(:, :mol%nat), dqdr, alpha=1.0_wp)
+      call gemm(daqxdL, cache%ainv(:, :mol%nat), dqdL, alpha=1.0_wp)
+      ! pop cpq timer
       call timer%pop
-      call print_total_time(print_unit, verbosity_solve, timer%get("total"))
+      call print_gradient_time(print_unit, verbosity_solve, timer%get("cpq"))
+   end if
 
-   end subroutine solve
+   ! pop total solve timer
+   call timer%pop
+   call print_total_time(print_unit, verbosity_solve, timer%get("total"))
+
+end subroutine solve
 
 !> Adjoint external gradient calculation using cached data
 !
 !> This routine evaluates dF/dR and dF/dL from the derivative of the objective
 !> w.r.t. charges (dF/dq), avoiding explicit differentiation
 !> of the charge solution by solving an adjoint system.
-   subroutine get_external_gradient(self, mol, solver, cache, error, &
+subroutine get_external_gradient(self, mol, solver, cache, error, &
    & dfdq, dfdr, dfdL, list, unit, verbosity)
 
-      !> Electronegativity-equilibration model
-      class(mchrg_model_type), intent(in) :: self
+   !> Electronegativity-equilibration model
+   class(mchrg_model_type), intent(in) :: self
 
-      !> Molecular structure data
-      type(structure_type), intent(in) :: mol
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
 
-      !> Solver instance
-      class(mchrg_solver_type), intent(in) :: solver
+   !> Solver instance
+   class(mchrg_solver_type), intent(in) :: solver
 
-      !> Cache handling
-      type(mchrg_cache), intent(inout) :: cache
+   !> Cache handling
+   type(mchrg_cache), intent(inout) :: cache
 
-      !> Error handling
-      type(error_type), allocatable, intent(out) :: error
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
 
-      !> Derivative of the objective w.r.t. atomic partial charges
-      real(wp), intent(in) :: dfdq(:)
+   !> Derivative of the objective w.r.t. atomic partial charges
+   real(wp), intent(in) :: dfdq(:)
 
-      !> External gradient w.r.t. positions
-      real(wp), intent(inout) :: dfdr(:, :)
+   !> External gradient w.r.t. positions
+   real(wp), intent(inout) :: dfdr(:, :)
 
-      !> External gradient w.r.t. lattice vectors
-      real(wp), intent(inout) :: dfdL(:, :)
+   !> External gradient w.r.t. lattice vectors
+   real(wp), intent(inout) :: dfdL(:, :)
 
-      !> Neighbour list optional type
-      type(csr_list), intent(in), optional :: list
+   !> Neighbour list optional type
+   type(csr_list), intent(in), optional :: list
 
-      !> Output unit
-      integer, intent(in), optional :: unit
+   !> Output unit
+   integer, intent(in), optional :: unit
 
-      !> Verbosity level
-      integer, intent(in), optional :: verbosity
+   !> Verbosity level
+   integer, intent(in), optional :: verbosity
 
-      integer :: iat
-      integer :: ndim
-      real(wp), allocatable :: yvec(:)
-      real(wp), allocatable :: padj(:)
-      real(wp), allocatable :: dfdq_loc(:)
-      real(wp) :: uvecsum
-      real(wp) :: yvecsum
-      real(wp) :: scale
-      integer :: print_unit, verbosity_solve
-      type(timer_type) :: timer
+   integer :: iat
+   integer :: ndim
+   real(wp), allocatable :: yvec(:)
+   real(wp), allocatable :: padj(:)
+   real(wp), allocatable :: dfdq_loc(:)
+   real(wp) :: uvecsum
+   real(wp) :: yvecsum
+   real(wp) :: scale
+   integer :: print_unit, verbosity_solve
+   type(timer_type) :: timer
 
-      verbosity_solve = 0
-      if (present(verbosity)) verbosity_solve = verbosity
-      print_unit = output_unit
-      if (present(unit)) print_unit = unit
+   verbosity_solve = 0
+   if (present(verbosity)) verbosity_solve = verbosity
+   print_unit = output_unit
+   if (present(unit)) print_unit = unit
 
-      if (size(dfdq) > mol%nat) then
-         call fatal_error(error, "External partial derivative is wrong size")
-         return
-      end if
+   if (size(dfdq) > mol%nat) then
+      call fatal_error(error, "External partial derivative is wrong size")
+      return
+   end if
 
-      if (solver%need_pos_def) then
-         ndim = mol%nat
-      else
-         ndim = mol%nat + 1
-         allocate(dfdq_loc(ndim), source=0.0_wp)
-         dfdq_loc(:mol%nat) = dfdq
-      end if
+   if (solver%need_pos_def) then
+      ndim = mol%nat
+   else
+      ndim = mol%nat + 1
+      allocate(dfdq_loc(ndim), source=0.0_wp)
+      dfdq_loc(:mol%nat) = dfdq
+   end if
 
-      call timer%push("setup_external")
-      call timer%pop
+   call timer%push("setup_external")
+   call timer%pop
 
-      call print_gradient_header(print_unit, verbosity_solve, &
+   call print_gradient_header(print_unit, verbosity_solve, &
       & timer%get("setup_external"))
-      call timer%push("external_gradient")
+   call timer%push("external_gradient")
 
-      ! Get variables from the model cache
-      if (.not. allocated(cache%amat)) then
-         call fatal_error(error, "J-matrix is not allocated")
-         return
-      end if
-      if (.not. allocated(cache%uvec) .and. solver%need_pos_def) then
-         call fatal_error(error, "Constraint response J*uvec = 1 is not allocated")
-         return
-      end if
+   ! Get variables from the model cache
+   if (.not. allocated(cache%amat)) then
+      call fatal_error(error, "J-matrix is not allocated")
+      return
+   end if
+   if (.not. allocated(cache%uvec) .and. solver%need_pos_def) then
+      call fatal_error(error, "Constrained response J*uvec = 1 is not allocated")
+      return
+   end if
 
-      if (solver%need_pos_def) then
-         allocate(yvec(ndim))
-         do iat = 1, mol%nat
-            yvec(iat) = dfdq(iat) / cache%amat(iat, iat)
-         end do
+   if (solver%need_pos_def) then
+      allocate(yvec(ndim))
+      do iat = 1, mol%nat
+         yvec(iat) = dfdq(iat) / cache%amat(iat, iat)
+      end do
 
-         ! Constrained response: J*yvec = dfdq
-         call print_adjoint_message(print_unit, verbosity_solve)
-         call solver%solve(amat=cache%amat, alist=cache%alist, &
+      ! Unconstrained response: J*yvec = dfdq
+      call print_adjoint_message(print_unit, verbosity_solve)
+      call solver%solve(amat=cache%amat, alist=cache%alist, &
          & xvec=dfdq, vrhs=yvec, list=list, error=error)
-         if (allocated(error)) return
+      if (allocated(error)) return
 
-         ! Projection of uvec on yvec
-         yvecsum = sum(yvec)
-         uvecsum = sum(cache%uvec)
-         scale = yvecsum / (uvecsum + eps)
-         allocate(padj(mol%nat))
-         padj = yvec - scale * cache%uvec
-      else
-         allocate(padj(ndim))
+      ! Projection of uvec on yvec
+      yvecsum = sum(yvec)
+      uvecsum = sum(cache%uvec)
+      scale = yvecsum / (uvecsum + eps)
+      allocate(padj(mol%nat))
+      padj = yvec - scale * cache%uvec
+   else
+      allocate(padj(ndim))
 
-         ! Direct solution: J*yvec = dfdq
-         call print_adjoint_message(print_unit, verbosity_solve)
-         call solver%solve(amat=cache%amat, xvec=dfdq_loc, vrhs=padj, &
+      ! Direct solution: J*yvec = dfdq
+      call print_adjoint_message(print_unit, verbosity_solve)
+      call solver%solve(amat=cache%amat, xvec=dfdq_loc, vrhs=padj, &
          & new_unit=print_unit, error=error)
-         if (allocated(error)) return
-      end if
+      if (allocated(error)) return
+   end if
 
-      ! Evaluate external gradients via adjoint contraction:
-      ! dfdr = p^T * (db/dr - dA/dr X q)
+   ! Evaluate external gradients via adjoint contraction:
+   ! dfdr = p^T * (db/dr - dA/dr X q)
 
-      call self%get_grad(mol, cache, padj, dfdr, dfdL, alpha=-1.0_wp, &
+   call self%get_grad(mol, cache, padj, dfdr, dfdL, alpha=-1.0_wp, &
       & beta=1.0_wp, list=list)
 
-      ! pop dfdr timer
-      call timer%pop
-      call print_gradient_time(print_unit, verbosity_solve, &
+   ! pop dfdr timer
+   call timer%pop
+   call print_gradient_time(print_unit, verbosity_solve, &
       & timer%get("external_gradient"))
 
-   end subroutine get_external_gradient
+end subroutine get_external_gradient
 
 !> Local charges calculation
-   subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL, &
+subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL, &
    & list, dqlocdrij, dqlocdrji, dqlocdrdiag)
-      !> Electronegativity equilibration model
-      class(mchrg_model_type), intent(in) :: self
+   !> Electronegativity equilibration model
+   class(mchrg_model_type), intent(in) :: self
 
-      !> Molecular structure data
-      type(structure_type), intent(in) :: mol
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
 
-      !> Lattice translation vectors
-      real(wp), intent(in) :: trans(:, :)
+   !> Lattice translation vectors
+   real(wp), intent(in) :: trans(:, :)
 
-      !> Local atomic partial charges
-      real(wp), intent(out) :: qloc(:)
+   !> Local atomic partial charges
+   real(wp), intent(out) :: qloc(:)
 
-      !> Optional derivative of local atomic partial charges w.r.t. atomic positions
-      real(wp), intent(out), optional :: dqlocdr(3, mol%nat, mol%nat)
+   !> Optional derivative of local atomic partial charges w.r.t. atomic positions
+   real(wp), intent(out), optional :: dqlocdr(3, mol%nat, mol%nat)
 
-      !> Optional derivative of local atomic partial charges w.r.t. lattice vectors
-      real(wp), intent(out), optional :: dqlocdL(3, 3, mol%nat)
+   !> Optional derivative of local atomic partial charges w.r.t. lattice vectors
+   real(wp), intent(out), optional :: dqlocdL(3, 3, mol%nat)
 
-      !> Lattice points
-      type(csr_list), intent(in), optional :: list
+   !> Lattice points
+   type(csr_list), intent(in), optional :: list
 
-      !> Optional derivative with respect to the first atom in each pair
-      real(wp), intent(out), optional :: dqlocdrij(:, :)
+   !> Optional derivative with respect to the first atom in each pair
+   real(wp), intent(out), optional :: dqlocdrij(:, :)
 
-      !> Optional derivative with respect to the second atom in each pair
-      real(wp), intent(out), optional :: dqlocdrji(:, :)
+   !> Optional derivative with respect to the second atom in each pair
+   real(wp), intent(out), optional :: dqlocdrji(:, :)
 
-      !> Optional derivative with respect to the diagonal atom in each pair
-      real(wp), intent(out), optional :: dqlocdrdiag(:, :)
+   !> Optional derivative with respect to the diagonal atom in each pair
+   real(wp), intent(out), optional :: dqlocdrdiag(:, :)
 
-      qloc = 0.0_wp
-      if (present(dqlocdr) .and. present(dqlocdL)) then
-         dqlocdr = 0.0_wp
-         dqlocdL = 0.0_wp
-      end if
-      if (present(list) .and. present(dqlocdrij) .and. present(dqlocdrji) &
+   qloc = 0.0_wp
+   if (present(dqlocdr) .and. present(dqlocdL)) then
+      dqlocdr = 0.0_wp
+      dqlocdL = 0.0_wp
+   end if
+   if (present(list) .and. present(dqlocdrij) .and. present(dqlocdrji) &
       & .and. present(dqlocdrdiag) .and. present(dqlocdL)) then
-         dqlocdrij = 0.0_wp
-         dqlocdrji = 0.0_wp
-         dqlocdrdiag = 0.0_wp
-         dqlocdL = 0.0_wp
-      end if
-      ! Get the electronegativity weighted CN for local charge
-      ! Derivatives depend only in this CN
-      if (allocated(self%ncoord_en)) then
-         call self%ncoord_en%get_coordination_number(mol, trans, qloc, &
+      dqlocdrij = 0.0_wp
+      dqlocdrji = 0.0_wp
+      dqlocdrdiag = 0.0_wp
+      dqlocdL = 0.0_wp
+   end if
+   ! Get the electronegativity weighted CN for local charge
+   ! Derivatives depend only in this CN
+   if (allocated(self%ncoord_en)) then
+      call self%ncoord_en%get_coordination_number(mol, trans, qloc, &
          & dcndr=dqlocdr, dcndrij=dqlocdrij, dcndrji=dqlocdrji, &
          & dcndrdiag=dqlocdrdiag, dcndL=dqlocdL, list=list)
-      end if
+   end if
 
-      ! Distribute the total charge equally
-      qloc = qloc + mol%charge / real(mol%nat, wp)
+   ! Distribute the total charge equally
+   qloc = qloc + mol%charge / real(mol%nat, wp)
 
-   end subroutine local_charge
+end subroutine local_charge
 
 !> Print header for charge equilibration solver
-   subroutine print_solve_header(unit, verbosity, timer)
-      !> Output unit
-      integer, intent(in) :: unit
+subroutine print_solve_header(unit, verbosity, timer)
+   !> Output unit
+   integer, intent(in) :: unit
 
-      !> Verbosity level
-      integer, intent(in) :: verbosity
+   !> Verbosity level
+   integer, intent(in) :: verbosity
 
-      !> Elapsed setup time
-      real(wp), intent(in) :: timer
+   !> Elapsed setup time
+   real(wp), intent(in) :: timer
 
-      if (verbosity > 0) then
-         write(unit, '(54("-"))')
-         write(unit, '(13x, a)') "Charge equilibration solver"
-         write(unit, '(54("-"))')
+   if (verbosity > 0) then
+      write(unit, '(54("-"))')
+      write(unit, '(13x, a)') "Charge equilibration solver"
+      write(unit, '(54("-"))')
+      write(unit, '(a)') ''
+      if (verbosity > 1) then
+         write(unit, '(a, 1x, a)') "Setup time : ", format_time(timer)
          write(unit, '(a)') ''
-         if (verbosity > 1) then
-            write(unit, '(a, 1x, a)') "Setup time : ", format_time(timer)
-            write(unit, '(a)') ''
-         end if
       end if
-   end subroutine print_solve_header
+   end if
+end subroutine print_solve_header
 
 !> Print header for gradient calculations
-   subroutine print_gradient_header(unit, verbosity, timer)
-      !> Output unit
-      integer, intent(in) :: unit
+subroutine print_gradient_header(unit, verbosity, timer)
+   !> Output unit
+   integer, intent(in) :: unit
 
-      !> Verbosity level
-      integer, intent(in) :: verbosity
+   !> Verbosity level
+   integer, intent(in) :: verbosity
 
-      !> Elapsed gradient setup time
-      real(wp), intent(in) :: timer
+   !> Elapsed gradient setup time
+   real(wp), intent(in) :: timer
 
-      if (verbosity > 0) then
-         write(unit, '(54("-"))')
-         write(unit, '(17x, a)') "Gradient Calculations"
-         write(unit, '(54("-"))')
+   if (verbosity > 0) then
+      write(unit, '(54("-"))')
+      write(unit, '(17x, a)') "Gradient Calculations"
+      write(unit, '(54("-"))')
+      write(unit, '(a)') ''
+      if (verbosity > 1) then
+         write(unit, '(a, 1x, a)') "Gradient setup time : ", format_time(timer)
          write(unit, '(a)') ''
-         if (verbosity > 1) then
-            write(unit, '(a, 1x, a)') "Gradient setup time : ", format_time(timer)
-            write(unit, '(a)') ''
-         end if
       end if
-   end subroutine print_gradient_header
+   end if
+end subroutine print_gradient_header
 
 !> Print message for constrained system solves
-   subroutine print_constrained_system_message(unit, verbosity, vector)
-      !> Output unit
-      integer, intent(in) :: unit
+subroutine print_constrained_system_message(unit, verbosity, vector)
+   !> Output unit
+   integer, intent(in) :: unit
 
-      !> Verbosity level
-      integer, intent(in) :: verbosity
+   !> Verbosity level
+   integer, intent(in) :: verbosity
 
-      !> Constrained-system identifier
-      character, intent(in) :: vector
+   !> Constrained-system identifier
+   character, intent(in) :: vector
 
-      if (verbosity > 0) then
-         if (vector == 'u') then
-            write(unit, '(a)') 'Solving constrained system: J*u = 1'
-         else if (vector == 'v') then
-            write(unit, '(a)') 'Solving constrained system: J*v = chi'
-         else if (vector == 'y') then
-            write(unit, '(a)') 'Solving derivative constrained system: J*y = df/dq'
-         end if
-         write(unit, '(a)') ''
+   if (verbosity > 0) then
+      if (vector == 'u') then
+         write(unit, '(a)') 'Solving constrained system: J*u = 1'
+      else if (vector == 'v') then
+         write(unit, '(a)') 'Solving unconstrained system: J*v = chi'
+      else if (vector == 'y') then
+         write(unit, '(a)') 'Solving derivative unconstrained system: J*y = df/dq'
       end if
-   end subroutine print_constrained_system_message
+      write(unit, '(a)') ''
+   end if
+end subroutine print_constrained_system_message
 
 !> Print message for adjoint system solve
-   subroutine print_adjoint_message(unit, verbosity)
-      !> Output unit
-      integer, intent(in) :: unit
+subroutine print_adjoint_message(unit, verbosity)
+   !> Output unit
+   integer, intent(in) :: unit
 
-      !> Verbosity level
-      integer, intent(in) :: verbosity
+   !> Verbosity level
+   integer, intent(in) :: verbosity
 
-      if (verbosity > 0) then
-         write(unit, '(a)') 'Solving adjoint system: J*y = dfdq'
-         write(unit, '(a)') ''
-      end if
-   end subroutine print_adjoint_message
+   if (verbosity > 0) then
+      write(unit, '(a)') 'Solving adjoint system: J*y = dfdq'
+      write(unit, '(a)') ''
+   end if
+end subroutine print_adjoint_message
 
 !> Print gradient calculation time
-   subroutine print_gradient_time(unit, verbosity, timer)
-      !> Output unit
-      integer, intent(in) :: unit
+subroutine print_gradient_time(unit, verbosity, timer)
+   !> Output unit
+   integer, intent(in) :: unit
 
-      !> Verbosity level
-      integer, intent(in) :: verbosity
+   !> Verbosity level
+   integer, intent(in) :: verbosity
 
-      !> Elapsed gradient calculation time
-      real(wp), intent(in) :: timer
+   !> Elapsed gradient calculation time
+   real(wp), intent(in) :: timer
 
-      if (verbosity > 1) then
-         write(unit, '(a, 1x, a)') "Gradient calculation time : ", format_time(timer)
-         write(unit, '(a)') ''
-      end if
-   end subroutine print_gradient_time
+   if (verbosity > 1) then
+      write(unit, '(a, 1x, a)') "Gradient calculation time : ", format_time(timer)
+      write(unit, '(a)') ''
+   end if
+end subroutine print_gradient_time
 
 !> Print energy calculation time
-   subroutine print_energy_time(unit, verbosity, timer)
-      !> Output unit
-      integer, intent(in) :: unit
+subroutine print_energy_time(unit, verbosity, timer)
+   !> Output unit
+   integer, intent(in) :: unit
 
-      !> Verbosity level
-      integer, intent(in) :: verbosity
+   !> Verbosity level
+   integer, intent(in) :: verbosity
 
-      !> Elapsed energy calculation time
-      real(wp), intent(in) :: timer
+   !> Elapsed energy calculation time
+   real(wp), intent(in) :: timer
 
-      if (verbosity > 1) then
-         write(unit, '(a, 1x, a)') "Energy calculation time : ", format_time(timer)
-         write(unit, '(a)') ''
-      end if
-   end subroutine print_energy_time
+   if (verbosity > 1) then
+      write(unit, '(a, 1x, a)') "Energy calculation time : ", format_time(timer)
+      write(unit, '(a)') ''
+   end if
+end subroutine print_energy_time
 
 !> Print total solve time
-   subroutine print_total_time(unit, verbosity, timer)
-      !> Output unit
-      integer, intent(in) :: unit
+subroutine print_total_time(unit, verbosity, timer)
+   !> Output unit
+   integer, intent(in) :: unit
 
-      !> Verbosity level
-      integer, intent(in) :: verbosity
+   !> Verbosity level
+   integer, intent(in) :: verbosity
 
-      !> Elapsed total solve time
-      real(wp), intent(in) :: timer
+   !> Elapsed total solve time
+   real(wp), intent(in) :: timer
 
-      if (verbosity > 1) then
-         write(unit, '(a, 1x, a)') "Total solve time : ", format_time(timer)
-         write(unit, '(a)') ''
-      end if
-   end subroutine print_total_time
+   if (verbosity > 1) then
+      write(unit, '(a, 1x, a)') "Total solve time : ", format_time(timer)
+      write(unit, '(a)') ''
+   end if
+end subroutine print_total_time
 
 end module multicharge_model_type
