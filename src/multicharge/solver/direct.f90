@@ -51,159 +51,167 @@ module multicharge_solver_direct
 
 contains
 
-   !> Construct a direct solver from its input configuration
-   subroutine new_direct_solver(self, input)
-      !> Direct solver instance
-      class(direct_solver), intent(out) :: self
 
-      !> Direct solver configuration
-      type(direct_input), intent(in) :: input
+!> Construct a direct solver from its input configuration
+subroutine new_direct_solver(self, input)
+   !> Direct solver instance
+   class(direct_solver), intent(out) :: self
 
-      self%need_pos_def = .false.
-      if (allocated(input%verbosity)) then
-         self%verbosity = input%verbosity
-      else
-         self%verbosity = verbosity_def
+   !> Direct solver configuration
+   type(direct_input), intent(in) :: input
+
+   self%need_pos_def = .false.
+   if (allocated(input%verbosity)) then
+      self%verbosity = input%verbosity
+   else
+      self%verbosity = verbosity_def
+   end if
+
+end subroutine new_direct_solver
+
+
+!> Solve a dense symmetric linear system using LAPACK
+subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error)
+   !> Direct solver instance
+   class(direct_solver), intent(in) :: self
+
+   !> Dense coefficient matrix of the linear system
+   real(wp), intent(in), optional :: amat(:, :)
+
+   !> Coefficient matrix values in compressed-row storage
+   real(wp), intent(in), optional :: alist(:)
+
+   !> Right-hand side vector
+   real(wp), intent(in) :: xvec(:)
+
+   !> On input: initial guess; on output: solution
+   real(wp), intent(inout), contiguous :: vrhs(:)
+
+   !> Inverse coefficient matrix
+   real(wp), intent(out), optional :: ainv(:, :)
+
+   !> Whether to solve coupled-perturbed equations
+   logical, intent(in), optional :: cpq
+
+   !> Optional neighbour-list representation of the matrix
+   type(csr_list), intent(in), optional :: list
+
+   !> Output unit (optional)
+   integer, intent(in), optional :: new_unit
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   real(wp), allocatable :: invmat(:, :)
+   integer, allocatable :: ipiv(:)
+
+   integer :: local_info
+   integer :: ndim, ic, jc
+
+   integer :: unit
+
+   logical :: want_cpq
+
+   type(timer_type) :: timer
+
+   if (self%verbosity > 1) call timer%push("total")
+
+   if (present(new_unit)) then
+      unit = new_unit
+   else
+      unit = output_unit
+   end if
+
+   if (self%verbosity > 0) then
+      call write_direct_solver(unit)
+   end if
+
+   ! Dimensions match check
+   ndim = size(xvec)
+
+   if (present(amat)) then
+      if (size(amat, 1) /= ndim .or. size(amat, 2) /= ndim) then
+         call fatal_error(error, "solve_direct: dimension mismatch.")
+         return
       end if
 
-   end subroutine new_direct_solver
+      allocate(invmat(ndim, ndim))
+      invmat = amat
+      vrhs = xvec
 
-   !> Solve a dense symmetric linear system using LAPACK
-   subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error)
-      !> Direct solver instance
-      class(direct_solver), intent(in) :: self
+      want_cpq = .false.
+      if (present(cpq)) want_cpq = cpq
 
-      !> Dense coefficient matrix of the linear system
-      real(wp), intent(in), optional :: amat(:, :)
-
-      !> Coefficient matrix values in compressed-row storage
-      real(wp), intent(in), optional :: alist(:)
-
-      !> Right-hand side vector
-      real(wp), intent(in) :: xvec(:)
-
-      !> On input: initial guess; on output: solution
-      real(wp), intent(inout), contiguous :: vrhs(:)
-
-      !> Inverse coefficient matrix
-      real(wp), intent(out), optional :: ainv(:, :)
-
-      !> Whether to solve coupled-perturbed equations
-      logical, intent(in), optional :: cpq
-
-      !> Optional neighbour-list representation of the matrix
-      type(csr_list), intent(in), optional :: list
-
-      !> Output unit (optional)
-      integer, intent(in), optional :: new_unit
-
-      !> Error handling
-      type(error_type), allocatable, intent(out) :: error
-
-      real(wp), allocatable :: invmat(:, :)
-      integer, allocatable :: ipiv(:)
-
-      integer :: local_info
-      integer :: ndim, ic, jc
-
-      integer :: unit
-
-      logical :: want_cpq
-
-      type(timer_type) :: timer
-
-      if (self%verbosity > 1) call timer%push("total")
-
-      if (present(new_unit)) then
-         unit = new_unit
-      else
-         unit = output_unit
+      ! Factorize the Coulomb matrix
+      allocate(ipiv(ndim))
+      call sytrf(invmat, ipiv, info=local_info, uplo='l')
+      if (local_info /= 0) then
+         call fatal_error(error, "Bunch-Kaufman factorization failed.")
+         return
       end if
 
-      if (self%verbosity > 0) then
-         call write_direct_solver(unit)
-      end if
-
-      ! Dimensions match check
-      ndim = size(xvec)
-
-      if (present(amat)) then
-         if (size(amat,1) /= ndim .or. size(amat,2) /= ndim) then
-            call fatal_error(error, "solve_direct: dimension mismatch.")
-            return
-         end if
-
-         allocate(invmat(ndim, ndim))
-         invmat = amat
-         vrhs = xvec
-
-         want_cpq = .false.
-         if (present(cpq)) want_cpq = cpq
-
-         ! Factorize the Coulomb matrix
-         allocate(ipiv(ndim))
-         call sytrf(invmat, ipiv, info=local_info, uplo='l')
+      if (want_cpq) then
+         ! Inverted matrix is needed for coupled-perturbed equations
+         call sytri(invmat, ipiv, info=local_info, uplo='l')
          if (local_info /= 0) then
-            call fatal_error(error, "Bunch-Kaufman factorization failed.")
+            call fatal_error(error, "Inversion of factorized matrix failed.")
+            return
+         end if
+         ! Solve the linear system
+         call symv(invmat, xvec, vrhs, uplo='l')
+         do ic = 1, ndim
+            do jc = ic + 1, ndim
+               invmat(ic, jc) = invmat(jc, ic)
+            end do
+         end do
+      else
+         ! Solve the linear system
+         call sytrs(invmat, vrhs, ipiv, info=local_info, uplo='l')
+         if (local_info /= 0) then
+            call fatal_error(error, "Solution of linear system failed.")
             return
          end if
 
-         if (want_cpq) then
-            ! Inverted matrix is needed for coupled-perturbed equations
-            call sytri(invmat, ipiv, info=local_info, uplo='l')
-            if (local_info /= 0) then
-               call fatal_error(error, "Inversion of factorized matrix failed.")
-               return
-            end if
-            ! Solve the linear system
-            call symv(invmat, xvec, vrhs, uplo='l')
-            do ic = 1, ndim
-               do jc = ic + 1, ndim
-                  invmat(ic, jc) = invmat(jc, ic)
-               end do
-            end do
-         else
-            ! Solve the linear system
-            call sytrs(invmat, vrhs, ipiv, info=local_info, uplo='l')
-            if (local_info /= 0) then
-               call fatal_error(error, "Solution of linear system failed.")
-               return
-            end if
-
-         end if
-
-         if (present(ainv)) ainv = invmat
-
       end if
 
-      ! pop solve timer
-      call timer%pop
-      call print_direct_final(unit, timer, self%verbosity)
+      if (present(ainv)) ainv = invmat
 
-   end subroutine solve
+   end if
+
+   ! pop solve timer
+   call timer%pop
+   call print_direct_final(unit, timer, self%verbosity)
+
+end subroutine solve
+
 
 !> Print the direct solver banner
-   subroutine write_direct_solver(unit)
-      !> Output unit
-      integer, intent(in) :: unit
+subroutine write_direct_solver(unit)
+   !> Output unit
+   integer, intent(in) :: unit
 
-      write(unit, '(a)') "Using Direct Solver"
-      write(unit, '(a)')
+   write(unit, '(a)') "Using Direct Solver"
+   write(unit, '(a)')
 
-   end subroutine write_direct_solver
+end subroutine write_direct_solver
 
-   !> Print final summary
-   subroutine print_direct_final(unit, timer, verbosity)
-      !> Output unit
-      integer, intent(in) :: unit, verbosity
 
-      !> Timer holding the accumulated execution time
-      type(timer_type), intent(in) :: timer
+!> Print final summary
+subroutine print_direct_final(unit, timer, verbosity)
+   !> Output unit
+   integer, intent(in) :: unit
 
-      if (verbosity > 1) then
-         write(unit, '(a, 1x, a)') "Direct solver time : ", format_time(timer%get("total"))
-         write(unit, '(a)') ''
-      end if
-   end subroutine print_direct_final
+   !> Timer holding the accumulated execution time
+   type(timer_type), intent(in) :: timer
+
+   !> Verbosity level
+   integer, intent(in) :: verbosity
+
+   if (verbosity > 1) then
+      write(unit, '(a, 1x, a)') "Direct solver time : ", &
+         & format_time(timer%get("total"))
+      write(unit, '(a)') ''
+   end if
+end subroutine print_direct_final
 
 end module multicharge_solver_direct

@@ -13,19 +13,28 @@
 ! See the License for the specific language governing permissions and
 ! limitations under the License.
 
+!> Wigner-Seitz cell construction for periodic neighbour lists
 module multicharge_wignerseitz
-   use mctc_cutoff, only: get_lattice_points
-   use mctc_env, only: wp
-   use mctc_io, only: structure_type
+   use mctc_cutoff, only : get_lattice_points
+   use mctc_env, only : wp
+   use mctc_io, only : structure_type
    implicit none
    private
 
    public :: wignerseitz_cell_type, new_wignerseitz_cell
 
+   !> Wigner-Seitz cell holding the minimum-image translations for each atom pair
    type :: wignerseitz_cell_type
+      !> Maximum number of periodic images found for any atom pair
       integer :: nimg_max
+
+      !> Number of periodic images belonging to the Wigner-Seitz cell for each atom pair
       integer, allocatable :: nimg(:, :)
+
+      !> Index into trans of each periodic image for each atom pair
       integer, allocatable :: tridx(:, :, :)
+
+      !> Translation vectors of the candidate periodic images
       real(wp), allocatable :: trans(:, :)
    end type wignerseitz_cell_type
 
@@ -35,85 +44,99 @@ module multicharge_wignerseitz
    !> Tolerance to consider equivalent images
    real(wp), parameter :: tol = 0.01_wp
 
+
 contains
 
-   subroutine new_wignerseitz_cell(self, mol)
 
-      !> Wigner-Seitz cell instance
-      type(wignerseitz_cell_type), intent(out) :: self
+!> Construct the Wigner-Seitz cell for a periodic structure
+subroutine new_wignerseitz_cell(self, mol)
 
-      !> Molecular structure data
-      type(structure_type), intent(in) :: mol
+   !> Wigner-Seitz cell instance
+   type(wignerseitz_cell_type), intent(out) :: self
 
-      integer :: iat, jat, ntr, nimg
-      integer, allocatable :: tridx(:)
-      real(wp) :: vec(3)
-      real(wp), allocatable :: trans(:, :)
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
 
-      call get_lattice_points(mol%periodic, mol%lattice, thr, trans)
-      ntr = size(trans, 2)
-      allocate(self%nimg(mol%nat, mol%nat), self%tridx(ntr, mol%nat, mol%nat), &
-      & tridx(ntr))
+   integer :: iat, jat, ntr, nimg
+   integer, allocatable :: tridx(:)
+   real(wp) :: vec(3)
+   real(wp), allocatable :: trans(:, :)
 
-      self%nimg_max = 0
-      !$omp parallel do default(none) schedule(runtime) collapse(2) &
-      !$omp shared(mol, trans, self) private(iat, jat, vec, nimg, tridx)
-      do iat = 1, mol%nat
-         do jat = 1, mol%nat
-            vec(:) = mol%xyz(:, iat) - mol%xyz(:, jat)
-            call get_pairs(nimg, trans, vec, tridx)
-            self%nimg(jat, iat) = nimg
-            self%tridx(:, jat, iat) = tridx
-            self%nimg_max = max(nimg, self%nimg_max)
-         end do
+   call get_lattice_points(mol%periodic, mol%lattice, thr, trans)
+   ntr = size(trans, 2)
+   allocate(self%nimg(mol%nat, mol%nat), self%tridx(ntr, mol%nat, mol%nat), &
+   & tridx(ntr))
+
+   self%nimg_max = 0
+   !$omp parallel do default(none) schedule(runtime) collapse(2) &
+   !$omp shared(mol, trans, self) private(iat, jat, vec, nimg, tridx)
+   do iat = 1, mol%nat
+      do jat = 1, mol%nat
+         vec(:) = mol%xyz(:, iat) - mol%xyz(:, jat)
+         call get_pairs(nimg, trans, vec, tridx)
+         self%nimg(jat, iat) = nimg
+         self%tridx(:, jat, iat) = tridx
+         self%nimg_max = max(nimg, self%nimg_max)
       end do
+   end do
 
-      call move_alloc(trans, self%trans)
+   call move_alloc(trans, self%trans)
 
-   end subroutine new_wignerseitz_cell
+end subroutine new_wignerseitz_cell
 
-   subroutine get_pairs(iws, trans, rij, list)
-      integer, intent(out) :: iws
-      real(wp), intent(in) :: rij(3)
-      real(wp), intent(in) :: trans(:, :)
-      integer, intent(out) :: list(:)
 
-      logical :: mask(size(list))
-      real(wp) :: dist(size(list)), vec(3), r2
-      integer :: itr, img, pos
+!> Determine the periodic images belonging to the Wigner-Seitz cell of an atom pair
+subroutine get_pairs(iws, trans, rij, list)
 
-      iws = 0
-      img = 0
-      list(:) = 0
-      mask(:) = .true.
+   !> Number of periodic images belonging to the Wigner-Seitz cell
+   integer, intent(out) :: iws
 
-      do itr = 1, size(trans, 2)
-         vec(:) = rij - trans(:, itr)
-         r2 = vec(1)**2 + vec(2)**2 + vec(3)**2
-         if (r2 < thr) cycle
-         img = img + 1
-         dist(img) = r2
-      end do
+   !> Candidate translation vectors
+   real(wp), intent(in) :: trans(:, :)
 
-      if (img == 0) return
+   !> Distance vector between the two atoms
+   real(wp), intent(in) :: rij(3)
 
-      pos = minloc(dist(:img), dim=1)
+   !> Index into trans of each periodic image belonging to the Wigner-Seitz cell
+   integer, intent(out) :: list(:)
 
-      r2 = dist(pos)
+   logical :: mask(size(list))
+   real(wp) :: dist(size(list)), vec(3), r2
+   integer :: itr, img, pos
+
+   iws = 0
+   img = 0
+   list(:) = 0
+   mask(:) = .true.
+
+   do itr = 1, size(trans, 2)
+      vec(:) = rij - trans(:, itr)
+      r2 = vec(1)**2 + vec(2)**2 + vec(3)**2
+      if (r2 < thr) cycle
+      img = img + 1
+      dist(img) = r2
+   end do
+
+   if (img == 0) return
+
+   pos = minloc(dist(:img), dim=1)
+
+   r2 = dist(pos)
+   mask(pos) = .false.
+
+   iws = 1
+   list(iws) = pos
+   if (img <= iws) return
+
+   do
+      pos = minloc(dist(:img), dim=1, mask=mask(:img))
+      if (abs(dist(pos) - r2) > tol) exit
       mask(pos) = .false.
-
-      iws = 1
+      iws = iws + 1
       list(iws) = pos
-      if (img <= iws) return
+   end do
 
-      do
-         pos = minloc(dist(:img), dim=1, mask=mask(:img))
-         if (abs(dist(pos) - r2) > tol) exit
-         mask(pos) = .false.
-         iws = iws + 1
-         list(iws) = pos
-      end do
+end subroutine get_pairs
 
-   end subroutine get_pairs
 
 end module multicharge_wignerseitz

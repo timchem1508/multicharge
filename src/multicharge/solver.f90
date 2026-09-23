@@ -24,8 +24,8 @@
 module multicharge_solver
    use mctc_env, only : error_type, fatal_error
    use multicharge_solver_type, only : mchrg_solver_type, mchrg_solver_input
-   use multicharge_solver_direct, only : direct_solver, new_direct_solver, & 
-                                        & direct_input
+   use multicharge_solver_direct, only : direct_solver, new_direct_solver, &
+      & direct_input
    use multicharge_solver_cg, only : cg_solver, new_cg_solver, cg_input
    implicit none
    private
@@ -35,36 +35,41 @@ module multicharge_solver
    public :: cg_solver, new_cg_solver, cg_input
    public :: new_mchrg_solver
 
-contains 
+contains
 
+
+!> Construct a solver instance from its input configuration
 subroutine new_mchrg_solver(solver, input, error)
-    !> Solver type
-    class(mchrg_solver_type), intent(out), allocatable :: solver
-    !> Solver input
-    class(mchrg_solver_input), intent(in) :: input
-    !> Error handling
-    type(error_type), allocatable, intent(out) :: error
 
-    select type (input)
-    type is (cg_input)
-        block
-            class(cg_solver), allocatable :: tmp
-            allocate(tmp)
-            call new_cg_solver(tmp, input)
-            call move_alloc(tmp, solver)
-        end block
-    type is (direct_input)
-        block
-            class(direct_solver), allocatable :: tmp
-            allocate(tmp)
-            call new_direct_solver(tmp, input)
-            call move_alloc(tmp, solver)
-        end block
-    class default 
-        call fatal_error(error, "Unknown solver input type")
-        return
-    end select
-    
+   !> Solver instance to construct
+   class(mchrg_solver_type), intent(out), allocatable :: solver
+
+   !> Solver input configuration
+   class(mchrg_solver_input), intent(in) :: input
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   select type (input)
+   type is (cg_input)
+      block
+         class(cg_solver), allocatable :: tmp
+         allocate(tmp)
+         call new_cg_solver(tmp, input)
+         call move_alloc(tmp, solver)
+      end block
+   type is (direct_input)
+      block
+         class(direct_solver), allocatable :: tmp
+         allocate(tmp)
+         call new_direct_solver(tmp, input)
+         call move_alloc(tmp, solver)
+      end block
+   class default
+      call fatal_error(error, "Unknown solver input type")
+      return
+   end select
+
 end subroutine new_mchrg_solver
 
 end module multicharge_solver

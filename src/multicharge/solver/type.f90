@@ -29,12 +29,14 @@ module multicharge_solver_type
       !> Whether the solver requires a positive-definite matrix
       logical, allocatable :: need_pos_def
    contains
+
       !> Solve the linear system
       procedure(solve), deferred :: solve
+
    end type mchrg_solver_type
 
-
    abstract interface
+      !> Solve the linear system of equations
       subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error)
          import :: mchrg_solver_type, error_type, wp, csr_list
 
@@ -71,8 +73,7 @@ module multicharge_solver_type
    end interface
 
    !> Abstract base type for solver configuration
-   type, abstract, public :: mchrg_solver_input
+   type, abstract :: mchrg_solver_input
    end type mchrg_solver_input
-
 
 end module multicharge_solver_type

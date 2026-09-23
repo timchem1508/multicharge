@@ -13,72 +13,99 @@
 ! See the License for the specific language governing permissions and
 ! limitations under the License.
 
-!> @file multicharge/cache.f90
+!> @file multicharge/model/cache.f90
 !> Contains the cache baseclass for the charge models and a container for mutable cache data
 
 !> Cache for charge models
 module multicharge_model_cache
-   use mctc_env, only: wp
-   use mctc_io, only: structure_type
-   use multicharge_wignerseitz, only: wignerseitz_cell_type
+   use mctc_env, only : wp
+   use mctc_io, only : structure_type
+   use multicharge_wignerseitz, only : wignerseitz_cell_type
    implicit none
    private
 
+   public :: mchrg_cache
+
    !> Cache for the charge model
-   type, public :: mchrg_cache
+   type :: mchrg_cache
+
       !> Coordination number array
       real(wp), allocatable :: cn(:)
+
       !> Ewald separation parameter
       real(wp) :: alpha
+
       !> Wigner-Seitz cell
       type(wignerseitz_cell_type) :: wsc
+
       !> Translation matrix
       real(wp), allocatable :: trans(:, :)
+
       !> Local charges
       real(wp), allocatable :: qloc(:)
+
       !> Full Maxwell capacitance matrix
       real(wp), allocatable :: cmat(:, :)
+
       !> Compressed version of the C-matrix
       real(wp), allocatable :: clist(:)
+
       !> Store tmp array from xvec calculation for reuse
       real(wp), allocatable :: xtmp(:)
+
       !> Electronegativity vector
       real(wp), allocatable :: xvec(:)
+
       !> Coulomb matrix
       real(wp), allocatable :: amat(:, :)
+
       !> Compressed version of the A-matrix
       real(wp), allocatable :: alist(:)
+
       !> Inversed amat
-      real(wp), allocatable :: ainv(:,:)
+      real(wp), allocatable :: ainv(:, :)
+
       !> Solution of the ES equation
       real(wp), allocatable :: vrhs(:)
+
       !> Constraint response: jamt*uvec=1
       real(wp), allocatable :: uvec(:)
+
       !> Coordination number gradient w.r.t the positions
       real(wp), allocatable :: dcndr(:, :, :)
+
       !> Coordination number gradient w.r.t the lattice vectors
       real(wp), allocatable :: dcndL(:, :, :)
+
       !> Local charge derivatives w.r.t positions
       real(wp), allocatable :: dqlocdr(:, :, :)
+
       !> Local charge derivatives w.r.t lattice vectors
       real(wp), allocatable :: dqlocdL(:, :, :)
+
       !> Derivative of Maxwell capacitance matrix w.r.t positions
       real(wp), allocatable :: dcdr(:, :, :)
+
       !> Derivative of Maxwell capacitance matrix w.r.t positions in compressed format
       real(wp), allocatable :: dcdrdiag(:, :)
+
       !> Derivative of Maxwell capacitance matrix w.r.t lattice vectors
       real(wp), allocatable :: dcdL(:, :, :)
+
       !> Coulomb matrix derivatives w.r.t positions
       real(wp), allocatable :: dadr(:, :, :)
+
       !> Coulomb matrix derivatives w.r.t lattice vectors
       real(wp), allocatable :: dadL(:, :, :)
+
       !> Electronegativity derivatives w.r.t positions
       real(wp), allocatable :: dxdr(:, :, :)
+
       !> Electronegativity derivatives w.r.t lattice vectors
       real(wp), allocatable :: dxdL(:, :, :)
+
       !> Logical flag for gradient calculation
       logical :: grad
-
    end type mchrg_cache
 
 end module multicharge_model_cache
