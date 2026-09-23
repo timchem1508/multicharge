@@ -13,7 +13,7 @@
 ! See the License for the specific language governing permissions and
 ! limitations under the License.
 
-!> @file multicharge/model/type.f90
+!> @file multicharge/model/type.F90
 !> Provides a general base class for charge models
 
 #ifndef IK
@@ -71,37 +71,37 @@ module multicharge_model_type
 
       !> Electronegativity weighted CN for local charge
       class(ncoord_type), allocatable :: ncoord_en
-contains
+   contains
 
- !> Solve linear equations for the charge model
-procedure :: solve
+      !> Solve linear equations for the charge model
+      procedure :: solve
 
- !> Get external gradient
-procedure :: get_external_gradient
+      !> Get external gradient
+      procedure :: get_external_gradient
 
- !> Calculate local charges from electronegativity weighted CN
-procedure :: local_charge
+      !> Calculate local charges from electronegativity weighted CN
+      procedure :: local_charge
 
- !> Update cache
-procedure(update), deferred :: update
+      !> Update cache
+      procedure(update), deferred :: update
 
- !> Calculate capacitance matrix
-procedure(get_capacitance_matrix), deferred :: get_capacitance_matrix
+      !> Calculate capacitance matrix
+      procedure(get_capacitance_matrix), deferred :: get_capacitance_matrix
 
- !> Calculate right-hand side (electronegativity)
-procedure(get_xvec), deferred :: get_xvec
+      !> Calculate right-hand side (electronegativity)
+      procedure(get_xvec), deferred :: get_xvec
 
- !> Calculate electronegativity-vector gradients
-procedure(get_xvec_derivs), deferred :: get_xvec_derivs
+      !> Calculate electronegativity-vector gradients
+      procedure(get_xvec_derivs), deferred :: get_xvec_derivs
 
- !> Calculate Coulomb matrix
-procedure(get_coulomb_matrix), deferred :: get_coulomb_matrix
+      !> Calculate Coulomb matrix
+      procedure(get_coulomb_matrix), deferred :: get_coulomb_matrix
 
- !> Calculate Coulomb matrix derivatives
-procedure(get_coulomb_derivs), deferred :: get_coulomb_derivs
+      !> Calculate Coulomb matrix derivatives
+      procedure(get_coulomb_derivs), deferred :: get_coulomb_derivs
 
- !> Calculate capacitance-corrected electronegativity derivatives
-procedure(get_grad), deferred :: get_grad
+      !> Calculate capacitance-corrected electronegativity derivatives
+      procedure(get_grad), deferred :: get_grad
 
    end type mchrg_model_type
 
@@ -168,7 +168,6 @@ procedure(get_grad), deferred :: get_grad
          !> Multicharge neighbourlist type
          type(csr_list), intent(in), optional :: list
       end subroutine get_coulomb_matrix
-
 
       !> Coulomb matrix derivatives contracted with charges
       subroutine get_coulomb_derivs(self, mol, ndim, cache, list)
@@ -273,6 +272,7 @@ procedure(get_grad), deferred :: get_grad
    !> Smallest positive working-precision number
    real(wp), parameter :: eps = tiny(1.0_wp)
 
+
 contains
 
 
@@ -298,6 +298,7 @@ subroutine get_dir_trans(mol, trans, cutoff)
 
 end subroutine get_dir_trans
 
+
 !> Generate reciprocal lattice translation vectors for a periodic structure
 subroutine get_rec_trans(mol, trans, cutoff)
    !> Molecular structure data
@@ -321,6 +322,7 @@ subroutine get_rec_trans(mol, trans, cutoff)
    end if
 
 end subroutine get_rec_trans
+
 
 !> Top-level solve routine with optional persistent cache
 subroutine solve(self, mol, solver, cache, error, &
@@ -385,7 +387,6 @@ subroutine solve(self, mol, solver, cache, error, &
    logical :: add_lagr = .true.
    type(timer_type) :: timer
    integer :: print_unit, verbosity_solve
-
 
    ! Calculate gradient if the respective arrays are present
    grad = present(gradient) .and. present(sigma)
@@ -562,8 +563,9 @@ subroutine solve(self, mol, solver, cache, error, &
 
 end subroutine solve
 
+
 !> Adjoint external gradient calculation using cached data
-!
+!>
 !> This routine evaluates dF/dR and dF/dL from the derivative of the objective
 !> w.r.t. charges (dF/dq), avoiding explicit differentiation
 !> of the charge solution by solving an adjoint system.
@@ -690,6 +692,7 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
 
 end subroutine get_external_gradient
 
+
 !> Local charges calculation
 subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL, &
    & list, dqlocdrij, dqlocdrji, dqlocdrdiag)
@@ -736,7 +739,6 @@ subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL, &
       dqlocdL = 0.0_wp
    end if
    ! Get the electronegativity weighted CN for local charge
-   ! Derivatives depend only in this CN
    if (allocated(self%ncoord_en)) then
       call self%ncoord_en%get_coordination_number(mol, trans, qloc, &
          & dcndr=dqlocdr, dcndrij=dqlocdrij, dcndrji=dqlocdrji, &
@@ -747,6 +749,7 @@ subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL, &
    qloc = qloc + mol%charge / real(mol%nat, wp)
 
 end subroutine local_charge
+
 
 !> Print header for charge equilibration solver
 subroutine print_solve_header(unit, verbosity, timer)
@@ -771,6 +774,7 @@ subroutine print_solve_header(unit, verbosity, timer)
    end if
 end subroutine print_solve_header
 
+
 !> Print header for gradient calculations
 subroutine print_gradient_header(unit, verbosity, timer)
    !> Output unit
@@ -793,6 +797,7 @@ subroutine print_gradient_header(unit, verbosity, timer)
       end if
    end if
 end subroutine print_gradient_header
+
 
 !> Print message for constrained system solves
 subroutine print_constrained_system_message(unit, verbosity, vector)
@@ -817,6 +822,7 @@ subroutine print_constrained_system_message(unit, verbosity, vector)
    end if
 end subroutine print_constrained_system_message
 
+
 !> Print message for adjoint system solve
 subroutine print_adjoint_message(unit, verbosity)
    !> Output unit
@@ -830,6 +836,7 @@ subroutine print_adjoint_message(unit, verbosity)
       write(unit, '(a)') ''
    end if
 end subroutine print_adjoint_message
+
 
 !> Print gradient calculation time
 subroutine print_gradient_time(unit, verbosity, timer)
@@ -848,6 +855,7 @@ subroutine print_gradient_time(unit, verbosity, timer)
    end if
 end subroutine print_gradient_time
 
+
 !> Print energy calculation time
 subroutine print_energy_time(unit, verbosity, timer)
    !> Output unit
@@ -864,6 +872,7 @@ subroutine print_energy_time(unit, verbosity, timer)
       write(unit, '(a)') ''
    end if
 end subroutine print_energy_time
+
 
 !> Print total solve time
 subroutine print_total_time(unit, verbosity, timer)

@@ -18,23 +18,24 @@
 !> Thomas Froitzheim, Marcel Müller, Andreas Hansen, and Stefan Grimme,
 !> *J. Chem. Phys.*, **2025**, 162, 214109.
 !> DOI: [10.1063/5.0268978](https://dx.doi.org/10.1063/5.0268978)
-!> 
+!>
 !> Updated from of the parametrization and minor model changes published in
 !>
 !> Thomas Froitzheim, Marcel Müller, Andreas Hansen, and Stefan Grimme,
 !> *ChemRxiv*, **2025**.
 !> DOI: [10.26434/chemrxiv-2025-bjxvt](https://doi.org/10.26434/chemrxiv-2025-bjxvt)
 !>
-!> The original parametrization can be used in multicharge v0.5.0. 
+!> The original parametrization can be used in multicharge v0.5.0.
 module multicharge_param_eeqbc2025
-   use mctc_env, only: wp
-   use mctc_io_symbols, only: to_number
+   use mctc_env, only : wp
+   use mctc_io_symbols, only : to_number
    implicit none
    private
 
    public :: get_eeqbc_chi, get_eeqbc_eta, get_eeqbc_rad, get_eeqbc_kcnchi, &
       & get_eeqbc_kqchi, get_eeqbc_kqeta, get_eeqbc_kcnrad, get_eeqbc_cap, &
       & get_eeqbc_cov_radii, get_eeqbc_avg_cn, get_eeqbc_rvdw_scale
+
 
    !> Element-specific electronegativity for the EEQ_BC charges.
    interface get_eeqbc_chi
@@ -106,6 +107,7 @@ module multicharge_param_eeqbc2025
    !> Maximum atomic number allowed in EEQ_BC calculations
    integer, parameter :: max_elem = 103
 
+
    !> Element-specific electronegativity for the EEQ_BC charges.
    real(wp), parameter :: eeqbc_chi(max_elem) = [&
       &  0.8467604300_wp, -0.2183140421_wp, -0.2075642802_wp,  0.6522721704_wp, & !1-4
@@ -134,7 +136,6 @@ module multicharge_param_eeqbc2025
       & -0.5401572596_wp, -0.8144566011_wp, -0.7154181149_wp, -0.7102059966_wp, & !93-96
       & -0.5048909376_wp, -0.4963167616_wp, -0.7233431134_wp, -0.8625643907_wp, & !97-100
       & -0.6411108832_wp, -0.8832896019_wp, -1.0659105468_wp] !101-103
-
 
    !> Element-specific chemical hardnesses for the EEQ_BC charges.
    real(wp), parameter :: eeqbc_eta(max_elem) = [&
@@ -340,7 +341,7 @@ module multicharge_param_eeqbc2025
       &  0.3827783674_wp,  0.3287073050_wp,  0.5096472311_wp] !101-103
 
    !> Element-specific covalent radii for the CN for the EEQ_BC charges.
-   real(wp), parameter :: eeqbc_cov_radii(max_elem) = 0.5_wp*[&
+   real(wp), parameter :: eeqbc_cov_radii(max_elem) = 0.5_wp * [&
       &  0.5930850061_wp,  0.6828783524_wp,  2.5060627321_wp,  2.1530174721_wp, & !1-4
       &  2.0808370973_wp,  2.1547612587_wp,  2.3825166136_wp,  2.3845548778_wp, & !5-8
       &  2.2785689025_wp,  1.5895245890_wp,  3.2262348700_wp,  3.0085723165_wp, & !9-12
@@ -426,7 +427,9 @@ module multicharge_param_eeqbc2025
       &  1.0000000000_wp,  1.0000000000_wp,  1.0000000000_wp,  1.0000000000_wp, & !97-100
       &  1.0000000000_wp,  1.0000000000_wp,  1.0000000000_wp] !101-103
 
+
 contains
+
 
 !> Get electronegativity for species with a given symbol
 elemental function get_eeqbc_chi_sym(symbol) result(chi)
@@ -440,6 +443,7 @@ elemental function get_eeqbc_chi_sym(symbol) result(chi)
    chi = get_eeqbc_chi(to_number(symbol))
 
 end function get_eeqbc_chi_sym
+
 
 !> Get electronegativity for species with a given atomic number
 elemental function get_eeqbc_chi_num(number) result(chi)
@@ -458,6 +462,7 @@ elemental function get_eeqbc_chi_num(number) result(chi)
 
 end function get_eeqbc_chi_num
 
+
 !> Get hardness for species with a given symbol
 elemental function get_eeqbc_eta_sym(symbol) result(eta)
 
@@ -470,6 +475,7 @@ elemental function get_eeqbc_eta_sym(symbol) result(eta)
    eta = get_eeqbc_eta(to_number(symbol))
 
 end function get_eeqbc_eta_sym
+
 
 !> Get hardness for species with a given atomic number
 elemental function get_eeqbc_eta_num(number) result(eta)
@@ -488,6 +494,7 @@ elemental function get_eeqbc_eta_num(number) result(eta)
 
 end function get_eeqbc_eta_num
 
+
 !> Get charge width for species with a given symbol
 elemental function get_eeqbc_rad_sym(symbol) result(rad)
 
@@ -500,6 +507,7 @@ elemental function get_eeqbc_rad_sym(symbol) result(rad)
    rad = get_eeqbc_rad(to_number(symbol))
 
 end function get_eeqbc_rad_sym
+
 
 !> Get charge width for species with a given atomic number
 elemental function get_eeqbc_rad_num(number) result(rad)
@@ -518,6 +526,7 @@ elemental function get_eeqbc_rad_num(number) result(rad)
 
 end function get_eeqbc_rad_num
 
+
 !> Get CN scaling of the electronegativity for species with a given symbol
 elemental function get_eeqbc_kcnchi_sym(symbol) result(kcnchi)
 
@@ -530,6 +539,7 @@ elemental function get_eeqbc_kcnchi_sym(symbol) result(kcnchi)
    kcnchi = get_eeqbc_kcnchi(to_number(symbol))
 
 end function get_eeqbc_kcnchi_sym
+
 
 !> Get CN scaling of the electronegativity for species with a given atomic number
 elemental function get_eeqbc_kcnchi_num(number) result(kcnchi)
@@ -548,6 +558,7 @@ elemental function get_eeqbc_kcnchi_num(number) result(kcnchi)
 
 end function get_eeqbc_kcnchi_num
 
+
 !> Get local q scaling of the electronegativity for species with a given symbol
 elemental function get_eeqbc_kqchi_sym(symbol) result(kqchi)
 
@@ -560,6 +571,7 @@ elemental function get_eeqbc_kqchi_sym(symbol) result(kqchi)
    kqchi = get_eeqbc_kqchi(to_number(symbol))
 
 end function get_eeqbc_kqchi_sym
+
 
 !> Get local q scaling of the electronegativity for species with a given atomic number
 elemental function get_eeqbc_kqchi_num(number) result(kqchi)
@@ -578,6 +590,7 @@ elemental function get_eeqbc_kqchi_num(number) result(kqchi)
 
 end function get_eeqbc_kqchi_num
 
+
 !> Get local q scaling of the chemical hardness for species with a given symbol
 elemental function get_eeqbc_kqeta_sym(symbol) result(kqeta)
 
@@ -590,6 +603,7 @@ elemental function get_eeqbc_kqeta_sym(symbol) result(kqeta)
    kqeta = get_eeqbc_kqeta(to_number(symbol))
 
 end function get_eeqbc_kqeta_sym
+
 
 !> Get local q scaling of the chemical hardness for species with a given atomic number
 elemental function get_eeqbc_kqeta_num(number) result(kqeta)
@@ -608,6 +622,7 @@ elemental function get_eeqbc_kqeta_num(number) result(kqeta)
 
 end function get_eeqbc_kqeta_num
 
+
 !> Get CN scaling of the charge width for species with a given symbol
 elemental function get_eeqbc_kcnrad_sym(symbol) result(kcnrad)
 
@@ -620,6 +635,7 @@ elemental function get_eeqbc_kcnrad_sym(symbol) result(kcnrad)
    kcnrad = get_eeqbc_kcnrad(to_number(symbol))
 
 end function get_eeqbc_kcnrad_sym
+
 
 !> Get CN scaling of the charge width for species with a given atomic number
 elemental function get_eeqbc_kcnrad_num(number) result(kcnrad)
@@ -638,6 +654,7 @@ elemental function get_eeqbc_kcnrad_num(number) result(kcnrad)
 
 end function get_eeqbc_kcnrad_num
 
+
 !> Get bond capacitance for species with a given symbol
 elemental function get_eeqbc_cap_sym(symbol) result(cap)
 
@@ -650,6 +667,7 @@ elemental function get_eeqbc_cap_sym(symbol) result(cap)
    cap = get_eeqbc_cap(to_number(symbol))
 
 end function get_eeqbc_cap_sym
+
 
 !> Get bond capacitance for species with a given atomic number
 elemental function get_eeqbc_cap_num(number) result(cap)
@@ -668,6 +686,7 @@ elemental function get_eeqbc_cap_num(number) result(cap)
 
 end function get_eeqbc_cap_num
 
+
 !> Get covalent radius for species with a given symbol
 elemental function get_eeqbc_cov_radii_sym(symbol) result(rcov)
 
@@ -680,6 +699,7 @@ elemental function get_eeqbc_cov_radii_sym(symbol) result(rcov)
    rcov = get_eeqbc_cov_radii(to_number(symbol))
 
 end function get_eeqbc_cov_radii_sym
+
 
 !> Get covalent radius for species with a given atomic number
 elemental function get_eeqbc_cov_radii_num(number) result(rcov)
@@ -698,6 +718,7 @@ elemental function get_eeqbc_cov_radii_num(number) result(rcov)
 
 end function get_eeqbc_cov_radii_num
 
+
 !> Get average CN for species with a given symbol
 elemental function get_eeqbc_avg_cn_sym(symbol) result(avg_cn)
 
@@ -710,6 +731,7 @@ elemental function get_eeqbc_avg_cn_sym(symbol) result(avg_cn)
    avg_cn = get_eeqbc_avg_cn(to_number(symbol))
 
 end function get_eeqbc_avg_cn_sym
+
 
 !> Get average CN for species with a given atomic number
 elemental function get_eeqbc_avg_cn_num(number) result(avg_cn)
@@ -728,6 +750,7 @@ elemental function get_eeqbc_avg_cn_num(number) result(avg_cn)
 
 end function get_eeqbc_avg_cn_num
 
+
 !> Get scaling for pairwise van-der-Waals radius for species with a given symbol
 elemental function get_eeqbc_rvdw_scale_sym(symbol) result(rvdw_scale)
 
@@ -740,6 +763,7 @@ elemental function get_eeqbc_rvdw_scale_sym(symbol) result(rvdw_scale)
    rvdw_scale = get_eeqbc_rvdw_scale(to_number(symbol))
 
 end function get_eeqbc_rvdw_scale_sym
+
 
 !> Get scaling for pairwise van-der-Waals radius for species with a given atomic number
 elemental function get_eeqbc_rvdw_scale_num(number) result(rvdw_scale)
@@ -757,5 +781,6 @@ elemental function get_eeqbc_rvdw_scale_num(number) result(rvdw_scale)
    end if
 
 end function get_eeqbc_rvdw_scale_num
+
 
 end module multicharge_param_eeqbc2025

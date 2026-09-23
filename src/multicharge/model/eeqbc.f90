@@ -26,8 +26,7 @@
 !> Thomas Froitzheim, Marcel Müller, Andreas Hansen, and Stefan Grimme,
 !> *ChemRxiv*, **2025**.
 !> DOI: [10.26434/chemrxiv-2025-bjxvt](https://doi.org/10.26434/chemrxiv-2025-bjxvt)
-!>
-!> The original parametrization can be used in multicharge v0.5.0.
+
 module multicharge_model_eeqbc
    use mctc_env, only : error_type, wp, i8
    use mctc_io, only : structure_type
@@ -59,33 +58,33 @@ module multicharge_model_eeqbc
 
       !> Van der Waals radii matrix (nat × nat)
       real(wp), allocatable :: rvdw(:, :)
-contains
- !> Update and allocate cache
-procedure :: update
- !> Calculate capacitance matrix
-procedure :: get_capacitance_matrix
- !> Calculate Coulomb matrix
-procedure :: get_coulomb_matrix
- !> Calculate derivatives of Coulomb matrix multiplied by charge
-procedure :: get_coulomb_derivs
- !> Calculate right-hand side (electronegativity vector)
-procedure :: get_xvec
- !> Calculate derivatives of EN vector
-procedure :: get_xvec_derivs
- !> Calculate constraint matrix (molecular)
-procedure :: get_cmat_0d
- !> Calculate constraint matrix (molecular) using neighbour list
-procedure :: get_cmat_0d_list
- !> Calculate full constraint matrix (periodic)
-procedure :: get_cmat_3d
- !> Calculate constraint matrix derivatives (molecular)
-procedure :: get_dcmat_0d
- !> Calculate constraint matrix derivatives (molecular) using neighbour list
-procedure :: get_dcmat_0d_list
- !> Calculate constraint matrix derivatives (periodic)
-procedure :: get_dcmat_3d
- !> Calculate gradient
-procedure :: get_grad
+   contains
+      !> Update and allocate cache
+      procedure :: update
+      !> Calculate capacitance matrix
+      procedure :: get_capacitance_matrix
+      !> Calculate Coulomb matrix
+      procedure :: get_coulomb_matrix
+      !> Calculate derivatives of Coulomb matrix multiplied by charge
+      procedure :: get_coulomb_derivs
+      !> Calculate right-hand side (electronegativity vector)
+      procedure :: get_xvec
+      !> Calculate derivatives of EN vector
+      procedure :: get_xvec_derivs
+      !> Calculate constraint matrix (molecular)
+      procedure :: get_cmat_0d
+      !> Calculate constraint matrix (molecular) using neighbour list
+      procedure :: get_cmat_0d_list
+      !> Calculate full constraint matrix (periodic)
+      procedure :: get_cmat_3d
+      !> Calculate constraint matrix derivatives (molecular)
+      procedure :: get_dcmat_0d
+      !> Calculate constraint matrix derivatives (molecular) using neighbour list
+      procedure :: get_dcmat_0d_list
+      !> Calculate constraint matrix derivatives (periodic)
+      procedure :: get_dcmat_3d
+      !> Calculate gradient
+      procedure :: get_grad
    end type eeqbc_model
 
    real(wp), parameter :: sqrtpi = sqrt(pi)
@@ -261,13 +260,13 @@ subroutine get_capacitance_matrix(self, mol, ndim, cache, list)
       ! Neighbour list routines
       if (any(mol%periodic)) then
          call get_cmat_3d_list(self, mol, list, cache%clist)
-         ! cmat gradients
+         ! Capacitance-matrix gradients
          if (cache%grad) then
             call get_dcmat_3d_list(self, mol, list, cache)
          end if
       else
          call get_cmat_0d_list(self, mol, list, cache%clist)
-         ! cmat gradients
+         ! Capacitance-matrix gradients
          if (cache%grad) then
             call get_dcmat_0d_list(self, mol, list, cache)
          end if
@@ -286,7 +285,7 @@ subroutine get_capacitance_matrix(self, mol, ndim, cache, list)
          end if
       else
          call get_cmat_0d(self, mol, cache%cmat)
-         ! cmat gradients
+         ! Capacitance-matrix gradients
          if (cache%grad) then
             call get_dcmat_0d(self, mol, cache%dcdr, cache%dcdL)
          end if
@@ -324,7 +323,6 @@ subroutine get_xvec(self, mol, ndim, cache, list, efield)
 
    cache%xvec(:) = 0.0_wp
 
-   ! Step 1: Perfectly parallelized
    !$omp parallel do default(none) schedule(runtime) &
    !$omp shared(mol, self, cache) &
    !$omp private(iat, izp)
@@ -346,19 +344,17 @@ subroutine get_xvec(self, mol, ndim, cache, list, efield)
       !$omp end parallel do
    end if
 
-   ! Only write the extra element if xtmp has room for it
    if (size(cache%xtmp) == mol%nat + 1) then
       cache%xtmp(mol%nat + 1) = mol%charge
    end if
 
-   ! Step 2: Matrix-vector multiplication
    if (present(list)) then
       call spmv_csr(list, cache%clist, cache%xtmp, cache%xvec, alpha=1.0_wp, beta=0.0_wp)
    else
       call gemv(cache%cmat, cache%xtmp, cache%xvec)
    end if
 
-   ! Step 3: Periodic corrections
+   ! Periodic contributions
    if (any(mol%periodic)) then
       call get_dir_trans(mol, dtrans, cutoff)
 
@@ -371,22 +367,16 @@ subroutine get_xvec(self, mol, ndim, cache, list, efield)
             capi = self%cap(izp)
             rvdw = self%rvdw(izp, izp)
 
-            if (list%wsc%nimg_list(list%inl(iat)) > 1) then
+            if (list%wsc%nimg_list(list%inl(iat)) > 0) then
                wsw = 1.0_wp / real(list%wsc%nimg_list(list%inl(iat)), wp)
-
-               ! Skip identity image at list%wsc%itr_list(kat) and loop through R /= 0 images
                do img = list%wsc%itr_list(list%inl(iat)), list%wsc%itr_list(list%inl(iat) + 1) - 1
                   vec = list%wsc%trans(:, list%wsc%tridx_list(img))
                   call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, ctmp)
-
-                  ! Direct write is safe: 'iat' is private to this specific thread
                   cache%xvec(iat) = cache%xvec(iat) - wsw * ctmp * cache%xtmp(iat)
                end do
             end if
          end do
          !$omp end parallel do
-
-
       else
          !$omp parallel do default(none) schedule(runtime) &
          !$omp shared(mol, self, cache, dtrans) &
@@ -665,7 +655,6 @@ subroutine get_coulomb_matrix(self, mol, ndim, cache, list)
    !> Multicharge neighbourlist type
    type(csr_list), intent(in), optional :: list
 
-
    if (present(list)) then
       ! Allocate amat
       if (.not. allocated(cache%alist)) then
@@ -819,9 +808,8 @@ subroutine get_amat_3d(self, mol, cache)
 
    cache%amat(:, :) = 0.0_wp
 
-
    !$omp parallel default(none) &
-   !$omp shared(cache, mol, self, dtrans)  &
+   !$omp shared(cache, mol, self, dtrans) &
    !$omp private(iat, izp, jat, jzp, gam, vec, dtmp, ctmp, norm_cn) &
    !$omp private(radi, radj, capi, capj, rvdw, r1, wsw, amat_local)
    allocate(amat_local, source=cache%amat)
@@ -834,7 +822,7 @@ subroutine get_amat_3d(self, mol, cache)
       capi = self%cap(izp)
       do jat = 1, iat - 1
          jzp = mol%id(jat)
-         ! vdw distance in Angstrom (approximate factor 2)
+         ! Van der Waals distance in Angstrom (approximate factor 2)
          rvdw = self%rvdw(izp, jzp)
          ! Effective charge width of j
          norm_cn = cache%cn(jat) / self%avg_cn(jzp)
@@ -851,7 +839,7 @@ subroutine get_amat_3d(self, mol, cache)
          end do
       end do
 
-      ! diagonal Coulomb interaction terms
+      ! Diagonal Coulomb interaction terms
       gam = 1.0_wp / sqrt(2.0_wp * radi**2)
       rvdw = self%rvdw(izp, izp)
       wsw = 1.0_wp / real(cache%wsc%nimg(iat, iat), wp)
@@ -941,15 +929,11 @@ subroutine get_amat_3d_list(self, mol, list, cache)
          cache%alist(kat) = atmp
       end do
 
-      ! Diagonal Coulomb interaction terms (Self-Image)
+      ! Diagonal Coulomb interaction terms
       gam = 1.0_wp / sqrt(2.0_wp * radi**2)
       rvdw = self%rvdw(izp, izp)
-
-      ! Execute only if periodic self-images exist (nimg > 1, since index 1 is identity R=0)
       if (list%wsc%nimg_list(list%inl(iat)) > 0) then
          wsw = 1.0_wp / real(list%wsc%nimg_list(list%inl(iat)), wp)
-
-         ! Skip identity image at list%wsc%itr_list(list%inl(iat)) and loop through R /= 0 images
          do img = list%wsc%itr_list(list%inl(iat)), list%wsc%itr_list(list%inl(iat) + 1) - 1
             vec = list%wsc%trans(:, list%wsc%tridx_list(img))
             call get_amat_dir_3d(vec, gam, dtrans, self%kbc, rvdw, capi, capi, dtmp)
@@ -1518,6 +1502,7 @@ subroutine get_cmat_0d_list(self, mol, list, clist)
 
 end subroutine get_cmat_0d_list
 
+!> Build the bond capacitance matrix for a periodic system.
 subroutine get_cmat_3d(self, mol, wsc, cmat)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
@@ -1559,7 +1544,7 @@ subroutine get_cmat_3d(self, mol, wsc, cmat)
          end do
       end do
 
-      ! self-image diagonal term - also race-free, touches only own iat
+      ! Self-image diagonal term - also race-free, touches only own iat
       rvdw = self%rvdw(izp, izp)
       wsw = 1.0_wp / real(wsc%nimg(iat, iat), wp)
       do img = 1, wsc%nimg(iat, iat)
@@ -1645,12 +1630,13 @@ subroutine get_cmat_3d_list(self, mol, list, clist)
 
       ! 2. Self-interaction with periodic images R /= 0 (j = iat)
       rvdw = self%rvdw(izp, izp)
-      wsw  = 1.0_wp / real(list%wsc%nimg_list(list%inl(iat)), wp)
+      wsw = 1.0_wp / real(list%wsc%nimg_list(list%inl(iat)), wp)
 
       do img = list%wsc%itr_list(list%inl(iat)), list%wsc%itr_list(list%inl(iat) + 1) - 1
          vec = list%wsc%trans(:, list%wsc%tridx_list(img))
          call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, tmp)
-         diag(iat) = diag(iat) + tmp * wsw   ! touches only own atom -> not even a cross-thread hazard
+         ! Direct write is safe: touches only own atom, not even a cross-thread hazard
+         diag(iat) = diag(iat) + tmp * wsw
       end do
 
    end do
@@ -1732,7 +1718,7 @@ subroutine get_dcpair(kbc, vec, rvdw, capi, capj, dgpair, dspair)
    real(wp), intent(in) :: capj
    !> Derivative w.r.t. atomic position (3)
    real(wp), intent(out) :: dgpair(3)
-   !> Derivative w.r.t. lattice parameters (3��3)
+   !> Derivative w.r.t. lattice parameters (3×3)
    real(wp), intent(out) :: dspair(3, 3)
 
    real(wp) :: r1, arg, dtmp
@@ -1853,11 +1839,11 @@ subroutine get_dcmat_0d_list(self, mol, list, cache)
 
          call get_dcpair(self%kbc, vec, rvdw, capi, capj, dG, dS)
 
-         ! updates for coordinate gradients (dcdrdiag)
+         ! Updates for coordinate gradients (dcdrdiag)
          dcdrdiag(:, iat) = dcdrdiag(:, iat) - dG(:)
          dcdrdiag(:, jat) = dcdrdiag(:, jat) + dG(:)
 
-         ! updates for strain/lattice derivatives (dcdL)
+         ! Updates for strain/lattice derivatives (dcdL)
          dcdL(:, :, iat) = dcdL(:, :, iat) + dS(:, :)
          dcdL(:, :, jat) = dcdL(:, :, jat) + dS(:, :)
 
@@ -1871,11 +1857,17 @@ subroutine get_dcmat_0d_list(self, mol, list, cache)
 
 end subroutine get_dcmat_0d_list
 
+!> Build the derivative of the bond capacitance matrix for a periodic system.
 subroutine get_dcmat_3d(self, mol, wsc, dcdr, dcdL)
+   !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
+   !> Molecular structure data
    type(structure_type), intent(in) :: mol
+   !> Wigner-Seitz cell
    type(wignerseitz_cell_type), intent(in) :: wsc
+   !> Derivative of capacitance matrix w.r.t. atomic positions (3 × nat × ndim)
    real(wp), intent(out) :: dcdr(:, :, :)
+   !> Derivative of capacitance matrix w.r.t. lattice parameters (3 × 3 × ndim)
    real(wp), intent(out) :: dcdL(:, :, :)
 
    integer :: iat, jat, izp, jzp, img
@@ -1940,10 +1932,16 @@ subroutine get_dcmat_3d(self, mol, wsc, dcdr, dcdL)
 
 end subroutine get_dcmat_3d
 
+!> Build the derivative of the bond capacitance matrix for a periodic system using a
+!> CSR adjacency list.
 subroutine get_dcmat_3d_list(self, mol, list, cache)
+   !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
+   !> Molecular structure data
    type(structure_type), intent(in) :: mol
+   !> Multicharge neighbourlist type
    type(csr_list), intent(in) :: list
+   !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
 
    integer :: iat, jat, izp, jzp
@@ -1980,7 +1978,8 @@ subroutine get_dcmat_3d_list(self, mol, list, cache)
          wsw = 1.0_wp / real(list%wsc%nimg_list(kat), wp)
 
          do img = list%wsc%itr_list(kat), list%wsc%itr_list(kat+1) - 1
-            vec = mol%xyz(:, jat) - mol%xyz(:, iat) + list%wsc%trans(:, list%wsc%tridx_list(img))
+            vec = mol%xyz(:, jat) - mol%xyz(:, iat) + &
+               & list%wsc%trans(:, list%wsc%tridx_list(img))
             call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
 
             dcdrdiag_acc(:, iat) = dcdrdiag_acc(:, iat) - dG(:) * wsw
@@ -1994,7 +1993,6 @@ subroutine get_dcmat_3d_list(self, mol, list, cache)
       rvdw = self%rvdw(izp, izp)
       if (list%wsc%nimg_list(list%inl(iat)) > 0) then
          wsw = 1.0_wp / real(list%wsc%nimg_list(list%inl(iat)), wp)
-
          do img = list%wsc%itr_list(list%inl(iat)), list%wsc%itr_list(list%inl(iat) + 1) - 1
             vec = list%wsc%trans(:, list%wsc%tridx_list(img))
             call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, dG, dS)
@@ -2046,6 +2044,7 @@ subroutine get_dcpair_dir(kbc, rij, trans, rvdw, capi, capj, dgpair, dspair)
    end do
 end subroutine get_dcpair_dir
 
+!> Compute the derivative of the coordination-number pair contribution for a single image.
 subroutine get_dcnpair(self, mol, iat, jat, rij, dG_ij, dG_ji)
    !> Coordination number container
    class(ncoord_type), intent(in) :: self
@@ -2071,7 +2070,6 @@ subroutine get_dcnpair(self, mol, iat, jat, rij, dG_ij, dG_ji)
 
    den = self%get_en_factor(izp, jzp)
    countd = den * self%ncoord_dcount(izp, jzp, r1) * rij / r1
-
 
    ! Pay attention to the case when atoms are the same
    ! (e.g., self-interaction through periodic boundaries)
@@ -2121,6 +2119,7 @@ subroutine get_dcnpair_dir(self, mol, trans, iat, jat, rij, dG_ij, dG_ji)
    end do
 end subroutine get_dcnpair_dir
 
+!> Compute the coordination number and its diagonal derivatives using a neighbour list.
 subroutine get_dcndiag_list(self, mol, trans, cn, dcndrdiag, dcndL, list)
    !> Coordination number container
    class(ncoord_type), intent(in) :: self
@@ -2238,7 +2237,6 @@ subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta, list)
    end if
 
 end subroutine get_grad
-
 
 !> Accumulate gradient and stress contributions for a non-periodic CSR system
 subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain, betain)
@@ -2521,7 +2519,6 @@ subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
 
    deallocate(gradient_local, sigma_local, qlocacc, cnacc, dtrans, v)
 end subroutine get_grad_0d
-
 
 !> Accumulate gradient and stress contributions for a periodic CSR system
 subroutine get_grad_3d_list(self, mol, list, cache, p, gradient, sigma, alphain, betain)

@@ -14,15 +14,15 @@
 ! limitations under the License.
 
 module multicharge_param
-   use mctc_env, only: error_type, wp
-   use mctc_io, only: structure_type
-   use mctc_io_convert, only: autoaa
-   use mctc_data, only: get_covalent_rad, get_pauling_en, get_vdw_rad
-   use multicharge_model, only: mchrg_model_type, &
+   use mctc_env, only : error_type, wp
+   use mctc_io, only : structure_type
+   use mctc_io_convert, only : autoaa
+   use mctc_data, only : get_covalent_rad, get_pauling_en, get_vdw_rad
+   use multicharge_model, only : mchrg_model_type, &
       & new_eeq_model, eeq_model, new_eeqbc_model, eeqbc_model
-   use multicharge_param_eeq2019, only: get_eeq_chi, get_eeq_eta, &
+   use multicharge_param_eeq2019, only : get_eeq_chi, get_eeq_eta, &
       & get_eeq_rad, get_eeq_kcnchi
-   use multicharge_param_eeqbc2025, only: get_eeqbc_chi, get_eeqbc_eta, &
+   use multicharge_param_eeqbc2025, only : get_eeqbc_chi, get_eeqbc_eta, &
       & get_eeqbc_rad, get_eeqbc_kcnchi, get_eeqbc_kqchi, get_eeqbc_kqeta, &
       & get_eeqbc_kcnrad, get_eeqbc_cap, get_eeqbc_cov_radii, get_eeqbc_avg_cn, &
       & get_eeqbc_rvdw_scale
@@ -42,8 +42,11 @@ module multicharge_param
    !> Actual charge model enumerator
    type(TMchargeModelEnum), parameter :: mchrg_model = TMchargeModelEnum()
 
+
 contains
 
+
+!> Construct an EEQ (2019) model with the default element-wise parameters
 subroutine new_eeq2019_model(mol, model, error)
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
@@ -73,6 +76,8 @@ subroutine new_eeq2019_model(mol, model, error)
 
 end subroutine new_eeq2019_model
 
+
+!> Construct an EEQBC (2025) model with the default element-wise parameters
 subroutine new_eeqbc2025_model(mol, model, error)
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
