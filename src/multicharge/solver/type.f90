@@ -61,7 +61,7 @@ module multicharge_solver_type
          !> Flag for coupled-perturbed equations
          logical, intent(in), optional :: cpq
 
-         !> Optional neighbour-list representation of the matrix
+         !> Optional neighborlist representation of the matrix
          type(csr_list), intent(in), optional :: list
 
          !> Output unit

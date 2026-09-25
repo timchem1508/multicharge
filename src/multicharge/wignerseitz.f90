@@ -13,30 +13,16 @@
 ! See the License for the specific language governing permissions and
 ! limitations under the License.
 
-!> Wigner-Seitz cell construction for periodic neighbour lists
+!> Wigner-Seitz cell construction for periodic neighborlists
 module multicharge_wignerseitz
    use mctc_cutoff, only : get_lattice_points
    use mctc_env, only : wp
    use mctc_io, only : structure_type
+   use mctc_wignerseitz, only : wignerseitz_cell
    implicit none
    private
 
-   public :: wignerseitz_cell_type, new_wignerseitz_cell
-
-   !> Wigner-Seitz cell holding the minimum-image translations for each atom pair
-   type :: wignerseitz_cell_type
-      !> Maximum number of periodic images found for any atom pair
-      integer :: nimg_max
-
-      !> Number of periodic images belonging to the Wigner-Seitz cell for each atom pair
-      integer, allocatable :: nimg(:, :)
-
-      !> Index into trans of each periodic image for each atom pair
-      integer, allocatable :: tridx(:, :, :)
-
-      !> Translation vectors of the candidate periodic images
-      real(wp), allocatable :: trans(:, :)
-   end type wignerseitz_cell_type
+   public :: new_wignerseitz_cell
 
    !> Small cutoff threshold to create only closest cells
    real(wp), parameter :: thr = sqrt(epsilon(0.0_wp))
@@ -52,7 +38,7 @@ contains
 subroutine new_wignerseitz_cell(self, mol)
 
    !> Wigner-Seitz cell instance
-   type(wignerseitz_cell_type), intent(out) :: self
+   type(wignerseitz_cell), intent(out) :: self
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol

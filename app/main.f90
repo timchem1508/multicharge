@@ -97,19 +97,19 @@ program main
       end if
    end if
 
+   allocate(cache)
 
-   ! Create neighbour list if requested
+   ! Create neighborlist if requested
    if (use_nlist) then
       call timer%push("nlist")
       allocate(list)
       if (any(mol%periodic)) then
-         allocate(wsc)
-         call new_csr_list(list, mol, wsc, cutoff)
+         call new_csr_list(list, mol, error, cache%wsc, cutoff)
       else
-         call new_csr_list(list, mol, cutoff=cutoff)
+         call new_csr_list(list, mol, error, cutoff=cutoff)
       end if
       call timer%pop
-      write(output_unit, '(a, 1x, a)') "Neighbour list generation time :", format_time(timer%get("nlist"))
+      write(output_unit, '(a, 1x, a)') "neighborlist generation time :", format_time(timer%get("nlist"))
    end if
 
    call timer%push("model_setup")
@@ -149,8 +149,6 @@ program main
    end if
 
    grad = egrad .or. qgrad
-
-   allocate(cache)
 
    call timer%push("update")
    call model%update(mol, cache, trans, grad, list)
@@ -207,8 +205,8 @@ subroutine help(unit)
       "-tol, -tolerance, --tolerance <real>", "Provide the tolerance of the solver", &
       "-g, -eg, -grad, --grad, -egrad, --egrad", "Evaluate molecular energy gradient and virial.", &
       "-qg, -qgrad, --qgrad", "Evaluate molecular charge gradient and virial.", &
-      "-list, -nlist, --nlist", "Use neighbour list for solver (not compatible with charge gradient)", &
-      "-cut, -cutoff, --cutoff <real>", "Cutoff for neighbour list generation in Bohrs (default: 29.0 Bohr)", &
+      "-list, -nlist, --nlist", "Use neighborlist for solver (not compatible with charge gradient)", &
+      "-cut, -cutoff, --cutoff <real>", "Cutoff for neighborlist generation in Bohrs (default: 29.0 Bohr)", &
       "-v, -verbose, --verbose", "Show more", &
       "-s, -silent, --silent", "Show less", &
       "-j, -json, --json", "Provide output in JSON format to the file 'multicharge.json'", &
@@ -238,7 +236,7 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
    !> ID of choosen model type
    integer, intent(out) :: model_id
 
-   !> Flag for neighbour list creation
+   !> Flag for neighborlist creation
    logical, intent(out) :: use_nlist
 
    !> Nlist cutoff
@@ -402,7 +400,7 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
          call get_argument(iarg, arg)
          read(arg, *, iostat=iostat) cutoff
          if (iostat /= 0) then
-            call fatal_error(error, "Invalid neighbourlist cutoff")
+            call fatal_error(error, "Invalid neighborlist cutoff")
             exit
          end if
       end select

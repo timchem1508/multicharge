@@ -28,7 +28,8 @@ module multicharge_model_eeq
    use mctc_io_constants, only : pi
    use mctc_io_math, only : matdet_3x3
    use mctc_ncoord, only : new_ncoord, cn_count
-   use multicharge_wignerseitz, only : wignerseitz_cell_type, new_wignerseitz_cell
+   use mctc_wignerseitz, only : wignerseitz_cell
+   use multicharge_wignerseitz, only : new_wignerseitz_cell
    use mctc_csrlist, only : csr_list
    use multicharge_ewald, only : get_alpha
    use multicharge_model_type, only : mchrg_model_type, get_dir_trans, get_rec_trans
@@ -122,7 +123,7 @@ subroutine update(self, mol, cache, trans, grad, list)
    class(eeq_model), intent(in) :: self
    !> Structure type
    type(structure_type), intent(in) :: mol
-   !> Multicharge neighbourlist type
+   !> Multicharge neighborlist type
    type(csr_list), intent(in), optional :: list
    !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
@@ -169,7 +170,7 @@ subroutine get_capacitance_matrix(self, mol, ndim, cache, list)
    integer, intent(in) :: ndim
    !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
-   !> Multicharge neighbourlist type
+   !> Multicharge neighborlist type
    type(csr_list), intent(in), optional :: list
 end subroutine get_capacitance_matrix
 
@@ -184,7 +185,7 @@ subroutine get_xvec(self, mol, ndim, cache, list, efield)
    integer, intent(in) :: ndim
    !> Multicharge cache (provides CN and will store the vector)
    type(mchrg_cache), intent(inout) :: cache
-   !> Multicharge neighbourlist type
+   !> Multicharge neighborlist type
    type(csr_list), intent(in), optional :: list
    !> External electric field
    real(wp), intent(in), optional :: efield(:)
@@ -236,7 +237,7 @@ subroutine get_xvec_derivs(self, mol, ndim, cache, list)
    integer, intent(in) :: ndim
    !> Multicharge cache (provides CN derivatives, stores x‑vector derivatives)
    type(mchrg_cache), intent(inout) :: cache
-   !> Multicharge neighbourlist type
+   !> Multicharge neighborlist type
    type(csr_list), intent(in), optional :: list
 
    real(wp), parameter :: reg = 1.0e-14_wp
@@ -277,7 +278,7 @@ subroutine get_coulomb_matrix(self, mol, ndim, cache, list)
    integer, intent(in) :: ndim
    !> Multicharge cache (will hold the Coulomb matrix)
    type(mchrg_cache), intent(inout) :: cache
-   !> Multicharge neighbourlist type
+   !> Multicharge neighborlist type
    type(csr_list), intent(in), optional :: list
 
    if (.not. allocated(cache%amat)) then
@@ -353,7 +354,7 @@ subroutine get_amat_3d(self, mol, wsc, alpha, amat)
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
    !> Wigner–Seitz cell for the given structure
-   type(wignerseitz_cell_type), intent(in) :: wsc
+   type(wignerseitz_cell), intent(in) :: wsc
    !> Ewald splitting parameter
    real(wp), intent(in) :: alpha
    !> Output Coulomb matrix (size ndim × ndim)
@@ -488,7 +489,7 @@ subroutine get_coulomb_derivs(self, mol, ndim, cache, list)
    integer, intent(in) :: ndim
    !> Multicharge cache (provides charges and will store derivatives)
    type(mchrg_cache), intent(inout) :: cache
-   !> Multicharge neighbourlist type
+   !> Multicharge neighborlist type
    type(csr_list), intent(in), optional :: list
 
    real(wp), allocatable :: atrace(:,:)
@@ -588,7 +589,7 @@ subroutine get_damat_3d(self, mol, wsc, alpha, qvec, dadr, dadL, atrace)
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
    !> Wigner–Seitz cell
-   type(wignerseitz_cell_type), intent(in) :: wsc
+   type(wignerseitz_cell), intent(in) :: wsc
    !> Ewald splitting parameter
    real(wp), intent(in) :: alpha
    !> Charge vector (right‑hand side)
@@ -767,7 +768,7 @@ subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta, list)
    real(wp), intent(in), optional :: alpha
    !> Optional electronegativity prefactor
    real(wp), intent(in), optional :: beta
-   !> Neighbour list (each unordered pair appears once)
+   !> neighborlist (each unordered pair appears once)
    type(csr_list), optional, intent(in) :: list
 
    if (any(mol%periodic)) then

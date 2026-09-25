@@ -19,8 +19,9 @@ module test_wignerseitz
       & test_failed
    use mctc_io_structure, only: structure_type
    use mctc_cutoff, only: get_lattice_points
+   use mctc_wignerseitz, only : wignerseitz_cell
    use mstore, only: get_structure
-   use multicharge_wignerseitz
+   use multicharge_wignerseitz, only : new_wignerseitz_cell
    implicit none
    private
 
@@ -111,7 +112,7 @@ subroutine test_wsc_0d(error)
    type(error_type), allocatable, intent(out) :: error
 
    type(structure_type) :: mol
-   type(wignerseitz_cell_type) :: wsc
+   type(wignerseitz_cell) :: wsc
 
    call get_structure(mol, "MB16-43", "02")
 
@@ -131,7 +132,7 @@ subroutine test_wsc_3d(error)
    type(error_type), allocatable, intent(out) :: error
 
    type(structure_type) :: mol
-   type(wignerseitz_cell_type) :: wsc
+   type(wignerseitz_cell) :: wsc
 
    call get_structure(mol, "X23", "pyrazole")
 

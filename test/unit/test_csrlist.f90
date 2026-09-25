@@ -40,13 +40,13 @@ module test_csrlist
    !> Tight tolerance for direct numerical comparisons
    real(wp), parameter :: thr = 100 * epsilon(1.0_wp)
 
-   !> Tolerance for neighbour-list and dense-matrix comparisons
+   !> Tolerance for neighborlist and dense-matrix comparisons
    real(wp), parameter :: thr1 = 1.0e5_wp*epsilon(1.0_wp)
 
    !> Tolerance for numerical derivatives
    real(wp), parameter :: thr2 = sqrt(epsilon(1.0_wp))
 
-   !> Neighbour-list cutoff used by shared test helpers
+   !> neighborlist cutoff used by shared test helpers
    real(wp), parameter :: cutoff = 29.0_wp
 
 
@@ -201,7 +201,7 @@ subroutine gen_test_molecular(error, mol, model, qref, eref)
 
    ! Build adjacency list
    allocate(list)
-   call new_csr_list(list, mol, cutoff=cutoff)
+   call new_csr_list(list, mol, error, cutoff=cutoff)
 
    call model%update(mol, cache, trans, grad=.false., list=list)
    call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, unit=output_unit)
@@ -278,7 +278,7 @@ subroutine test_components(error, mol, model)
    allocate(cache2)
    allocate(list)
 
-   call new_csr_list(list, mol, cutoff=cutoff)
+   call new_csr_list(list, mol, error, cutoff=cutoff)
    call model%update(mol, cache2, trans, grad=.true., list=list)
 
    call model%solve(mol, solver, cache2, error, list=list, unit=output_unit)
@@ -347,7 +347,6 @@ subroutine gen_test_periodic(error, mol, model)
    real(wp), allocatable :: eref(:)
 
    type(mchrg_cache), allocatable :: cache
-   type(wignerseitz_cell), allocatable :: wsc
    type(csr_list), allocatable :: list
 
    ! Solver variables
@@ -399,8 +398,7 @@ subroutine gen_test_periodic(error, mol, model)
    deallocate(cache)
    allocate(cache)
    allocate(list)
-   allocate(wsc)
-   call new_csr_list(list, mol, wsc, 29.0_wp)
+   call new_csr_list(list, mol, error, cache%wsc, 29.0_wp)
    call model%update(mol, cache, trans, grad=.false., list=list)
    call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, unit=output_unit)
 
@@ -486,7 +484,7 @@ subroutine test_grad(error, mol, model)
    allocate(list)
    gradient = 0.0_wp
    sigma(:, :) = 0.0_wp
-   call new_csr_list(list, mol, cutoff=cutoff)
+   call new_csr_list(list, mol, error, cutoff=cutoff)
    call model%update(mol, cache2, trans, grad=.true., list=list)
 
    call model%solve(mol, solver, cache2, error, &
@@ -584,10 +582,9 @@ subroutine test_grad_periodic(error, mol, model)
 
    allocate(cache2)
    allocate(list)
-   allocate(wsc)
    gradient = 0.0_wp
    sigma(:, :) = 0.0_wp
-   call new_csr_list(list, mol, wsc, cutoff=29.0_wp)
+   call new_csr_list(list, mol, error, cache2%wsc, cutoff=29.0_wp)
    call model%update(mol, cache2, trans, grad=.true., list=list)
 
    call model%solve(mol, solver, cache2, error, &
@@ -634,7 +631,7 @@ subroutine test_api(error, mol, model, qref)
    real(wp), allocatable :: qvec(:)
 
    allocate(list)
-   call new_csr_list(list, mol, cutoff=cutoff)
+   call new_csr_list(list, mol, error, cutoff=cutoff)
 
    ! Check wrapper functions
    allocate (qvec(mol%nat), source=0.0_wp)
