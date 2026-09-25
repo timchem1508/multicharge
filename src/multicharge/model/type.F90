@@ -113,7 +113,7 @@ module multicharge_model_type
          !> Structure type
          type(structure_type), intent(in) :: mol
 
-         !> Multicharge neighbourlist type
+         !> Multicharge neighborlist type
          type(csr_list), intent(in), optional :: list
 
          !> Multicharge cache containing CN, local charges, and a Wigner-Seitz cell
@@ -142,7 +142,7 @@ module multicharge_model_type
          !> Multicharge cache holding the capacitance matrix and optional derivatives
          type(mchrg_cache), intent(inout) :: cache
 
-         !> Multicharge neighbourlist type
+         !> Multicharge neighborlist type
          type(csr_list), intent(in), optional :: list
       end subroutine get_capacitance_matrix
 
@@ -162,7 +162,7 @@ module multicharge_model_type
          !> Multicharge cache holding the Coulomb matrix
          type(mchrg_cache), intent(inout) :: cache
 
-         !> Multicharge neighbourlist type
+         !> Multicharge neighborlist type
          type(csr_list), intent(in), optional :: list
       end subroutine get_coulomb_matrix
 
@@ -182,7 +182,7 @@ module multicharge_model_type
          !> Multicharge cache holding Coulomb-matrix derivatives
          type(mchrg_cache), intent(inout) :: cache
 
-         !> Multicharge neighbourlist type
+         !> Multicharge neighborlist type
          type(csr_list), intent(in), optional :: list
       end subroutine get_coulomb_derivs
 
@@ -202,7 +202,7 @@ module multicharge_model_type
          !> Multicharge cache holding the electronegativity vector and workspace
          type(mchrg_cache), intent(inout) :: cache
 
-         !> Multicharge neighbourlist type
+         !> Multicharge neighborlist type
          type(csr_list), intent(in), optional :: list
       end subroutine get_xvec
 
@@ -222,7 +222,7 @@ module multicharge_model_type
          !> Multicharge cache holding electronegativity-vector derivatives
          type(mchrg_cache), intent(inout) :: cache
 
-         !> Multicharge neighbourlist type
+         !> Multicharge neighborlist type
          type(csr_list), intent(in), optional :: list
       end subroutine get_xvec_derivs
 
@@ -254,7 +254,7 @@ module multicharge_model_type
          !> Stress scaling factor
          real(wp), intent(in), optional :: beta
 
-         !> Neighbour list (each unordered pair appears once)
+         !> neighborlist (each unordered pair appears once)
          type(csr_list), optional, intent(in) :: list
       end subroutine get_grad
 
@@ -355,7 +355,7 @@ subroutine solve(self, mol, solver, cache, error, &
    !> Optional derivative of the atomic partial charges w.r.t. lattice vectors
    real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
 
-   !> Neighbour list optional type
+   !> neighborlist optional type
    type(csr_list), intent(in), optional :: list
 
    !> Optional print verbossity number input flag
@@ -587,7 +587,7 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
    !> External gradient w.r.t. lattice vectors
    real(wp), intent(inout) :: dfdL(:, :)
 
-   !> Neighbour list optional type
+   !> neighborlist optional type
    type(csr_list), intent(in), optional :: list
 
    !> Output unit

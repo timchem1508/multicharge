@@ -93,7 +93,7 @@ subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error
    !> Whether to solve coupled-perturbed equations
    logical, intent(in), optional :: cpq
 
-   !> Optional neighbour-list representation of the matrix
+   !> Optional neighborlist representation of the matrix
    type(csr_list), intent(in), optional :: list
 
    !> Output unit (optional)

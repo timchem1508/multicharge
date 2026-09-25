@@ -60,7 +60,7 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, list)
    !> Derivative of the partial charges w.r.t. strain deformations
    real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
 
-   !> Neighbour list
+   !> neighborlist
    type(csr_list), intent(in), optional :: list
 
    type(mchrg_cache), allocatable :: cache
@@ -131,7 +131,7 @@ subroutine get_eeqbc_charges(mol, error, qvec, dqdr, dqdL, list)
    !> Derivative of the partial charges w.r.t. strain deformations
    real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
 
-   !> Neighbour list
+   !> neighborlist
    type(csr_list), intent(in), optional :: list
 
    class(mchrg_model_type), allocatable :: eeqbc_model

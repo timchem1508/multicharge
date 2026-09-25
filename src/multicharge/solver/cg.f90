@@ -38,7 +38,7 @@ module multicharge_solver_cg
       !> Output verbosity
       integer, allocatable :: verbosity
 
-      !> Whether to use a neighbour-list representation
+      !> Whether to use a neighborlist representation
       logical, allocatable :: use_nlist
 
       !> Whether to use the iterative conjugate-gradient solver
@@ -56,7 +56,7 @@ module multicharge_solver_cg
       !> Output verbosity
       integer, allocatable :: verbosity
 
-      !> Whether to use a neighbour-list representation
+      !> Whether to use a neighborlist representation
       logical, allocatable :: use_nlist
    contains
       !> Solve the linear system iteratively
@@ -75,7 +75,7 @@ module multicharge_solver_cg
    !> Default output verbosity
    integer, parameter :: verbosity_def = 0
 
-   !> Default neighbour-list usage
+   !> Default neighborlist usage
    logical, parameter :: use_nlist_def = .false.
 
 contains
@@ -138,7 +138,7 @@ subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error
    !> Whether to solve coupled-perturbed equations
    logical, intent(in), optional :: cpq
 
-   !> Optional neighbour-list representation of the matrix
+   !> Optional neighborlist representation of the matrix
    type(csr_list), intent(in), optional :: list
 
    !> Output unit

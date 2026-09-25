@@ -20,7 +20,7 @@
 module multicharge_model_cache
    use mctc_env, only : wp
    use mctc_io, only : structure_type
-   use multicharge_wignerseitz, only : wignerseitz_cell_type
+   use mctc_wignerseitz, only : wignerseitz_cell
    implicit none
    private
 
@@ -36,7 +36,7 @@ module multicharge_model_cache
       real(wp) :: alpha
 
       !> Wigner-Seitz cell
-      type(wignerseitz_cell_type) :: wsc
+      type(wignerseitz_cell) :: wsc
 
       !> Translation matrix
       real(wp), allocatable :: trans(:, :)
