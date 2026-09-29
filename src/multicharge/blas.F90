@@ -603,7 +603,7 @@ subroutine mchrg_dgemv312(amat, xvec, yvec, alpha, beta, trans)
       yptr(1:size(yvec, 1) * size(yvec, 2)) => yvec
    end if
    call gemv(aptr, xvec, yptr, alpha, beta, tra)
-end subroutine 
+end subroutine
 
 
 subroutine mchrg_dgemv321(amat, xvec, yvec, alpha, beta, trans)
