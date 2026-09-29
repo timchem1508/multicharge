@@ -2352,7 +2352,9 @@ subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain,
       end do
 
       ! 5. Diagonal weight accumulation
-      qlocacc(iat) = qlocacc(iat) + self%kqeta_pre * self%kqeta(izp) / cosh(self%kqeta(izp) * cache%qloc(iat))**2 * W_ii * cache%clist(list%inl(iat)) * alpha &
+      qlocacc(iat) = qlocacc(iat) + self%kqeta_pre * self%kqeta(izp) &
+         & / cosh(self%kqeta(izp) * cache%qloc(iat))**2 &
+         & * W_ii * cache%clist(list%inl(iat)) * alpha &
          & + v(iat) * self%kqchi(mol%id(iat)) * beta
       cnacc(iat) = cnacc(iat) - sqrt2pi * dradi / (radi**2) * W_ii * cache%clist(list%inl(iat)) * alpha &
          & + v(iat) * self%kcnchi(mol%id(iat)) * beta
@@ -2491,7 +2493,9 @@ subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
       end do
 
       ! 5. Diagonal weight accumulation
-      qlocacc(iat) = qlocacc(iat) + self%kqeta_pre * self%kqeta(izp) / cosh(self%kqeta(izp) * cache%qloc(iat))**2 * W_ii * cache%cmat(iat, iat) * alpha &
+      qlocacc(iat) = qlocacc(iat) + self%kqeta_pre * self%kqeta(izp) &
+         & / cosh(self%kqeta(izp) * cache%qloc(iat))**2 &
+         & * W_ii * cache%cmat(iat, iat) * alpha &
          & + v(iat) * self%kqchi(mol%id(iat)) * beta
       cnacc(iat) = cnacc(iat) - sqrt2pi * dradi / (radi**2) * W_ii * cache%cmat(iat, iat) * alpha &
          & + v(iat) * self%kcnchi(mol%id(iat)) * beta
