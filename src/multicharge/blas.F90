@@ -25,6 +25,7 @@ module multicharge_blas
 
    public :: dot, scal, axpy, symv, gemv, gemm
 
+
    !> Constant times a vector plus a vector: y := a*x + y
    interface axpy
       module procedure :: mchrg_axpy_rsp
@@ -325,221 +326,395 @@ module multicharge_blas
 
 contains
 
-! implementation of axpy wrappers
+
+!> Scaled vector addition y := alpha*x + y (real, single)
 pure subroutine mchrg_axpy_rsp(xvec, yvec, alpha)
+
    integer, parameter :: wp = sp
+
+   !> Vector x
    real(wp), contiguous, intent(in) :: xvec(:)
+
+   !> Vector y
    real(wp), contiguous, intent(inout) :: yvec(:)
+
+   !> Optional scalar alpha
    real(wp), intent(in), optional :: alpha
+
    integer(ik) :: n
    real(wp) :: a
+
    n = size(xvec)
    a = 1.0_wp
    if (present(alpha)) a = alpha
    call blas_axpy(n, a, xvec, 1_ik, yvec, 1_ik)
+
 end subroutine mchrg_axpy_rsp
 
 
+!> Scaled vector addition y := alpha*x + y (complex, single)
 pure subroutine mchrg_axpy_csp(xvec, yvec, alpha)
+
    integer, parameter :: wp = sp
+
+   !> Vector x
    complex(wp), contiguous, intent(in) :: xvec(:)
+
+   !> Vector y
    complex(wp), contiguous, intent(inout) :: yvec(:)
+
+   !> Optional scalar alpha
    complex(wp), intent(in), optional :: alpha
+
    integer(ik) :: n
    complex(wp) :: a
+
    n = size(xvec)
    a = 1.0_wp
    if (present(alpha)) a = alpha
    call blas_axpy(n, a, xvec, 1_ik, yvec, 1_ik)
+
 end subroutine mchrg_axpy_csp
 
 
+!> Scaled vector addition y := alpha*x + y (real, double)
 pure subroutine mchrg_axpy_rdp(xvec, yvec, alpha)
+
    integer, parameter :: wp = dp
+
+   !> Vector x
    real(wp), contiguous, intent(in) :: xvec(:)
+
+   !> Vector y
    real(wp), contiguous, intent(inout) :: yvec(:)
+
+   !> Optional scalar alpha
    real(wp), intent(in), optional :: alpha
+
    integer(ik) :: n
    real(wp) :: a
+
    n = size(xvec)
    a = 1.0_wp
    if (present(alpha)) a = alpha
    call blas_axpy(n, a, xvec, 1_ik, yvec, 1_ik)
+
 end subroutine mchrg_axpy_rdp
 
 
+!> Scaled vector addition y := alpha*x + y (complex, double)
 pure subroutine mchrg_axpy_cdp(xvec, yvec, alpha)
+
    integer, parameter :: wp = dp
+
+   !> Vector x
    complex(wp), contiguous, intent(in) :: xvec(:)
+
+   !> Vector y
    complex(wp), contiguous, intent(inout) :: yvec(:)
+
+   !> Optional scalar alpha
    complex(wp), intent(in), optional :: alpha
+
    integer(ik) :: n
    complex(wp) :: a
+
    n = size(xvec)
    a = 1.0_wp
    if (present(alpha)) a = alpha
    call blas_axpy(n, a, xvec, 1_ik, yvec, 1_ik)
+
 end subroutine mchrg_axpy_cdp
 
 
-! implementation of scal wrappers
+!> Scale a vector x := alpha*x (real, single)
 pure subroutine mchrg_scal_rsp(alpha, xvec)
+
    integer, parameter :: wp = sp
+
+   !> Scalar alpha
    real(wp), intent(in) :: alpha
+
+   !> Vector x
    real(wp), contiguous, intent(inout) :: xvec(:)
+
    integer(ik) :: n
+
    n = size(xvec)
    call blas_scal(n, alpha, xvec, 1_ik)
+
 end subroutine mchrg_scal_rsp
 
 
+!> Scale a vector x := alpha*x (real scalar, complex vector, single)
 pure subroutine mchrg_scal_rcsp(alpha, xvec)
+
    integer, parameter :: wp = sp
+
+   !> Scalar alpha
    real(wp), intent(in) :: alpha
+
+   !> Vector x
    complex(wp), contiguous, intent(inout) :: xvec(:)
+
    integer(ik) :: n
+
    n = size(xvec)
    call blas_scal(n, alpha, xvec, 1_ik)
+
 end subroutine mchrg_scal_rcsp
 
 
+!> Scale a vector x := alpha*x (complex, single)
 pure subroutine mchrg_scal_csp(alpha, xvec)
+
    integer, parameter :: wp = sp
+
+   !> Scalar alpha
    complex(wp), intent(in) :: alpha
+
+   !> Vector x
    complex(wp), contiguous, intent(inout) :: xvec(:)
+
    integer(ik) :: n
+
    n = size(xvec)
    call blas_scal(n, alpha, xvec, 1_ik)
+
 end subroutine mchrg_scal_csp
 
 
+!> Scale a vector x := alpha*x (real, double)
 pure subroutine mchrg_scal_rdp(alpha, xvec)
+
    integer, parameter :: wp = dp
+
+   !> Scalar alpha
    real(wp), intent(in) :: alpha
+
+   !> Vector x
    real(wp), contiguous, intent(inout) :: xvec(:)
+
    integer(ik) :: n
+
    n = size(xvec)
    call blas_scal(n, alpha, xvec, 1_ik)
+
 end subroutine mchrg_scal_rdp
 
 
+!> Scale a vector x := alpha*x (real scalar, complex vector, double)
 pure subroutine mchrg_scal_rcdp(alpha, xvec)
+
    integer, parameter :: wp = dp
+
+   !> Scalar alpha
    real(wp), intent(in) :: alpha
+
+   !> Vector x
    complex(wp), contiguous, intent(inout) :: xvec(:)
+
    integer(ik) :: n
+
    n = size(xvec)
    call blas_scal(n, alpha, xvec, 1_ik)
+
 end subroutine mchrg_scal_rcdp
 
 
+!> Scale a vector x := alpha*x (complex, double)
 pure subroutine mchrg_scal_cdp(alpha, xvec)
+
    integer, parameter :: wp = dp
+
+   !> Scalar alpha
    complex(wp), intent(in) :: alpha
+
+   !> Vector x
    complex(wp), contiguous, intent(inout) :: xvec(:)
+
    integer(ik) :: n
+
    n = size(xvec)
    call blas_scal(n, alpha, xvec, 1_ik)
+
 end subroutine mchrg_scal_cdp
 
 
-! implementation of dot wrappers
+!> Dot product of two vectors (single)
 function mchrg_sdot(xvec, yvec) result(dot_prod)
-   real(sp) :: dot_prod
+
+   !> Vector x
    real(sp), intent(in) :: xvec(:)
+
+   !> Vector y
    real(sp), intent(in) :: yvec(:)
+
+   real(sp) :: dot_prod
    integer(ik) :: incx, incy, n
+
    incx = 1_ik
    incy = 1_ik
    n = size(xvec)
    dot_prod = blas_dot(n, xvec, incx, yvec, incy)
+
 end function mchrg_sdot
 
 
+!> Dot product of two vectors (double)
 function mchrg_ddot(xvec, yvec) result(dot_prod)
-   real(dp) :: dot_prod
+
+   !> Vector x
    real(dp), intent(in) :: xvec(:)
+
+   !> Vector y
    real(dp), intent(in) :: yvec(:)
+
+   real(dp) :: dot_prod
    integer(ik) :: incx, incy, n
+
    incx = 1_ik
    incy = 1_ik
    n = size(xvec)
    dot_prod = blas_dot(n, xvec, incx, yvec, incy)
+
 end function mchrg_ddot
 
 
+!> Dot product of two vectors (single, array ranks 12)
 function mchrg_sdot12(xvec, yvec) result(dot_prod)
-   real(sp) :: dot_prod
+
+   !> Vector x
    real(sp), intent(in) :: xvec(:)
+
+   !> Vector y
    real(sp), intent(in), contiguous, target :: yvec(:, :)
+
+   real(sp) :: dot_prod
    real(sp), pointer :: yptr(:)
+
    yptr(1:size(yvec)) => yvec
    dot_prod = dot(xvec, yptr)
+
 end function mchrg_sdot12
 
 
+!> Dot product of two vectors (single, array ranks 21)
 function mchrg_sdot21(xvec, yvec) result(dot_prod)
-   real(sp) :: dot_prod
+
+   !> Vector x
    real(sp), intent(in), contiguous, target :: xvec(:, :)
+
+   !> Vector y
    real(sp), intent(in) :: yvec(:)
+
+   real(sp) :: dot_prod
    real(sp), pointer :: xptr(:)
+
    xptr(1:size(xvec)) => xvec
    dot_prod = dot(xptr, yvec)
+
 end function mchrg_sdot21
 
 
+!> Dot product of two vectors (single, array ranks 22)
 function mchrg_sdot22(xvec, yvec) result(dot_prod)
-   real(sp) :: dot_prod
+
+   !> Vector x
    real(sp), intent(in), contiguous, target :: xvec(:, :)
+
+   !> Vector y
    real(sp), intent(in), contiguous, target :: yvec(:, :)
+
+   real(sp) :: dot_prod
    real(sp), pointer :: xptr(:), yptr(:)
+
    xptr(1:size(xvec)) => xvec
    yptr(1:size(yvec)) => yvec
    dot_prod = dot(xptr, yptr)
+
 end function mchrg_sdot22
 
 
+!> Dot product of two vectors (double, array ranks 12)
 function mchrg_ddot12(xvec, yvec) result(dot_prod)
-   real(dp) :: dot_prod
+
+   !> Vector x
    real(dp), intent(in) :: xvec(:)
+
+   !> Vector y
    real(dp), intent(in), contiguous, target :: yvec(:, :)
+
+   real(dp) :: dot_prod
    real(dp), pointer :: yptr(:)
+
    yptr(1:size(yvec)) => yvec
    dot_prod = dot(xvec, yptr)
+
 end function mchrg_ddot12
 
 
+!> Dot product of two vectors (double, array ranks 21)
 function mchrg_ddot21(xvec, yvec) result(dot_prod)
-   real(dp) :: dot_prod
+
+   !> Vector x
    real(dp), intent(in), contiguous, target :: xvec(:, :)
+
+   !> Vector y
    real(dp), intent(in) :: yvec(:)
+
+   real(dp) :: dot_prod
    real(dp), pointer :: xptr(:)
+
    xptr(1:size(xvec)) => xvec
    dot_prod = dot(xptr, yvec)
+
 end function mchrg_ddot21
 
 
+!> Dot product of two vectors (double, array ranks 22)
 function mchrg_ddot22(xvec, yvec) result(dot_prod)
-   real(dp) :: dot_prod
+
+   !> Vector x
    real(dp), intent(in), contiguous, target :: xvec(:, :)
+
+   !> Vector y
    real(dp), intent(in), contiguous, target :: yvec(:, :)
+
+   real(dp) :: dot_prod
    real(dp), pointer :: xptr(:), yptr(:)
+
    xptr(1:size(xvec)) => xvec
    yptr(1:size(yvec)) => yvec
    dot_prod = dot(xptr, yptr)
+
 end function mchrg_ddot22
 
 
-! implementation of gemv wrappers
+!> General matrix-vector product (single, array ranks 312)
 subroutine mchrg_sgemv312(amat, xvec, yvec, alpha, beta, trans)
+
+   !> Matrix A
    real(sp), intent(in), contiguous, target :: amat(:, :, :)
+
+   !> Vector x
    real(sp), intent(in) :: xvec(:)
+
+   !> Vector y
    real(sp), intent(inout), contiguous, target :: yvec(:, :)
+
+   !> Optional scalar alpha
    real(sp), intent(in), optional :: alpha
+
+   !> Optional scalar beta
    real(sp), intent(in), optional :: beta
+
+   !> Optional transposition of A ('n', 't' or 'c')
    character(len=1), intent(in), optional :: trans
+
    real(sp), pointer :: aptr(:, :), yptr(:)
    character(len=1) :: tra
+
    if (present(trans)) then
       tra = trans
    else
@@ -550,21 +725,37 @@ subroutine mchrg_sgemv312(amat, xvec, yvec, alpha, beta, trans)
       yptr(1:size(yvec, 1)*size(yvec, 2)) => yvec
    else
       aptr(1:size(amat, 1), 1:size(amat, 2)*size(amat, 3)) => amat
-      yptr(1:size(yvec, 1) * size(yvec, 2)) => yvec
+      yptr(1:size(yvec, 1)*size(yvec, 2)) => yvec
    end if
    call gemv(aptr, xvec, yptr, alpha, beta, tra)
+
 end subroutine mchrg_sgemv312
 
 
+!> General matrix-vector product (single, array ranks 321)
 subroutine mchrg_sgemv321(amat, xvec, yvec, alpha, beta, trans)
+
+   !> Matrix A
    real(sp), intent(in), contiguous, target :: amat(:, :, :)
+
+   !> Vector x
    real(sp), intent(in), contiguous, target :: xvec(:, :)
+
+   !> Vector y
    real(sp), intent(inout) :: yvec(:)
+
+   !> Optional scalar alpha
    real(sp), intent(in), optional :: alpha
+
+   !> Optional scalar beta
    real(sp), intent(in), optional :: beta
+
+   !> Optional transposition of A ('n', 't' or 'c')
    character(len=1), intent(in), optional :: trans
+
    real(sp), pointer :: aptr(:, :), xptr(:)
    character(len=1) :: tra
+
    if (present(trans)) then
       tra = trans
    else
@@ -578,18 +769,34 @@ subroutine mchrg_sgemv321(amat, xvec, yvec, alpha, beta, trans)
       xptr(1:size(xvec, 1) * size(xvec, 2)) => xvec
    end if
    call gemv(aptr, xptr, yvec, alpha, beta, tra)
+
 end subroutine mchrg_sgemv321
 
 
+!> General matrix-vector product (double, array ranks 312)
 subroutine mchrg_dgemv312(amat, xvec, yvec, alpha, beta, trans)
+
+   !> Matrix A
    real(dp), intent(in), contiguous, target :: amat(:, :, :)
+
+   !> Vector x
    real(dp), intent(in) :: xvec(:)
+
+   !> Vector y
    real(dp), intent(inout), contiguous, target :: yvec(:, :)
+
+   !> Optional scalar alpha
    real(dp), intent(in), optional :: alpha
+
+   !> Optional scalar beta
    real(dp), intent(in), optional :: beta
+
+   !> Optional transposition of A ('n', 't' or 'c')
    character(len=1), intent(in), optional :: trans
+
    real(dp), pointer :: aptr(:, :), yptr(:)
    character(len=1) :: tra
+
    if (present(trans)) then
       tra = trans
    else
@@ -600,21 +807,36 @@ subroutine mchrg_dgemv312(amat, xvec, yvec, alpha, beta, trans)
       yptr(1:size(yvec, 1)*size(yvec, 2)) => yvec
    else
       aptr(1:size(amat, 1), 1:size(amat, 2)*size(amat, 3)) => amat
-      yptr(1:size(yvec, 1) * size(yvec, 2)) => yvec
+      yptr(1:size(yvec, 1)*size(yvec, 2)) => yvec
    end if
    call gemv(aptr, xvec, yptr, alpha, beta, tra)
-end subroutine
+end subroutine mchrg_dgemv312
 
 
+!> General matrix-vector product (double, array ranks 321)
 subroutine mchrg_dgemv321(amat, xvec, yvec, alpha, beta, trans)
+
+   !> Matrix A
    real(dp), intent(in), contiguous, target :: amat(:, :, :)
+
+   !> Vector x
    real(dp), intent(in), contiguous, target :: xvec(:, :)
+
+   !> Vector y
    real(dp), intent(inout) :: yvec(:)
+
+   !> Optional scalar alpha
    real(dp), intent(in), optional :: alpha
+
+   !> Optional scalar beta
    real(dp), intent(in), optional :: beta
+
+   !> Optional transposition of A ('n', 't' or 'c')
    character(len=1), intent(in), optional :: trans
+
    real(dp), pointer :: aptr(:, :), xptr(:)
    character(len=1) :: tra
+
    if (present(trans)) then
       tra = trans
    else
@@ -628,19 +850,35 @@ subroutine mchrg_dgemv321(amat, xvec, yvec, alpha, beta, trans)
       xptr(1:size(xvec, 1) * size(xvec, 2)) => xvec
    end if
    call gemv(aptr, xptr, yvec, alpha, beta, tra)
+
 end subroutine mchrg_dgemv321
 
 
+!> General matrix-vector product (single)
 pure subroutine mchrg_sgemv(amat, xvec, yvec, alpha, beta, trans)
+
+   !> Matrix A
    real(sp), intent(in) :: amat(:, :)
+
+   !> Vector x
    real(sp), intent(in) :: xvec(:)
+
+   !> Vector y
    real(sp), intent(inout) :: yvec(:)
+
+   !> Optional scalar alpha
    real(sp), intent(in), optional :: alpha
+
+   !> Optional scalar beta
    real(sp), intent(in), optional :: beta
+
+   !> Optional transposition of A ('n', 't' or 'c')
    character(len=1), intent(in), optional :: trans
+
    real(sp) :: a, b
    character(len=1) :: tra
    integer(ik) :: incx, incy, m, n, lda
+
    if (present(alpha)) then
       a = alpha
    else
@@ -649,7 +887,7 @@ pure subroutine mchrg_sgemv(amat, xvec, yvec, alpha, beta, trans)
    if (present(beta)) then
       b = beta
    else
-      b = 0
+      b = 0.0_sp
    end if
    if (present(trans)) then
       tra = trans
@@ -662,19 +900,35 @@ pure subroutine mchrg_sgemv(amat, xvec, yvec, alpha, beta, trans)
    m = size(amat, 1)
    n = size(amat, 2)
    call blas_gemv(tra, m, n, a, amat, lda, xvec, incx, b, yvec, incy)
+
 end subroutine mchrg_sgemv
 
 
+!> General matrix-vector product (double)
 pure subroutine mchrg_dgemv(amat, xvec, yvec, alpha, beta, trans)
+
+   !> Matrix A
    real(dp), intent(in) :: amat(:, :)
+
+   !> Vector x
    real(dp), intent(in) :: xvec(:)
+
+   !> Vector y
    real(dp), intent(inout) :: yvec(:)
+
+   !> Optional scalar alpha
    real(dp), intent(in), optional :: alpha
+
+   !> Optional scalar beta
    real(dp), intent(in), optional :: beta
+
+   !> Optional transposition of A ('n', 't' or 'c')
    character(len=1), intent(in), optional :: trans
+
    real(dp) :: a, b
    character(len=1) :: tra
    integer(ik) :: incx, incy, m, n, lda
+
    if (present(alpha)) then
       a = alpha
    else
@@ -683,7 +937,7 @@ pure subroutine mchrg_dgemv(amat, xvec, yvec, alpha, beta, trans)
    if (present(beta)) then
       b = beta
    else
-      b = 0
+      b = 0.0_dp
    end if
    if (present(trans)) then
       tra = trans
@@ -696,20 +950,35 @@ pure subroutine mchrg_dgemv(amat, xvec, yvec, alpha, beta, trans)
    m = size(amat, 1)
    n = size(amat, 2)
    call blas_gemv(tra, m, n, a, amat, lda, xvec, incx, b, yvec, incy)
+
 end subroutine mchrg_dgemv
 
 
-! implementation of symv wrappers
+!> Symmetric matrix-vector product (single)
 pure subroutine mchrg_ssymv(amat, xvec, yvec, uplo, alpha, beta)
+
+   !> Matrix A
    real(sp), intent(in) :: amat(:, :)
+
+   !> Vector x
    real(sp), intent(in) :: xvec(:)
+
+   !> Vector y
    real(sp), intent(inout) :: yvec(:)
+
+   !> Optional triangle of A to reference ('u' or 'l')
    character(len=1), intent(in), optional :: uplo
+
+   !> Optional scalar alpha
    real(sp), intent(in), optional :: alpha
+
+   !> Optional scalar beta
    real(sp), intent(in), optional :: beta
+
    character(len=1) :: ula
    real(sp) :: a, b
    integer(ik) :: incx, incy, n, lda
+
    if (present(alpha)) then
       a = alpha
    else
@@ -718,7 +987,7 @@ pure subroutine mchrg_ssymv(amat, xvec, yvec, uplo, alpha, beta)
    if (present(beta)) then
       b = beta
    else
-      b = 0
+      b = 0.0_sp
    end if
    if (present(uplo)) then
       ula = uplo
@@ -730,19 +999,35 @@ pure subroutine mchrg_ssymv(amat, xvec, yvec, uplo, alpha, beta)
    lda = max(1, size(amat, 1))
    n = size(amat, 2)
    call blas_symv(ula, n, a, amat, lda, xvec, incx, b, yvec, incy)
+
 end subroutine mchrg_ssymv
 
 
+!> Symmetric matrix-vector product (double)
 pure subroutine mchrg_dsymv(amat, xvec, yvec, uplo, alpha, beta)
+
+   !> Matrix A
    real(dp), intent(in) :: amat(:, :)
+
+   !> Vector x
    real(dp), intent(in) :: xvec(:)
+
+   !> Vector y
    real(dp), intent(inout) :: yvec(:)
+
+   !> Optional triangle of A to reference ('u' or 'l')
    character(len=1), intent(in), optional :: uplo
+
+   !> Optional scalar alpha
    real(dp), intent(in), optional :: alpha
+
+   !> Optional scalar beta
    real(dp), intent(in), optional :: beta
+
    character(len=1) :: ula
    real(dp) :: a, b
    integer(ik) :: incx, incy, n, lda
+
    if (present(alpha)) then
       a = alpha
    else
@@ -751,7 +1036,7 @@ pure subroutine mchrg_dsymv(amat, xvec, yvec, uplo, alpha, beta)
    if (present(beta)) then
       b = beta
    else
-      b = 0
+      b = 0.0_dp
    end if
    if (present(uplo)) then
       ula = uplo
@@ -763,21 +1048,38 @@ pure subroutine mchrg_dsymv(amat, xvec, yvec, uplo, alpha, beta)
    lda = max(1, size(amat, 1))
    n = size(amat, 2)
    call blas_symv(ula, n, a, amat, lda, xvec, incx, b, yvec, incy)
+
 end subroutine mchrg_dsymv
 
 
-! implementation of gemm wrappers
+!> General matrix-matrix product (single)
 pure subroutine mchrg_sgemm(amat, bmat, cmat, transa, transb, alpha, beta)
+
+   !> Matrix A
    real(sp), intent(in) :: amat(:, :)
+
+   !> Matrix B
    real(sp), intent(in) :: bmat(:, :)
+
+   !> Matrix C
    real(sp), intent(inout) :: cmat(:, :)
+
+   !> Optional transposition of A ('n', 't' or 'c')
    character(len=1), intent(in), optional :: transa
+
+   !> Optional transposition of B ('n', 't' or 'c')
    character(len=1), intent(in), optional :: transb
+
+   !> Optional scalar alpha
    real(sp), intent(in), optional :: alpha
+
+   !> Optional scalar beta
    real(sp), intent(in), optional :: beta
+
    character(len=1) :: tra, trb
    real(sp) :: a, b
    integer(ik) :: m, n, k, lda, ldb, ldc
+
    if (present(alpha)) then
       a = alpha
    else
@@ -798,7 +1100,7 @@ pure subroutine mchrg_sgemm(amat, bmat, cmat, transa, transb, alpha, beta)
    else
       trb = 'n'
    end if
-   if ((tra.eq.'n'.or.tra.eq.'N')) then
+   if (tra == 'n' .or. tra == 'N') then
       k = size(amat, 2)
    else
       k = size(amat, 1)
@@ -809,20 +1111,38 @@ pure subroutine mchrg_sgemm(amat, bmat, cmat, transa, transb, alpha, beta)
    m = size(cmat, 1)
    n = size(cmat, 2)
    call blas_gemm(tra, trb, m, n, k, a, amat, lda, bmat, ldb, b, cmat, ldc)
+
 end subroutine mchrg_sgemm
 
 
+!> General matrix-matrix product (double)
 pure subroutine mchrg_dgemm(amat, bmat, cmat, transa, transb, alpha, beta)
+
+   !> Matrix A
    real(dp), intent(in) :: amat(:, :)
+
+   !> Matrix B
    real(dp), intent(in) :: bmat(:, :)
+
+   !> Matrix C
    real(dp), intent(inout) :: cmat(:, :)
+
+   !> Optional transposition of A ('n', 't' or 'c')
    character(len=1), intent(in), optional :: transa
+
+   !> Optional transposition of B ('n', 't' or 'c')
    character(len=1), intent(in), optional :: transb
+
+   !> Optional scalar alpha
    real(dp), intent(in), optional :: alpha
+
+   !> Optional scalar beta
    real(dp), intent(in), optional :: beta
+
    character(len=1) :: tra, trb
    real(dp) :: a, b
    integer(ik) :: m, n, k, lda, ldb, ldc
+
    if (present(alpha)) then
       a = alpha
    else
@@ -843,7 +1163,7 @@ pure subroutine mchrg_dgemm(amat, bmat, cmat, transa, transb, alpha, beta)
    else
       trb = 'n'
    end if
-   if ((tra.eq.'n'.or.tra.eq.'N')) then
+   if (tra == 'n' .or. tra == 'N') then
       k = size(amat, 2)
    else
       k = size(amat, 1)
@@ -854,19 +1174,37 @@ pure subroutine mchrg_dgemm(amat, bmat, cmat, transa, transb, alpha, beta)
    m = size(cmat, 1)
    n = size(cmat, 2)
    call blas_gemm(tra, trb, m, n, k, a, amat, lda, bmat, ldb, b, cmat, ldc)
+
 end subroutine mchrg_dgemm
 
 
+!> General matrix-matrix product (single, array ranks 323)
 subroutine mchrg_sgemm323(amat, bmat, cmat, transa, transb, alpha, beta)
+
+   !> Matrix A
    real(sp), intent(in), contiguous, target :: amat(:, :, :)
+
+   !> Matrix B
    real(sp), intent(in) :: bmat(:, :)
+
+   !> Matrix C
    real(sp), intent(inout), contiguous, target :: cmat(:, :, :)
+
+   !> Optional transposition of A ('n', 't' or 'c')
    character(len=1), intent(in), optional :: transa
+
+   !> Optional transposition of B ('n', 't' or 'c')
    character(len=1), intent(in), optional :: transb
+
+   !> Optional scalar alpha
    real(sp), intent(in), optional :: alpha
+
+   !> Optional scalar beta
    real(sp), intent(in), optional :: beta
+
    real(sp), pointer :: aptr(:, :), cptr(:, :)
    character(len=1) :: tra
+
    if (present(transa)) then
       tra = transa
    else
@@ -879,19 +1217,37 @@ subroutine mchrg_sgemm323(amat, bmat, cmat, transa, transb, alpha, beta)
    end if
    cptr(1:size(cmat, 1)*size(cmat, 2), 1:size(cmat, 3)) => cmat
    call gemm(aptr, bmat, cptr, tra, transb, alpha, beta)
+
 end subroutine mchrg_sgemm323
 
 
+!> General matrix-matrix product (single, array ranks 233)
 subroutine mchrg_sgemm233(amat, bmat, cmat, transa, transb, alpha, beta)
+
+   !> Matrix A
    real(sp), intent(in) :: amat(:, :)
+
+   !> Matrix B
    real(sp), intent(in), contiguous, target :: bmat(:, :, :)
+
+   !> Matrix C
    real(sp), intent(inout), contiguous, target :: cmat(:, :, :)
+
+   !> Optional transposition of A ('n', 't' or 'c')
    character(len=1), intent(in), optional :: transa
+
+   !> Optional transposition of B ('n', 't' or 'c')
    character(len=1), intent(in), optional :: transb
+
+   !> Optional scalar alpha
    real(sp), intent(in), optional :: alpha
+
+   !> Optional scalar beta
    real(sp), intent(in), optional :: beta
+
    real(sp), pointer :: bptr(:, :), cptr(:, :)
    character(len=1) :: trb
+
    if (present(transb)) then
       trb = transb
    else
@@ -904,19 +1260,37 @@ subroutine mchrg_sgemm233(amat, bmat, cmat, transa, transb, alpha, beta)
    end if
    cptr(1:size(cmat, 1), 1:size(cmat, 2)*size(cmat, 3)) => cmat
    call gemm(amat, bptr, cptr, transa, trb, alpha, beta)
+
 end subroutine mchrg_sgemm233
 
 
+!> General matrix-matrix product (single, array ranks 332)
 subroutine mchrg_sgemm332(amat, bmat, cmat, transa, transb, alpha, beta)
+
+   !> Matrix A
    real(sp), intent(in), contiguous, target :: amat(:, :, :)
+
+   !> Matrix B
    real(sp), intent(in), contiguous, target :: bmat(:, :, :)
+
+   !> Matrix C
    real(sp), intent(inout) :: cmat(:, :)
+
+   !> Optional transposition of A ('n', 't' or 'c')
    character(len=1), intent(in), optional :: transa
+
+   !> Optional transposition of B ('n', 't' or 'c')
    character(len=1), intent(in), optional :: transb
+
+   !> Optional scalar alpha
    real(sp), intent(in), optional :: alpha
+
+   !> Optional scalar beta
    real(sp), intent(in), optional :: beta
+
    real(sp), pointer :: aptr(:, :), bptr(:, :)
    character(len=1) :: tra, trb
+
    if (present(transa)) then
       tra = transa
    else
@@ -938,19 +1312,37 @@ subroutine mchrg_sgemm332(amat, bmat, cmat, transa, transb, alpha, beta)
       bptr(1:size(bmat, 1), 1:size(bmat, 2)*size(bmat, 3)) => bmat
    end if
    call gemm(aptr, bptr, cmat, tra, trb, alpha, beta)
+
 end subroutine mchrg_sgemm332
 
 
+!> General matrix-matrix product (double, array ranks 323)
 subroutine mchrg_dgemm323(amat, bmat, cmat, transa, transb, alpha, beta)
+
+   !> Matrix A
    real(dp), intent(in), contiguous, target :: amat(:, :, :)
+
+   !> Matrix B
    real(dp), intent(in) :: bmat(:, :)
+
+   !> Matrix C
    real(dp), intent(inout), contiguous, target :: cmat(:, :, :)
+
+   !> Optional transposition of A ('n', 't' or 'c')
    character(len=1), intent(in), optional :: transa
+
+   !> Optional transposition of B ('n', 't' or 'c')
    character(len=1), intent(in), optional :: transb
+
+   !> Optional scalar alpha
    real(dp), intent(in), optional :: alpha
+
+   !> Optional scalar beta
    real(dp), intent(in), optional :: beta
+
    real(dp), pointer :: aptr(:, :), cptr(:, :)
    character(len=1) :: tra
+
    if (present(transa)) then
       tra = transa
    else
@@ -963,19 +1355,37 @@ subroutine mchrg_dgemm323(amat, bmat, cmat, transa, transb, alpha, beta)
    end if
    cptr(1:size(cmat, 1)*size(cmat, 2), 1:size(cmat, 3)) => cmat
    call gemm(aptr, bmat, cptr, tra, transb, alpha, beta)
+
 end subroutine mchrg_dgemm323
 
 
+!> General matrix-matrix product (double, array ranks 233)
 subroutine mchrg_dgemm233(amat, bmat, cmat, transa, transb, alpha, beta)
+
+   !> Matrix A
    real(dp), intent(in) :: amat(:, :)
+
+   !> Matrix B
    real(dp), intent(in), contiguous, target :: bmat(:, :, :)
+
+   !> Matrix C
    real(dp), intent(inout), contiguous, target :: cmat(:, :, :)
+
+   !> Optional transposition of A ('n', 't' or 'c')
    character(len=1), intent(in), optional :: transa
+
+   !> Optional transposition of B ('n', 't' or 'c')
    character(len=1), intent(in), optional :: transb
+
+   !> Optional scalar alpha
    real(dp), intent(in), optional :: alpha
+
+   !> Optional scalar beta
    real(dp), intent(in), optional :: beta
+
    real(dp), pointer :: bptr(:, :), cptr(:, :)
    character(len=1) :: trb
+
    if (present(transb)) then
       trb = transb
    else
@@ -988,19 +1398,37 @@ subroutine mchrg_dgemm233(amat, bmat, cmat, transa, transb, alpha, beta)
    end if
    cptr(1:size(cmat, 1), 1:size(cmat, 2)*size(cmat, 3)) => cmat
    call gemm(amat, bptr, cptr, transa, trb, alpha, beta)
+
 end subroutine mchrg_dgemm233
 
 
+!> General matrix-matrix product (double, array ranks 332)
 subroutine mchrg_dgemm332(amat, bmat, cmat, transa, transb, alpha, beta)
+
+   !> Matrix A
    real(dp), intent(in), contiguous, target :: amat(:, :, :)
+
+   !> Matrix B
    real(dp), intent(in), contiguous, target :: bmat(:, :, :)
+
+   !> Matrix C
    real(dp), intent(inout) :: cmat(:, :)
+
+   !> Optional transposition of A ('n', 't' or 'c')
    character(len=1), intent(in), optional :: transa
+
+   !> Optional transposition of B ('n', 't' or 'c')
    character(len=1), intent(in), optional :: transb
+
+   !> Optional scalar alpha
    real(dp), intent(in), optional :: alpha
+
+   !> Optional scalar beta
    real(dp), intent(in), optional :: beta
+
    real(dp), pointer :: aptr(:, :), bptr(:, :)
    character(len=1) :: tra, trb
+
    if (present(transa)) then
       tra = transa
    else
@@ -1022,6 +1450,7 @@ subroutine mchrg_dgemm332(amat, bmat, cmat, transa, transb, alpha, beta)
       bptr(1:size(bmat, 1), 1:size(bmat, 2)*size(bmat, 3)) => bmat
    end if
    call gemm(aptr, bptr, cmat, tra, trb, alpha, beta)
+
 end subroutine mchrg_dgemm332
 
 

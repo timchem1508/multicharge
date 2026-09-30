@@ -31,37 +31,50 @@ module multicharge_model_eeq
    use mctc_wignerseitz, only : wignerseitz_cell
    use multicharge_wignerseitz, only : new_wignerseitz_cell
    use multicharge_ewald, only : get_alpha
-   use multicharge_model_type, only : mchrg_model_type, get_dir_trans, get_rec_trans
+   use multicharge_model_type, only : mchrg_model_type, get_dir_trans, &
+      & get_rec_trans
    use multicharge_model_cache, only : mchrg_cache
    implicit none
    private
 
    public :: eeq_model, new_eeq_model
 
+
    !> EEQ model operations on shared charge-model parameters
    type, extends(mchrg_model_type) :: eeq_model
    contains
+
       !> Update and allocate cache
       procedure :: update
+
       !> Calculate capacitance matrix
       procedure :: get_capacitance_matrix
+
       !> Calculate Coulomb matrix
       procedure :: get_coulomb_matrix
+
       !> Calculate derivatives of Coulomb matrix multiplied by charge
       procedure :: get_coulomb_derivs
+
       !> Calculate right-hand side (electronegativity vector)
       procedure :: get_xvec
+
       !> Calculate EN vector derivatives
       procedure :: get_xvec_derivs
+
       !> Calculate gradient
       procedure :: get_grad
+
    end type eeq_model
 
+   !> Square root of pi
    real(wp), parameter :: sqrtpi = sqrt(pi)
-   real(wp), parameter :: sqrt2pi = sqrt(2.0_wp / pi)
-   real(wp), parameter :: eps = sqrt(epsilon(0.0_wp))
 
-   real(wp), parameter :: cutoff = 15.0_wp
+   !> Square root of 2 / pi
+   real(wp), parameter :: sqrt2pi = sqrt(2.0_wp / pi)
+
+   !> Threshold below which distances and norms are treated as zero
+   real(wp), parameter :: eps = sqrt(epsilon(0.0_wp))
 
    !> Default scaling factor for the external electric field
    real(wp), parameter :: default_efield_scale = 1.0_wp
@@ -73,31 +86,42 @@ contains
 !> Construct an EEQ model from element-wise parameters
 subroutine new_eeq_model(self, mol, error, chi, rad, eta, kcnchi, &
    & cutoff, cn_exp, rcov, cn_max, efield_scale)
+
    !> Electronegativity equilibration model
    type(eeq_model), intent(out) :: self
+
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
+
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
+
    !> Electronegativity
    real(wp), intent(in) :: chi(:)
+
    !> Exponent gaussian charge
    real(wp), intent(in) :: rad(:)
+
    !> Chemical hardness
    real(wp), intent(in) :: eta(:)
+
    !> CN scaling factor for electronegativity
    real(wp), intent(in) :: kcnchi(:)
+
    !> Cutoff radius for coordination number
    real(wp), intent(in), optional :: cutoff
+
    !> Steepness of the CN counting function
    real(wp), intent(in), optional :: cn_exp
+
    !> Covalent radii for CN
    real(wp), intent(in), optional :: rcov(:)
+
    !> Maximum CN cutoff for CN
    real(wp), intent(in), optional :: cn_max
+
    !> Scaling factor for the external electric field
    real(wp), intent(in), optional :: efield_scale
-
 
    self%chi = chi
    self%rad = rad
@@ -116,16 +140,21 @@ subroutine new_eeq_model(self, mol, error, chi, rad, eta, kcnchi, &
 end subroutine new_eeq_model
 
 
-!> Update coordination numbers and, if needed, the Wigner–Seitz cell and Ewald alpha.
+!> Update coordination numbers and, if needed, the Wigner-Seitz cell and alpha
 subroutine update(self, mol, cache, trans, grad)
+
    !> EEQ model type
    class(eeq_model), intent(in) :: self
+
    !> Structure type
    type(structure_type), intent(in) :: mol
+
    !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
+
    !> Lattice vectors
    real(wp), intent(in) :: trans(:, :)
+
    !> Flag to compute derivatives
    logical, intent(in) :: grad
 
@@ -143,7 +172,8 @@ subroutine update(self, mol, cache, trans, grad)
       if (.not. allocated(cache%dcndL)) then
          allocate(cache%dcndL(3, 3, mol%nat))
       end if
-      call self%ncoord%get_coordination_number(mol, trans, cache%cn, cache%dcndr, cache%dcndL)
+      call self%ncoord%get_coordination_number(mol, trans, cache%cn, &
+         & cache%dcndr, cache%dcndL)
    else
       call self%ncoord%get_coordination_number(mol, trans, cache%cn)
    end if
@@ -159,12 +189,16 @@ end subroutine update
 
 !> No-op override: the EEQ model does not use a capacitance matrix.
 subroutine get_capacitance_matrix(self, mol, ndim, cache)
+
    !> EEQ model type
    class(eeq_model), intent(in) :: self
+
    !> Structure type
    type(structure_type), intent(in) :: mol
+
    !> System size
    integer, intent(in) :: ndim
+
    !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
 end subroutine get_capacitance_matrix
@@ -172,14 +206,19 @@ end subroutine get_capacitance_matrix
 
 !> Build the electronegativity vector with CN correction.
 subroutine get_xvec(self, mol, ndim, cache, efield)
+
    !> EEQ model type
    class(eeq_model), intent(in) :: self
+
    !> Structure type
    type(structure_type), intent(in) :: mol
-   !> System size (number of atoms or atoms+1 if a Lagrange multiplier is used)
+
+   !> System size (nat, or nat + 1 with a Lagrange multiplier)
    integer, intent(in) :: ndim
+
    !> Multicharge cache (provides CN and will store the vector)
    type(mchrg_cache), intent(inout) :: cache
+
    !> External electric field
    real(wp), intent(in), optional :: efield(:)
 
@@ -220,15 +259,19 @@ subroutine get_xvec(self, mol, ndim, cache, efield)
 end subroutine get_xvec
 
 
-!> Compute derivatives of the electronegativity vector with respect to atomic positions and lattice parameters.
+!> Derivatives of the electronegativity vector w.r.t. positions and lattice
 subroutine get_xvec_derivs(self, mol, ndim, cache)
+
    !> EEQ model type
    class(eeq_model), intent(in) :: self
+
    !> Structure type
    type(structure_type), intent(in) :: mol
+
    !> System size
    integer, intent(in) :: ndim
-   !> Multicharge cache (provides CN derivatives, stores x‑vector derivatives)
+
+   !> Multicharge cache (provides CN derivatives, stores x-vector derivatives)
    type(mchrg_cache), intent(inout) :: cache
 
    real(wp), parameter :: reg = 1.0e-14_wp
@@ -252,21 +295,27 @@ subroutine get_xvec_derivs(self, mol, ndim, cache)
    do iat = 1, mol%nat
       izp = mol%id(iat)
       tmp = self%kcnchi(izp) / sqrt(cache%cn(iat) + reg)
-      cache%dxdr(:, :, iat) = 0.5_wp * tmp * cache%dcndr(:, :, iat) + cache%dxdr(:, :, iat)
-      cache%dxdL(:, :, iat) = 0.5_wp * tmp * cache%dcndL(:, :, iat) + cache%dxdL(:, :, iat)
+      cache%dxdr(:, :, iat) = 0.5_wp * tmp * cache%dcndr(:, :, iat) &
+         & + cache%dxdr(:, :, iat)
+      cache%dxdL(:, :, iat) = 0.5_wp * tmp * cache%dcndL(:, :, iat) &
+         & + cache%dxdL(:, :, iat)
    end do
 
 end subroutine get_xvec_derivs
 
 
-!> Assemble the Coulomb matrix (periodic or non‑periodic).
+!> Assemble the Coulomb matrix (periodic or non-periodic).
 subroutine get_coulomb_matrix(self, mol, ndim, cache)
+
    !> EEQ model type
    class(eeq_model), intent(in) :: self
+
    !> Structure type
    type(structure_type), intent(in) :: mol
+
    !> System size
    integer, intent(in) :: ndim
+
    !> Multicharge cache (will hold the Coulomb matrix)
    type(mchrg_cache), intent(inout) :: cache
 
@@ -282,16 +331,20 @@ subroutine get_coulomb_matrix(self, mol, ndim, cache)
    else
       call get_amat_0d(self, mol, cache%amat)
    end if
+
 end subroutine get_coulomb_matrix
 
 
-!> Build the Coulomb matrix for a non‑periodic system (0D).
+!> Build the Coulomb matrix for a non-periodic system (0D).
 subroutine get_amat_0d(self, mol, amat)
+
    !> EEQ model type
    class(eeq_model), intent(in) :: self
+
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
-   !> Output Coulomb matrix (size ndim × ndim)
+
+   !> Output Coulomb matrix (size ndim x ndim)
    real(wp), intent(out) :: amat(:, :)
 
    integer :: iat, jat, izp, jzp
@@ -338,15 +391,20 @@ end subroutine get_amat_0d
 
 !> Build the Coulomb matrix for a periodic system (3D) using Ewald summation.
 subroutine get_amat_3d(self, mol, wsc, alpha, amat)
+
    !> EEQ model type
    class(eeq_model), intent(in) :: self
+
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
-   !> Wigner–Seitz cell for the given structure
+
+   !> Wigner-Seitz cell for the given structure
    type(wignerseitz_cell), intent(in) :: wsc
+
    !> Ewald splitting parameter
    real(wp), intent(in) :: alpha
-   !> Output Coulomb matrix (size ndim × ndim)
+
+   !> Output Coulomb matrix (size ndim x ndim)
    real(wp), intent(out) :: amat(:, :)
 
    integer :: iat, jat, izp, jzp, img
@@ -373,7 +431,8 @@ subroutine get_amat_3d(self, mol, wsc, alpha, amat)
          gam = 1.0_wp / sqrt(self%rad(izp)**2 + self%rad(jzp)**2)
          wsw = 1.0_wp / real(wsc%nimg(jat, iat), wp)
          do img = 1, wsc%nimg(jat, iat)
-            vec = mol%xyz(:, jat) - mol%xyz(:, iat) + wsc%trans(:, wsc%tridx(img, jat, iat))
+            vec = mol%xyz(:, jat) - mol%xyz(:, iat) &
+               & + wsc%trans(:, wsc%tridx(img, jat, iat))
             call get_amat_dir_3d(vec, gam, alpha, dtrans, dtmp)
             call get_amat_rec_3d(vec, vol, alpha, rtrans, rtmp)
             amat_local(jat, iat) = amat_local(jat, iat) + (dtmp + rtmp) * wsw
@@ -409,16 +468,21 @@ subroutine get_amat_3d(self, mol, wsc, alpha, amat)
 end subroutine get_amat_3d
 
 
-!> Real‑space contribution to the Coulomb matrix (direct sum).
+!> Real-space contribution to the Coulomb matrix (direct sum).
 subroutine get_amat_dir_3d(rij, gam, alp, trans, amat)
+
    !> Distance vector between two atoms (including lattice translation)
    real(wp), intent(in) :: rij(3)
+
    !> Gaussian width parameter
    real(wp), intent(in) :: gam
+
    !> Ewald splitting parameter
    real(wp), intent(in) :: alp
-   !> Direct lattice translation vectors (3 × N)
+
+   !> Direct lattice translation vectors (3 x N)
    real(wp), intent(in) :: trans(:, :)
+
    !> Output contribution to the Coulomb matrix
    real(wp), intent(out) :: amat
 
@@ -438,16 +502,21 @@ subroutine get_amat_dir_3d(rij, gam, alp, trans, amat)
 end subroutine get_amat_dir_3d
 
 
-!> Reciprocal‑space contribution to the Coulomb matrix (Ewald sum).
+!> Reciprocal-space contribution to the Coulomb matrix (Ewald sum).
 subroutine get_amat_rec_3d(rij, vol, alp, trans, amat)
+
    !> Distance vector between two atoms (including lattice translation)
    real(wp), intent(in) :: rij(3)
+
    !> Unit cell volume
    real(wp), intent(in) :: vol
+
    !> Ewald splitting parameter
    real(wp), intent(in) :: alp
-   !> Reciprocal lattice translation vectors (3 × N)
+
+   !> Reciprocal lattice translation vectors (3 x N)
    real(wp), intent(in) :: trans(:, :)
+
    !> Output contribution to the Coulomb matrix
    real(wp), intent(out) :: amat
 
@@ -461,25 +530,30 @@ subroutine get_amat_rec_3d(rij, vol, alp, trans, amat)
       vec(:) = trans(:, itr)
       g2 = dot_product(vec, vec)
       if (g2 < eps) cycle
-      tmp = cos(dot_product(rij, vec)) * fac * exp(-0.25_wp * g2 / (alp * alp)) / g2
+      tmp = cos(dot_product(rij, vec)) * fac &
+         & * exp(-0.25_wp * g2 / (alp * alp)) / g2
       amat = amat + tmp
    end do
 
 end subroutine get_amat_rec_3d
 
 
-!> Compute the derivatives of the Coulomb matrix (multiplied by the charge vector).
+!> Derivatives of the Coulomb matrix contracted with the charge vector
 subroutine get_coulomb_derivs(self, mol, ndim, cache)
+
    !> EEQ model type
    class(eeq_model), intent(in) :: self
+
    !> Structure type
    type(structure_type), intent(in) :: mol
+
    !> System size
    integer, intent(in) :: ndim
+
    !> Multicharge cache (provides charges and will store derivatives)
    type(mchrg_cache), intent(inout) :: cache
 
-   real(wp), allocatable :: atrace(:,:)
+   real(wp), allocatable :: atrace(:, :)
 
    integer :: iat
 
@@ -502,21 +576,28 @@ subroutine get_coulomb_derivs(self, mol, ndim, cache)
    do iat = 1, mol%nat
       cache%dadr(:, iat, iat) = atrace(:, iat) + cache%dadr(:, iat, iat)
    end do
+
 end subroutine get_coulomb_derivs
 
 
-!> Build the derivatives of the Coulomb matrix for a non‑periodic system.
+!> Build the derivatives of the Coulomb matrix for a non-periodic system.
 subroutine get_damat_0d(self, mol, qvec, dadr, dadL, atrace)
+
    !> EEQ model type
    class(eeq_model), intent(in) :: self
+
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
-   !> Charge vector (right‑hand side)
+
+   !> Charge vector (right-hand side)
    real(wp), intent(in) :: qvec(:)
-   !> Derivative of Coulomb matrix w.r.t. atomic positions (3 × nat × ndim)
+
+   !> Derivative of Coulomb matrix w.r.t. atomic positions (3 x nat x ndim)
    real(wp), intent(out) :: dadr(:, :, :)
-   !> Derivative of Coulomb matrix w.r.t. lattice parameters (3 × 3 × ndim)
+
+   !> Derivative of Coulomb matrix w.r.t. lattice parameters (3 x 3 x ndim)
    real(wp), intent(out) :: dadL(:, :, :)
+
    !> Trace-like array for diagonal contributions
    real(wp), intent(out) :: atrace(:, :)
 
@@ -546,7 +627,8 @@ subroutine get_damat_0d(self, mol, qvec, dadr, dadL, atrace)
          r2 = vec(1)**2 + vec(2)**2 + vec(3)**2
          gam = 1.0_wp / sqrt(self%rad(izp)**2 + self%rad(jzp)**2)
          arg = gam * gam * r2
-         dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) - erf(sqrt(arg)) / (r2 * sqrt(r2))
+         dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) &
+            & - erf(sqrt(arg)) / (r2 * sqrt(r2))
          dG = dtmp * vec
          dS = spread(dG, 1, 3) * spread(vec, 2, 3)
          atrace_local(:, iat) = -dG * qvec(jat) + atrace_local(:, iat)
@@ -571,20 +653,28 @@ end subroutine get_damat_0d
 
 !> Build the derivatives of the Coulomb matrix for a periodic system.
 subroutine get_damat_3d(self, mol, wsc, alpha, qvec, dadr, dadL, atrace)
+
    !> EEQ model type
    class(eeq_model), intent(in) :: self
+
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
-   !> Wigner–Seitz cell
+
+   !> Wigner-Seitz cell
    type(wignerseitz_cell), intent(in) :: wsc
+
    !> Ewald splitting parameter
    real(wp), intent(in) :: alpha
-   !> Charge vector (right‑hand side)
+
+   !> Charge vector (right-hand side)
    real(wp), intent(in) :: qvec(:)
-   !> Derivative of Coulomb matrix w.r.t. atomic positions (3 × nat × ndim)
+
+   !> Derivative of Coulomb matrix w.r.t. atomic positions (3 x nat x ndim)
    real(wp), intent(out) :: dadr(:, :, :)
-   !> Derivative of Coulomb matrix w.r.t. lattice parameters (3 × 3 × ndim)
+
+   !> Derivative of Coulomb matrix w.r.t. lattice parameters (3 x 3 x ndim)
    real(wp), intent(out) :: dadL(:, :, :)
+
    !> Trace-like array for diagonal contributions
    real(wp), intent(out) :: atrace(:, :)
 
@@ -622,7 +712,8 @@ subroutine get_damat_3d(self, mol, wsc, alpha, qvec, dadr, dadL, atrace)
          gam = 1.0_wp / sqrt(self%rad(izp)**2 + self%rad(jzp)**2)
          wsw = 1.0_wp / real(wsc%nimg(jat, iat), wp)
          do img = 1, wsc%nimg(jat, iat)
-            vec = mol%xyz(:, jat) - mol%xyz(:, iat) + wsc%trans(:, wsc%tridx(img, jat, iat))
+            vec = mol%xyz(:, jat) - mol%xyz(:, iat) &
+               & + wsc%trans(:, wsc%tridx(img, jat, iat))
             call get_damat_dir_3d(vec, gam, alpha, dtrans, dGd, dSd)
             call get_damat_rec_3d(vec, vol, alpha, rtrans, dGr, dSr)
             dG = dG + (dGd + dGr) * wsw
@@ -659,19 +750,25 @@ subroutine get_damat_3d(self, mol, wsc, alpha, qvec, dadr, dadL, atrace)
 end subroutine get_damat_3d
 
 
-!> Real‑space contribution to the Coulomb matrix derivatives.
+!> Real-space contribution to the Coulomb matrix derivatives.
 subroutine get_damat_dir_3d(rij, gam, alp, trans, dg, ds)
+
    !> Distance vector between two atoms (including lattice translation)
    real(wp), intent(in) :: rij(3)
+
    !> Gaussian width parameter
    real(wp), intent(in) :: gam
+
    !> Ewald splitting parameter
    real(wp), intent(in) :: alp
-   !> Direct lattice translation vectors (3 × N)
+
+   !> Direct lattice translation vectors (3 x N)
    real(wp), intent(in) :: trans(:, :)
+
    !> Derivative of the Coulomb matrix element w.r.t. atomic position (3)
    real(wp), intent(out) :: dg(3)
-   !> Derivative of the Coulomb matrix element w.r.t. lattice parameters (3×3)
+
+   !> Derivative of the Coulomb matrix element w.r.t. lattice parameters (3x3)
    real(wp), intent(out) :: ds(3, 3)
 
    integer :: itr
@@ -688,8 +785,10 @@ subroutine get_damat_dir_3d(rij, gam, alp, trans, dg, ds)
       r1 = norm2(vec)
       if (r1 < eps) cycle
       r2 = r1 * r1
-      gtmp = +2.0_wp * gam * exp(-r2 * gam2) / (sqrtpi * r2) - erf(r1 * gam) / (r2 * r1)
-      atmp = -2.0_wp * alp * exp(-r2 * alp2) / (sqrtpi * r2) + erf(r1 * alp) / (r2 * r1)
+      gtmp = +2.0_wp * gam * exp(-r2 * gam2) / (sqrtpi * r2) &
+         & - erf(r1 * gam) / (r2 * r1)
+      atmp = -2.0_wp * alp * exp(-r2 * alp2) / (sqrtpi * r2) &
+         & + erf(r1 * alp) / (r2 * r1)
       dg(:) = dg + (gtmp + atmp) * vec
       ds(:, :) = ds + (gtmp + atmp) * spread(vec, 1, 3) * spread(vec, 2, 3)
    end do
@@ -697,25 +796,32 @@ subroutine get_damat_dir_3d(rij, gam, alp, trans, dg, ds)
 end subroutine get_damat_dir_3d
 
 
-!> Reciprocal‑space contribution to the Coulomb matrix derivatives.
+!> Reciprocal-space contribution to the Coulomb matrix derivatives.
 subroutine get_damat_rec_3d(rij, vol, alp, trans, dg, ds)
+
    !> Distance vector between two atoms (including lattice translation)
    real(wp), intent(in) :: rij(3)
+
    !> Unit cell volume
    real(wp), intent(in) :: vol
+
    !> Ewald splitting parameter
    real(wp), intent(in) :: alp
-   !> Reciprocal lattice translation vectors (3 × N)
+
+   !> Reciprocal lattice translation vectors (3 x N)
    real(wp), intent(in) :: trans(:, :)
+
    !> Derivative of the Coulomb matrix element w.r.t. atomic position (3)
    real(wp), intent(out) :: dg(3)
-   !> Derivative of the Coulomb matrix element w.r.t. lattice parameters (3×3)
+
+   !> Derivative of the Coulomb matrix element w.r.t. lattice parameters (3x3)
    real(wp), intent(out) :: ds(3, 3)
 
    integer :: itr
    real(wp) :: fac, vec(3), g2, gv, etmp, dtmp, alp2
    real(wp), parameter :: unity(3, 3) = reshape(&
-      & [1.0_wp, 0.0_wp, 0.0_wp, 0.0_wp, 1.0_wp, 0.0_wp, 0.0_wp, 0.0_wp, 1.0_wp], [3, 3])
+      & [1.0_wp, 0.0_wp, 0.0_wp, 0.0_wp, 1.0_wp, 0.0_wp, &
+      & 0.0_wp, 0.0_wp, 1.0_wp], [3, 3])
 
    dg(:) = 0.0_wp
    ds(:, :) = 0.0_wp
@@ -731,7 +837,8 @@ subroutine get_damat_rec_3d(rij, vol, alp, trans, dg, ds)
       dtmp = -sin(gv) * etmp
       dg(:) = dg + dtmp * vec
       ds(:, :) = ds + etmp * cos(gv) &
-         & * ((2.0_wp / g2 + 0.5_wp / alp2) * spread(vec, 1, 3) * spread(vec, 2, 3) - unity)
+         & * ((2.0_wp / g2 + 0.5_wp / alp2) &
+         & * spread(vec, 1, 3) * spread(vec, 2, 3) - unity)
    end do
 
 end subroutine get_damat_rec_3d
@@ -739,27 +846,37 @@ end subroutine get_damat_rec_3d
 
 !> Accumulate the gradient and stress contributions of the EEQ model
 subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta)
+
    !> EEQ model type
    class(eeq_model), intent(in) :: self
+
    !> Structure type
    type(structure_type), intent(in) :: mol
+
    !> Multicharge cache
    type(mchrg_cache), intent(in) :: cache
+
    !> Solution vector
    real(wp), intent(in) :: p(:)
+
    !> Cartesian gradient
    real(wp), intent(inout) :: gradient(:, :)
+
    !> Lattice stress contribution
    real(wp), intent(inout) :: sigma(:, :)
+
    !> Optional gradient prefactor
    real(wp), intent(in), optional :: alpha
+
    !> Optional electronegativity prefactor
    real(wp), intent(in), optional :: beta
 
    if (any(mol%periodic)) then
-      call get_grad_3d(self, mol, cache, p, gradient, sigma, alphain=alpha, betain=beta)
+      call get_grad_3d(self, mol, cache, p, gradient, sigma, &
+         & alphain=alpha, betain=beta)
    else
-      call get_grad_0d(self, mol, cache, p, gradient, sigma, alphain=alpha, betain=beta)
+      call get_grad_0d(self, mol, cache, p, gradient, sigma, &
+         & alphain=alpha, betain=beta)
    end if
 
 end subroutine get_grad
@@ -767,20 +884,28 @@ end subroutine get_grad
 
 !> Accumulate gradient and stress contributions for a non-periodic system
 subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
+
    !> EEQ model type
    class(eeq_model), intent(in) :: self
+
    !> Structure type
    type(structure_type), intent(in) :: mol
+
    !> Multicharge cache
    type(mchrg_cache), intent(in) :: cache
+
    !> Solution vector
    real(wp), intent(in) :: p(:)
+
    !> Cartesian gradient
    real(wp), intent(inout) :: gradient(:, :)
+
    !> Lattice stress contribution
    real(wp), intent(inout) :: sigma(:, :)
+
    !> Optional gradient prefactor
    real(wp), intent(in), optional :: alphain
+
    !> Optional electronegativity prefactor
    real(wp), intent(in), optional :: betain
 
@@ -817,7 +942,8 @@ subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
          r2 = dot_product(vec, vec)
          gam = 1.0_wp / sqrt(self%rad(izp)**2 + self%rad(jzp)**2)
          arg = gam * gam * r2
-         dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) - erf(sqrt(arg)) / (r2 * sqrt(r2))
+         dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) &
+            & - erf(sqrt(arg)) / (r2 * sqrt(r2))
          dG = dtmp * vec
          dS = spread(dG, 1, 3) * spread(vec, 2, 3)
 
@@ -826,8 +952,7 @@ subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
 
          gradient_local(:, iat) = gradient_local(:, iat) - dG * W_ij * alpha
          gradient_local(:, jat) = gradient_local(:, jat) + dG * W_ij * alpha
-         sigma_local(:, :)   = sigma_local(:, :)   + dS * W_ij * alpha
-
+         sigma_local(:, :) = sigma_local(:, :) + dS * W_ij * alpha
       end do
 
       tmp = self%kcnchi(izp) / sqrt(cache%cn(iat) + reg)
@@ -844,10 +969,11 @@ subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
    deallocate(gradient_local, sigma_local)
    !$omp end parallel
 
-   allocate(gradient_local(3, mol%nat), source = 0.0_wp)
-   allocate(sigma_local(3, 3), source = 0.0_wp)
+   allocate(gradient_local(3, mol%nat), source=0.0_wp)
+   allocate(sigma_local(3, 3), source=0.0_wp)
 
-   call self%ncoord%add_coordination_number_derivs(mol, cache%trans, cnacc, gradient_local, sigma_local)
+   call self%ncoord%add_coordination_number_derivs(mol, cache%trans, cnacc, &
+      & gradient_local, sigma_local)
 
    gradient = gradient + beta * gradient_local
    sigma = sigma + beta * sigma_local
@@ -857,20 +983,28 @@ end subroutine get_grad_0d
 
 !> Accumulate gradient and stress contributions for a periodic system
 subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
+
    !> EEQ model type
    class(eeq_model), intent(in) :: self
+
    !> Structure type
    type(structure_type), intent(in) :: mol
+
    !> Multicharge cache
    type(mchrg_cache), intent(in) :: cache
+
    !> Solution vector
    real(wp), intent(in) :: p(:)
+
    !> Cartesian gradient
    real(wp), intent(inout) :: gradient(:, :)
+
    !> Lattice stress contribution
    real(wp), intent(inout) :: sigma(:, :)
+
    !> Optional gradient prefactor
    real(wp), intent(in), optional :: alphain
+
    !> Optional electronegativity prefactor
    real(wp), intent(in), optional :: betain
 
@@ -895,7 +1029,8 @@ subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
    allocate(cnacc(mol%nat), source=0.0_wp)
 
    !$omp parallel default(none) &
-   !$omp shared(cache, mol, self, p, gradient, sigma, vol, dtrans, rtrans, alpha, cnacc) &
+   !$omp shared(cache, mol, self, p, gradient, sigma, vol, dtrans, rtrans) &
+   !$omp shared(alpha, cnacc) &
    !$omp private(iat, izp, jat, jzp, gam, vec, r2, dtmp, arg, wsw, tmp) &
    !$omp private(W_ii, W_ij, gradient_local, sigma_local) &
    !$omp private(dG, dS, dGd, dSd, dGr, dSr)
@@ -914,7 +1049,8 @@ subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
          gam = 1.0_wp / sqrt(self%rad(izp)**2 + self%rad(jzp)**2)
          wsw = 1.0_wp / real(cache%wsc%nimg(jat, iat), wp)
          do img = 1, cache%wsc%nimg(jat, iat)
-            vec = mol%xyz(:, jat) - mol%xyz(:, iat) + cache%wsc%trans(:, cache%wsc%tridx(img, jat, iat))
+            vec = mol%xyz(:, jat) - mol%xyz(:, iat) &
+               & + cache%wsc%trans(:, cache%wsc%tridx(img, jat, iat))
             call get_damat_dir_3d(vec, gam, cache%alpha, dtrans, dGd, dSd)
             call get_damat_rec_3d(vec, vol, cache%alpha, rtrans, dGr, dSr)
             dG = dG + (dGd + dGr) * wsw
@@ -953,14 +1089,16 @@ subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
    deallocate(gradient_local, sigma_local)
    !$omp end parallel
 
-   allocate(gradient_local(3, mol%nat), source = 0.0_wp)
-   allocate(sigma_local(3, 3), source = 0.0_wp)
+   allocate(gradient_local(3, mol%nat), source=0.0_wp)
+   allocate(sigma_local(3, 3), source=0.0_wp)
 
-   call self%ncoord%add_coordination_number_derivs(mol, cache%trans, cnacc, gradient_local, sigma_local)
+   call self%ncoord%add_coordination_number_derivs(mol, cache%trans, cnacc, &
+      & gradient_local, sigma_local)
 
    gradient = gradient + beta * gradient_local
    sigma = sigma + beta * sigma_local
 
 end subroutine get_grad_3d
+
 
 end module multicharge_model_eeq

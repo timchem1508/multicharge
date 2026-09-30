@@ -18,12 +18,13 @@ program tester
    use, intrinsic :: iso_fortran_env, only : error_unit
    use mctc_env, only : get_argument
    use mctc_env_testing, only : run_testsuite, new_testsuite, testsuite_type, &
-   & select_suite, run_selected
+      & select_suite, run_selected
    use test_model, only : collect_model
    use test_pbc, only : collect_pbc
    use test_wignerseitz, only : collect_wignerseitz
-   use test_solver, only: collect_solver
+   use test_solver, only : collect_solver
    implicit none
+
    integer :: stat, is
    character(len=:), allocatable :: suite_name, test_name
    type(testsuite_type), allocatable :: testsuites(:)
@@ -32,11 +33,11 @@ program tester
    stat = 0
 
    testsuites = [ &
-   & new_testsuite("solver", collect_solver), &
-   & new_testsuite("model", collect_model), &
-   & new_testsuite("pbc", collect_pbc), &
-   & new_testsuite("wignerseitz", collect_wignerseitz) &
-   & ]
+      & new_testsuite("solver", collect_solver), &
+      & new_testsuite("model", collect_model), &
+      & new_testsuite("pbc", collect_pbc), &
+      & new_testsuite("wignerseitz", collect_wignerseitz) &
+      & ]
 
    call get_argument(1, suite_name)
    call get_argument(2, test_name)
@@ -73,6 +74,4 @@ program tester
       error stop 1
    end if
 
-
 end program tester
-

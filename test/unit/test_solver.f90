@@ -14,18 +14,12 @@
 ! limitations under the License.
 
 module test_solver
-   use iso_fortran_env, only : output_unit
-   use mctc_env, only: wp
-   use mctc_env_testing, only: new_unittest, unittest_type, error_type, test_failed
-   use mctc_io_structure, only: structure_type, new
-   use mstore, only: get_structure
-   use multicharge_model_type, only: mchrg_model_type
-   use multicharge_model_eeqbc, only: eeqbc_model
-   use multicharge_param, only: new_eeq2019_model, new_eeqbc2025_model
-   use multicharge_charge, only: get_charges, get_eeq_charges, get_eeqbc_charges
-   use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
-   use multicharge_solver_direct, only : direct_solver, new_direct_solver, direct_input
+   use mctc_env, only : wp
+   use mctc_env_testing, only : new_unittest, unittest_type, error_type, test_failed
    use multicharge_solver_cg, only : cg_solver, new_cg_solver, cg_input
+   use multicharge_solver_direct, only : direct_solver, new_direct_solver, &
+      & direct_input
+   use multicharge_solver_type, only : mchrg_solver_type, mchrg_solver_input
    implicit none
    private
 
@@ -36,7 +30,9 @@ module test_solver
    real(wp), parameter :: thr2 = sqrt(epsilon(1.0_wp))
    real(wp), parameter :: thr_rel = 1.0e-6_wp
 
+
 contains
+
 
 !> Collect all unit tests for the CG solver
 subroutine collect_solver(testsuite)
@@ -45,22 +41,27 @@ subroutine collect_solver(testsuite)
    type(unittest_type), allocatable, intent(out) :: testsuite(:)
 
    testsuite = [ &
-   & new_unittest("cg-identity-2x2", test_cg_identity_2x2), &
-   & new_unittest("cg-diagonal-5x5", test_cg_diagonal_5x5), &
-   & new_unittest("cg-spd-small", test_cg_spd_small), &
-   & new_unittest("cg-spd-large", test_cg_spd_large), &
-   & new_unittest("cg-ill-conditioned", test_cg_ill_conditioned), &
-   & new_unittest("cg-zero-rhs", test_cg_zero_rhs), &
-   & new_unittest("cg-random-spd", test_cg_random_spd) &
-   & ]
+      & new_unittest("cg-identity-2x2", test_cg_identity_2x2), &
+      & new_unittest("cg-diagonal-5x5", test_cg_diagonal_5x5), &
+      & new_unittest("cg-spd-small", test_cg_spd_small), &
+      & new_unittest("cg-spd-large", test_cg_spd_large), &
+      & new_unittest("cg-ill-conditioned", test_cg_ill_conditioned), &
+      & new_unittest("cg-zero-rhs", test_cg_zero_rhs), &
+      & new_unittest("cg-random-spd", test_cg_random_spd) &
+      & ]
 
 end subroutine collect_solver
 
+
+!> Construct a solver matching the dynamic type of the solver input
 subroutine solver_maker(solver, input, error)
+
    !> Solver type
    class(mchrg_solver_type), intent(out), allocatable :: solver
+
    !> Solver input
    class(mchrg_solver_input), intent(in) :: input
+
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
@@ -85,6 +86,7 @@ subroutine solver_maker(solver, input, error)
    end select
 
 end subroutine solver_maker
+
 
 !> Test: Identity matrix 2x2
 subroutine test_cg_identity_2x2(error)
@@ -113,7 +115,7 @@ subroutine test_cg_identity_2x2(error)
       solver_input%cgmiter = maxiter
       solver_input%verbosity = verbosity
    end select
-   call solver_maker(solver, solver_input,  error)
+   call solver_maker(solver, solver_input, error)
 
    ! Identity matrix
    amat = 0.0_wp
@@ -140,10 +142,10 @@ subroutine test_cg_identity_2x2(error)
    type is (direct_input)
       solver_input%verbosity = verbosity
    end select
-   call solver_maker(solver, solver_input,  error)
+   call solver_maker(solver, solver_input, error)
    expected = [0.0_wp, 0.0_wp]
    call cpu_time(start_direct)
-   call solver%solve(amat=amat, xvec=xvec, vrhs=expected,  error=error)
+   call solver%solve(amat=amat, xvec=xvec, vrhs=expected, error=error)
    call cpu_time(end_direct)
 
    ! Check solution
@@ -154,12 +156,14 @@ subroutine test_cg_identity_2x2(error)
       print'(a)', "Expected:"
       print'(3es21.14)', expected
    else
-      print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
-      print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', (end_direct-start_direct)/(end_cg-start_cg)
+      print '("CG Solver CPU Time : ",f6.3," seconds.")', end_cg - start_cg
+      print '("Direct Solver CPU Time : ",f6.3," seconds.")', end_direct - start_direct
+      print '("CG Solver time profit : ",f6.3)', &
+         & (end_direct - start_direct) / (end_cg - start_cg)
    end if
 
 end subroutine test_cg_identity_2x2
+
 
 !> Test: Diagonal matrix 5x5
 subroutine test_cg_diagonal_5x5(error)
@@ -189,7 +193,7 @@ subroutine test_cg_diagonal_5x5(error)
       solver_input%cgmiter = maxiter
       solver_input%verbosity = verbosity
    end select
-   call solver_maker(solver, solver_input,  error)
+   call solver_maker(solver, solver_input, error)
 
    ! Diagonal matrix with increasing values
    amat = 0.0_wp
@@ -218,7 +222,7 @@ subroutine test_cg_diagonal_5x5(error)
    type is (direct_input)
       solver_input%verbosity = verbosity
    end select
-   call solver_maker(solver, solver_input,  error)
+   call solver_maker(solver, solver_input, error)
    call cpu_time(start_direct)
    expected = [0.0_wp, 0.0_wp, 0.0_wp, 0.0_wp, 0.0_wp]
    call solver%solve(amat=amat, xvec=xvec, vrhs=expected, error=error)
@@ -232,12 +236,14 @@ subroutine test_cg_diagonal_5x5(error)
       print'(a)', "Expected:"
       print'(3es21.14)', expected
    else
-      print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
-      print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', (end_direct-start_direct)/(end_cg-start_cg)
+      print '("CG Solver CPU Time : ",f6.3," seconds.")', end_cg - start_cg
+      print '("Direct Solver CPU Time : ",f6.3," seconds.")', end_direct - start_direct
+      print '("CG Solver time profit : ",f6.3)', &
+         & (end_direct - start_direct) / (end_cg - start_cg)
    end if
 
 end subroutine test_cg_diagonal_5x5
+
 
 !> Test: Small SPD matrix
 subroutine test_cg_spd_small(error)
@@ -266,7 +272,7 @@ subroutine test_cg_spd_small(error)
       solver_input%cgmiter = maxiter
       solver_input%verbosity = verbosity
    end select
-   call solver_maker(solver, solver_input,  error)
+   call solver_maker(solver, solver_input, error)
 
    ! SPD matrix
    amat = reshape([4.0_wp, 1.0_wp, 1.0_wp, &
@@ -293,7 +299,7 @@ subroutine test_cg_spd_small(error)
    type is (direct_input)
       solver_input%verbosity = verbosity
    end select
-   call solver_maker(solver, solver_input,  error)
+   call solver_maker(solver, solver_input, error)
    expected = [1.0_wp, 1.0_wp, 1.0_wp]
    call cpu_time(start_direct)
    call solver%solve(amat=amat, xvec=xvec, vrhs=expected, error=error)
@@ -307,12 +313,14 @@ subroutine test_cg_spd_small(error)
       print'(a)', "Expected:"
       print'(3es21.14)', expected
    else
-      print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
-      print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', (end_direct-start_direct)/(end_cg-start_cg)
+      print '("CG Solver CPU Time : ",f6.3," seconds.")', end_cg - start_cg
+      print '("Direct Solver CPU Time : ",f6.3," seconds.")', end_direct - start_direct
+      print '("CG Solver time profit : ",f6.3)', &
+         & (end_direct - start_direct) / (end_cg - start_cg)
    end if
 
 end subroutine test_cg_spd_small
+
 
 !> Test: Large SPD matrix (1000x1000)
 subroutine test_cg_spd_large(error)
@@ -342,7 +350,7 @@ subroutine test_cg_spd_large(error)
       solver_input%cgmiter = maxiter
       solver_input%verbosity = verbosity
    end select
-   call solver_maker(solver, solver_input,  error)
+   call solver_maker(solver, solver_input, error)
 
    allocate(amat(n,n), xvec(n), vrhs(n), expected(n), b(n))
 
@@ -386,7 +394,7 @@ subroutine test_cg_spd_large(error)
    type is (direct_input)
       solver_input%verbosity = verbosity
    end select
-   call solver_maker(solver, solver_input,  error)
+   call solver_maker(solver, solver_input, error)
 
    ! Reference solution
    call cpu_time(start_direct)
@@ -401,12 +409,14 @@ subroutine test_cg_spd_large(error)
       print'(a)', "Expected:"
       print'(3es21.14)', expected
    else
-      print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
-      print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', (end_direct-start_direct)/(end_cg-start_cg)
+      print '("CG Solver CPU Time : ",f6.3," seconds.")', end_cg - start_cg
+      print '("Direct Solver CPU Time : ",f6.3," seconds.")', end_direct - start_direct
+      print '("CG Solver time profit : ",f6.3)', &
+         & (end_direct - start_direct) / (end_cg - start_cg)
    end if
 
 end subroutine test_cg_spd_large
+
 
 !> Test: Ill-conditioned matrix
 subroutine test_cg_ill_conditioned(error)
@@ -436,7 +446,7 @@ subroutine test_cg_ill_conditioned(error)
       solver_input%cgmiter = maxiter
       solver_input%verbosity = verbosity
    end select
-   call solver_maker(solver, solver_input,  error)
+   call solver_maker(solver, solver_input, error)
 
    ! Create an ill-conditioned diagonal matrix
    amat = 0.0_wp
@@ -471,7 +481,7 @@ subroutine test_cg_ill_conditioned(error)
    type is (direct_input)
       solver_input%verbosity = verbosity
    end select
-   call solver_maker(solver, solver_input,  error)
+   call solver_maker(solver, solver_input, error)
 
    ! Reference solution
    call cpu_time(start_direct)
@@ -486,12 +496,14 @@ subroutine test_cg_ill_conditioned(error)
       print'(a)', "Expected:"
       print'(3es21.14)', expected
    else
-      print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
-      print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', (end_direct-start_direct)/(end_cg-start_cg)
+      print '("CG Solver CPU Time : ",f6.3," seconds.")', end_cg - start_cg
+      print '("Direct Solver CPU Time : ",f6.3," seconds.")', end_direct - start_direct
+      print '("CG Solver time profit : ",f6.3)', &
+         & (end_direct - start_direct) / (end_cg - start_cg)
    end if
 
 end subroutine test_cg_ill_conditioned
+
 
 !> Test: Zero RHS vector
 subroutine test_cg_zero_rhs(error)
@@ -521,7 +533,7 @@ subroutine test_cg_zero_rhs(error)
       solver_input%cgmiter = maxiter
       solver_input%verbosity = verbosity
    end select
-   call solver_maker(solver, solver_input,  error)
+   call solver_maker(solver, solver_input, error)
 
    ! Create a simple SPD matrix
    amat = 0.0_wp
@@ -554,7 +566,7 @@ subroutine test_cg_zero_rhs(error)
    type is (direct_input)
       solver_input%verbosity = verbosity
    end select
-   call solver_maker(solver, solver_input,  error)
+   call solver_maker(solver, solver_input, error)
 
    ! Reference solution
    call cpu_time(start_direct)
@@ -569,12 +581,14 @@ subroutine test_cg_zero_rhs(error)
       print'(a)', "Expected:"
       print'(3es21.14)', expected
    else
-      print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
-      print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', (end_direct-start_direct)/(end_cg-start_cg)
+      print '("CG Solver CPU Time : ",f6.3," seconds.")', end_cg - start_cg
+      print '("Direct Solver CPU Time : ",f6.3," seconds.")', end_direct - start_direct
+      print '("CG Solver time profit : ",f6.3)', &
+         & (end_direct - start_direct) / (end_cg - start_cg)
    end if
 
 end subroutine test_cg_zero_rhs
+
 
 !> Test: Random SPD matrix
 subroutine test_cg_random_spd(error)
@@ -606,7 +620,7 @@ subroutine test_cg_random_spd(error)
       solver_input%cgmiter = maxiter
       solver_input%verbosity = verbosity
    end select
-   call solver_maker(solver, solver_input,  error)
+   call solver_maker(solver, solver_input, error)
 
    allocate(amat(n,n), xvec(n), vrhs(n), expected(n), b(n), temp(n,n))
 
@@ -676,7 +690,7 @@ subroutine test_cg_random_spd(error)
    type is (direct_input)
       solver_input%verbosity = verbosity
    end select
-   call solver_maker(solver, solver_input,  error)
+   call solver_maker(solver, solver_input, error)
 
    ! Reference solution
    call cpu_time(start_direct)
@@ -691,11 +705,13 @@ subroutine test_cg_random_spd(error)
       print'(a)', "Expected:"
       print'(3es21.14)', expected
    else
-      print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
-      print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', (end_direct-start_direct)/(end_cg-start_cg)
+      print '("CG Solver CPU Time : ",f6.3," seconds.")', end_cg - start_cg
+      print '("Direct Solver CPU Time : ",f6.3," seconds.")', end_direct - start_direct
+      print '("CG Solver time profit : ",f6.3)', &
+         & (end_direct - start_direct) / (end_cg - start_cg)
    end if
 
 end subroutine test_cg_random_spd
+
 
 end module test_solver

@@ -19,7 +19,7 @@
 !> *J. Chem. Phys.*, **2025**, 162, 214109.
 !> DOI: [10.1063/5.0268978](https://dx.doi.org/10.1063/5.0268978)
 !>
-!> Updated from of the parametrization and minor model changes published in
+!> Updated form of the parametrization and minor model changes published in
 !>
 !> Thomas Froitzheim, Marcel Müller, Andreas Hansen, and Stefan Grimme,
 !> *ChemRxiv*, **2025**.
@@ -61,13 +61,13 @@ module multicharge_param_eeqbc2025
       module procedure :: get_eeqbc_kcnchi_num
    end interface get_eeqbc_kcnchi
 
-   !> Element-specific local q scaling of the electronegativity for the EEQ_BC charges.
+   !> Element-specific local charge scaling of the electronegativity
    interface get_eeqbc_kqchi
       module procedure :: get_eeqbc_kqchi_sym
       module procedure :: get_eeqbc_kqchi_num
    end interface get_eeqbc_kqchi
 
-   !> Element-specific local q scaling of the chemical hardness for the EEQ_BC charges.
+   !> Element-specific local charge scaling of the chemical hardness
    interface get_eeqbc_kqeta
       module procedure :: get_eeqbc_kqeta_sym
       module procedure :: get_eeqbc_kqeta_num
@@ -224,7 +224,7 @@ module multicharge_param_eeqbc2025
       & -1.9788157098_wp, -1.8145174473_wp, -1.6079639366_wp, -2.8677464047_wp, & !97-100
       & -1.5325075455_wp, -0.9706879719_wp, -0.9870924795_wp] !101-103
 
-   !> Element-specific local q scaling of the electronegativity for the EEQ_BC charges.
+   !> Element-specific local charge scaling of the electronegativity
    real(wp), parameter :: eeqbc_kqchi(max_elem) = [&
       &  3.5194720929_wp,  0.1470383338_wp, 11.3046142065_wp,  7.5532876529_wp, & !1-4
       &  6.9405502860_wp,  5.3352972531_wp,  5.6154161978_wp,  5.3451107586_wp, & !5-8
@@ -253,7 +253,7 @@ module multicharge_param_eeqbc2025
       &  7.6040130324_wp,  9.3179608505_wp,  8.0442848320_wp,  7.5793455390_wp, & !97-100
       &  7.8843649728_wp,  7.9778579082_wp,  7.4274418789_wp] !101-103
 
-   !> Element-specific local q scaling of the chemical hardness for the EEQ_BC charges
+   !> Element-specific local charge scaling of the chemical hardness
    real(wp), parameter :: eeqbc_kqeta(max_elem) = 0.5_wp * [&
       &  7.5990940066_wp, -1.7712337517_wp,  6.1461685618_wp,  2.8690613059_wp, & !1-4
       &  1.6643432851_wp,  0.5232151629_wp,  0.4094442242_wp,  0.5445440043_wp, & !5-8
@@ -369,7 +369,7 @@ module multicharge_param_eeqbc2025
       &  2.7188494129_wp,  2.7941335957_wp,  3.2020860461_wp,  1.5623494196_wp, & !97-100
       &  2.8208057454_wp,  2.8130190589_wp,  2.7482546063_wp] !101-103
 
-   !> Element-specific averaged coordination number over the fitset for the EEQ_BC charges.
+   !> Element-specific average coordination number over the fitset
    real(wp), parameter :: eeqbc_avg_cn(max_elem) = [&
       &  0.3921100000_wp, 0.0810600000_wp, 0.9910100000_wp, 0.7499500000_wp, & !1-4
       &  1.1543700000_wp, 1.6691400000_wp, 1.4250300000_wp, 0.8718100000_wp, & !5-8
@@ -559,13 +559,13 @@ elemental function get_eeqbc_kcnchi_num(number) result(kcnchi)
 end function get_eeqbc_kcnchi_num
 
 
-!> Get local q scaling of the electronegativity for species with a given symbol
+!> Get local charge scaling of the electronegativity for a symbol
 elemental function get_eeqbc_kqchi_sym(symbol) result(kqchi)
 
    !> Element symbol
    character(len=*), intent(in) :: symbol
 
-   !> local q scaling of EN
+   !> local charge scaling of EN
    real(wp) :: kqchi
 
    kqchi = get_eeqbc_kqchi(to_number(symbol))
@@ -573,13 +573,13 @@ elemental function get_eeqbc_kqchi_sym(symbol) result(kqchi)
 end function get_eeqbc_kqchi_sym
 
 
-!> Get local q scaling of the electronegativity for species with a given atomic number
+!> Get local charge scaling of the electronegativity for an atomic number
 elemental function get_eeqbc_kqchi_num(number) result(kqchi)
 
    !> Atomic number
    integer, intent(in) :: number
 
-   !> local q scaling of EN
+   !> local charge scaling of EN
    real(wp) :: kqchi
 
    if (number > 0 .and. number <= size(eeqbc_kqchi, dim=1)) then
@@ -591,13 +591,13 @@ elemental function get_eeqbc_kqchi_num(number) result(kqchi)
 end function get_eeqbc_kqchi_num
 
 
-!> Get local q scaling of the chemical hardness for species with a given symbol
+!> Get local charge scaling of the chemical hardness for a symbol
 elemental function get_eeqbc_kqeta_sym(symbol) result(kqeta)
 
    !> Element symbol
    character(len=*), intent(in) :: symbol
 
-   !> local q scaling of hardness
+   !> local charge scaling of hardness
    real(wp) :: kqeta
 
    kqeta = get_eeqbc_kqeta(to_number(symbol))
@@ -605,13 +605,13 @@ elemental function get_eeqbc_kqeta_sym(symbol) result(kqeta)
 end function get_eeqbc_kqeta_sym
 
 
-!> Get local q scaling of the chemical hardness for species with a given atomic number
+!> Get local charge scaling of the chemical hardness for an atomic number
 elemental function get_eeqbc_kqeta_num(number) result(kqeta)
 
    !> Atomic number
    integer, intent(in) :: number
 
-   !> local q scaling of hardness
+   !> local charge scaling of hardness
    real(wp) :: kqeta
 
    if (number > 0 .and. number <= size(eeqbc_kqeta, dim=1)) then
@@ -751,7 +751,7 @@ elemental function get_eeqbc_avg_cn_num(number) result(avg_cn)
 end function get_eeqbc_avg_cn_num
 
 
-!> Get scaling for pairwise van-der-Waals radius for species with a given symbol
+!> Get scaling of the pairwise van-der-Waals radius for a symbol
 elemental function get_eeqbc_rvdw_scale_sym(symbol) result(rvdw_scale)
 
    !> Element symbol
@@ -765,7 +765,7 @@ elemental function get_eeqbc_rvdw_scale_sym(symbol) result(rvdw_scale)
 end function get_eeqbc_rvdw_scale_sym
 
 
-!> Get scaling for pairwise van-der-Waals radius for species with a given atomic number
+!> Get scaling of the pairwise van-der-Waals radius for an atomic number
 elemental function get_eeqbc_rvdw_scale_num(number) result(rvdw_scale)
 
    !> Atomic number

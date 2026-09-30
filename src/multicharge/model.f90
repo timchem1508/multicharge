@@ -31,4 +31,5 @@ module multicharge_model
    public :: eeq_model, new_eeq_model
    public :: eeqbc_model, new_eeqbc_model
 
+
 end module multicharge_model

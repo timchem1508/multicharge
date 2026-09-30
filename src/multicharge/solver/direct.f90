@@ -14,8 +14,10 @@
 ! limitations under the License.
 
 !> @file multicharge/solver/direct.f90
-!> Provides implementation of the direct solver using LAPACK for symmetric indefinite systems.
+!> Provides implementation of the direct solver using LAPACK
+!> for symmetric indefinite systems
 
+!> Direct linear system solver
 module multicharge_solver_direct
    use iso_fortran_env, only : output_unit
    use mctc_env, only : error_type, fatal_error, format_time, timer_type, wp
@@ -27,8 +29,10 @@ module multicharge_solver_direct
 
    public :: direct_solver, direct_input, new_direct_solver
 
+
    !> Input configuration for the direct solver
    type, extends(mchrg_solver_input) :: direct_input
+
       !> Whether to use the direct solver
       logical :: direct = .true.
 
@@ -38,9 +42,11 @@ module multicharge_solver_direct
 
    !> Direct LAPACK solver for symmetric indefinite systems
    type, extends(mchrg_solver_type) :: direct_solver
+
       !> Output verbosity
       integer, allocatable :: verbosity
    contains
+
       !> Solve the linear system directly
       procedure :: solve
    end type direct_solver
@@ -48,11 +54,13 @@ module multicharge_solver_direct
    !> Default verbosity level
    integer, parameter :: verbosity_def = 0
 
+
 contains
 
 
 !> Construct a direct solver from its input configuration
 subroutine new_direct_solver(self, input)
+
    !> Direct solver instance
    class(direct_solver), intent(out) :: self
 
@@ -71,6 +79,7 @@ end subroutine new_direct_solver
 
 !> Solve a dense symmetric linear system using LAPACK
 subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
+
    !> Direct solver instance
    class(direct_solver), intent(in) :: self
 
@@ -98,13 +107,8 @@ subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
    real(wp), allocatable :: invmat(:, :)
    integer, allocatable :: ipiv(:)
 
-   integer :: local_info
-   integer :: ndim, ic, jc
-
-   integer :: unit
-
+   integer :: local_info, ndim, ic, jc, unit
    logical :: want_cpq
-
    type(timer_type) :: timer
 
    if (self%verbosity > 1) call timer%push("total")
@@ -163,12 +167,11 @@ subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
          call fatal_error(error, "Solution of linear system failed.")
          return
       end if
-
    end if
 
    if (present(ainv)) ainv = invmat
 
-   ! pop solve timer
+   ! Stop the solve timer
    call timer%pop
    call print_direct_final(unit, timer, self%verbosity)
 
@@ -177,6 +180,7 @@ end subroutine solve
 
 !> Print the direct solver banner
 subroutine write_direct_solver(unit)
+
    !> Output unit
    integer, intent(in) :: unit
 
@@ -186,8 +190,9 @@ subroutine write_direct_solver(unit)
 end subroutine write_direct_solver
 
 
-!> Print final summary
+!> Print the final timing summary
 subroutine print_direct_final(unit, timer, verbosity)
+
    !> Output unit
    integer, intent(in) :: unit
 
@@ -202,6 +207,8 @@ subroutine print_direct_final(unit, timer, verbosity)
          & format_time(timer%get("total"))
       write(unit, '(a)') ''
    end if
+
 end subroutine print_direct_final
+
 
 end module multicharge_solver_direct

@@ -14,24 +14,23 @@
 ! limitations under the License.
 
 module test_wignerseitz
-   use mctc_env, only: wp
-   use mctc_env_testing, only: new_unittest, unittest_type, error_type, check, &
-      & test_failed
-   use mctc_io_structure, only: structure_type
-   use mctc_cutoff, only: get_lattice_points
+   use mctc_cutoff, only : get_lattice_points
+   use mctc_env, only : wp
+   use mctc_env_testing, only : new_unittest, unittest_type, error_type, check
+   use mctc_io_structure, only : structure_type
    use mctc_wignerseitz, only : wignerseitz_cell
-   use mstore, only: get_structure
+   use mstore, only : get_structure
    use multicharge_wignerseitz, only : new_wignerseitz_cell
    implicit none
    private
 
    public :: collect_wignerseitz
 
-   real(wp), parameter :: thr = 100 * epsilon(1.0_wp)
-   real(wp), parameter :: thr1 = 1.0e5_wp*epsilon(1.0_wp)
    real(wp), parameter :: thr2 = sqrt(epsilon(1.0_wp))
 
+
 contains
+
 
 !> Collect all exported unit tests
 subroutine collect_wignerseitz(testsuite)
@@ -47,6 +46,7 @@ subroutine collect_wignerseitz(testsuite)
       & ]
 
 end subroutine collect_wignerseitz
+
 
 subroutine test_latticepoints_0d(error)
 
@@ -77,6 +77,7 @@ subroutine test_latticepoints_0d(error)
 
 end subroutine test_latticepoints_0d
 
+
 subroutine test_latticepoints_3d(error)
 
    !> Error handling
@@ -106,6 +107,7 @@ subroutine test_latticepoints_3d(error)
 
 end subroutine test_latticepoints_3d
 
+
 subroutine test_wsc_0d(error)
 
    !> Error handling
@@ -126,6 +128,7 @@ subroutine test_wsc_0d(error)
 
 end subroutine test_wsc_0d
 
+
 subroutine test_wsc_3d(error)
 
    !> Error handling
@@ -145,5 +148,6 @@ subroutine test_wsc_3d(error)
    if (allocated(error)) return
 
 end subroutine test_wsc_3d
+
 
 end module test_wignerseitz

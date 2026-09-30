@@ -16,14 +16,10 @@
 !> @file multicharge/model/type.F90
 !> Provides a general base class for charge models
 
-#ifndef IK
-#define IK i4
-#endif
-
 !> Abstract base type and shared operations for charge models
 module multicharge_model_type
    use iso_fortran_env, only : output_unit
-   use mctc_env, only : timer_type, format_time, error_type, fatal_error, wp, ik => IK
+   use mctc_env, only : timer_type, format_time, error_type, fatal_error, wp
    use mctc_io, only : structure_type
    use mctc_io_constants, only : pi
    use mctc_io_math, only : matinv_3x3
@@ -32,11 +28,11 @@ module multicharge_model_type
    use multicharge_blas, only : gemv, symv, gemm
    use multicharge_model_cache, only : mchrg_cache
    use multicharge_solver_type, only : mchrg_solver_type
-
    implicit none
    private
 
    public :: mchrg_model_type, get_dir_trans, get_rec_trans
+
 
    !> Abstract multicharge model type
    type, abstract :: mchrg_model_type
@@ -70,6 +66,7 @@ module multicharge_model_type
 
       !> Electronegativity weighted CN for local charge
       class(ncoord_type), allocatable :: ncoord_en
+
    contains
 
       !> Solve linear equations for the charge model
@@ -104,7 +101,9 @@ module multicharge_model_type
 
    end type mchrg_model_type
 
+
    abstract interface
+
       !> Update model-dependent quantities and cache
       subroutine update(self, mol, cache, trans, grad)
          import :: mchrg_model_type, structure_type, mchrg_cache, wp
@@ -115,7 +114,7 @@ module multicharge_model_type
          !> Structure type
          type(structure_type), intent(in) :: mol
 
-         !> Multicharge cache containing CN, local charges, and a Wigner-Seitz cell
+         !> Multicharge cache with CN, local charges, and Wigner-Seitz cell
          type(mchrg_cache), intent(inout) :: cache
 
          !> Lattice vectors
@@ -138,7 +137,7 @@ module multicharge_model_type
          !> System size
          integer, intent(in) :: ndim
 
-         !> Multicharge cache holding the capacitance matrix and optional derivatives
+         !> Multicharge cache holding capacitance matrix and derivatives
          type(mchrg_cache), intent(inout) :: cache
       end subroutine get_capacitance_matrix
 
@@ -189,7 +188,7 @@ module multicharge_model_type
          !> System size
          integer, intent(in) :: ndim
 
-         !> Multicharge cache holding the electronegativity vector and workspace
+         !> Multicharge cache holding the electronegativity vector
          type(mchrg_cache), intent(inout) :: cache
 
          !> External electric field
@@ -244,6 +243,7 @@ module multicharge_model_type
 
    end interface
 
+
    !> Twice pi
    real(wp), parameter :: twopi = 2.0_wp * pi
 
@@ -256,6 +256,7 @@ contains
 
 !> Generate direct lattice translation vectors for a periodic structure
 subroutine get_dir_trans(mol, trans, cutoff)
+
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
 
@@ -279,6 +280,7 @@ end subroutine get_dir_trans
 
 !> Generate reciprocal lattice translation vectors for a periodic structure
 subroutine get_rec_trans(mol, trans, cutoff)
+
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
 
@@ -290,6 +292,7 @@ subroutine get_rec_trans(mol, trans, cutoff)
    real(wp), intent(in), optional :: cutoff
 
    integer, parameter :: rep(3) = [2, 2, 2]
+
    real(wp) :: rec_lat(3, 3)
 
    rec_lat = twopi * transpose(matinv_3x3(mol%lattice))
@@ -333,16 +336,16 @@ subroutine solve(self, mol, solver, cache, error, &
    !> Optional stress tensor for electrostatic energy
    real(wp), intent(inout), contiguous, optional :: sigma(:, :)
 
-   !> Optional derivative of the atomic partial charges w.r.t. atomic positions
+   !> Optional derivative of the partial charges w.r.t. atomic positions
    real(wp), intent(out), contiguous, optional :: dqdr(:, :, :)
 
-   !> Optional derivative of the atomic partial charges w.r.t. lattice vectors
+   !> Optional derivative of the partial charges w.r.t. lattice vectors
    real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
 
    !> Optional external electric field
    real(wp), intent(in), contiguous, optional :: efield(:)
 
-   !> Optional print verbossity number input flag
+   !> Optional print verbosity level
    integer, intent(in), optional :: verbosity
 
    !> Output unit
@@ -359,7 +362,7 @@ subroutine solve(self, mol, solver, cache, error, &
    real(wp), allocatable :: daqxdL(:, :, :)
 
    logical :: grad, cpq
-   logical :: add_lagr = .true.
+   logical :: add_lagr
    type(timer_type) :: timer
    integer :: print_unit, verbosity_solve
 
@@ -461,7 +464,8 @@ subroutine solve(self, mol, solver, cache, error, &
          & alpha=0.5_wp, beta=-1.0_wp, uplo='l')
       if (ndim > mol%nat) then
          ! Correct xvec to exclude constraint term
-         cache%xvec(:mol%nat) = cache%xvec(:mol%nat) - 0.5_wp * cache%vrhs(mol%nat + 1)
+         cache%xvec(:mol%nat) = cache%xvec(:mol%nat) &
+            & - 0.5_wp * cache%vrhs(mol%nat + 1)
       end if
       energy(:) = energy(:) + cache%vrhs(:mol%nat) * cache%xvec(:mol%nat)
       call timer%pop
@@ -477,7 +481,8 @@ subroutine solve(self, mol, solver, cache, error, &
 
       ! pop gradient timer
       call timer%pop
-      call print_gradient_time(print_unit, verbosity_solve, timer%get("gradient"))
+      call print_gradient_time(print_unit, verbosity_solve, &
+         & timer%get("gradient"))
    end if
 
    ! Calculate charge derivatives if requested
@@ -607,7 +612,8 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
       return
    end if
    if (.not. allocated(cache%uvec) .and. solver%need_pos_def) then
-      call fatal_error(error, "Constrained response J*uvec = 1 is not allocated")
+      call fatal_error(error, &
+         & "Constrained response J*uvec = 1 is not allocated")
       return
    end if
 
@@ -619,8 +625,7 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
 
       ! Unconstrained response: J*yvec = dfdq
       call print_adjoint_message(print_unit, verbosity_solve)
-      call solver%solve(amat=cache%amat, &
-         & xvec=dfdq, vrhs=yvec, error=error)
+      call solver%solve(amat=cache%amat, xvec=dfdq, vrhs=yvec, error=error)
       if (allocated(error)) return
 
       ! Projection of uvec on yvec
@@ -642,8 +647,7 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
    ! Evaluate external gradients via adjoint contraction:
    ! dfdr = p^T * (db/dr - dA/dr X q)
 
-   call self%get_grad(mol, cache, padj, dfdr, dfdL, alpha=-1.0_wp, &
-      & beta=1.0_wp)
+   call self%get_grad(mol, cache, padj, dfdr, dfdL, alpha=-1.0_wp, beta=1.0_wp)
 
    ! pop dfdr timer
    call timer%pop
@@ -656,6 +660,7 @@ end subroutine get_external_gradient
 !> Local charges calculation
 subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL, &
    & dqlocdrij, dqlocdrji, dqlocdrdiag)
+
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: self
 
@@ -668,10 +673,10 @@ subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL, &
    !> Local atomic partial charges
    real(wp), intent(out) :: qloc(:)
 
-   !> Optional derivative of local atomic partial charges w.r.t. atomic positions
+   !> Optional derivative of local charges w.r.t. atomic positions
    real(wp), intent(out), optional :: dqlocdr(3, mol%nat, mol%nat)
 
-   !> Optional derivative of local atomic partial charges w.r.t. lattice vectors
+   !> Optional derivative of local charges w.r.t. lattice vectors
    real(wp), intent(out), optional :: dqlocdL(3, 3, mol%nat)
 
    !> Optional derivative with respect to the first atom in each pair
@@ -704,6 +709,7 @@ end subroutine local_charge
 
 !> Print header for charge equilibration solver
 subroutine print_solve_header(unit, verbosity, timer)
+
    !> Output unit
    integer, intent(in) :: unit
 
@@ -728,6 +734,7 @@ end subroutine print_solve_header
 
 !> Print header for gradient calculations
 subroutine print_gradient_header(unit, verbosity, timer)
+
    !> Output unit
    integer, intent(in) :: unit
 
@@ -752,6 +759,7 @@ end subroutine print_gradient_header
 
 !> Print message for constrained system solves
 subroutine print_constrained_system_message(unit, verbosity, vector)
+
    !> Output unit
    integer, intent(in) :: unit
 
@@ -767,7 +775,8 @@ subroutine print_constrained_system_message(unit, verbosity, vector)
       else if (vector == 'v') then
          write(unit, '(a)') 'Solving unconstrained system: J*v = chi'
       else if (vector == 'y') then
-         write(unit, '(a)') 'Solving derivative unconstrained system: J*y = df/dq'
+         write(unit, '(a)') &
+            & 'Solving derivative unconstrained system: J*y = df/dq'
       end if
       write(unit, '(a)') ''
    end if
@@ -776,6 +785,7 @@ end subroutine print_constrained_system_message
 
 !> Print message for adjoint system solve
 subroutine print_adjoint_message(unit, verbosity)
+
    !> Output unit
    integer, intent(in) :: unit
 
@@ -791,6 +801,7 @@ end subroutine print_adjoint_message
 
 !> Print gradient calculation time
 subroutine print_gradient_time(unit, verbosity, timer)
+
    !> Output unit
    integer, intent(in) :: unit
 
@@ -801,7 +812,8 @@ subroutine print_gradient_time(unit, verbosity, timer)
    real(wp), intent(in) :: timer
 
    if (verbosity > 1) then
-      write(unit, '(a, 1x, a)') "Gradient calculation time : ", format_time(timer)
+      write(unit, '(a, 1x, a)') &
+         & "Gradient calculation time : ", format_time(timer)
       write(unit, '(a)') ''
    end if
 end subroutine print_gradient_time
@@ -809,6 +821,7 @@ end subroutine print_gradient_time
 
 !> Print energy calculation time
 subroutine print_energy_time(unit, verbosity, timer)
+
    !> Output unit
    integer, intent(in) :: unit
 
@@ -827,6 +840,7 @@ end subroutine print_energy_time
 
 !> Print total solve time
 subroutine print_total_time(unit, verbosity, timer)
+
    !> Output unit
    integer, intent(in) :: unit
 
@@ -841,5 +855,6 @@ subroutine print_total_time(unit, verbosity, timer)
       write(unit, '(a)') ''
    end if
 end subroutine print_total_time
+
 
 end module multicharge_model_type

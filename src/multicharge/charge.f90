@@ -25,9 +25,8 @@ module multicharge_charge
    use mctc_cutoff, only : get_lattice_points
    use multicharge_model_type, only : mchrg_model_type
    use multicharge_model_cache, only : mchrg_cache
-   use multicharge_solver_type, only : mchrg_solver_type, mchrg_solver_input
-   use multicharge_solver_cg, only : cg_solver, new_cg_solver, cg_input
-   use multicharge_solver_direct, only : direct_solver, new_direct_solver, direct_input
+   use multicharge_solver_direct, only : direct_solver, new_direct_solver, &
+      & direct_input
    use multicharge_param, only : new_eeq2019_model, new_eeqbc2025_model
    implicit none
    private
@@ -76,7 +75,8 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, efield)
    grad = present(dqdr) .and. present(dqdL)
 
    allocate(cache)
-   call get_lattice_points(mol%periodic, mol%lattice, mchrg_model%ncoord%cutoff, trans)
+   call get_lattice_points(mol%periodic, mol%lattice, &
+      & mchrg_model%ncoord%cutoff, trans)
    call mchrg_model%update(mol, cache, trans, grad)
    call mchrg_model%solve(mol, solver, cache, error, &
       & qvec=qvec, dqdr=dqdr, dqdL=dqdL, &

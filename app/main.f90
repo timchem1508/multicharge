@@ -14,20 +14,19 @@
 ! limitations under the License.
 
 program main
-   use, intrinsic :: iso_fortran_env, only: output_unit, error_unit, input_unit
-   use mctc_env, only: error_type, fatal_error, get_argument, wp, timer_type, format_time
-   use mctc_io, only: structure_type, read_structure, filetype, get_filetype
-   use mctc_cutoff, only: get_lattice_points
-   use mctc_wignerseitz, only: wignerseitz_cell
-   use multicharge, only: mchrg_model_type, mchrg_model, mchrg_cache, new_eeq2019_model, &
-   & new_eeqbc2025_model, get_multicharge_version, &
-   & write_ascii_model, write_ascii_properties, write_ascii_results
-   use multicharge_output, only: json_results
-   use multicharge_solver, only: new_mchrg_solver, mchrg_solver_type, direct_solver, &
-   & cg_solver, mchrg_solver_input, cg_input, direct_input
-
-
+   use, intrinsic :: iso_fortran_env, only : output_unit, error_unit, input_unit
+   use mctc_env, only : error_type, fatal_error, get_argument, wp, timer_type, &
+      & format_time
+   use mctc_io, only : structure_type, read_structure, filetype, get_filetype
+   use mctc_cutoff, only : get_lattice_points
+   use multicharge, only : mchrg_model_type, mchrg_model, mchrg_cache, &
+      & new_eeq2019_model, new_eeqbc2025_model, get_multicharge_version, &
+      & write_ascii_model, write_ascii_properties, write_ascii_results
+   use multicharge_output, only : json_results
+   use multicharge_solver, only : new_mchrg_solver, mchrg_solver_type, &
+      & mchrg_solver_input, cg_input, direct_input
    implicit none
+
    character(len=*), parameter :: prog_name = "multicharge"
    character(len=*), parameter :: json_output = "multicharge.json"
 
@@ -36,7 +35,6 @@ program main
    integer :: stat, unit, model_id
    type(error_type), allocatable :: error
    type(structure_type) :: mol
-   type(wignerseitz_cell), allocatable :: wsc
    class(mchrg_model_type), allocatable :: model
    type(mchrg_cache), allocatable :: cache
    class(mchrg_solver_type), allocatable :: solver
@@ -54,7 +52,7 @@ program main
    call timer%push("total")
 
    call get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
-      efield, json, solver_input, verbosity, error)
+      & efield, json, solver_input, verbosity, error)
    if (allocated(error)) then
       write(error_unit, '(a)') error%message
       error stop
@@ -88,7 +86,7 @@ program main
                "[Info] Molecular charge read from '"//chargeinput//"'"
          else
             write(output_unit, '(a,/)') &
-               "[Warn] Could not read molecular charge read from '"//chargeinput//"'"
+               "[Warn] Could not read molecular charge from '"//chargeinput//"'"
          end if
          close(unit)
       end if
@@ -103,7 +101,7 @@ program main
    else if (model_id == mchrg_model%eeqbc2025) then
       call new_eeqbc2025_model(mol, model, error)
    else
-      call fatal_error(error, "Invalid model was choosen.")
+      call fatal_error(error, "Invalid model was chosen.")
    end if
    if (allocated(error)) then
       write(error_unit, '(a)') error%message
@@ -114,7 +112,8 @@ program main
 
    call timer%pop
 
-   call write_ascii_model(output_unit, mol, model, verbosity, timer%get("model_setup"))
+   call write_ascii_model(output_unit, mol, model, verbosity, &
+      & timer%get("model_setup"))
 
    allocate(energy(mol%nat), qvec(mol%nat))
    energy(:) = 0.0_wp
@@ -138,11 +137,12 @@ program main
    call model%update(mol, cache, trans, grad)
    call timer%pop
    if (verbosity > 1) then
-      write(output_unit, '(a, 1x, a)') "Get coordination number time : ", format_time(timer%get("update"))
+      write(output_unit, '(a, 1x, a)') "Get coordination number time : ", &
+         & format_time(timer%get("update"))
    end if
    call model%solve(mol, solver, cache, error, &
-   & energy, gradient, sigma, qvec, dqdr, dqdL, efield=efield, &
-   & verbosity=verbosity, unit=output_unit)
+      & energy, gradient, sigma, qvec, dqdr, dqdL, efield=efield, &
+      & verbosity=verbosity, unit=output_unit)
 
    if (allocated(error)) then
       write(error_unit, '(a)') error%message
@@ -154,20 +154,27 @@ program main
 
    call timer%pop
    if (verbosity > 1) then
-      write(output_unit, '(a, 1x, a)') "Total execution time : ", format_time(timer%get("total"))
+      write(output_unit, '(a, 1x, a)') "Total execution time : ", &
+         & format_time(timer%get("total"))
    end if
 
    if (json) then
       open(file=json_output, newunit=unit)
-      call json_results(unit, "  ", energy=sum(energy), gradient=gradient, dqdr=dqdr, charges=qvec, cn=cache%cn)
+      call json_results(unit, "  ", energy=sum(energy), gradient=gradient, &
+         & dqdr=dqdr, charges=qvec, cn=cache%cn)
       close(unit)
       write(output_unit, '(a)') &
          "[Info] JSON dump of results written to '"//json_output//"'"
    end if
 
+
 contains
 
+
+!> Print the usage message
 subroutine help(unit)
+
+   !> Output unit
    integer, intent(in) :: unit
 
    write(unit, '(a, *(1x, a))') &
@@ -183,15 +190,19 @@ subroutine help(unit)
       "-m, -model, --model <model>", "Choose the charge model (eeq or eeqbc)", &
       "-i, -input, --input <format>", "Hint for the format of the input file", &
       "-c, -charge, --charge <value>", "Provide the molecular charge", &
-      "-e, -efield, --efield <x>,<y>,<z>", "Provide the external electric field in atomic units", &
-      "-solver, --solver <type>", "Provide the partial charge solver: 'cg' or 'direct' (default)", &
+      "-e, -efield, --efield <x>,<y>,<z>", &
+      & "Provide the external electric field in atomic units", &
+      "-solver, --solver <type>", &
+      & "Provide the partial charge solver: 'cg' or 'direct' (default)", &
       "-it, -maxiter, --maxiter <int>", "Provide the maximal number of CG iterations", &
       "-tol, -tolerance, --tolerance <real>", "Provide the tolerance of the solver", &
-      "-g, -eg, -grad, --grad, -egrad, --egrad", "Evaluate molecular energy gradient and virial.", &
+      "-g, -eg, -grad, --grad, -egrad, --egrad", &
+      & "Evaluate molecular energy gradient and virial.", &
       "-qg, -qgrad, --qgrad", "Evaluate molecular charge gradient and virial.", &
       "-v, -verbose, --verbose", "Show more", &
       "-s, -silent, --silent", "Show less", &
-      "-j, -json, --json", "Provide output in JSON format to the file 'multicharge.json'", &
+      "-j, -json, --json", &
+      & "Provide output in JSON format to the file 'multicharge.json'", &
       "-version, --version", "Print program version and exit", &
       "-h, -help, --help", "Show this help message"
 
@@ -199,23 +210,30 @@ subroutine help(unit)
 
 end subroutine help
 
+
+!> Print the program version
 subroutine version(unit)
+
+   !> Output unit
    integer, intent(in) :: unit
+
    character(len=:), allocatable :: version_string
 
    call get_multicharge_version(string=version_string)
    write(unit, '(a, *(1x, a))') &
-   & prog_name, "version", version_string
+      & prog_name, "version", version_string
 
 end subroutine version
 
-subroutine get_arguments(input, model_id, &
-& input_format, egrad, qgrad, charge, efield, json, solver_input, verbosity, error)
+
+!> Parse the command line arguments
+subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
+      & efield, json, solver_input, verbosity, error)
 
    !> Input file name
    character(len=:), allocatable :: input
 
-   !> ID of choosen model type
+   !> ID of chosen model type
    integer, intent(out) :: model_id
 
    !> Input file format
@@ -236,19 +254,17 @@ subroutine get_arguments(input, model_id, &
    !> Provide JSON output
    logical, intent(out) :: json
 
-   !> Solver args
+   !> Solver input configuration
    class(mchrg_solver_input), allocatable, intent(out) :: solver_input
 
-   !> Verbosity number
+   !> Verbosity level
    integer, allocatable :: verbosity
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
    integer :: iarg, narg, iostat
-   character(len=:), allocatable :: arg
-
-   character(len=:), allocatable :: solver_name
+   character(len=:), allocatable :: arg, solver_name
    integer, allocatable :: maxiter
    real(wp), allocatable :: tol
 
@@ -260,127 +276,129 @@ subroutine get_arguments(input, model_id, &
    verbosity = 1
    narg = command_argument_count()
 
-   do while(iarg < narg)
+   do while (iarg < narg)
       iarg = iarg + 1
       call get_argument(iarg, arg)
-      select case(arg)
+      select case (arg)
          case("-h", "-help", "--help")
-         call help(output_unit)
-         stop
+            call help(output_unit)
+            stop
          case("-version", "--version")
-         call version(output_unit)
-         stop
+            call version(output_unit)
+            stop
          case("-v", "-verbose", "--verbose")
-         verbosity = verbosity + 1
+            verbosity = verbosity + 1
          case("-s", "-silent", "--silent")
-         verbosity = verbosity - 1
+            verbosity = verbosity - 1
          case default
-         if (.not. allocated(input)) then
-            call move_alloc(arg, input)
-            cycle
-         end if
-         call fatal_error(error, "Too many positional arguments present")
-         exit
+            if (.not. allocated(input)) then
+               call move_alloc(arg, input)
+               cycle
+            end if
+            call fatal_error(error, "Too many positional arguments present")
+            exit
          case("-m", "-model", "--model")
-         iarg = iarg + 1
-         call get_argument(iarg, arg)
-         if (.not. allocated(arg)) then
-            call fatal_error(error, "Missing argument for model")
-            exit
-         end if
-         if (arg == "eeq2019" .or. arg == "eeq") then
-            model_id = mchrg_model%eeq2019
-         else if (arg == "eeqbc2025" .or. arg == "eeqbc") then
-            model_id = mchrg_model%eeqbc2025
-         else
-            call fatal_error(error, "Invalid model")
-            exit
-         end if
+            iarg = iarg + 1
+            call get_argument(iarg, arg)
+            if (.not. allocated(arg)) then
+               call fatal_error(error, "Missing argument for model")
+               exit
+            end if
+            if (arg == "eeq2019" .or. arg == "eeq") then
+               model_id = mchrg_model%eeq2019
+            else if (arg == "eeqbc2025" .or. arg == "eeqbc") then
+               model_id = mchrg_model%eeqbc2025
+            else
+               call fatal_error(error, "Invalid model")
+               exit
+            end if
          case("-i", "-input", "--input")
-         iarg = iarg + 1
-         call get_argument(iarg, arg)
-         if (.not. allocated(arg)) then
-            call fatal_error(error, "Missing argument for input format")
-            exit
-         end if
-         input_format = get_filetype("."//arg)
+            iarg = iarg + 1
+            call get_argument(iarg, arg)
+            if (.not. allocated(arg)) then
+               call fatal_error(error, "Missing argument for input format")
+               exit
+            end if
+            input_format = get_filetype("."//arg)
          case("-c", "-charge", "--charge")
-         iarg = iarg + 1
-         call get_argument(iarg, arg)
-         if (.not. allocated(arg)) then
-            call fatal_error(error, "Missing argument for charge")
-            exit
-         end if
-         allocate(charge)
-         read(arg, *, iostat=iostat) charge
-         if (iostat /= 0) then
-            call fatal_error(error, "Invalid charge value")
-            exit
-         end if
+            iarg = iarg + 1
+            call get_argument(iarg, arg)
+            if (.not. allocated(arg)) then
+               call fatal_error(error, "Missing argument for charge")
+               exit
+            end if
+            allocate(charge)
+            read(arg, *, iostat=iostat) charge
+            if (iostat /= 0) then
+               call fatal_error(error, "Invalid charge value")
+               exit
+            end if
          case("-e", "-efield", "--efield")
-         iarg = iarg + 1
-         call get_argument(iarg, arg)
-         if (.not. allocated(arg)) then
-            call fatal_error(error, "Missing argument for electric field")
-            exit
-         end if
-         allocate(efield(3))
-         read(arg, *, iostat=iostat) efield
-         if (iostat /= 0) then
-            call fatal_error(error, "Invalid electric field value")
-            exit
-         end if
+            iarg = iarg + 1
+            call get_argument(iarg, arg)
+            if (.not. allocated(arg)) then
+               call fatal_error(error, "Missing argument for electric field")
+               exit
+            end if
+            allocate(efield(3))
+            read(arg, *, iostat=iostat) efield
+            if (iostat /= 0) then
+               call fatal_error(error, "Invalid electric field value")
+               exit
+            end if
          case("-g", "-eg", "-grad", "--grad", "-egrad", "--egrad")
-         egrad = .true.
+            egrad = .true.
          case("-qg", "-qgrad", "--qgrad")
-         qgrad = .true.
+            qgrad = .true.
          case("-j", "-json", "--json")
-         json = .true.
+            json = .true.
          case("-solver", "--solver")
-         if (allocated(solver_name)) then
-            call fatal_error(error, "Cannot use multiple solvers")
-            exit
-         end if
-         iarg = iarg + 1
-         call get_argument(iarg, solver_name)
-         if (solver_name == "DIRECT" .or. solver_name == "direct") then
-            allocate(direct_input :: solver_input)
-         end if
-         if (solver_name == "CG" .or. solver_name == "cg") then
-            allocate(cg_input :: solver_input)
-         end if
+            if (allocated(solver_name)) then
+               call fatal_error(error, "Cannot use multiple solvers")
+               exit
+            end if
+            iarg = iarg + 1
+            call get_argument(iarg, solver_name)
+            if (solver_name == "DIRECT" .or. solver_name == "direct") then
+               allocate(direct_input :: solver_input)
+            end if
+            if (solver_name == "CG" .or. solver_name == "cg") then
+               allocate(cg_input :: solver_input)
+            end if
          case("-it", "-maxiter", "--maxiter")
-         allocate(maxiter)
-         iarg = iarg + 1
-         call get_argument(iarg, arg)
-         read(arg, *, iostat=iostat) maxiter
-         if (iostat /= 0) then
-            call fatal_error(error, "Invalid maximal number of iterations")
-            exit
-         end if
+            allocate(maxiter)
+            iarg = iarg + 1
+            call get_argument(iarg, arg)
+            read(arg, *, iostat=iostat) maxiter
+            if (iostat /= 0) then
+               call fatal_error(error, "Invalid maximal number of iterations")
+               exit
+            end if
          case("-tol", "-tolerance", "--tolerance")
-         allocate(tol)
-         iarg = iarg + 1
-         call get_argument(iarg, arg)
-         read(arg, *, iostat=iostat) tol
-         if (iostat /= 0) then
-            call fatal_error(error, "Invalid tolerance")
-            exit
-         end if
+            allocate(tol)
+            iarg = iarg + 1
+            call get_argument(iarg, arg)
+            read(arg, *, iostat=iostat) tol
+            if (iostat /= 0) then
+               call fatal_error(error, "Invalid tolerance")
+               exit
+            end if
       end select
    end do
 
-   ! Charge gradient cannot be evaluated using cg solver.
    if (qgrad) then
       select type (solver_input)
          type is (cg_input)
-         call fatal_error(error, "Charge gradient cannot be evaluated using cg solver.")
-         return
+            call fatal_error(error, &
+               & "Charge gradient cannot be evaluated using cg solver.")
+            return
       end select
    end if
 
-   if ((allocated(maxiter) .or. allocated(tol)) .and. .not. allocated(solver_input)) then
-      call fatal_error(error, "Maximal number of iterations and tolerance cannot be used alonwise the cg solver.")
+   if ((allocated(maxiter) .or. allocated(tol)) &
+         & .and. .not. allocated(solver_input)) then
+      call fatal_error(error, "Maximal number of iterations and tolerance "//&
+         & "cannot be used alongside the cg solver.")
       return
    end if
 
@@ -389,23 +407,22 @@ subroutine get_arguments(input, model_id, &
       allocate(direct_input :: solver_input)
    end if
 
-   select type(solver_input)
+   select type (solver_input)
       type is (cg_input)
-      if (allocated(maxiter)) then
-         solver_input%cgmiter = maxiter
-      end if
-      if (allocated(tol)) then
-         solver_input%cgtol = tol
-      end if
-      if (allocated(verbosity)) then
-         solver_input%verbosity = verbosity
-      end if
+         if (allocated(maxiter)) then
+            solver_input%cgmiter = maxiter
+         end if
+         if (allocated(tol)) then
+            solver_input%cgtol = tol
+         end if
+         if (allocated(verbosity)) then
+            solver_input%verbosity = verbosity
+         end if
       type is (direct_input)
-      if (allocated(verbosity)) then
-         solver_input%verbosity = verbosity
-      end if
+         if (allocated(verbosity)) then
+            solver_input%verbosity = verbosity
+         end if
    end select
-
 
    if (.not. allocated(input)) then
       if (.not. allocated(error)) then
@@ -415,5 +432,6 @@ subroutine get_arguments(input, model_id, &
    end if
 
 end subroutine get_arguments
+
 
 end program main

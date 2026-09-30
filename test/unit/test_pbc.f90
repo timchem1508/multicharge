@@ -14,21 +14,21 @@
 ! limitations under the License.
 
 module test_pbc
-   use iso_fortran_env, only: output_unit
-   use mctc_env, only: wp
-   use mctc_env_testing, only: new_unittest, unittest_type, error_type, &
-   & test_failed
-   use mctc_io_structure, only: structure_type
-   use mctc_cutoff, only: get_lattice_points
-   use mstore, only: get_structure
-   use multicharge_blas, only: gemv
-   use multicharge_model_type, only: mchrg_model_type
-   use multicharge_model_eeqbc, only: eeqbc_model
-   use multicharge_param, only: new_eeq2019_model, new_eeqbc2025_model
-   use multicharge_model_cache, only: mchrg_cache
-   use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
-   use multicharge_solver_direct, only : direct_solver, new_direct_solver, direct_input
+   use iso_fortran_env, only : output_unit
+   use mctc_cutoff, only : get_lattice_points
+   use mctc_env, only : wp
+   use mctc_env_testing, only : new_unittest, unittest_type, error_type, test_failed
+   use mctc_io_structure, only : structure_type
+   use mstore, only : get_structure
+   use multicharge_blas, only : gemv
+   use multicharge_model_cache, only : mchrg_cache
+   use multicharge_model_eeqbc, only : eeqbc_model
+   use multicharge_model_type, only : mchrg_model_type
+   use multicharge_param, only : new_eeq2019_model, new_eeqbc2025_model
    use multicharge_solver_cg, only : cg_solver, new_cg_solver, cg_input
+   use multicharge_solver_direct, only : direct_solver, new_direct_solver, &
+      & direct_input
+   use multicharge_solver_type, only : mchrg_solver_type, mchrg_solver_input
    implicit none
    private
 
@@ -39,7 +39,9 @@ module test_pbc
    real(wp), parameter :: thr2 = sqrt(epsilon(1.0_wp))
    real(wp), parameter :: thr3 = 100*sqrt(epsilon(1.0_wp))
 
+
 contains
+
 
 !> Collect all exported unit tests
 subroutine collect_pbc(testsuite)
@@ -48,59 +50,65 @@ subroutine collect_pbc(testsuite)
    type(unittest_type), allocatable, intent(out) :: testsuite(:)
 
    testsuite = [ &
-   & new_unittest("eeq-charges-cyanamide", test_eeq_q_cyanamide), &
-   & new_unittest("eeq-energy-formamide", test_eeq_e_formamide), &
-   & new_unittest("eeq-dbdr-co2", test_eeq_dbdr_co2), &
-   & new_unittest("eeq-dbdL-co2", test_eeq_dbdL_co2), &
-   & new_unittest("eeq-dadr-ice", test_eeq_dadr_ice), &
-   & new_unittest("eeq-dadL-ice", test_eeq_dadL_ice), &
-   & new_unittest("eeq-gradient-co2", test_eeq_g_co2), &
-   & new_unittest("eeq-sigma-ice", test_eeq_s_ice), &
-   & new_unittest("eeq-dqdr-urea", test_eeq_dqdr_urea), &
-   & new_unittest("eeq-dqdL-oxacb", test_eeq_dqdL_oxacb), &
-   & new_unittest("eeq-dfdr-urea", test_eeq_dfdr_urea), &
-   & new_unittest("eeqbc-dbdr-co2", test_eeqbc_dbdr_co2), &
-   & new_unittest("eeqbc-dbdL-co2", test_eeqbc_dbdL_co2), &
-   & new_unittest("eeqbc-dadr-ice", test_eeqbc_dadr_ice), &
-   & new_unittest("eeqbc-dadL-ice", test_eeqbc_dadL_ice), &
-   & new_unittest("eeqbc-gradient-co2", test_eeqbc_g_co2), &
-   & new_unittest("eeqbc-sigma-ice", test_eeqbc_s_ice), &
-   & new_unittest("eeqbc-dqdr-urea", test_eeqbc_dqdr_urea), &
-   & new_unittest("eeqbc-dqdL-oxacb", test_eeqbc_dqdL_oxacb), &
-   & new_unittest("eeqbc-dfdr-urea", test_eeqbc_dfdr_urea) &
-   & ]
+      & new_unittest("eeq-charges-cyanamide", test_eeq_q_cyanamide), &
+      & new_unittest("eeq-energy-formamide", test_eeq_e_formamide), &
+      & new_unittest("eeq-dbdr-co2", test_eeq_dbdr_co2), &
+      & new_unittest("eeq-dbdL-co2", test_eeq_dbdL_co2), &
+      & new_unittest("eeq-dadr-ice", test_eeq_dadr_ice), &
+      & new_unittest("eeq-dadL-ice", test_eeq_dadL_ice), &
+      & new_unittest("eeq-gradient-co2", test_eeq_g_co2), &
+      & new_unittest("eeq-sigma-ice", test_eeq_s_ice), &
+      & new_unittest("eeq-dqdr-urea", test_eeq_dqdr_urea), &
+      & new_unittest("eeq-dqdL-oxacb", test_eeq_dqdL_oxacb), &
+      & new_unittest("eeq-dfdr-urea", test_eeq_dfdr_urea), &
+      & new_unittest("eeqbc-dbdr-co2", test_eeqbc_dbdr_co2), &
+      & new_unittest("eeqbc-dbdL-co2", test_eeqbc_dbdL_co2), &
+      & new_unittest("eeqbc-dadr-ice", test_eeqbc_dadr_ice), &
+      & new_unittest("eeqbc-dadL-ice", test_eeqbc_dadL_ice), &
+      & new_unittest("eeqbc-gradient-co2", test_eeqbc_g_co2), &
+      & new_unittest("eeqbc-sigma-ice", test_eeqbc_s_ice), &
+      & new_unittest("eeqbc-dqdr-urea", test_eeqbc_dqdr_urea), &
+      & new_unittest("eeqbc-dqdL-oxacb", test_eeqbc_dqdL_oxacb), &
+      & new_unittest("eeqbc-dfdr-urea", test_eeqbc_dfdr_urea) &
+      & ]
 
 end subroutine collect_pbc
 
+
+!> Construct a solver matching the dynamic type of the solver input
 subroutine solver_maker(solver, input, error)
+
    !> Solver type
    class(mchrg_solver_type), intent(out), allocatable :: solver
+
    !> Solver input
    class(mchrg_solver_input), intent(in) :: input
+
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
    select type (input)
-    type is (cg_input)
+   type is (cg_input)
       block
          class(cg_solver), allocatable :: tmp
          allocate(tmp)
          call new_cg_solver(tmp, input)
          call move_alloc(tmp, solver)
       end block
-    type is (direct_input)
+   type is (direct_input)
       block
          class(direct_solver), allocatable :: tmp
          allocate(tmp)
          call new_direct_solver(tmp, input)
          call move_alloc(tmp, solver)
       end block
-    class default
+   class default
       allocate(error)
       return
    end select
 
 end subroutine solver_maker
+
 
 subroutine gen_test(error, mol, model, qref, eref)
 
@@ -136,7 +144,7 @@ subroutine gen_test(error, mol, model, qref, eref)
 
    allocate(cg_input :: solver_input)
    select type (solver_input)
-    type is (cg_input)
+   type is (cg_input)
       solver_input%cgtol = tol
       solver_input%cgmiter = maxiter
       solver_input%verbosity = verbosity
@@ -183,6 +191,7 @@ subroutine gen_test(error, mol, model, qref, eref)
 
 end subroutine gen_test
 
+
 subroutine test_numgrad(error, mol, model)
 
    !> Error handling
@@ -214,7 +223,7 @@ subroutine test_numgrad(error, mol, model)
 
    allocate(cg_input :: solver_input)
    select type (solver_input)
-    type is (cg_input)
+   type is (cg_input)
       solver_input%cgtol = tol
       solver_input%cgmiter = maxiter
       solver_input%verbosity = verbosity
@@ -270,6 +279,7 @@ subroutine test_numgrad(error, mol, model)
 
 end subroutine test_numgrad
 
+
 subroutine test_numsigma(error, mol, model)
 
    !> Error handling
@@ -300,7 +310,7 @@ subroutine test_numsigma(error, mol, model)
 
    allocate(direct_input :: solver_input)
    select type (solver_input)
-    type is (direct_input)
+   type is (direct_input)
       solver_input%verbosity = verbosity
       ndim = mol%nat + 1
    end select
@@ -369,6 +379,7 @@ subroutine test_numsigma(error, mol, model)
 
 end subroutine test_numsigma
 
+
 subroutine test_dbdr(error, mol, model)
 
    !> Error handling
@@ -398,7 +409,7 @@ subroutine test_dbdr(error, mol, model)
 
    allocate(cg_input :: solver_input)
    select type (solver_input)
-    type is (cg_input)
+   type is (cg_input)
       solver_input%cgtol = tol
       solver_input%cgmiter = maxiter
       solver_input%verbosity = verbosity
@@ -456,6 +467,7 @@ subroutine test_dbdr(error, mol, model)
 
 end subroutine test_dbdr
 
+
 subroutine test_dbdL(error, mol, model)
 
    !> Error handling
@@ -488,7 +500,7 @@ subroutine test_dbdL(error, mol, model)
 
    allocate(cg_input :: solver_input)
    select type (solver_input)
-    type is (cg_input)
+   type is (cg_input)
       solver_input%cgtol = tol
       solver_input%cgmiter = maxiter
       solver_input%verbosity = verbosity
@@ -563,6 +575,7 @@ subroutine test_dbdL(error, mol, model)
 
 end subroutine test_dbdL
 
+
 subroutine test_dadr(error, mol, model)
 
 
@@ -594,7 +607,7 @@ subroutine test_dadr(error, mol, model)
 
    allocate(cg_input :: solver_input)
    select type (solver_input)
-    type is (cg_input)
+   type is (cg_input)
       solver_input%cgtol = tol
       solver_input%cgmiter = maxiter
       solver_input%verbosity = verbosity
@@ -604,14 +617,15 @@ subroutine test_dadr(error, mol, model)
 
    allocate (cache)
 
-   allocate (amatr1(ndim, ndim), amatl1(ndim, ndim), amatr2(ndim, ndim), amatl2(ndim, ndim), &
-   & numtrace(3, mol%nat), numgrad(3, mol%nat, ndim), qvec(mol%nat))
+   allocate (amatr1(ndim, ndim), amatl1(ndim, ndim), amatr2(ndim, ndim), &
+      & amatl2(ndim, ndim), numtrace(3, mol%nat), numgrad(3, mol%nat, ndim), &
+      & qvec(mol%nat))
 
    ! Set tolerance higher if testing eeqbc model
    select type (model)
-    type is (eeqbc_model)
+   type is (eeqbc_model)
       thr2_local = 3.0_wp*thr2
-    class default
+   class default
       thr2_local = thr2
    end select
 
@@ -694,6 +708,7 @@ subroutine test_dadr(error, mol, model)
 
 end subroutine test_dadr
 
+
 subroutine test_dadL(error, mol, model)
 
    !> Error handling
@@ -725,7 +740,7 @@ subroutine test_dadL(error, mol, model)
 
    allocate(cg_input :: solver_input)
    select type (solver_input)
-    type is (cg_input)
+   type is (cg_input)
       solver_input%cgtol = tol
       solver_input%cgmiter = maxiter
       solver_input%verbosity = verbosity
@@ -804,6 +819,7 @@ subroutine test_dadL(error, mol, model)
 
 end subroutine test_dadL
 
+
 subroutine test_numdqdr(error, mol, model)
 
    !> Error handling
@@ -832,7 +848,7 @@ subroutine test_numdqdr(error, mol, model)
 
    allocate(direct_input :: solver_input)
    select type (solver_input)
-    type is (direct_input)
+   type is (direct_input)
       solver_input%verbosity = verbosity
       ndim = mol%nat+1
    end select
@@ -880,6 +896,7 @@ subroutine test_numdqdr(error, mol, model)
 
 end subroutine test_numdqdr
 
+
 subroutine test_numdqdL(error, mol, model)
 
    !> Error handling
@@ -910,7 +927,7 @@ subroutine test_numdqdL(error, mol, model)
 
    allocate(direct_input :: solver_input)
    select type (solver_input)
-    type is (direct_input)
+   type is (direct_input)
       solver_input%verbosity = verbosity
       ndim = mol%nat + 1
    end select
@@ -973,6 +990,7 @@ subroutine test_numdqdL(error, mol, model)
 
 end subroutine test_numdqdL
 
+
 subroutine test_dfdr(error, mol, dfdq, model)
 
    !> Error handling
@@ -1009,7 +1027,7 @@ subroutine test_dfdr(error, mol, dfdq, model)
    ! Allocate direct solver input for dqdr
    allocate(direct_input :: solver_dqdr_input)
    select type (solver_dqdr_input)
-    type is (direct_input)
+   type is (direct_input)
       solver_dqdr_input%verbosity = verbosity
    end select
    call solver_maker(solver_dqdr, solver_dqdr_input, error)
@@ -1018,7 +1036,7 @@ subroutine test_dfdr(error, mol, dfdq, model)
    ! Allocate CG solver input for gradient
    allocate(cg_input :: solver_dfdr_input)
    select type (solver_dfdr_input)
-    type is (cg_input)
+   type is (cg_input)
       solver_dfdr_input%cgtol = tol
       solver_dfdr_input%cgmiter = maxiter
       solver_dfdr_input%verbosity = verbosity
@@ -1072,6 +1090,7 @@ subroutine test_dfdr(error, mol, dfdq, model)
 
 end subroutine test_dfdr
 
+
 subroutine test_eeq_q_cyanamide(error)
 
    !> Error handling
@@ -1102,6 +1121,7 @@ subroutine test_eeq_q_cyanamide(error)
 
 end subroutine test_eeq_q_cyanamide
 
+
 subroutine test_eeq_e_formamide(error)
 
    !> Error handling
@@ -1126,6 +1146,7 @@ subroutine test_eeq_e_formamide(error)
 
 end subroutine test_eeq_e_formamide
 
+
 subroutine test_eeq_dbdr_co2(error)
 
    !> Error handling
@@ -1140,6 +1161,7 @@ subroutine test_eeq_dbdr_co2(error)
    call test_dbdr(error, mol, model)
 
 end subroutine test_eeq_dbdr_co2
+
 
 subroutine test_eeq_dbdL_co2(error)
 
@@ -1156,6 +1178,7 @@ subroutine test_eeq_dbdL_co2(error)
 
 end subroutine test_eeq_dbdL_co2
 
+
 subroutine test_eeq_dadr_ice(error)
 
    !> Error handling
@@ -1170,6 +1193,7 @@ subroutine test_eeq_dadr_ice(error)
    call test_dadr(error, mol, model)
 
 end subroutine test_eeq_dadr_ice
+
 
 subroutine test_eeq_dadL_ice(error)
 
@@ -1186,6 +1210,7 @@ subroutine test_eeq_dadL_ice(error)
 
 end subroutine test_eeq_dadL_ice
 
+
 subroutine test_eeq_g_co2(error)
 
    !> Error handling
@@ -1200,6 +1225,7 @@ subroutine test_eeq_g_co2(error)
    call test_numgrad(error, mol, model)
 
 end subroutine test_eeq_g_co2
+
 
 subroutine test_eeq_s_ice(error)
 
@@ -1216,6 +1242,7 @@ subroutine test_eeq_s_ice(error)
 
 end subroutine test_eeq_s_ice
 
+
 subroutine test_eeq_dqdr_urea(error)
 
    !> Error handling
@@ -1231,6 +1258,7 @@ subroutine test_eeq_dqdr_urea(error)
 
 end subroutine test_eeq_dqdr_urea
 
+
 subroutine test_eeq_dqdL_oxacb(error)
 
    !> Error handling
@@ -1245,6 +1273,7 @@ subroutine test_eeq_dqdL_oxacb(error)
    call test_numdqdL(error, mol, model)
 
 end subroutine test_eeq_dqdL_oxacb
+
 
 subroutine test_eeq_dfdr_urea(error)
 
@@ -1268,6 +1297,7 @@ subroutine test_eeq_dfdr_urea(error)
 
 end subroutine test_eeq_dfdr_urea
 
+
 subroutine test_eeqbc_dbdr_co2(error)
 
    !> Error handling
@@ -1282,6 +1312,7 @@ subroutine test_eeqbc_dbdr_co2(error)
    call test_dbdr(error, mol, model)
 
 end subroutine test_eeqbc_dbdr_co2
+
 
 subroutine test_eeqbc_dbdL_co2(error)
 
@@ -1298,6 +1329,7 @@ subroutine test_eeqbc_dbdL_co2(error)
 
 end subroutine test_eeqbc_dbdL_co2
 
+
 subroutine test_eeqbc_dadr_ice(error)
 
    !> Error handling
@@ -1312,6 +1344,7 @@ subroutine test_eeqbc_dadr_ice(error)
    call test_dadr(error, mol, model)
 
 end subroutine test_eeqbc_dadr_ice
+
 
 subroutine test_eeqbc_dadL_ice(error)
 
@@ -1328,6 +1361,7 @@ subroutine test_eeqbc_dadL_ice(error)
 
 end subroutine test_eeqbc_dadL_ice
 
+
 subroutine test_eeqbc_g_co2(error)
 
    !> Error handling
@@ -1342,6 +1376,7 @@ subroutine test_eeqbc_g_co2(error)
    call test_numgrad(error, mol, model)
 
 end subroutine test_eeqbc_g_co2
+
 
 subroutine test_eeqbc_s_ice(error)
 
@@ -1358,6 +1393,7 @@ subroutine test_eeqbc_s_ice(error)
 
 end subroutine test_eeqbc_s_ice
 
+
 subroutine test_eeqbc_dqdr_urea(error)
 
    !> Error handling
@@ -1373,6 +1409,7 @@ subroutine test_eeqbc_dqdr_urea(error)
 
 end subroutine test_eeqbc_dqdr_urea
 
+
 subroutine test_eeqbc_dqdL_oxacb(error)
 
    !> Error handling
@@ -1387,6 +1424,7 @@ subroutine test_eeqbc_dqdL_oxacb(error)
    call test_numdqdL(error, mol, model)
 
 end subroutine test_eeqbc_dqdL_oxacb
+
 
 subroutine test_eeqbc_dfdr_urea(error)
 
@@ -1409,5 +1447,6 @@ subroutine test_eeqbc_dfdr_urea(error)
    call test_dfdr(error, mol, dfdq, model)
 
 end subroutine test_eeqbc_dfdr_urea
+
 
 end module test_pbc
