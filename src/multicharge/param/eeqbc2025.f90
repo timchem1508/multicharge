@@ -369,7 +369,8 @@ module multicharge_param_eeqbc2025
       &  2.7188494129_wp,  2.7941335957_wp,  3.2020860461_wp,  1.5623494196_wp, & !97-100
       &  2.8208057454_wp,  2.8130190589_wp,  2.7482546063_wp] !101-103
 
-   !> Element-specific averaged coordination number over the fitset for the EEQ_BC charges.
+   !> Element-specific averaged coordination number over the fitset for the
+   !> EEQ_BC charges.
    real(wp), parameter :: eeqbc_avg_cn(max_elem) = [&
       &  0.3921100000_wp, 0.0810600000_wp, 0.9910100000_wp, 0.7499500000_wp, & !1-4
       &  1.1543700000_wp, 1.6691400000_wp, 1.4250300000_wp, 0.8718100000_wp, & !5-8

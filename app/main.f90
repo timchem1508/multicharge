@@ -56,7 +56,8 @@ program main
 
    call timer%push("total")
 
-   call get_arguments(input, model_id, use_nlist, cutoff, input_format, egrad, qgrad, charge, &
+   call get_arguments(input, model_id, use_nlist, cutoff, input_format, egrad, qgrad, &
+   & charge, &
       efield, json, solver_input, verbosity, error)
    if (allocated(error)) then
       write(error_unit, '(a)') error%message
@@ -109,7 +110,8 @@ program main
          call new_csr_list(list, mol, error, cutoff=cutoff)
       end if
       call timer%pop
-      write(output_unit, '(a, 1x, a)') "neighborlist generation time :", format_time(timer%get("nlist"))
+      write(output_unit, '(a, 1x, a)') "neighborlist generation time :", &
+      & format_time(timer%get("nlist"))
    end if
 
    call timer%push("model_setup")
@@ -154,7 +156,8 @@ program main
    call model%update(mol, cache, trans, grad, list)
    call timer%pop
    if (verbosity > 1) then
-      write(output_unit, '(a, 1x, a)') "Get coordination number time : ", format_time(timer%get("update"))
+      write(output_unit, '(a, 1x, a)') "Get coordination number time : ", &
+      & format_time(timer%get("update"))
    end if
    call model%solve(mol, solver, cache, error, &
    & energy, gradient, sigma, qvec, dqdr, dqdL, list, efield=efield, &
@@ -170,18 +173,22 @@ program main
 
    call timer%pop
    if (verbosity > 1) then
-      write(output_unit, '(a, 1x, a)') "Total execution time : ", format_time(timer%get("total"))
+      write(output_unit, '(a, 1x, a)') "Total execution time : ", &
+      & format_time(timer%get("total"))
    end if
 
    if (json) then
       open(file=json_output, newunit=unit)
-      call json_results(unit, "  ", energy=sum(energy), gradient=gradient, dqdr=dqdr, charges=qvec, cn=cache%cn)
+      call json_results(unit, "  ", energy=sum(energy), gradient=gradient, dqdr=dqdr, &
+      & charges=qvec, cn=cache%cn)
       close(unit)
       write(output_unit, '(a)') &
          "[Info] JSON dump of results written to '"//json_output//"'"
    end if
 
+
 contains
+
 
 subroutine help(unit)
    integer, intent(in) :: unit
@@ -199,17 +206,23 @@ subroutine help(unit)
       "-m, -model, --model <model>", "Choose the charge model (eeq or eeqbc)", &
       "-i, -input, --input <format>", "Hint for the format of the input file", &
       "-c, -charge, --charge <value>", "Provide the molecular charge", &
-      "-e, -efield, --efield <x>,<y>,<z>", "Provide the external electric field in atomic units", &
-      "-solver, --solver <type>", "Provide the partial charge solver: 'cg' or 'direct' (default)", &
+      "-e, -efield, --efield <x>,<y>,<z>", &
+      & "Provide the external electric field in atomic units", &
+      "-solver, --solver <type>", &
+      & "Provide the partial charge solver: 'cg' or 'direct' (default)", &
       "-it, -maxiter, --maxiter <int>", "Provide the maximal number of CG iterations", &
       "-tol, -tolerance, --tolerance <real>", "Provide the tolerance of the solver", &
-      "-g, -eg, -grad, --grad, -egrad, --egrad", "Evaluate molecular energy gradient and virial.", &
+      "-g, -eg, -grad, --grad, -egrad, --egrad", &
+      & "Evaluate molecular energy gradient and virial.", &
       "-qg, -qgrad, --qgrad", "Evaluate molecular charge gradient and virial.", &
-      "-list, -nlist, --nlist", "Use neighborlist for solver (not compatible with charge gradient)", &
-      "-cut, -cutoff, --cutoff <real>", "Cutoff for neighborlist generation in Bohrs (default: 29.0 Bohr)", &
+      "-list, -nlist, --nlist", &
+      & "Use neighborlist for solver (not compatible with charge gradient)", &
+      "-cut, -cutoff, --cutoff <real>", &
+      & "Cutoff for neighborlist generation in Bohrs (default: 29.0 Bohr)", &
       "-v, -verbose, --verbose", "Show more", &
       "-s, -silent, --silent", "Show less", &
-      "-j, -json, --json", "Provide output in JSON format to the file 'multicharge.json'", &
+      "-j, -json, --json", &
+      & "Provide output in JSON format to the file 'multicharge.json'", &
       "-version, --version", "Print program version and exit", &
       "-h, -help, --help", "Show this help message"
 
@@ -416,7 +429,9 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
    end if
 
    if ((allocated(maxiter) .or. allocated(tol)) .and. .not. allocated(solver_input)) then
-      call fatal_error(error, "Maximal number of iterations and tolerance cannot be used alonwise the cg solver.")
+      call fatal_error(error, &
+         & "Maximal number of iterations and tolerance cannot be used alongside "&
+         & //"the cg solver.")
       return
    end if
 

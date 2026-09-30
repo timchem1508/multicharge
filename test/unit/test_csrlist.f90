@@ -204,7 +204,8 @@ subroutine gen_test_molecular(error, mol, model, qref, eref)
    call new_csr_list(list, mol, error, cutoff=cutoff)
 
    call model%update(mol, cache, trans, grad=.false., list=list)
-   call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, unit=output_unit)
+   call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, &
+   & unit=output_unit)
    if (allocated(error)) return
 
    if (present(qref)) then
@@ -400,7 +401,8 @@ subroutine gen_test_periodic(error, mol, model)
    allocate(list)
    call new_csr_list(list, mol, error, cache%wsc, 29.0_wp)
    call model%update(mol, cache, trans, grad=.false., list=list)
-   call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, unit=output_unit)
+   call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, &
+   & unit=output_unit)
 
    if (any(abs(qvec - qref) > thr1)) then
       call test_failed(error, "Partial charges do not match")

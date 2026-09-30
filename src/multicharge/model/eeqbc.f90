@@ -14,7 +14,8 @@
 ! limitations under the License.
 
 !> @file multicharge/model/eeqbc.f90
-!> Provides implementation of the bond capacitor electronegativity equilibration model (EEQ_BC)
+!> Provides implementation of the bond capacitor electronegativity
+!> equilibration model (EEQ_BC)
 
 !> Bond capacitor electronegativity equilibration charge model published in
 !>
@@ -101,6 +102,7 @@ module multicharge_model_eeqbc
    !> Default scaling factor for the external electric field
    real(wp), parameter :: default_efield_scale = 10.0_wp
 
+
 contains
 
 
@@ -184,7 +186,8 @@ subroutine new_eeqbc_model(self, mol, error, chi, rad, &
 
 end subroutine new_eeqbc_model
 
-!> Update coordination numbers and local charges, and set up the Wigner-Seitz cell if periodic
+!> Update coordination numbers and local charges, and set up the Wigner-Seitz
+!> cell if periodic
 subroutine update(self, mol, cache, trans, grad, list)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
@@ -370,7 +373,8 @@ subroutine get_xvec(self, mol, ndim, cache, list, efield)
 
             if (cache%wsc%nimg_list(list%inl(iat)) > 0) then
                wsw = 1.0_wp / real(cache%wsc%nimg_list(list%inl(iat)), wp)
-               do img = cache%wsc%itr_list(list%inl(iat)), cache%wsc%itr_list(list%inl(iat) + 1) - 1
+               do img = cache%wsc%itr_list(list%inl(iat)), &
+               & cache%wsc%itr_list(list%inl(iat) + 1) - 1
                   vec = cache%wsc%trans(:, cache%wsc%tridx_list(img))
                   call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, ctmp)
                   cache%xvec(iat) = cache%xvec(iat) - wsw * ctmp * cache%xtmp(iat)
@@ -402,7 +406,8 @@ subroutine get_xvec(self, mol, ndim, cache, list, efield)
 
 end subroutine get_xvec
 
-!> Compute electronegativity-vector derivatives with respect to positions and lattice parameters
+!> Compute electronegativity-vector derivatives with respect to positions and
+!> lattice parameters
 subroutine get_xvec_derivs(self, mol, ndim, cache, list)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
@@ -420,14 +425,16 @@ subroutine get_xvec_derivs(self, mol, ndim, cache, list)
    end if
    if (.not. allocated(cache%dcndL)) then
       allocate(cache%dcndL(3, 3, mol%nat))
-      call self%ncoord%get_coordination_number(mol, cache%trans, cache%cn, dcndr=cache%dcndr, dcndL=cache%dcndL)
+      call self%ncoord%get_coordination_number(mol, cache%trans, cache%cn, &
+      & dcndr=cache%dcndr, dcndL=cache%dcndL)
    end if
    if (.not. allocated(cache%dqlocdr)) then
       allocate(cache%dqlocdr(3, mol%nat, mol%nat))
    end if
    if (.not. allocated(cache%dqlocdL)) then
       allocate(cache%dqlocdL(3, 3, mol%nat))
-      call self%local_charge(mol, cache%trans, qloc=cache%qloc, dqlocdr=cache%dqlocdr, dqlocdL=cache%dqlocdL)
+      call self%local_charge(mol, cache%trans, qloc=cache%qloc, dqlocdr=cache%dqlocdr, &
+      & dqlocdL=cache%dqlocdL)
    end if
 
    if (any(mol%periodic)) then
@@ -479,10 +486,14 @@ subroutine get_xvec_derivs_0d(self, mol, ndim, cache)
    do iat = 1, mol%nat
       izp = mol%id(iat)
       ! CN and effective charge derivative
-      dtmpdr_local(:, :, iat) = self%kcnchi(izp) * cache%dcndr(:, :, iat) + dtmpdr_local(:, :, iat)
-      dtmpdL_local(:, :, iat) = self%kcnchi(izp) * cache%dcndL(:, :, iat) + dtmpdL_local(:, :, iat)
-      dtmpdr_local(:, :, iat) = self%kqchi(izp) * cache%dqlocdr(:, :, iat) + dtmpdr_local(:, :, iat)
-      dtmpdL_local(:, :, iat) = self%kqchi(izp) * cache%dqlocdL(:, :, iat) + dtmpdL_local(:, :, iat)
+      dtmpdr_local(:, :, iat) = self%kcnchi(izp) * cache%dcndr(:, :, &
+      & iat) + dtmpdr_local(:, :, iat)
+      dtmpdL_local(:, :, iat) = self%kcnchi(izp) * cache%dcndL(:, :, &
+      & iat) + dtmpdL_local(:, :, iat)
+      dtmpdr_local(:, :, iat) = self%kqchi(izp) * cache%dqlocdr(:, :, &
+      & iat) + dtmpdr_local(:, :, iat)
+      dtmpdL_local(:, :, iat) = self%kqchi(izp) * cache%dqlocdL(:, :, &
+      & iat) + dtmpdL_local(:, :, iat)
    end do
    !$omp end do
    !$omp critical (get_xvec_derivs_0d_)
@@ -506,12 +517,16 @@ subroutine get_xvec_derivs_0d(self, mol, ndim, cache)
    do iat = 1, mol%nat
       do jat = 1, iat - 1
          ! Diagonal elements
-         dxdr_local(:, iat, iat) = dxdr_local(:, iat, iat) + cache%xtmp(jat) * cache%dcdr(:, iat, jat)
-         dxdr_local(:, jat, jat) = dxdr_local(:, jat, jat) + cache%xtmp(iat) * cache%dcdr(:, jat, iat)
+         dxdr_local(:, iat, iat) = dxdr_local(:, iat, &
+         & iat) + cache%xtmp(jat) * cache%dcdr(:, iat, jat)
+         dxdr_local(:, jat, jat) = dxdr_local(:, jat, &
+         & jat) + cache%xtmp(iat) * cache%dcdr(:, jat, iat)
 
          ! Derivative of capacitance matrix
-         dxdr_local(:, iat, jat) = (cache%xtmp(iat) - cache%xtmp(jat)) * cache%dcdr(:, iat, jat) + dxdr_local(:, iat, jat)
-         dxdr_local(:, jat, iat) = (cache%xtmp(jat) - cache%xtmp(iat)) * cache%dcdr(:, jat, iat) + dxdr_local(:, jat, iat)
+         dxdr_local(:, iat, jat) = (cache%xtmp(iat) - cache%xtmp(jat)) * cache%dcdr(:, &
+         & iat, jat) + dxdr_local(:, iat, jat)
+         dxdr_local(:, jat, iat) = (cache%xtmp(jat) - cache%xtmp(iat)) * cache%dcdr(:, &
+         & jat, iat) + dxdr_local(:, jat, iat)
 
          vec = mol%xyz(:, iat) - mol%xyz(:, jat)
          dxdL_local(:, :, iat) = dxdL_local(:, :, iat) + cache%xtmp(jat) * &
@@ -519,8 +534,10 @@ subroutine get_xvec_derivs_0d(self, mol, ndim, cache)
          dxdL_local(:, :, jat) = dxdL_local(:, :, jat) + cache%xtmp(iat) * &
             & spread(cache%dcdr(:, jat, iat), 1, 3) * spread(-vec, 2, 3)
       end do
-      dxdr_local(:, iat, iat) = dxdr_local(:, iat, iat) + cache%xtmp(iat) * cache%dcdr(:, iat, iat)
-      dxdL_local(:, :, iat) = dxdL_local(:, :, iat) + cache%xtmp(iat) * cache%dcdL(:, :, iat)
+      dxdr_local(:, iat, iat) = dxdr_local(:, iat, &
+      & iat) + cache%xtmp(iat) * cache%dcdr(:, iat, iat)
+      dxdL_local(:, :, iat) = dxdL_local(:, :, iat) + cache%xtmp(iat) * cache%dcdL(:, &
+      & :, iat)
    end do
    !$omp end do
    !$omp critical (get_xvec_derivs_0d_)
@@ -567,10 +584,14 @@ subroutine get_xvec_derivs_3d(self, mol, ndim, cache)
    do iat = 1, mol%nat
       izp = mol%id(iat)
       ! CN and effective charge derivative
-      dtmpdr_local(:, :, iat) = self%kcnchi(izp) * cache%dcndr(:, :, iat) + dtmpdr_local(:, :, iat)
-      dtmpdL_local(:, :, iat) = self%kcnchi(izp) * cache%dcndL(:, :, iat) + dtmpdL_local(:, :, iat)
-      dtmpdr_local(:, :, iat) = self%kqchi(izp) * cache%dqlocdr(:, :, iat) + dtmpdr_local(:, :, iat)
-      dtmpdL_local(:, :, iat) = self%kqchi(izp) * cache%dqlocdL(:, :, iat) + dtmpdL_local(:, :, iat)
+      dtmpdr_local(:, :, iat) = self%kcnchi(izp) * cache%dcndr(:, :, &
+      & iat) + dtmpdr_local(:, :, iat)
+      dtmpdL_local(:, :, iat) = self%kcnchi(izp) * cache%dcndL(:, :, &
+      & iat) + dtmpdL_local(:, :, iat)
+      dtmpdr_local(:, :, iat) = self%kqchi(izp) * cache%dqlocdr(:, :, &
+      & iat) + dtmpdr_local(:, :, iat)
+      dtmpdL_local(:, :, iat) = self%kqchi(izp) * cache%dqlocdL(:, :, &
+      & iat) + dtmpdL_local(:, :, iat)
    end do
    !$omp end do
    !$omp critical (get_xvec_derivs_3d_)
@@ -603,7 +624,8 @@ subroutine get_xvec_derivs_3d(self, mol, ndim, cache)
          capj = self%cap(jzp)
 
          ! Diagonal elements
-         dxdr_local(:, iat, iat) = dxdr_local(:, iat, iat) + cache%xtmp(jat) * cache%dcdr(:, iat, jat)
+         dxdr_local(:, iat, iat) = dxdr_local(:, iat, &
+         & iat) + cache%xtmp(jat) * cache%dcdr(:, iat, jat)
 
          ! Derivative of capacitance matrix
          dxdr_local(:, iat, jat) = dxdr_local(:, iat, jat)  &
@@ -611,12 +633,14 @@ subroutine get_xvec_derivs_3d(self, mol, ndim, cache)
 
          wsw = 1.0_wp / real(cache%wsc%nimg(iat, jat), wp)
          do img = 1, cache%wsc%nimg(iat, jat)
-            vec = mol%xyz(:, jat) - mol%xyz(:, iat) + cache%wsc%trans(:, cache%wsc%tridx(img, jat, iat))
+            vec = mol%xyz(:, jat) - mol%xyz(:, iat) + cache%wsc%trans(:, &
+            & cache%wsc%tridx(img, jat, iat))
             call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
             dxdL_local(:, :, iat) = dxdL_local(:, :, iat) - wsw * dS * cache%xtmp(jat)
          end do
       end do
-      dxdL_local(:, :, iat) = dxdL_local(:, :, iat) + cache%xtmp(iat) * cache%dcdL(:, :, iat)
+      dxdL_local(:, :, iat) = dxdL_local(:, :, iat) + cache%xtmp(iat) * cache%dcdL(:, &
+      & :, iat)
 
       ! Capacitance terms for i = j, T != 0
       rvdw = self%rvdw(izp, izp)
@@ -627,10 +651,14 @@ subroutine get_xvec_derivs_3d(self, mol, ndim, cache)
          call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, ctmp)
          ctmp = ctmp * wsw
          ! EN derivative
-         dxdr_local(:, :, iat) = dxdr_local(:, :, iat) - ctmp * self%kcnchi(izp) * cache%dcndr(:, :, iat)
-         dxdL_local(:, :, iat) = dxdL_local(:, :, iat) - ctmp * self%kcnchi(izp) * cache%dcndL(:, :, iat)
-         dxdr_local(:, :, iat) = dxdr_local(:, :, iat) - ctmp * self%kqchi(izp) * cache%dqlocdr(:, :, iat)
-         dxdL_local(:, :, iat) = dxdL_local(:, :, iat) - ctmp * self%kqchi(izp) * cache%dqlocdL(:, :, iat)
+         dxdr_local(:, :, iat) = dxdr_local(:, :, &
+         & iat) - ctmp * self%kcnchi(izp) * cache%dcndr(:, :, iat)
+         dxdL_local(:, :, iat) = dxdL_local(:, :, &
+         & iat) - ctmp * self%kcnchi(izp) * cache%dcndL(:, :, iat)
+         dxdr_local(:, :, iat) = dxdr_local(:, :, &
+         & iat) - ctmp * self%kqchi(izp) * cache%dqlocdr(:, :, iat)
+         dxdL_local(:, :, iat) = dxdL_local(:, :, &
+         & iat) - ctmp * self%kqchi(izp) * cache%dqlocdL(:, :, iat)
       end do
    end do
    !$omp end do
@@ -720,7 +748,8 @@ subroutine get_amat_0d(self, mol, cache)
          amat_local(iat, jat) = tmp
       end do
       ! Effective hardness
-      tmp = self%eta(izp) + self%kqeta_pre * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi
+      tmp = self%eta(izp) + self%kqeta_pre * tanh(self%kqeta(izp) * cache%qloc(iat)) &
+      & + sqrt2pi / radi
       amat_local(iat, iat) = amat_local(iat, iat) + tmp * cache%cmat(iat, iat) + 1.0_wp
    end do
    !$omp end do
@@ -782,7 +811,8 @@ subroutine get_amat_0d_list(self, mol, list, cache)
       end do
 
       ! Effective hardness
-      tmp = self%eta(izp) + self%kqeta_pre * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi
+      tmp = self%eta(izp) + self%kqeta_pre * tanh(self%kqeta(izp) * cache%qloc(iat)) &
+      & + sqrt2pi / radi
       cache%alist(list%inl(iat)) = tmp * cache%clist(list%inl(iat)) + 1.0_wp
    end do
    !$omp end do
@@ -790,7 +820,8 @@ subroutine get_amat_0d_list(self, mol, list, cache)
 
 end subroutine get_amat_0d_list
 
-!> Build the Coulomb matrix for a periodic system (3D) using Ewald summation and bond capacitance.
+!> Build the Coulomb matrix for a periodic system (3D) using Ewald summation
+!> and bond capacitance.
 subroutine get_amat_3d(self, mol, cache)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
@@ -833,7 +864,8 @@ subroutine get_amat_3d(self, mol, cache)
          gam = 1.0_wp / sqrt(radi**2 + radj**2)
          wsw = 1.0_wp / real(cache%wsc%nimg(jat, iat), wp)
          do img = 1, cache%wsc%nimg(jat, iat)
-            vec = mol%xyz(:, jat) - mol%xyz(:, iat) + cache%wsc%trans(:, cache%wsc%tridx(img, jat, iat))
+            vec = mol%xyz(:, jat) - mol%xyz(:, iat) + cache%wsc%trans(:, &
+            & cache%wsc%tridx(img, jat, iat))
             call get_amat_dir_3d(vec, gam, dtrans, self%kbc, rvdw, capi, capj, dtmp)
             amat_local(jat, iat) = amat_local(jat, iat) + dtmp * wsw
             amat_local(iat, jat) = amat_local(iat, jat) + dtmp * wsw
@@ -851,7 +883,8 @@ subroutine get_amat_3d(self, mol, cache)
       end do
 
       ! Effective hardness
-      dtmp = self%eta(izp) + self%kqeta_pre * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi
+      dtmp = self%eta(izp) + self%kqeta_pre &
+      & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi
       amat_local(iat, iat) = amat_local(iat, iat) + cache%cmat(iat, iat) * dtmp + 1.0_wp
    end do
    !$omp end do
@@ -922,7 +955,8 @@ subroutine get_amat_3d_list(self, mol, list, cache)
          ! Accumulate image contributions in a local scalar
          atmp = 0.0_wp
          do img = cache%wsc%itr_list(kat), cache%wsc%itr_list(kat+1) - 1
-            vec = mol%xyz(:, jat) - mol%xyz(:, iat) + cache%wsc%trans(:, cache%wsc%tridx_list(img))
+            vec = mol%xyz(:, jat) - mol%xyz(:, iat) + cache%wsc%trans(:, &
+            & cache%wsc%tridx_list(img))
             call get_amat_dir_3d(vec, gam, dtrans, self%kbc, rvdw, capi, capj, dtmp)
             atmp = atmp + dtmp * wsw
          end do
@@ -935,7 +969,8 @@ subroutine get_amat_3d_list(self, mol, list, cache)
       rvdw = self%rvdw(izp, izp)
       if (cache%wsc%nimg_list(list%inl(iat)) > 0) then
          wsw = 1.0_wp / real(cache%wsc%nimg_list(list%inl(iat)), wp)
-         do img = cache%wsc%itr_list(list%inl(iat)), cache%wsc%itr_list(list%inl(iat) + 1) - 1
+         do img = cache%wsc%itr_list(list%inl(iat)), &
+         & cache%wsc%itr_list(list%inl(iat) + 1) - 1
             vec = cache%wsc%trans(:, cache%wsc%tridx_list(img))
             call get_amat_dir_3d(vec, gam, dtrans, self%kbc, rvdw, capi, capi, dtmp)
             adiag_tmp = adiag_tmp + dtmp * wsw
@@ -943,7 +978,8 @@ subroutine get_amat_3d_list(self, mol, list, cache)
       end if
 
       ! Effective hardness
-      dtmp = self%eta(izp) + self%kqeta_pre * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi
+      dtmp = self%eta(izp) + self%kqeta_pre &
+      & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi
 
       ! Single safe direct write (iat is thread-exclusive)
       cache%alist(list%inl(iat)) = adiag_tmp + cache%clist(list%inl(iat)) * dtmp + 1.0_wp
@@ -988,7 +1024,8 @@ subroutine get_amat_dir_3d(rij, gam, trans, kbc, rvdw, capi, capj, amat)
 
 end subroutine get_amat_dir_3d
 
-!> Compute derivatives of the Coulomb matrix (multiplied by the charge vector) for the EEQBC model.
+!> Compute derivatives of the Coulomb matrix (multiplied by the charge vector)
+!> for the EEQBC model.
 subroutine get_coulomb_derivs(self, mol, ndim, cache, list)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
@@ -1010,14 +1047,16 @@ subroutine get_coulomb_derivs(self, mol, ndim, cache, list)
    end if
    if (.not. allocated(cache%dcndL)) then
       allocate(cache%dcndL(3, 3, mol%nat))
-      call self%ncoord%get_coordination_number(mol, cache%trans, cache%cn, dcndr=cache%dcndr, dcndL=cache%dcndL)
+      call self%ncoord%get_coordination_number(mol, cache%trans, cache%cn, &
+      & dcndr=cache%dcndr, dcndL=cache%dcndL)
    end if
    if (.not. allocated(cache%dqlocdr)) then
       allocate(cache%dqlocdr(3, mol%nat, mol%nat))
    end if
    if (.not. allocated(cache%dqlocdL)) then
       allocate(cache%dqlocdL(3, 3, mol%nat))
-      call self%local_charge(mol, cache%trans, qloc=cache%qloc, dqlocdr=cache%dqlocdr, dqlocdL=cache%dqlocdL)
+      call self%local_charge(mol, cache%trans, qloc=cache%qloc, dqlocdr=cache%dqlocdr, &
+      & dqlocdL=cache%dqlocdL)
    end if
 
    allocate(atrace(3, mol%nat), source = 0.0_wp)
@@ -1086,9 +1125,11 @@ subroutine get_damat_0d(self, mol, cache, atrace)
 
          ! Coulomb interaction of Gaussian charges
          gam = 1.0_wp / sqrt(radi**2 + radj**2)
-         dgamdr(:, :) = -(radi * dradi * cache%dcndr(:, :, iat) + radj * dradj * cache%dcndr(:, :, jat)) &
+         dgamdr(:, :) = -(radi * dradi * cache%dcndr(:, :, &
+         & iat) + radj * dradj * cache%dcndr(:, :, jat)) &
             & * gam**3.0_wp
-         dgamdL(:, :) = -(radi * dradi * cache%dcndL(:, :, iat) + radj * dradj * cache%dcndL(:, :, jat)) &
+         dgamdL(:, :) = -(radi * dradi * cache%dcndL(:, :, &
+         & iat) + radj * dradj * cache%dcndL(:, :, jat)) &
             & * gam**3.0_wp
 
          ! Explicit derivative
@@ -1097,41 +1138,63 @@ subroutine get_damat_0d(self, mol, cache, atrace)
             & - erf(sqrt(arg)) / (r2 * sqrt(r2))
          dG(:) = dtmp * vec
          dS(:, :) = spread(dG, 1, 3) * spread(vec, 2, 3)
-         atrace_local(:, iat) = -dG * cache%vrhs(jat) * cache%cmat(jat, iat) + atrace_local(:, iat)
-         atrace_local(:, jat) = +dG * cache%vrhs(iat) * cache%cmat(iat, jat) + atrace_local(:, jat)
-         dadr_local(:, iat, jat) = -dG * cache%vrhs(iat) * cache%cmat(iat, jat) + dadr_local(:, iat, jat)
-         dadr_local(:, jat, iat) = +dG * cache%vrhs(jat) * cache%cmat(jat, iat) + dadr_local(:, jat, iat)
-         dadL_local(:, :, iat) = +dS * cache%vrhs(jat) * cache%cmat(jat, iat) + dadL_local(:, :, iat)
-         dadL_local(:, :, jat) = +dS * cache%vrhs(iat) * cache%cmat(iat, jat) + dadL_local(:, :, jat)
+         atrace_local(:, iat) = -dG * cache%vrhs(jat) * cache%cmat(jat, &
+         & iat) + atrace_local(:, iat)
+         atrace_local(:, jat) = +dG * cache%vrhs(iat) * cache%cmat(iat, &
+         & jat) + atrace_local(:, jat)
+         dadr_local(:, iat, jat) = -dG * cache%vrhs(iat) * cache%cmat(iat, &
+         & jat) + dadr_local(:, iat, jat)
+         dadr_local(:, jat, iat) = +dG * cache%vrhs(jat) * cache%cmat(jat, &
+         & iat) + dadr_local(:, jat, iat)
+         dadL_local(:, :, iat) = +dS * cache%vrhs(jat) * cache%cmat(jat, &
+         & iat) + dadL_local(:, :, iat)
+         dadL_local(:, :, jat) = +dS * cache%vrhs(iat) * cache%cmat(iat, &
+         & jat) + dadL_local(:, :, jat)
 
          ! Effective charge width derivative
          dtmp = 2.0_wp * exp(-arg) / (sqrtpi)
-         dadr_local(:, :, iat) = +dtmp * cache%vrhs(jat) * cache%cmat(jat, iat) * dgamdr(:, :) + dadr_local(:, :, iat)
-         dadr_local(:, :, jat) = +dtmp * cache%vrhs(iat) * cache%cmat(iat, jat) * dgamdr(:, :) + dadr_local(:, :, jat)
-         dadL_local(:, :, iat) = +dtmp * cache%vrhs(jat) * dgamdL(:, :) * cache%cmat(jat, iat) + dadL_local(:, :, iat)
-         dadL_local(:, :, jat) = +dtmp * cache%vrhs(iat) * dgamdL(:, :) * cache%cmat(iat, jat) + dadL_local(:, :, jat)
+         dadr_local(:, :, iat) = +dtmp * cache%vrhs(jat) * cache%cmat(jat, &
+         & iat) * dgamdr(:, :) + dadr_local(:, :, iat)
+         dadr_local(:, :, jat) = +dtmp * cache%vrhs(iat) * cache%cmat(iat, &
+         & jat) * dgamdr(:, :) + dadr_local(:, :, jat)
+         dadL_local(:, :, iat) = +dtmp * cache%vrhs(jat) * dgamdL(:, &
+         & :) * cache%cmat(jat, iat) + dadL_local(:, :, iat)
+         dadL_local(:, :, jat) = +dtmp * cache%vrhs(iat) * dgamdL(:, &
+         & :) * cache%cmat(iat, jat) + dadL_local(:, :, jat)
 
          ! Capacitance derivative off-diagonal
          dtmp = erf(sqrt(r2) * gam) / (sqrt(r2))
-         atrace_local(:, iat) = -dtmp * cache%vrhs(jat) * cache%dcdr(:, jat, iat) + atrace_local(:, iat)
-         atrace_local(:, jat) = -dtmp * cache%vrhs(iat) * cache%dcdr(:, iat, jat) + atrace_local(:, jat)
-         dadr_local(:, iat, jat) = +dtmp * cache%vrhs(iat) * cache%dcdr(:, iat, jat) + dadr_local(:, iat, jat)
-         dadr_local(:, jat, iat) = +dtmp * cache%vrhs(jat) * cache%dcdr(:, jat, iat) + dadr_local(:, jat, iat)
-         dadL_local(:, :, iat) = -dtmp * cache%vrhs(jat) * spread(cache%dcdr(:, iat, jat), 2, 3) * spread(vec, 1, 3) &
+         atrace_local(:, iat) = -dtmp * cache%vrhs(jat) * cache%dcdr(:, jat, &
+         & iat) + atrace_local(:, iat)
+         atrace_local(:, jat) = -dtmp * cache%vrhs(iat) * cache%dcdr(:, iat, &
+         & jat) + atrace_local(:, jat)
+         dadr_local(:, iat, jat) = +dtmp * cache%vrhs(iat) * cache%dcdr(:, iat, &
+         & jat) + dadr_local(:, iat, jat)
+         dadr_local(:, jat, iat) = +dtmp * cache%vrhs(jat) * cache%dcdr(:, jat, &
+         & iat) + dadr_local(:, jat, iat)
+         dadL_local(:, :, iat) = -dtmp * cache%vrhs(jat) * spread(cache%dcdr(:, iat, &
+         & jat), 2, 3) * spread(vec, 1, 3) &
             & + dadL_local(:, :, iat)
-         dadL_local(:, :, jat) = -dtmp * cache%vrhs(iat) * spread(cache%dcdr(:, iat, jat), 2, 3) * spread(vec, 1, 3) &
+         dadL_local(:, :, jat) = -dtmp * cache%vrhs(iat) * spread(cache%dcdr(:, iat, &
+         & jat), 2, 3) * spread(vec, 1, 3) &
             & + dadL_local(:, :, jat)
 
          ! Capacitance derivative diagonal
-         dtmp = (self%eta(izp) + self%kqeta_pre * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi) * cache%vrhs(iat)
-         dadr_local(:, jat, iat) = -dtmp * cache%dcdr(:, jat, iat) + dadr_local(:, jat, iat)
+         dtmp = (self%eta(izp) + self%kqeta_pre &
+         & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi) * cache%vrhs(iat)
+         dadr_local(:, jat, iat) = -dtmp * cache%dcdr(:, jat, iat) + dadr_local(:, &
+         & jat, iat)
 
-         dtmp = (self%eta(jzp) + self%kqeta_pre * tanh(self%kqeta(jzp) * cache%qloc(jat)) + sqrt2pi / radj) * cache%vrhs(jat)
-         dadr_local(:, iat, jat) = -dtmp * cache%dcdr(:, iat, jat) + dadr_local(:, iat, jat)
+         dtmp = (self%eta(jzp) + self%kqeta_pre &
+         & * tanh(self%kqeta(jzp) * cache%qloc(jat)) + sqrt2pi / radj) * cache%vrhs(jat)
+         dadr_local(:, iat, jat) = -dtmp * cache%dcdr(:, iat, jat) + dadr_local(:, &
+         & iat, jat)
       end do
 
       ! Hardness derivative
-      dtmp = self%kqeta_pre * self%kqeta(izp) / cosh(self%kqeta(izp) * cache%qloc(iat))**2 * cache%vrhs(iat) * cache%cmat(iat, iat)
+      dtmp = self%kqeta_pre * self%kqeta(izp) &
+      & / cosh(self%kqeta(izp) * cache%qloc(iat))**2 * cache%vrhs(iat) &
+      & * cache%cmat(iat, iat)
       dadr_local(:, :, iat) = +dtmp * cache%dqlocdr(:, :, iat) + dadr_local(:, :, iat)
       dadL_local(:, :, iat) = +dtmp * cache%dqlocdL(:, :, iat) + dadL_local(:, :, iat)
 
@@ -1141,7 +1204,8 @@ subroutine get_damat_0d(self, mol, cache, atrace)
       dadL_local(:, :, iat) = +dtmp * cache%dcndL(:, :, iat) + dadL_local(:, :, iat)
 
       ! Capacitance derivative
-      dtmp = (self%eta(izp) + self%kqeta_pre * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi) * cache%vrhs(iat)
+      dtmp = (self%eta(izp) + self%kqeta_pre &
+      & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi) * cache%vrhs(iat)
       dadr_local(:, iat, iat) = +dtmp * cache%dcdr(:, iat, iat) + dadr_local(:, iat, iat)
       dadL_local(:, :, iat) = +dtmp * cache%dcdL(:, :, iat) + dadL_local(:, :, iat)
 
@@ -1213,14 +1277,17 @@ subroutine get_damat_3d(self, mol, cache, atrace)
 
          ! Coulomb interaction of Gaussian charges
          gam = 1.0_wp / sqrt(radi**2 + radj**2)
-         dgamdr(:, :) = -(radi * dradi * cache%dcndr(:, :, iat) + radj * dradj * cache%dcndr(:, :, jat)) &
+         dgamdr(:, :) = -(radi * dradi * cache%dcndr(:, :, &
+         & iat) + radj * dradj * cache%dcndr(:, :, jat)) &
             & * gam**3.0_wp
-         dgamdL(:, :) = -(radi * dradi * cache%dcndL(:, :, iat) + radj * dradj * cache%dcndL(:, :, jat)) &
+         dgamdL(:, :) = -(radi * dradi * cache%dcndL(:, :, &
+         & iat) + radj * dradj * cache%dcndL(:, :, jat)) &
             & * gam**3.0_wp
 
          wsw = 1.0_wp / real(cache%wsc%nimg(jat, iat), wp)
          do img = 1, cache%wsc%nimg(jat, iat)
-            vec = mol%xyz(:, jat) - mol%xyz(:, iat) + cache%wsc%trans(:, cache%wsc%tridx(img, jat, iat))
+            vec = mol%xyz(:, jat) - mol%xyz(:, iat) + cache%wsc%trans(:, &
+            & cache%wsc%tridx(img, jat, iat))
 
             call get_damat_dir(vec, dtrans, capi, capj, rvdw, self%kbc, gam, dG, dS, dgam)
             dG = dG * wsw
@@ -1236,10 +1303,14 @@ subroutine get_damat_3d(self, mol, cache, atrace)
             dadL_local(:, :, iat) = +dS * cache%vrhs(jat) + dadL_local(:, :, iat)
 
             ! Effective charge width derivative
-            dadr_local(:, :, iat) = -dgam * cache%vrhs(jat) * dgamdr(:, :) + dadr_local(:, :, iat)
-            dadr_local(:, :, jat) = -dgam * cache%vrhs(iat) * dgamdr(:, :) + dadr_local(:, :, jat)
-            dadL_local(:, :, iat) = -dgam * cache%vrhs(jat) * dgamdL(:, :) + dadL_local(:, :, iat)
-            dadL_local(:, :, jat) = -dgam * cache%vrhs(iat) * dgamdL(:, :) + dadL_local(:, :, jat)
+            dadr_local(:, :, iat) = -dgam * cache%vrhs(jat) * dgamdr(:, &
+            & :) + dadr_local(:, :, iat)
+            dadr_local(:, :, jat) = -dgam * cache%vrhs(iat) * dgamdr(:, &
+            & :) + dadr_local(:, :, jat)
+            dadL_local(:, :, iat) = -dgam * cache%vrhs(jat) * dgamdL(:, &
+            & :) + dadL_local(:, :, iat)
+            dadL_local(:, :, jat) = -dgam * cache%vrhs(iat) * dgamdL(:, &
+            & :) + dadL_local(:, :, jat)
 
             call get_damat_dc_dir(vec, dtrans, capi, capj, rvdw, self%kbc, gam, dG, dS)
             dG = dG * wsw
@@ -1257,9 +1328,13 @@ subroutine get_damat_3d(self, mol, cache, atrace)
             dG = dG * wsw
 
             ! Capacitance derivative diagonal
-            dtmp = (self%eta(izp) + self%kqeta_pre * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi) * cache%vrhs(iat)
+            dtmp = (self%eta(izp) + self%kqeta_pre &
+            & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi) &
+            & * cache%vrhs(iat)
             dadr_local(:, jat, iat) = +dtmp * dG(:) + dadr_local(:, jat, iat)
-            dtmp = (self%eta(jzp) + self%kqeta_pre * tanh(self%kqeta(jzp) * cache%qloc(jat)) + sqrt2pi / radj) * cache%vrhs(jat)
+            dtmp = (self%eta(jzp) + self%kqeta_pre &
+            & * tanh(self%kqeta(jzp) * cache%qloc(jat)) + sqrt2pi / radj) &
+            & * cache%vrhs(jat)
             dadr_local(:, iat, jat) = -dtmp * dG(:) + dadr_local(:, iat, jat)
          end do
       end do
@@ -1281,8 +1356,10 @@ subroutine get_damat_3d(self, mol, cache, atrace)
          dadL_local(:, :, iat) = dadL_local(:, :, iat) + dS * cache%vrhs(iat)
 
          ! Effective charge width derivative
-         dadr_local(:, :, iat) = dadr_local(:, :, iat) - cache%vrhs(iat) * dgam * dgamdr(:, :)
-         dadL_local(:, :, iat) = dadL_local(:, :, iat) - cache%vrhs(iat) * dgam * dgamdL(:, :)
+         dadr_local(:, :, iat) = dadr_local(:, :, &
+         & iat) - cache%vrhs(iat) * dgam * dgamdr(:, :)
+         dadL_local(:, :, iat) = dadL_local(:, :, &
+         & iat) - cache%vrhs(iat) * dgam * dgamdL(:, :)
 
          ! Capacitance derivative
          call get_damat_dc_dir(vec, dtrans, capi, capi, rvdw, self%kbc, gam, dG, dS)
@@ -1290,7 +1367,9 @@ subroutine get_damat_3d(self, mol, cache, atrace)
       end do
 
       ! Hardness derivative
-      dtmp = self%kqeta_pre * self%kqeta(izp) / cosh(self%kqeta(izp) * cache%qloc(iat))**2 * cache%vrhs(iat) * cache%cmat(iat, iat)
+      dtmp = self%kqeta_pre * self%kqeta(izp) &
+      & / cosh(self%kqeta(izp) * cache%qloc(iat))**2 * cache%vrhs(iat) &
+      & * cache%cmat(iat, iat)
       dadr_local(:, :, iat) = +dtmp * cache%dqlocdr(:, :, iat) + dadr_local(:, :, iat)
       dadL_local(:, :, iat) = +dtmp * cache%dqlocdL(:, :, iat) + dadL_local(:, :, iat)
 
@@ -1299,7 +1378,8 @@ subroutine get_damat_3d(self, mol, cache, atrace)
       dadr_local(:, :, iat) = +dtmp * cache%dcndr(:, :, iat) + dadr_local(:, :, iat)
       dadL_local(:, :, iat) = +dtmp * cache%dcndL(:, :, iat) + dadL_local(:, :, iat)
 
-      dtmp = (self%eta(izp) + self%kqeta_pre * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi) * cache%vrhs(iat)
+      dtmp = (self%eta(izp) + self%kqeta_pre &
+      & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi) * cache%vrhs(iat)
       dadr_local(:, iat, iat) = +dtmp * cache%dcdr(:, iat, iat) + dadr_local(:, iat, iat)
       dadL_local(:, :, iat) = +dtmp * cache%dcdL(:, :, iat) + dadL_local(:, :, iat)
 
@@ -1361,7 +1441,8 @@ subroutine get_damat_dir(rij, trans, capi, capj, rvdw, kbc, gam, dG, dS, dgam)
 
 end subroutine get_damat_dir
 
-!> Contribution to the derivative of the Coulomb matrix from the derivative of the bond capacitance (direct part).
+!> Contribution to the derivative of the Coulomb matrix from the derivative of
+!> the bond capacitance (direct part).
 subroutine get_damat_dc_dir(rij, trans, capi, capj, rvdw, kbc, gam, dG, dS)
    !> Distance vector between two atoms (including lattice translation)
    real(wp), intent(in) :: rij(3)
@@ -1537,7 +1618,8 @@ subroutine get_cmat_3d(self, mol, wsc, cmat)
          capj = self%cap(jzp)
          wsw = 1.0_wp / real(wsc%nimg(jat, iat), wp)
          do img = 1, wsc%nimg(jat, iat)
-            vec = mol%xyz(:, iat) - mol%xyz(:, jat) - wsc%trans(:, wsc%tridx(img, jat, iat))
+            vec = mol%xyz(:, iat) - mol%xyz(:, jat) - wsc%trans(:, wsc%tridx(img, jat, &
+            & iat))
             call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, tmp)
 
             cmat(jat, iat) = cmat(jat, iat) - tmp * wsw
@@ -1616,7 +1698,8 @@ subroutine get_cmat_3d_list(self, mol, list, cache)
          ctmp = 0.0_wp
 
          do img = cache%wsc%itr_list(kat), cache%wsc%itr_list(kat+1) - 1
-            vec = mol%xyz(:, iat) - mol%xyz(:, jat) - cache%wsc%trans(:, cache%wsc%tridx_list(img))
+            vec = mol%xyz(:, iat) - mol%xyz(:, jat) - cache%wsc%trans(:, &
+            & cache%wsc%tridx_list(img))
 
             call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, tmp)
 
@@ -1633,7 +1716,8 @@ subroutine get_cmat_3d_list(self, mol, list, cache)
       rvdw = self%rvdw(izp, izp)
       wsw = 1.0_wp / real(cache%wsc%nimg_list(list%inl(iat)), wp)
 
-      do img = cache%wsc%itr_list(list%inl(iat)), cache%wsc%itr_list(list%inl(iat) + 1) - 1
+      do img = cache%wsc%itr_list(list%inl(iat)), &
+      & cache%wsc%itr_list(list%inl(iat) + 1) - 1
          vec = cache%wsc%trans(:, cache%wsc%tridx_list(img))
          call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, tmp)
          ! Direct write is safe: touches only own atom, not even a cross-thread hazard
@@ -1705,7 +1789,8 @@ subroutine get_cpair_dir(kbc, rij, trans, rvdw, capi, capj, cpair)
    end do
 end subroutine get_cpair_dir
 
-!> Compute the derivative of the bond capacitance with respect to atomic positions and lattice parameters.
+!> Compute the derivative of the bond capacitance with respect to atomic
+!> positions and lattice parameters.
 subroutine get_dcpair(kbc, vec, rvdw, capi, capj, dgpair, dspair)
    !> Bond capacitance exponent
    real(wp), intent(in) :: kbc
@@ -1898,7 +1983,8 @@ subroutine get_dcmat_3d(self, mol, wsc, dcdr, dcdL)
          rvdw = self%rvdw(izp, jzp)
          wsw = 1.0_wp / real(wsc%nimg(jat, iat), wp)
          do img = 1, wsc%nimg(jat, iat)
-            vec = mol%xyz(:, jat) - mol%xyz(:, iat) + wsc%trans(:, wsc%tridx(img, jat, iat))
+            vec = mol%xyz(:, jat) - mol%xyz(:, iat) + wsc%trans(:, wsc%tridx(img, jat, &
+            & iat))
             call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
 
             dcdr(:, iat, jat) = dcdr(:, iat, jat) + dG * wsw
@@ -1994,7 +2080,8 @@ subroutine get_dcmat_3d_list(self, mol, list, cache)
       rvdw = self%rvdw(izp, izp)
       if (cache%wsc%nimg_list(list%inl(iat)) > 0) then
          wsw = 1.0_wp / real(cache%wsc%nimg_list(list%inl(iat)), wp)
-         do img = cache%wsc%itr_list(list%inl(iat)), cache%wsc%itr_list(list%inl(iat) + 1) - 1
+         do img = cache%wsc%itr_list(list%inl(iat)), &
+         & cache%wsc%itr_list(list%inl(iat) + 1) - 1
             vec = cache%wsc%trans(:, cache%wsc%tridx_list(img))
             call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, dG, dS)
             dcdL_acc(:, :, iat) = dcdL_acc(:, :, iat) + dS(:, :) * wsw
@@ -2179,11 +2266,14 @@ subroutine get_dcndiag_list(self, mol, trans, cn, dcndrdiag, dcndL, list)
             dcndrdiag_local(:,iat) = dcndrdiag_local(:,iat) + countd
             dcndL_local(:, :, iat) = dcndL_local(:, :, iat) + sigma
 
-            ! Accumulate terms for the neighbor atom (j), avoiding double counting for self-images
+            ! Accumulate terms for the neighbor atom (j), avoiding
+            ! double counting for self-images
             if (iat /= jat) then
                cn_local(jat) = cn_local(jat) + countf * self%directed_factor
-               dcndrdiag_local(:,jat) = dcndrdiag_local(:,jat) - countd * self%directed_factor
-               dcndL_local(:, :, jat) = dcndL_local(:, :, jat) + sigma * self%directed_factor
+               dcndrdiag_local(:,jat) = dcndrdiag_local(:, &
+               & jat) - countd * self%directed_factor
+               dcndL_local(:, :, jat) = dcndL_local(:, :, &
+               & jat) + sigma * self%directed_factor
             end if
 
          end do
@@ -2225,15 +2315,19 @@ subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta, list)
 
    if (.not. present(list)) then
       if (any(mol%periodic)) then
-         call get_grad_3d(self, mol, cache, p, gradient, sigma, alphain=alpha, betain=beta)
+         call get_grad_3d(self, mol, cache, p, gradient, sigma, alphain=alpha, &
+         & betain=beta)
       else
-         call get_grad_0d(self, mol, cache, p, gradient, sigma, alphain=alpha, betain=beta)
+         call get_grad_0d(self, mol, cache, p, gradient, sigma, alphain=alpha, &
+         & betain=beta)
       end if
    else
       if (any(mol%periodic)) then
-         call get_grad_3d_list(self, mol, list, cache, p, gradient, sigma, alphain=alpha, betain=beta)
+         call get_grad_3d_list(self, mol, list, cache, p, gradient, sigma, &
+         & alphain=alpha, betain=beta)
       else
-         call get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain=alpha, betain=beta)
+         call get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, &
+         & alphain=alpha, betain=beta)
       end if
    end if
 
@@ -2318,20 +2412,26 @@ subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain,
          dtmp = 2.0_wp * exp(-arg) / (sqrtpi)
 
          ! Accumulate scalar weights for CN derivatives
-         cnacc(iat) = cnacc(iat) - (dtmp * radi * dradi * gam**3.0_wp) * cache%clist(kat) * W_ij * alpha
-         cnacc(jat) = cnacc(jat) - (dtmp * radj * dradj * gam**3.0_wp) * cache%clist(kat) * W_ij * alpha
+         cnacc(iat) = cnacc(iat) - (dtmp * radi * dradi * gam**3.0_wp) &
+         & * cache%clist(kat) * W_ij * alpha
+         cnacc(jat) = cnacc(jat) - (dtmp * radj * dradj * gam**3.0_wp) &
+         & * cache%clist(kat) * W_ij * alpha
 
          ! 1. Explicit Geometry Derivative
-         dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) - erf(sqrt(arg)) / (r2 * sqrt(r2))
+         dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) - erf(sqrt(arg)) &
+         & / (r2 * sqrt(r2))
          dG = dtmp * vec
          dS = spread(dG, 1, 3) * spread(vec, 2, 3)
 
-         gradient_local(:, iat) = gradient_local(:, iat) - dG * cache%clist(kat) * W_ij * alpha
-         gradient_local(:, jat) = gradient_local(:, jat) + dG * cache%clist(kat) * W_ij * alpha
+         gradient_local(:, iat) = gradient_local(:, &
+         & iat) - dG * cache%clist(kat) * W_ij * alpha
+         gradient_local(:, jat) = gradient_local(:, &
+         & jat) + dG * cache%clist(kat) * W_ij * alpha
          sigma_local(:, :)   = sigma_local(:, :)   + dS * cache%clist(kat) * W_ij * alpha
 
          ! 3 & 4. Capacitance derivatives
-         call get_dcpair(self%kbc, vec, self%rvdw(izp, jzp), self%cap(izp), self%cap(jzp), dG, dS)
+         call get_dcpair(self%kbc, vec, self%rvdw(izp, jzp), self%cap(izp), &
+         & self%cap(jzp), dG, dS)
          dtmp = erf(sqrt(r2) * gam) / sqrt(r2)
          gradient_local(:, iat) = gradient_local(:, iat) + dtmp * dG * W_ij * alpha &
             & + p(iat) * cache%xtmp(jat) * dG * beta &
@@ -2345,9 +2445,11 @@ subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain,
             & - p(iat) * cache%xtmp(jat) * dS * beta &
             & - p(jat) * cache%xtmp(iat) * dS * beta
 
-         dtmp = (self%eta(jzp) + self%kqeta_pre * tanh(self%kqeta(jzp) * cache%qloc(jat)) + sqrt2pi / radj)
+         dtmp = (self%eta(jzp) + self%kqeta_pre &
+         & * tanh(self%kqeta(jzp) * cache%qloc(jat)) + sqrt2pi / radj)
          gradient_local(:, iat) = gradient_local(:, iat) - dtmp * dG * W_jj * alpha
-         dtmp = (self%eta(izp) + self%kqeta_pre * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi)
+         dtmp = (self%eta(izp) + self%kqeta_pre &
+         & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi)
          gradient_local(:, jat) = gradient_local(:, jat) + dtmp * dG * W_ii * alpha
       end do
 
@@ -2356,12 +2458,15 @@ subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain,
          & / cosh(self%kqeta(izp) * cache%qloc(iat))**2 &
          & * W_ii * cache%clist(list%inl(iat)) * alpha &
          & + v(iat) * self%kqchi(mol%id(iat)) * beta
-      cnacc(iat) = cnacc(iat) - sqrt2pi * dradi / (radi**2) * W_ii * cache%clist(list%inl(iat)) * alpha &
+      cnacc(iat) = cnacc(iat) - sqrt2pi * dradi / (radi**2) * W_ii &
+      & * cache%clist(list%inl(iat)) * alpha &
          & + v(iat) * self%kcnchi(mol%id(iat)) * beta
 
       ! 6. Intrinsic capacitance
-      dtmp = (self%eta(izp) + self%kqeta_pre * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi) * W_ii
-      gradient_local(:, iat) = gradient_local(:, iat) + dtmp * cache%dcdrdiag(:, iat) * alpha &
+      dtmp = (self%eta(izp) + self%kqeta_pre &
+      & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi) * W_ii
+      gradient_local(:, iat) = gradient_local(:, iat) + dtmp * cache%dcdrdiag(:, &
+      & iat) * alpha &
          & + p(iat) * cache%xtmp(iat) * cache%dcdrdiag(:, iat) * beta
 
       sigma_local(:, :)   = sigma_local(:, :)   + dtmp * cache%dcdL(:, :, iat) * alpha &
@@ -2375,8 +2480,10 @@ subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain,
    gradient_local = 0.0_wp
    sigma_local = 0.0_wp
 
-   call self%ncoord%add_coordination_number_derivs_list(mol, dtrans, cnacc, gradient_local, sigma_local, list)
-   call self%ncoord_en%add_coordination_number_derivs_list(mol, dtrans, qlocacc, gradient_local, sigma_local, list)
+   call self%ncoord%add_coordination_number_derivs_list(mol, dtrans, cnacc, &
+   & gradient_local, sigma_local, list)
+   call self%ncoord_en%add_coordination_number_derivs_list(mol, dtrans, qlocacc, &
+   & gradient_local, sigma_local, list)
 
    gradient = gradient + gradient_local
    sigma = sigma + sigma_local
@@ -2459,20 +2566,27 @@ subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
          dtmp = 2.0_wp * exp(-arg) / (sqrtpi)
 
          ! Accumulate scalar weights for CN derivatives
-         cnacc(iat) = cnacc(iat) - (dtmp * radi * dradi * gam**3.0_wp) * cache%cmat(iat, jat) * W_ij * alpha
-         cnacc(jat) = cnacc(jat) - (dtmp * radj * dradj * gam**3.0_wp) * cache%cmat(iat, jat) * W_ij * alpha
+         cnacc(iat) = cnacc(iat) - (dtmp * radi * dradi * gam**3.0_wp) &
+         & * cache%cmat(iat, jat) * W_ij * alpha
+         cnacc(jat) = cnacc(jat) - (dtmp * radj * dradj * gam**3.0_wp) &
+         & * cache%cmat(iat, jat) * W_ij * alpha
 
          ! 1. Explicit Geometry Derivative
-         dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) - erf(sqrt(arg)) / (r2 * sqrt(r2))
+         dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) - erf(sqrt(arg)) &
+         & / (r2 * sqrt(r2))
          dG = dtmp * vec
          dS = spread(dG, 1, 3) * spread(vec, 2, 3)
 
-         gradient_local(:, iat) = gradient_local(:, iat) - dG * cache%cmat(iat, jat) * W_ij * alpha
-         gradient_local(:, jat) = gradient_local(:, jat) + dG * cache%cmat(iat, jat) * W_ij * alpha
-         sigma_local(:, :)   = sigma_local(:, :)   + dS * cache%cmat(iat, jat) * W_ij * alpha
+         gradient_local(:, iat) = gradient_local(:, iat) - dG * cache%cmat(iat, &
+         & jat) * W_ij * alpha
+         gradient_local(:, jat) = gradient_local(:, jat) + dG * cache%cmat(iat, &
+         & jat) * W_ij * alpha
+         sigma_local(:, :)   = sigma_local(:, :)   + dS * cache%cmat(iat, &
+         & jat) * W_ij * alpha
 
          ! 3 & 4. Capacitance derivatives
-         call get_dcpair(self%kbc, vec, self%rvdw(izp, jzp), self%cap(izp), self%cap(jzp), dG, dS)
+         call get_dcpair(self%kbc, vec, self%rvdw(izp, jzp), self%cap(izp), &
+         & self%cap(jzp), dG, dS)
          dtmp = erf(sqrt(r2) * gam) / sqrt(r2)
          gradient_local(:, iat) = gradient_local(:, iat) + dtmp * dG * W_ij * alpha &
             & + p(iat) * cache%xtmp(jat) * dG * beta &
@@ -2486,9 +2600,11 @@ subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
             & - p(iat) * cache%xtmp(jat) * dS * beta &
             & - p(jat) * cache%xtmp(iat) * dS * beta
 
-         dtmp = (self%eta(jzp) + self%kqeta_pre * tanh(self%kqeta(jzp) * cache%qloc(jat)) + sqrt2pi / radj)
+         dtmp = (self%eta(jzp) + self%kqeta_pre &
+         & * tanh(self%kqeta(jzp) * cache%qloc(jat)) + sqrt2pi / radj)
          gradient_local(:, iat) = gradient_local(:, iat) - dtmp * dG * W_jj * alpha
-         dtmp = (self%eta(izp) + self%kqeta_pre * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi)
+         dtmp = (self%eta(izp) + self%kqeta_pre &
+         & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi)
          gradient_local(:, jat) = gradient_local(:, jat) + dtmp * dG * W_ii * alpha
       end do
 
@@ -2497,12 +2613,15 @@ subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
          & / cosh(self%kqeta(izp) * cache%qloc(iat))**2 &
          & * W_ii * cache%cmat(iat, iat) * alpha &
          & + v(iat) * self%kqchi(mol%id(iat)) * beta
-      cnacc(iat) = cnacc(iat) - sqrt2pi * dradi / (radi**2) * W_ii * cache%cmat(iat, iat) * alpha &
+      cnacc(iat) = cnacc(iat) - sqrt2pi * dradi / (radi**2) * W_ii * cache%cmat(iat, &
+      & iat) * alpha &
          & + v(iat) * self%kcnchi(mol%id(iat)) * beta
 
       ! 6. Intrinsic capacitance
-      dtmp = (self%eta(izp) + self%kqeta_pre * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi) * W_ii
-      gradient_local(:, iat) = gradient_local(:, iat) + dtmp * cache%dcdr(:, iat, iat) * alpha &
+      dtmp = (self%eta(izp) + self%kqeta_pre &
+      & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi) * W_ii
+      gradient_local(:, iat) = gradient_local(:, iat) + dtmp * cache%dcdr(:, iat, &
+      & iat) * alpha &
          & + p(iat) * cache%xtmp(iat) * cache%dcdr(:, iat, iat) * beta
 
       sigma_local(:, :)   = sigma_local(:, :)   + dtmp * cache%dcdL(:, :, iat) * alpha &
@@ -2516,8 +2635,10 @@ subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
    gradient_local = 0.0_wp
    sigma_local = 0.0_wp
 
-   call self%ncoord%add_coordination_number_derivs(mol, dtrans, cnacc, gradient_local, sigma_local)
-   call self%ncoord_en%add_coordination_number_derivs(mol, dtrans, qlocacc, gradient_local, sigma_local)
+   call self%ncoord%add_coordination_number_derivs(mol, dtrans, cnacc, gradient_local, &
+   & sigma_local)
+   call self%ncoord_en%add_coordination_number_derivs(mol, dtrans, qlocacc, &
+   & gradient_local, sigma_local)
 
    gradient = gradient + gradient_local
    sigma = sigma + sigma_local
@@ -2573,7 +2694,8 @@ subroutine get_grad_3d_list(self, mol, list, cache, p, gradient, sigma, alphain,
 
    !$omp parallel do default(none) schedule(runtime) &
    !$omp shared(cache, mol, list, self, p, v, dtrans, alpha, beta) &
-   !$omp private(iat, kat, izp, jat, jzp, gam, vec, r2, dtmp, radi, radj, dradi, dradj, dG, dS, norm_cn) &
+   !$omp private(iat, kat, izp, jat, jzp, gam, vec, r2) &
+   !$omp private(dtmp, radi, radj, dradi, dradj, dG, dS, norm_cn) &
    !$omp private(W_ii, W_jj, W_ij, wsw, capi, capj, rvdw, img, dgam, ctmp) &
    !$omp reduction(+:cnacc, qlocacc, gradient_local, sigma_local)
    do iat = 1, mol%nat
@@ -2600,11 +2722,14 @@ subroutine get_grad_3d_list(self, mol, list, cache, p, gradient, sigma, alphain,
          gam = 1.0_wp / sqrt(radi**2 + radj**2)
 
          do img = cache%wsc%itr_list(kat), cache%wsc%itr_list(kat+1) - 1
-            vec = mol%xyz(:, jat) - mol%xyz(:, iat) + cache%wsc%trans(:, cache%wsc%tridx_list(img))
+            vec = mol%xyz(:, jat) - mol%xyz(:, iat) + cache%wsc%trans(:, &
+            & cache%wsc%tridx_list(img))
             call get_damat_dir(vec, dtrans, capi, capj, rvdw, self%kbc, gam, dG, dS, dgam)
 
-            cnacc(iat) = cnacc(iat) + (dgam * wsw * radi * dradi * gam**3.0_wp) * W_ij * alpha
-            cnacc(jat) = cnacc(jat) + (dgam * wsw * radj * dradj * gam**3.0_wp) * W_ij * alpha
+            cnacc(iat) = cnacc(iat) + (dgam * wsw * radi * dradi * gam**3.0_wp) &
+            & * W_ij * alpha
+            cnacc(jat) = cnacc(jat) + (dgam * wsw * radj * dradj * gam**3.0_wp) &
+            & * W_ij * alpha
 
             gradient_local(:, iat) = gradient_local(:, iat) - dG * wsw * W_ij * alpha
             gradient_local(:, jat) = gradient_local(:, jat) + dG * wsw * W_ij * alpha
@@ -2616,20 +2741,27 @@ subroutine get_grad_3d_list(self, mol, list, cache, p, gradient, sigma, alphain,
             sigma_local(:, :)   = sigma_local(:, :) - W_ij * dS * wsw * alpha
 
             call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
-            dtmp = (self%eta(jzp) + self%kqeta_pre * tanh(self%kqeta(jzp) * cache%qloc(jat)) + sqrt2pi / radj)
-            gradient_local(:, iat) = gradient_local(:, iat) - dtmp * dG * wsw * W_jj * alpha &
+            dtmp = (self%eta(jzp) + self%kqeta_pre &
+            & * tanh(self%kqeta(jzp) * cache%qloc(jat)) + sqrt2pi / radj)
+            gradient_local(:, iat) = gradient_local(:, &
+            & iat) - dtmp * dG * wsw * W_jj * alpha &
                & + p(iat) * cache%xtmp(jat) * dG * wsw * beta &
                & - p(jat) * (cache%xtmp(jat) - cache%xtmp(iat)) * dG * wsw * beta
 
-            dtmp = (self%eta(izp) + self%kqeta_pre * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi)
-            gradient_local(:, jat) = gradient_local(:, jat) + dtmp * dG * wsw * W_ii * alpha &
+            dtmp = (self%eta(izp) + self%kqeta_pre &
+            & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi)
+            gradient_local(:, jat) = gradient_local(:, &
+            & jat) + dtmp * dG * wsw * W_ii * alpha &
                & - p(jat) * cache%xtmp(iat) * dG * wsw * beta &
                & + p(iat) * (cache%xtmp(iat) - cache%xtmp(jat)) * dG * wsw * beta
 
             ! Lattice Sigma Updates
-            ! This ensures the (xi - xj) term is correctly formed against the diagonal dcdL
-            sigma_local(:, :) = sigma_local(:, :) - p(iat) * cache%xtmp(jat) * dS * wsw * beta
-            sigma_local(:, :) = sigma_local(:, :) - p(jat) * cache%xtmp(iat) * dS * wsw * beta
+            ! This ensures the (xi - xj) term is correctly formed
+            ! against the diagonal dcdL
+            sigma_local(:, :) = sigma_local(:, &
+            & :) - p(iat) * cache%xtmp(jat) * dS * wsw * beta
+            sigma_local(:, :) = sigma_local(:, &
+            & :) - p(jat) * cache%xtmp(iat) * dS * wsw * beta
 
          end do
       end do
@@ -2641,17 +2773,20 @@ subroutine get_grad_3d_list(self, mol, list, cache, p, gradient, sigma, alphain,
       if (cache%wsc%nimg_list(list%inl(iat)) > 0) then
          wsw = 1.0_wp / real(cache%wsc%nimg_list(list%inl(iat)), wp)
 
-         do img = cache%wsc%itr_list(list%inl(iat)), cache%wsc%itr_list(list%inl(iat) + 1) - 1
+         do img = cache%wsc%itr_list(list%inl(iat)), &
+         & cache%wsc%itr_list(list%inl(iat) + 1) - 1
             vec = cache%wsc%trans(:, cache%wsc%tridx_list(img))
             call get_damat_dir(vec, dtrans, capi, capi, rvdw, self%kbc, gam, dG, dS, dgam)
             sigma_local(:, :) = sigma_local(:, :) + dS * wsw * W_ii * alpha
-            cnacc(iat) = cnacc(iat) + (dgam * wsw * 2.0_wp * radi * dradi * gam**3.0_wp) * W_ii * alpha
+            cnacc(iat) = cnacc(iat) + (dgam * wsw * 2.0_wp * radi * dradi &
+            & * gam**3.0_wp) * W_ii * alpha
 
             call get_damat_dc_dir(vec, dtrans, capi, capi, rvdw, self%kbc, gam, dG, dS)
             sigma_local(:, :) = sigma_local(:, :) - W_ii * dS * wsw * alpha
 
             call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, dG, dS)
-            sigma_local(:, :) = sigma_local(:, :) - p(iat) * cache%xtmp(iat) * dS * wsw * beta
+            sigma_local(:, :) = sigma_local(:, &
+            & :) - p(iat) * cache%xtmp(iat) * dS * wsw * beta
 
             call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, ctmp)
             ctmp = ctmp * wsw
@@ -2661,13 +2796,17 @@ subroutine get_grad_3d_list(self, mol, list, cache, p, gradient, sigma, alphain,
       end if
 
       qlocacc(iat) = qlocacc(iat) + self%kqeta_pre * self%kqeta(izp) / &
-         & cosh(self%kqeta(izp) * cache%qloc(iat))**2 * W_ii * cache%clist(list%inl(iat)) * alpha &
+         & cosh(self%kqeta(izp) * cache%qloc(iat))**2 * W_ii &
+         & * cache%clist(list%inl(iat)) * alpha &
          & + v(iat) * self%kqchi(izp) * beta
-      cnacc(iat) = cnacc(iat) - sqrt2pi * dradi / (radi**2) * W_ii * cache%clist(list%inl(iat)) * alpha &
+      cnacc(iat) = cnacc(iat) - sqrt2pi * dradi / (radi**2) * W_ii &
+      & * cache%clist(list%inl(iat)) * alpha &
          & + v(iat) * self%kcnchi(izp) * beta
 
-      dtmp = (self%eta(izp) + self%kqeta_pre * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi) * W_ii
-      gradient_local(:, iat) = gradient_local(:, iat) + dtmp * cache%dcdrdiag(:, iat) * alpha &
+      dtmp = (self%eta(izp) + self%kqeta_pre &
+      & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi) * W_ii
+      gradient_local(:, iat) = gradient_local(:, iat) + dtmp * cache%dcdrdiag(:, &
+      & iat) * alpha &
          & + p(iat) * cache%xtmp(iat) * cache%dcdrdiag(:, iat) * beta
       sigma_local(:, :) = sigma_local(:, :) + dtmp * cache%dcdL(:, :, iat) * alpha &
          & + p(iat) * cache%xtmp(iat) * cache%dcdL(:, :, iat) * beta
@@ -2680,8 +2819,10 @@ subroutine get_grad_3d_list(self, mol, list, cache, p, gradient, sigma, alphain,
    gradient_local = 0.0_wp
    sigma_local = 0.0_wp
 
-   call self%ncoord%add_coordination_number_derivs_list(mol, dtrans, cnacc, gradient_local, sigma_local, list)
-   call self%ncoord_en%add_coordination_number_derivs_list(mol, dtrans, qlocacc, gradient_local, sigma_local, list)
+   call self%ncoord%add_coordination_number_derivs_list(mol, dtrans, cnacc, &
+   & gradient_local, sigma_local, list)
+   call self%ncoord_en%add_coordination_number_derivs_list(mol, dtrans, qlocacc, &
+   & gradient_local, sigma_local, list)
 
    gradient = gradient + gradient_local
    sigma = sigma + sigma_local
@@ -2735,7 +2876,8 @@ subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
 
    !$omp parallel do default(none) schedule(runtime) &
    !$omp shared(cache, mol, self, p, dtrans, v, alpha, beta) &
-   !$omp private(iat, izp, jat, jzp, gam, vec, dtmp, radi, radj, dradi, dradj, dG, dS, norm_cn) &
+   !$omp private(iat, izp, jat, jzp, gam, vec, dtmp) &
+   !$omp private(radi, radj, dradi, dradj, dG, dS, norm_cn) &
    !$omp private(W_ii, W_jj, W_ij, wsw, capi, capj, rvdw, img, dgam, ctmp) &
    !$omp reduction(+:cnacc, qlocacc, gradient_local, sigma_local)
    do iat = 1, mol%nat
@@ -2760,13 +2902,16 @@ subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
          gam = 1.0_wp / sqrt(radi**2 + radj**2)
 
          do img = 1, cache%wsc%nimg(iat, jat)
-            vec = mol%xyz(:, jat) - mol%xyz(:, iat) + cache%wsc%trans(:, cache%wsc%tridx(img, jat, iat))
+            vec = mol%xyz(:, jat) - mol%xyz(:, iat) + cache%wsc%trans(:, &
+            & cache%wsc%tridx(img, jat, iat))
 
             ! 1. A-matrix explicit kernel derivative
             call get_damat_dir(vec, dtrans, capi, capj, rvdw, self%kbc, gam, dG, dS, dgam)
 
-            cnacc(iat) = cnacc(iat) + (dgam * wsw * radi * dradi * gam**3.0_wp) * W_ij * alpha
-            cnacc(jat) = cnacc(jat) + (dgam * wsw * radj * dradj * gam**3.0_wp) * W_ij * alpha
+            cnacc(iat) = cnacc(iat) + (dgam * wsw * radi * dradi * gam**3.0_wp) &
+            & * W_ij * alpha
+            cnacc(jat) = cnacc(jat) + (dgam * wsw * radj * dradj * gam**3.0_wp) &
+            & * W_ij * alpha
 
             gradient_local(:, iat) = gradient_local(:, iat) - dG * wsw * W_ij * alpha
             gradient_local(:, jat) = gradient_local(:, jat) + dG * wsw * W_ij * alpha
@@ -2781,17 +2926,22 @@ subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
             ! 3. Pair capacitance (b-vector) and hardness terms
             call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
 
-            dtmp = (self%eta(jzp) + self%kqeta_pre * tanh(self%kqeta(jzp) * cache%qloc(jat)) + sqrt2pi / radj)
-            gradient_local(:, iat) = gradient_local(:, iat) - dtmp * dG * wsw * W_jj * alpha &
+            dtmp = (self%eta(jzp) + self%kqeta_pre &
+            & * tanh(self%kqeta(jzp) * cache%qloc(jat)) + sqrt2pi / radj)
+            gradient_local(:, iat) = gradient_local(:, &
+            & iat) - dtmp * dG * wsw * W_jj * alpha &
                & + p(iat) * cache%xtmp(jat) * dG * wsw * beta &
                & - p(jat) * (cache%xtmp(jat) - cache%xtmp(iat)) * dG * wsw * beta
 
-            dtmp = (self%eta(izp) + self%kqeta_pre * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi)
-            gradient_local(:, jat) = gradient_local(:, jat) + dtmp * dG * wsw * W_ii * alpha &
+            dtmp = (self%eta(izp) + self%kqeta_pre &
+            & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi)
+            gradient_local(:, jat) = gradient_local(:, &
+            & jat) + dtmp * dG * wsw * W_ii * alpha &
                & - p(jat) * cache%xtmp(iat) * dG * wsw * beta &
                & + p(iat) * (cache%xtmp(iat) - cache%xtmp(jat)) * dG * wsw * beta
 
-            sigma_local(:, :)   = sigma_local(:, :)   - p(iat) * cache%xtmp(jat) * dS * wsw * beta &
+            sigma_local(:, :)   = sigma_local(:, &
+            & :)   - p(iat) * cache%xtmp(jat) * dS * wsw * beta &
                & - p(jat) * cache%xtmp(iat) * dS * wsw * beta
          end do
       end do
@@ -2806,13 +2956,15 @@ subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
 
          call get_damat_dir(vec, dtrans, capi, capi, rvdw, self%kbc, gam, dG, dS, dgam)
          sigma_local(:, :) = sigma_local(:, :) + dS * wsw * W_ii * alpha
-         cnacc(iat) = cnacc(iat) + (dgam * wsw * 2.0_wp * radi * dradi * gam**3.0_wp) * W_ii * alpha
+         cnacc(iat) = cnacc(iat) + (dgam * wsw * 2.0_wp * radi * dradi &
+         & * gam**3.0_wp) * W_ii * alpha
 
          call get_damat_dc_dir(vec, dtrans, capi, capi, rvdw, self%kbc, gam, dG, dS)
          sigma_local(:, :) = sigma_local(:, :) - W_ii * dS * wsw * alpha
 
          call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, dG, dS)
-         sigma_local(:, :) = sigma_local(:, :) - p(iat) * cache%xtmp(iat) * dS * wsw * beta
+         sigma_local(:, :) = sigma_local(:, &
+         & :) - p(iat) * cache%xtmp(iat) * dS * wsw * beta
 
          ! Apply self-image correction to potential v(iat) before weight calculation
          call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, ctmp)
@@ -2821,14 +2973,18 @@ subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
 
       ! Diagonal contributions to weights
       qlocacc(iat) = qlocacc(iat) + self%kqeta_pre * self%kqeta(izp) / &
-         & cosh(self%kqeta(izp) * cache%qloc(iat))**2 * W_ii * cache%cmat(iat, iat) * alpha &
+         & cosh(self%kqeta(izp) * cache%qloc(iat))**2 * W_ii * cache%cmat(iat, &
+         & iat) * alpha &
          & + v(iat) * self%kqchi(izp) * beta
-      cnacc(iat) = cnacc(iat) - sqrt2pi * dradi / (radi**2) * W_ii * cache%cmat(iat, iat) * alpha &
+      cnacc(iat) = cnacc(iat) - sqrt2pi * dradi / (radi**2) * W_ii * cache%cmat(iat, &
+      & iat) * alpha &
          & + v(iat) * self%kcnchi(izp) * beta
 
       ! Intrinsic capacitance
-      dtmp = (self%eta(izp) + self%kqeta_pre * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi) * W_ii
-      gradient_local(:, iat) = gradient_local(:, iat) + dtmp * cache%dcdr(:, iat, iat) * alpha &
+      dtmp = (self%eta(izp) + self%kqeta_pre &
+      & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi) * W_ii
+      gradient_local(:, iat) = gradient_local(:, iat) + dtmp * cache%dcdr(:, iat, &
+      & iat) * alpha &
          & + p(iat) * cache%xtmp(iat) * cache%dcdr(:, iat, iat) * beta
 
       sigma_local(:, :)   = sigma_local(:, :)   + dtmp * cache%dcdL(:, :, iat) * alpha &
@@ -2842,8 +2998,10 @@ subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
    gradient_local = 0.0_wp
    sigma_local = 0.0_wp
 
-   call self%ncoord%add_coordination_number_derivs(mol, dtrans, cnacc, gradient_local, sigma_local)
-   call self%ncoord_en%add_coordination_number_derivs(mol, dtrans, qlocacc, gradient_local, sigma_local)
+   call self%ncoord%add_coordination_number_derivs(mol, dtrans, cnacc, gradient_local, &
+   & sigma_local)
+   call self%ncoord_en%add_coordination_number_derivs(mol, dtrans, qlocacc, &
+   & gradient_local, sigma_local)
 
    gradient = gradient + gradient_local
    sigma = sigma + sigma_local

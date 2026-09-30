@@ -178,14 +178,16 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL)
       write(unit, '(a,":", t25, es20.13, 1x, a)') &
       & "Charge gradient norm", norm2(dqdr), "a.u./a0"
       write(unit, '(72("-"))')
-      write(unit, '(a10,1x,a4,3x,a6,1x,a4,3x,*(1x,a12))') "#", "Z", "#", "A", "dQ(Z)/dx(A)", "dQ(Z)/dy(A)", "dQ(Z)/dz(A)"
+      write(unit, '(a10,1x,a4,3x,a6,1x,a4,3x,*(1x,a12))') "#", "Z", "#", "A", &
+      & "dQ(Z)/dx(A)", "dQ(Z)/dy(A)", "dQ(Z)/dz(A)"
       write(unit, '(72("-"))')
       do iat = 1, mol%nat
          isp = mol%id(iat)
          do jat = 1, mol%nat
             jsp = mol%id(jat)
             write(unit, '(i10,1x,i3,1x,a2,1x,i6,1x,i3,1x,a2,*(2x ,es11.3))') &
-            & iat, mol%num(isp), mol%sym(isp), jat, mol%num(jsp), mol%sym(jsp), dqdr(:, jat, iat)
+            & iat, mol%num(isp), mol%sym(isp), jat, mol%num(jsp), mol%sym(jsp), &
+            & dqdr(:, jat, iat)
          end do
       end do
       write(unit, '(72("-"))')

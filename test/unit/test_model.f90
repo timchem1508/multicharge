@@ -37,7 +37,9 @@ module test_model
    real(wp), parameter :: thr1 = 1.0e5_wp*epsilon(1.0_wp)
    real(wp), parameter :: thr2 = sqrt(epsilon(1.0_wp))
 
+
 contains
+
 
 !> Collect all exported unit tests
 subroutine collect_model(testsuite)
@@ -168,7 +170,8 @@ subroutine test_dadr(error, mol, model)
 
    allocate (cache)
 
-   allocate (amatr1(ndim, ndim), amatl1(ndim, ndim), amatr2(ndim, ndim), amatl2(ndim, ndim), &
+   allocate (amatr1(ndim, ndim), amatl1(ndim, ndim), amatr2(ndim, ndim), amatl2(ndim, &
+   & ndim), &
    & numtrace(3, mol%nat), &
    & numgrad(3, mol%nat, ndim), qvec(mol%nat))
 

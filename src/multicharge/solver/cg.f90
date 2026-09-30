@@ -14,7 +14,8 @@
 ! limitations under the License.
 
 !> @file multicharge/solver/cg.f90
-!> Provides implementation of the conjugate gradient solver for linear systems of equations.
+!> Provides implementation of the conjugate gradient solver for linear systems
+!> of equations.
 
 module multicharge_solver_cg
    use iso_fortran_env, only : output_unit
@@ -77,6 +78,7 @@ module multicharge_solver_cg
 
    !> Default neighborlist usage
    logical, parameter :: use_nlist_def = .false.
+
 
 contains
 

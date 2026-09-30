@@ -39,7 +39,8 @@ module multicharge_param_eeq2019
       module procedure :: get_eeq_eta_num
    end interface get_eeq_eta
 
-   !> Element-specific CN scaling constant for the electronegativity equilibration charges.
+   !> Element-specific CN scaling constant for the electronegativity
+   !> equilibration charges.
    interface get_eeq_kcnchi
       module procedure :: get_eeq_kcnchi_sym
       module procedure :: get_eeq_kcnchi_num
@@ -80,7 +81,8 @@ module multicharge_param_eeq2019
       & 1.11003303_wp, 1.16831853_wp, 1.00887482_wp, 1.05928842_wp, 1.07672363_wp, &
       & 1.11308426_wp, 1.14340090_wp, 1.13714110_wp]
 
-   !> Element-specific chemical hardnesses for the electronegativity equilibration charges.
+   !> Element-specific chemical hardnesses for the electronegativity
+   !> equilibration charges.
    real(wp), parameter :: eeq_eta(max_elem) = [&
       &-0.35015861_wp, 1.04121227_wp, 0.09281243_wp, 0.09412380_wp, 0.26629137_wp, &
       & 0.19408787_wp, 0.05317918_wp, 0.03151644_wp, 0.32275132_wp, 1.30996037_wp, &
@@ -104,7 +106,8 @@ module multicharge_param_eeq2019
       &-0.00095936_wp,-0.00102814_wp,-0.00104450_wp,-0.00112666_wp,-0.00101529_wp, &
       &-0.00059592_wp,-0.00012585_wp,-0.00140896_wp]
 
-   !> Element-specific CN scaling constant for the electronegativity equilibration charges.
+   !> Element-specific CN scaling constant for the electronegativity
+   !> equilibration charges.
    real(wp), parameter :: eeq_kcnchi(max_elem) = [&
       & 0.04916110_wp, 0.10937243_wp,-0.12349591_wp,-0.02665108_wp,-0.02631658_wp, &
       & 0.06005196_wp, 0.09279548_wp, 0.11689703_wp, 0.15704746_wp, 0.07987901_wp, &

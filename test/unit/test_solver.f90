@@ -36,7 +36,9 @@ module test_solver
    real(wp), parameter :: thr2 = sqrt(epsilon(1.0_wp))
    real(wp), parameter :: thr_rel = 1.0e-6_wp
 
+
 contains
+
 
 !> Collect all unit tests for the CG solver
 subroutine collect_solver(testsuite)
@@ -156,7 +158,8 @@ subroutine test_cg_identity_2x2(error)
    else
       print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
       print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', (end_direct-start_direct)/(end_cg-start_cg)
+      print '("CG Solver ime profit : ",f6.3)', &
+      & (end_direct-start_direct)/(end_cg-start_cg)
    end if
 
 end subroutine test_cg_identity_2x2
@@ -234,7 +237,8 @@ subroutine test_cg_diagonal_5x5(error)
    else
       print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
       print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', (end_direct-start_direct)/(end_cg-start_cg)
+      print '("CG Solver ime profit : ",f6.3)', &
+      & (end_direct-start_direct)/(end_cg-start_cg)
    end if
 
 end subroutine test_cg_diagonal_5x5
@@ -309,7 +313,8 @@ subroutine test_cg_spd_small(error)
    else
       print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
       print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', (end_direct-start_direct)/(end_cg-start_cg)
+      print '("CG Solver ime profit : ",f6.3)', &
+      & (end_direct-start_direct)/(end_cg-start_cg)
    end if
 
 end subroutine test_cg_spd_small
@@ -403,7 +408,8 @@ subroutine test_cg_spd_large(error)
    else
       print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
       print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', (end_direct-start_direct)/(end_cg-start_cg)
+      print '("CG Solver ime profit : ",f6.3)', &
+      & (end_direct-start_direct)/(end_cg-start_cg)
    end if
 
 end subroutine test_cg_spd_large
@@ -488,7 +494,8 @@ subroutine test_cg_ill_conditioned(error)
    else
       print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
       print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', (end_direct-start_direct)/(end_cg-start_cg)
+      print '("CG Solver ime profit : ",f6.3)', &
+      & (end_direct-start_direct)/(end_cg-start_cg)
    end if
 
 end subroutine test_cg_ill_conditioned
@@ -571,7 +578,8 @@ subroutine test_cg_zero_rhs(error)
    else
       print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
       print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', (end_direct-start_direct)/(end_cg-start_cg)
+      print '("CG Solver ime profit : ",f6.3)', &
+      & (end_direct-start_direct)/(end_cg-start_cg)
    end if
 
 end subroutine test_cg_zero_rhs
@@ -693,7 +701,8 @@ subroutine test_cg_random_spd(error)
    else
       print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
       print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', (end_direct-start_direct)/(end_cg-start_cg)
+      print '("CG Solver ime profit : ",f6.3)', &
+      & (end_direct-start_direct)/(end_cg-start_cg)
    end if
 
 end subroutine test_cg_random_spd
