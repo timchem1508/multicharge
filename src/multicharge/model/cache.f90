@@ -14,7 +14,8 @@
 ! limitations under the License.
 
 !> @file multicharge/model/cache.f90
-!> Contains the cache baseclass for the charge models and a container for mutable cache data
+!> Contains the cache baseclass for the charge models and a container for
+!> mutable cache data
 
 !> Cache for charge models
 module multicharge_model_cache

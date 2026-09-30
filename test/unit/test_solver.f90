@@ -36,7 +36,9 @@ module test_solver
    real(wp), parameter :: thr2 = sqrt(epsilon(1.0_wp))
    real(wp), parameter :: thr_rel = 1.0e-6_wp
 
+
 contains
+
 
 !> Collect all unit tests for the CG solver
 subroutine collect_solver(testsuite)
@@ -45,45 +47,45 @@ subroutine collect_solver(testsuite)
    type(unittest_type), allocatable, intent(out) :: testsuite(:)
 
    testsuite = [ &
-      & new_unittest("cg-identity-2x2", test_cg_identity_2x2), &
-      & new_unittest("cg-diagonal-5x5", test_cg_diagonal_5x5), &
-      & new_unittest("cg-spd-small", test_cg_spd_small), &
-      & new_unittest("cg-spd-large", test_cg_spd_large), &
-      & new_unittest("cg-ill-conditioned", test_cg_ill_conditioned), &
-      & new_unittest("cg-zero-rhs", test_cg_zero_rhs), &
-      & new_unittest("cg-random-spd", test_cg_random_spd) &
-      & ]
+   & new_unittest("cg-identity-2x2", test_cg_identity_2x2), &
+   & new_unittest("cg-diagonal-5x5", test_cg_diagonal_5x5), &
+   & new_unittest("cg-spd-small", test_cg_spd_small), &
+   & new_unittest("cg-spd-large", test_cg_spd_large), &
+   & new_unittest("cg-ill-conditioned", test_cg_ill_conditioned), &
+   & new_unittest("cg-zero-rhs", test_cg_zero_rhs), &
+   & new_unittest("cg-random-spd", test_cg_random_spd) &
+   & ]
 
 end subroutine collect_solver
 
 subroutine solver_maker(solver, input, error)
-    !> Solver type
-    class(mchrg_solver_type), intent(out), allocatable :: solver
-    !> Solver input
-    class(mchrg_solver_input), intent(in) :: input
-    !> Error handling
-    type(error_type), allocatable, intent(out) :: error
+   !> Solver type
+   class(mchrg_solver_type), intent(out), allocatable :: solver
+   !> Solver input
+   class(mchrg_solver_input), intent(in) :: input
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
 
-    select type (input)
-    type is (cg_input)
-        block
-            class(cg_solver), allocatable :: tmp
-            allocate(tmp)
-            call new_cg_solver(tmp, input)
-            call move_alloc(tmp, solver)
-        end block
-    type is (direct_input)
-        block
-            class(direct_solver), allocatable :: tmp
-            allocate(tmp)
-            call new_direct_solver(tmp, input)
-            call move_alloc(tmp, solver)
-        end block
-    class default 
-        allocate(error)
-        return
-    end select
-    
+   select type (input)
+   type is (cg_input)
+      block
+         class(cg_solver), allocatable :: tmp
+         allocate(tmp)
+         call new_cg_solver(tmp, input)
+         call move_alloc(tmp, solver)
+      end block
+   type is (direct_input)
+      block
+         class(direct_solver), allocatable :: tmp
+         allocate(tmp)
+         call new_direct_solver(tmp, input)
+         call move_alloc(tmp, solver)
+      end block
+   class default
+      allocate(error)
+      return
+   end select
+
 end subroutine solver_maker
 
 !> Test: Identity matrix 2x2
@@ -114,15 +116,15 @@ subroutine test_cg_identity_2x2(error)
       solver_input%verbosity = verbosity
    end select
    call solver_maker(solver, solver_input,  error)
-   
+
    ! Identity matrix
    amat = 0.0_wp
    amat(1,1) = 1.0_wp
    amat(2,2) = 1.0_wp
-   
+
    ! RHS vector
    xvec = [1.0_wp, 2.0_wp]
-   
+
    ! Initial guess
    vrhs = [0.0_wp, 0.0_wp]
 
@@ -137,7 +139,7 @@ subroutine test_cg_identity_2x2(error)
    deallocate(solver)
    allocate(direct_input :: solver_input)
    select type(solver_input)
-      type is (direct_input)
+   type is (direct_input)
       solver_input%verbosity = verbosity
    end select
    call solver_maker(solver, solver_input,  error)
@@ -145,7 +147,7 @@ subroutine test_cg_identity_2x2(error)
    call cpu_time(start_direct)
    call solver%solve(amat=amat, xvec=xvec, vrhs=expected,  error=error)
    call cpu_time(end_direct)
-   
+
    ! Check solution
    if (any(abs(vrhs - expected) > thr)) then
       call test_failed(error, "CG solver failed for identity matrix")
@@ -156,7 +158,8 @@ subroutine test_cg_identity_2x2(error)
    else
       print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
       print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', (end_direct-start_direct)/(end_cg-start_cg)
+      print '("CG Solver ime profit : ",f6.3)', &
+      & (end_direct-start_direct)/(end_cg-start_cg)
    end if
 
 end subroutine test_cg_identity_2x2
@@ -197,13 +200,13 @@ subroutine test_cg_diagonal_5x5(error)
    do i = 1, n
       amat(i,i) = diag(i)
    end do
-   
+
    ! RHS vector
    xvec = [1.0_wp, 1.0_wp, 1.0_wp, 1.0_wp, 1.0_wp]
-   
+
    ! Initial guess
    vrhs = [0.0_wp, 0.0_wp, 0.0_wp, 0.0_wp, 0.0_wp]
-   
+
    ! Solve
    call cpu_time(start_cg)
    call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
@@ -215,7 +218,7 @@ subroutine test_cg_diagonal_5x5(error)
    deallocate(solver)
    allocate(direct_input :: solver_input)
    select type(solver_input)
-      type is (direct_input)
+   type is (direct_input)
       solver_input%verbosity = verbosity
    end select
    call solver_maker(solver, solver_input,  error)
@@ -223,7 +226,7 @@ subroutine test_cg_diagonal_5x5(error)
    expected = [0.0_wp, 0.0_wp, 0.0_wp, 0.0_wp, 0.0_wp]
    call solver%solve(amat=amat, xvec=xvec, vrhs=expected, error=error)
    call cpu_time(end_direct)
-   
+
    ! Check solution
    if (any(abs(vrhs - expected) > thr)) then
       call test_failed(error, "CG solver failed for diagonal matrix")
@@ -234,7 +237,8 @@ subroutine test_cg_diagonal_5x5(error)
    else
       print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
       print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', (end_direct-start_direct)/(end_cg-start_cg)
+      print '("CG Solver ime profit : ",f6.3)', &
+      & (end_direct-start_direct)/(end_cg-start_cg)
    end if
 
 end subroutine test_cg_diagonal_5x5
@@ -270,15 +274,15 @@ subroutine test_cg_spd_small(error)
 
    ! SPD matrix
    amat = reshape([4.0_wp, 1.0_wp, 1.0_wp, &
-                  &1.0_wp, 3.0_wp, 2.0_wp, &
-                  &1.0_wp, 2.0_wp, 4.0_wp], [n, n])
-   
+   &1.0_wp, 3.0_wp, 2.0_wp, &
+   &1.0_wp, 2.0_wp, 4.0_wp], [n, n])
+
    ! RHS vector
    xvec = [6.0_wp, 6.0_wp, 7.0_wp]
-   
+
    ! Initial guess
    vrhs = [0.0_wp, 0.0_wp, 0.0_wp]
-   
+
    ! Solve
    call cpu_time(start_cg)
    call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
@@ -290,7 +294,7 @@ subroutine test_cg_spd_small(error)
    deallocate(solver)
    allocate(direct_input :: solver_input)
    select type(solver_input)
-      type is (direct_input)
+   type is (direct_input)
       solver_input%verbosity = verbosity
    end select
    call solver_maker(solver, solver_input,  error)
@@ -298,7 +302,7 @@ subroutine test_cg_spd_small(error)
    call cpu_time(start_direct)
    call solver%solve(amat=amat, xvec=xvec, vrhs=expected, error=error)
    call cpu_time(end_direct)
-   
+
    ! Check solution
    if (any(abs(vrhs - expected) > thr)) then
       call test_failed(error, "CG solver failed for small SPD matrix")
@@ -309,7 +313,8 @@ subroutine test_cg_spd_small(error)
    else
       print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
       print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', (end_direct-start_direct)/(end_cg-start_cg)
+      print '("CG Solver ime profit : ",f6.3)', &
+      & (end_direct-start_direct)/(end_cg-start_cg)
    end if
 
 end subroutine test_cg_spd_small
@@ -325,7 +330,7 @@ subroutine test_cg_spd_large(error)
    real(wp), allocatable :: expected(:), b(:)
    integer :: i, j
 
-  ! Timer variables
+   ! Timer variables
    real(wp) :: start_cg, end_cg, start_direct, end_direct
 
    ! Solver variables
@@ -356,10 +361,10 @@ subroutine test_cg_spd_large(error)
          end if
       end do
    end do
-   
+
    ! Create a solution vector
    expected = [(sin(real(i, wp) * 0.1_wp), i=1, n)]
-   
+
    ! Compute RHS: b = A * expected
    b = 0.0_wp
    do i = 1, n
@@ -367,11 +372,11 @@ subroutine test_cg_spd_large(error)
          b(i) = b(i) + amat(i,j) * expected(j)
       end do
    end do
-   
+
    ! Initial guess
    vrhs = 0.0_wp
    xvec = b
-   
+
    ! Solve
    call cpu_time(start_cg)
    call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
@@ -383,7 +388,7 @@ subroutine test_cg_spd_large(error)
    deallocate(solver)
    allocate(direct_input :: solver_input)
    select type(solver_input)
-      type is (direct_input)
+   type is (direct_input)
       solver_input%verbosity = verbosity
    end select
    call solver_maker(solver, solver_input,  error)
@@ -392,7 +397,7 @@ subroutine test_cg_spd_large(error)
    call cpu_time(start_direct)
    call solver%solve(amat=amat, xvec=xvec, vrhs=expected, error=error)
    call cpu_time(end_direct)
-   
+
    ! Check solution
    if (any(abs(vrhs - expected) / max(1.0_wp, abs(expected)) > thr_rel)) then
       call test_failed(error, "CG solver failed for medium SPD matrix")
@@ -403,7 +408,8 @@ subroutine test_cg_spd_large(error)
    else
       print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
       print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', (end_direct-start_direct)/(end_cg-start_cg)
+      print '("CG Solver ime profit : ",f6.3)', &
+      & (end_direct-start_direct)/(end_cg-start_cg)
    end if
 
 end subroutine test_cg_spd_large
@@ -443,20 +449,20 @@ subroutine test_cg_ill_conditioned(error)
    do i = 1, n
       amat(i,i) = 10.0_wp ** (-(i-1))
    end do
-   
+
    ! Solution vector
    expected = [(1.0_wp, i=1, n)]
-   
+
    ! Compute RHS
    b = 0.0_wp
    do i = 1, n
       b(i) = amat(i,i) * expected(i)
    end do
-   
+
    ! Initial guess
    vrhs = 0.0_wp
    xvec = b
-   
+
    ! Solve
    call cpu_time(start_cg)
    call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
@@ -468,7 +474,7 @@ subroutine test_cg_ill_conditioned(error)
    deallocate(solver)
    allocate(direct_input :: solver_input)
    select type(solver_input)
-      type is (direct_input)
+   type is (direct_input)
       solver_input%verbosity = verbosity
    end select
    call solver_maker(solver, solver_input,  error)
@@ -477,7 +483,7 @@ subroutine test_cg_ill_conditioned(error)
    call cpu_time(start_direct)
    call solver%solve(amat=amat, xvec=xvec, vrhs=expected, error=error)
    call cpu_time(end_direct)
-   
+
    ! Check solution
    if (any(abs(vrhs - expected) / max(1.0_wp, abs(expected)) > thr_rel)) then
       call test_failed(error, "CG solver failed for medium SPD matrix")
@@ -488,7 +494,8 @@ subroutine test_cg_ill_conditioned(error)
    else
       print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
       print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', (end_direct-start_direct)/(end_cg-start_cg)
+      print '("CG Solver ime profit : ",f6.3)', &
+      & (end_direct-start_direct)/(end_cg-start_cg)
    end if
 
 end subroutine test_cg_ill_conditioned
@@ -530,16 +537,16 @@ subroutine test_cg_zero_rhs(error)
       if (i > 1) amat(i,i-1) = 0.1_wp
       if (i < n) amat(i,i+1) = 0.1_wp
    end do
-   
+
    ! Zero RHS
    xvec = 0.0_wp
-   
+
    ! Initial guess (non-zero to test convergence)
    vrhs = [1.0_wp, 2.0_wp, 3.0_wp, 4.0_wp, 5.0_wp]
-   
+
    ! Expected solution (all zeros)
    expected = 0.0_wp
-   
+
    ! Solve
    call cpu_time(start_cg)
    call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
@@ -551,7 +558,7 @@ subroutine test_cg_zero_rhs(error)
    deallocate(solver)
    allocate(direct_input :: solver_input)
    select type(solver_input)
-      type is (direct_input)
+   type is (direct_input)
       solver_input%verbosity = verbosity
    end select
    call solver_maker(solver, solver_input,  error)
@@ -560,7 +567,7 @@ subroutine test_cg_zero_rhs(error)
    call cpu_time(start_direct)
    call solver%solve(amat=amat, xvec=xvec, vrhs=expected, error=error)
    call cpu_time(end_direct)
-   
+
    ! Check solution
    if (any(abs(vrhs - expected) / max(1.0_wp, abs(expected)) > thr_rel)) then
       call test_failed(error, "CG solver failed for medium SPD matrix")
@@ -571,7 +578,8 @@ subroutine test_cg_zero_rhs(error)
    else
       print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
       print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', (end_direct-start_direct)/(end_cg-start_cg)
+      print '("CG Solver ime profit : ",f6.3)', &
+      & (end_direct-start_direct)/(end_cg-start_cg)
    end if
 
 end subroutine test_cg_zero_rhs
@@ -613,7 +621,7 @@ subroutine test_cg_random_spd(error)
    ! Initialize random seed
    call random_seed(size=seed_size)
    allocate(seed(seed_size))
-   seed = 12345  
+   seed = 12345
    call random_seed(put=seed)
 
    ! Generate random matrix B
@@ -622,14 +630,14 @@ subroutine test_cg_random_spd(error)
       do j = 1, i
          call random_number(r)
          ! Random values in [-1, 1]
-         temp(i,j) = 2.0_wp * r - 1.0_wp  
+         temp(i,j) = 2.0_wp * r - 1.0_wp
          if (i /= j) then
             ! Make symmetric
-            temp(j,i) = temp(i,j)  
+            temp(j,i) = temp(i,j)
          end if
       end do
    end do
-   
+
    ! Create SPD matrix: A = B^T * B + n*I (ensures positive definiteness)
    amat = 0.0_wp
    do i = 1, n
@@ -639,17 +647,17 @@ subroutine test_cg_random_spd(error)
          end do
       end do
       ! Add diagonal dominance
-      amat(i,i) = amat(i,i) + real(n, wp)  
+      amat(i,i) = amat(i,i) + real(n, wp)
    end do
-   
+
    ! Generate random solution vector
    expected = 0.0_wp
    do i = 1, n
       call random_number(r)
       ! Random values in [-1, 1]
-      expected(i) = 2.0_wp * r - 1.0_wp  
+      expected(i) = 2.0_wp * r - 1.0_wp
    end do
-   
+
    ! Compute RHS: b = A * expected
    b = 0.0_wp
    do i = 1, n
@@ -657,11 +665,11 @@ subroutine test_cg_random_spd(error)
          b(i) = b(i) + amat(i,j) * expected(j)
       end do
    end do
-   
+
    ! Initial guess
    vrhs = 0.0_wp
    xvec = b
-   
+
    ! Solve
    call cpu_time(start_cg)
    call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
@@ -673,7 +681,7 @@ subroutine test_cg_random_spd(error)
    deallocate(solver)
    allocate(direct_input :: solver_input)
    select type(solver_input)
-      type is (direct_input)
+   type is (direct_input)
       solver_input%verbosity = verbosity
    end select
    call solver_maker(solver, solver_input,  error)
@@ -682,7 +690,7 @@ subroutine test_cg_random_spd(error)
    call cpu_time(start_direct)
    call solver%solve(amat=amat, xvec=xvec, vrhs=expected, error=error)
    call cpu_time(end_direct)
-   
+
    ! Check solution
    if (any(abs(vrhs - expected) / max(1.0_wp, abs(expected)) > thr_rel)) then
       call test_failed(error, "CG solver failed for medium SPD matrix")
@@ -693,7 +701,8 @@ subroutine test_cg_random_spd(error)
    else
       print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
       print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', (end_direct-start_direct)/(end_cg-start_cg)
+      print '("CG Solver ime profit : ",f6.3)', &
+      & (end_direct-start_direct)/(end_cg-start_cg)
    end if
 
 end subroutine test_cg_random_spd
@@ -701,28 +710,28 @@ end subroutine test_cg_random_spd
 ! Additional subroutine for vector output
 
 subroutine write_vector(vector, name, unit)
-    implicit none
-    real(wp),intent(in) :: vector(:)
-    character(len=*),intent(in),optional :: name
-    integer, intent(in),optional :: unit
-    integer :: d
-    integer :: iunit, j
+   implicit none
+   real(wp),intent(in) :: vector(:)
+   character(len=*),intent(in),optional :: name
+   integer, intent(in),optional :: unit
+   integer :: d
+   integer :: iunit, j
 
-    d = size(vector, dim=1)
+   d = size(vector, dim=1)
 
-    if (present(unit)) then
-        iunit = unit
-    else
-        iunit = output_unit
-    end if
+   if (present(unit)) then
+      iunit = unit
+   else
+      iunit = output_unit
+   end if
 
-    if (present(name)) write(iunit,'(/,"vector printed:",1x,a)') name
+   if (present(name)) write(iunit,'(/,"vector printed:",1x,a)') name
 
-    do j = 1, d
-        write(iunit, '(i6)', advance='no') j
-        write(iunit, '(1x,f15.10)', advance='no') vector(j)
-        write(iunit, '(a)')
-    end do
+   do j = 1, d
+      write(iunit, '(i6)', advance='no') j
+      write(iunit, '(1x,f15.10)', advance='no') vector(j)
+      write(iunit, '(a)')
+   end do
 
 end subroutine write_vector
 

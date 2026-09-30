@@ -31,7 +31,9 @@ module test_wignerseitz
    real(wp), parameter :: thr1 = 1.0e5_wp*epsilon(1.0_wp)
    real(wp), parameter :: thr2 = sqrt(epsilon(1.0_wp))
 
+
 contains
+
 
 !> Collect all exported unit tests
 subroutine collect_wignerseitz(testsuite)

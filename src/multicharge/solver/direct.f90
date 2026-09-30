@@ -14,7 +14,8 @@
 ! limitations under the License.
 
 !> @file multicharge/solver/direct.f90
-!> Provides implementation of the direct solver using LAPACK for symmetric indefinite systems.
+!> Provides implementation of the direct solver using LAPACK for symmetric
+!> indefinite systems.
 
 module multicharge_solver_direct
    use iso_fortran_env, only : output_unit
@@ -48,6 +49,7 @@ module multicharge_solver_direct
 
    !> Default verbosity level
    integer, parameter :: verbosity_def = 0
+
 
 contains
 
