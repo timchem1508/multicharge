@@ -23,7 +23,6 @@ module multicharge_charge
    use mctc_env, only : error_type, wp
    use mctc_io, only : structure_type
    use mctc_cutoff, only : get_lattice_points
-   use mctc_csrlist, only : csr_list
    use multicharge_model_type, only : mchrg_model_type
    use multicharge_model_cache, only : mchrg_cache
    use multicharge_solver_type, only : mchrg_solver_type, mchrg_solver_input
@@ -40,7 +39,7 @@ contains
 
 
 !> Classical electronegativity equilibration charges
-subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, list, efield)
+subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, efield)
 
    !> Multicharge model
    class(mchrg_model_type), intent(in) :: mchrg_model
@@ -60,9 +59,6 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, list, efield)
    !> Derivative of the partial charges w.r.t. strain deformations
    real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
 
-   !> neighborlist
-   type(csr_list), intent(in), optional :: list
-
    !> Optional external electric field
    real(wp), intent(in), contiguous, optional :: efield(:)
 
@@ -70,21 +66,20 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, list, efield)
    logical :: grad
    real(wp), allocatable :: trans(:, :)
 
-   class(cg_solver), allocatable :: solver
-   class(cg_input), allocatable :: solver_input
+   class(direct_solver), allocatable :: solver
+   class(direct_input), allocatable :: solver_input
 
    allocate(solver_input)
-   solver_input%use_nlist = present(list)
    allocate(solver)
-   call new_cg_solver(solver, solver_input)
+   call new_direct_solver(solver, solver_input)
 
-   grad = present(dqdr) .and. present(dqdL) .and. .not. present(list)
+   grad = present(dqdr) .and. present(dqdL)
 
    allocate(cache)
    call get_lattice_points(mol%periodic, mol%lattice, mchrg_model%ncoord%cutoff, trans)
-   call mchrg_model%update(mol, cache, trans, grad, list=list)
+   call mchrg_model%update(mol, cache, trans, grad)
    call mchrg_model%solve(mol, solver, cache, error, &
-      & qvec=qvec, dqdr=dqdr, dqdL=dqdL, list=list, &
+      & qvec=qvec, dqdr=dqdr, dqdL=dqdL, &
       & efield=efield, unit=output_unit)
 
 end subroutine get_charges
@@ -121,7 +116,7 @@ end subroutine get_eeq_charges
 
 
 !> Obtain charges from bond capacity electronegativity equilibration model
-subroutine get_eeqbc_charges(mol, error, qvec, dqdr, dqdL, list, efield)
+subroutine get_eeqbc_charges(mol, error, qvec, dqdr, dqdL, efield)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
@@ -138,9 +133,6 @@ subroutine get_eeqbc_charges(mol, error, qvec, dqdr, dqdL, list, efield)
    !> Derivative of the partial charges w.r.t. strain deformations
    real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
 
-   !> neighborlist
-   type(csr_list), intent(in), optional :: list
-
    !> Optional external electric field
    real(wp), intent(in), contiguous, optional :: efield(:)
 
@@ -148,7 +140,7 @@ subroutine get_eeqbc_charges(mol, error, qvec, dqdr, dqdL, list, efield)
 
    call new_eeqbc2025_model(mol, eeqbc_model, error)
 
-   call get_charges(eeqbc_model, mol, error, qvec, dqdr, dqdL, list=list, efield=efield)
+   call get_charges(eeqbc_model, mol, error, qvec, dqdr, dqdL, efield=efield)
 
 end subroutine get_eeqbc_charges
 

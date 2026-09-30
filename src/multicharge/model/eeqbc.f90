@@ -32,7 +32,6 @@ module multicharge_model_eeqbc
    use mctc_io, only : structure_type
    use mctc_io_constants, only : pi
    use mctc_ncoord, only : cn_count, new_ncoord, ncoord_type
-   use mctc_csrlist, only : csr_list, spmv_csr
    use mctc_wignerseitz, only : wignerseitz_cell
    use multicharge_wignerseitz, only : new_wignerseitz_cell
    use multicharge_model_type, only : get_dir_trans, mchrg_model_type
@@ -74,14 +73,10 @@ module multicharge_model_eeqbc
       procedure :: get_xvec_derivs
       !> Calculate constraint matrix (molecular)
       procedure :: get_cmat_0d
-      !> Calculate constraint matrix (molecular) using neighborlist
-      procedure :: get_cmat_0d_list
       !> Calculate full constraint matrix (periodic)
       procedure :: get_cmat_3d
       !> Calculate constraint matrix derivatives (molecular)
       procedure :: get_dcmat_0d
-      !> Calculate constraint matrix derivatives (molecular) using neighborlist
-      procedure :: get_dcmat_0d_list
       !> Calculate constraint matrix derivatives (periodic)
       procedure :: get_dcmat_3d
       !> Calculate gradient
@@ -185,7 +180,7 @@ subroutine new_eeqbc_model(self, mol, error, chi, rad, &
 end subroutine new_eeqbc_model
 
 !> Update coordination numbers and local charges, and set up the Wigner-Seitz cell if periodic
-subroutine update(self, mol, cache, trans, grad, list)
+subroutine update(self, mol, cache, trans, grad)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Structure type
@@ -196,8 +191,6 @@ subroutine update(self, mol, cache, trans, grad, list)
    real(wp), intent(in) :: trans(:, :)
    !> Flag to compute derivatives
    logical, intent(in) :: grad
-   !> Multicharge neighborlist type
-   type(csr_list), intent(in), optional :: list
 
    cache%trans = trans
 
@@ -215,15 +208,10 @@ subroutine update(self, mol, cache, trans, grad, list)
       cache%grad = .false.
    end if
 
-   if (present(list)) then
-      call self%ncoord%get_coordination_number(mol, trans, cache%cn, list=list)
-      call self%local_charge(mol, trans, cache%qloc, list=list)
-   else
-      call self%ncoord%get_coordination_number(mol, trans, cache%cn)
-      call self%local_charge(mol, trans, qloc=cache%qloc)
-   end if
+   call self%ncoord%get_coordination_number(mol, trans, cache%cn)
+   call self%local_charge(mol, trans, qloc=cache%qloc)
 
-   if (any(mol%periodic) .and. .not. present(list)) then
+   if (any(mol%periodic)) then
       ! Create WSC
       call new_wignerseitz_cell(cache%wsc, mol)
    end if
@@ -231,7 +219,7 @@ subroutine update(self, mol, cache, trans, grad, list)
 end subroutine update
 
 !> Compute the capacitance matrix (and its derivatives if needed).
-subroutine get_capacitance_matrix(self, mol, ndim, cache, list)
+subroutine get_capacitance_matrix(self, mol, ndim, cache)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Structure type
@@ -240,63 +228,50 @@ subroutine get_capacitance_matrix(self, mol, ndim, cache, list)
    integer, intent(in) :: ndim
    !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
-   !> Multicharge neighborlist type
-   type(csr_list), intent(in), optional :: list
+
+   if (.not. allocated(cache%cmat)) allocate(cache%cmat(ndim, ndim))
 
    if (cache%grad) then
-      if (present(list)) then
-         if (.not. allocated(cache%dcdrdiag)) allocate(cache%dcdrdiag(3, mol%nat))
-         if (.not. allocated(cache%dcdL)) allocate(cache%dcdL(3, 3, mol%nat))
-      else
-         if (.not. allocated(cache%dcdr)) allocate(cache%dcdr(3, mol%nat, ndim))
-         if (.not. allocated(cache%dcdL)) allocate(cache%dcdL(3, 3, ndim))
-      end if
+      if (.not. allocated(cache%dcdr)) allocate(cache%dcdr(3, mol%nat, ndim))
+      if (.not. allocated(cache%dcdL)) allocate(cache%dcdL(3, 3, ndim))
    end if
 
-   if (present(list)) then
-      ! Allocate cmat
-      if (.not. allocated(cache%clist)) then
-         allocate(cache%clist(size(list%nlat, kind=i8)))
-      end if
-      ! neighborlist routines
-      if (any(mol%periodic)) then
-         call get_cmat_3d_list(self, mol, list, cache)
-         ! Capacitance-matrix gradients
-         if (cache%grad) then
-            call get_dcmat_3d_list(self, mol, list, cache)
-         end if
-      else
-         call get_cmat_0d_list(self, mol, list, cache)
-         ! Capacitance-matrix gradients
-         if (cache%grad) then
-            call get_dcmat_0d_list(self, mol, list, cache)
-         end if
+   if (any(mol%periodic)) then
+      ! Get full cmat sum over all WSC images (for get_xvec and xvec_derivs)
+      call get_cmat_3d(self, mol, cache%wsc, cache%cmat)
+      if (cache%grad) then
+         call get_dcmat_3d(self, mol, cache%wsc, cache%dcdr, cache%dcdL)
       end if
    else
-      ! Allocate cmat
-      if (.not. allocated(cache%cmat)) then
-         allocate(cache%cmat(ndim, ndim))
+      call get_cmat_0d(self, mol, cache%cmat)
+      ! Capacitance-matrix gradients
+      if (cache%grad) then
+         call get_dcmat_0d(self, mol, cache%dcdr, cache%dcdL)
       end if
-      ! Direct routines
-      if (any(mol%periodic)) then
-         ! Get full cmat sum over all WSC images (for get_xvec and xvec_derivs)
-         call get_cmat_3d(self, mol, cache%wsc, cache%cmat)
-         if (cache%grad) then
-            call get_dcmat_3d(self, mol, cache%wsc, cache%dcdr, cache%dcdL)
-         end if
-      else
-         call get_cmat_0d(self, mol, cache%cmat)
-         ! Capacitance-matrix gradients
-         if (cache%grad) then
-            call get_dcmat_0d(self, mol, cache%dcdr, cache%dcdL)
-         end if
+   end if
+   ! Allocate cmat
+   if (.not. allocated(cache%cmat)) then
+      allocate(cache%cmat(ndim, ndim))
+   end if
+   ! Direct routines
+   if (any(mol%periodic)) then
+      ! Get full cmat sum over all WSC images (for get_xvec and xvec_derivs)
+      call get_cmat_3d(self, mol, cache%wsc, cache%cmat)
+      if (cache%grad) then
+         call get_dcmat_3d(self, mol, cache%wsc, cache%dcdr, cache%dcdL)
+      end if
+   else
+      call get_cmat_0d(self, mol, cache%cmat)
+      ! Capacitance-matrix gradients
+      if (cache%grad) then
+         call get_dcmat_0d(self, mol, cache%dcdr, cache%dcdL)
       end if
    end if
 
 end subroutine get_capacitance_matrix
 
 !> Build the electronegativity vector, including local-charge corrections
-subroutine get_xvec(self, mol, ndim, cache, list, efield)
+subroutine get_xvec(self, mol, ndim, cache, efield)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Structure type
@@ -305,8 +280,6 @@ subroutine get_xvec(self, mol, ndim, cache, list, efield)
    integer, intent(in) :: ndim
    !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
-   !> Multicharge neighborlist type
-   type(csr_list), intent(in), optional :: list
    !> External electric field
    real(wp), intent(in), optional :: efield(:)
 
@@ -349,61 +322,35 @@ subroutine get_xvec(self, mol, ndim, cache, list, efield)
       cache%xtmp(mol%nat + 1) = mol%charge
    end if
 
-   if (present(list)) then
-      call spmv_csr(list, cache%clist, cache%xtmp, cache%xvec, alpha=1.0_wp, beta=0.0_wp)
-   else
-      call gemv(cache%cmat, cache%xtmp, cache%xvec)
-   end if
+   call gemv(cache%cmat, cache%xtmp, cache%xvec)
 
    ! Periodic contributions
    if (any(mol%periodic)) then
       call get_dir_trans(mol, dtrans, cutoff)
+      !$omp parallel do default(none) schedule(runtime) &
+      !$omp shared(mol, self, cache, dtrans) &
+      !$omp private(iat, izp, img, wsw, capi, vec, rvdw, ctmp)
+      do iat = 1, mol%nat
+         izp = mol%id(iat)
+         capi = self%cap(izp)
+         rvdw = self%rvdw(izp, izp)
 
-      if (present(list)) then
-         !$omp parallel do default(none) schedule(runtime) &
-         !$omp shared(mol, self, list, cache, dtrans) &
-         !$omp private(iat, izp, img, wsw, capi, vec, rvdw, ctmp)
-         do iat = 1, mol%nat
-            izp = mol%id(iat)
-            capi = self%cap(izp)
-            rvdw = self%rvdw(izp, izp)
+         wsw = 1.0_wp / real(cache%wsc%nimg(iat, iat), wp)
+         do img = 1, cache%wsc%nimg(iat, iat)
+            vec = cache%wsc%trans(:, cache%wsc%tridx(img, iat, iat))
+            call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, ctmp)
 
-            if (cache%wsc%nimg_list(list%inl(iat)) > 0) then
-               wsw = 1.0_wp / real(cache%wsc%nimg_list(list%inl(iat)), wp)
-               do img = cache%wsc%itr_list(list%inl(iat)), cache%wsc%itr_list(list%inl(iat) + 1) - 1
-                  vec = cache%wsc%trans(:, cache%wsc%tridx_list(img))
-                  call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, ctmp)
-                  cache%xvec(iat) = cache%xvec(iat) - wsw * ctmp * cache%xtmp(iat)
-               end do
-            end if
+            ! Direct write is safe: 'iat' is private to this specific thread
+            cache%xvec(iat) = cache%xvec(iat) - wsw * ctmp * cache%xtmp(iat)
          end do
-         !$omp end parallel do
-      else
-         !$omp parallel do default(none) schedule(runtime) &
-         !$omp shared(mol, self, cache, dtrans) &
-         !$omp private(iat, izp, img, wsw, capi, vec, rvdw, ctmp)
-         do iat = 1, mol%nat
-            izp = mol%id(iat)
-            capi = self%cap(izp)
-            rvdw = self%rvdw(izp, izp)
-
-            wsw = 1.0_wp / real(cache%wsc%nimg(iat, iat), wp)
-            do img = 1, cache%wsc%nimg(iat, iat)
-               vec = cache%wsc%trans(:, cache%wsc%tridx(img, iat, iat))
-               call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, ctmp)
-
-               ! Direct write is safe: 'iat' is private to this specific thread
-               cache%xvec(iat) = cache%xvec(iat) - wsw * ctmp * cache%xtmp(iat)
-            end do
-         end do
-         !$omp end parallel do
-      end if
+      end do
+      !$omp end parallel do
    end if
 
 end subroutine get_xvec
 
 !> Compute electronegativity-vector derivatives with respect to positions and lattice parameters
-subroutine get_xvec_derivs(self, mol, ndim, cache, list)
+subroutine get_xvec_derivs(self, mol, ndim, cache)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Structure type
@@ -412,8 +359,6 @@ subroutine get_xvec_derivs(self, mol, ndim, cache, list)
    integer, intent(in) :: ndim
    !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
-   !> Multicharge neighborlist type
-   type(csr_list), intent(in), optional :: list
 
    if (.not. allocated(cache%dcndr)) then
       allocate(cache%dcndr(3, mol%nat, mol%nat))
@@ -644,7 +589,7 @@ subroutine get_xvec_derivs_3d(self, mol, ndim, cache)
 end subroutine get_xvec_derivs_3d
 
 !> Assemble the Coulomb matrix, including bond-capacitance contributions
-subroutine get_coulomb_matrix(self, mol, ndim, cache, list)
+subroutine get_coulomb_matrix(self, mol, ndim, cache)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Structure type
@@ -653,30 +598,17 @@ subroutine get_coulomb_matrix(self, mol, ndim, cache, list)
    integer, intent(in) :: ndim
    !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
-   !> Multicharge neighborlist type
-   type(csr_list), intent(in), optional :: list
 
-   if (present(list)) then
-      ! Allocate amat
-      if (.not. allocated(cache%alist)) then
-         allocate(cache%alist(size(list%nlat, kind=i8)))
-      end if
-      if (any(mol%periodic)) then
-         call get_amat_3d_list(self, mol, list, cache)
-      else
-         call get_amat_0d_list(self, mol, list, cache)
-      end if
-   else
-      ! Allocate amat
-      if (.not. allocated(cache%amat)) then
-         allocate(cache%amat(ndim, ndim))
-      end if
-      if (any(mol%periodic)) then
-         call get_amat_3d(self, mol, cache)
-      else
-         call get_amat_0d(self, mol, cache)
-      end if
+   ! Allocate amat
+   if (.not. allocated(cache%amat)) then
+      allocate(cache%amat(ndim, ndim))
    end if
+   if (any(mol%periodic)) then
+      call get_amat_3d(self, mol, cache)
+   else
+      call get_amat_0d(self, mol, cache)
+   end if
+
 end subroutine get_coulomb_matrix
 
 !> Build the Coulomb matrix for a non‑periodic system (0D).
@@ -737,58 +669,6 @@ subroutine get_amat_0d(self, mol, cache)
    end if
 
 end subroutine get_amat_0d
-
-!> Build the Coulomb matrix for a non‑periodic system (0D).
-subroutine get_amat_0d_list(self, mol, list, cache)
-   !> EEQBC model type
-   class(eeqbc_model), intent(in) :: self
-   !> Molecular structure data
-   type(structure_type), intent(in) :: mol
-   !> Multicharge neighborlist type
-   type(csr_list), intent(in) :: list
-   !> Multicharge cache
-   type(mchrg_cache), intent(inout) :: cache
-
-   integer(i8) :: kat
-   integer :: iat, jat, izp, jzp
-   real(wp) :: vec(3), r2, gam2, tmp, norm_cn, radi, radj
-
-   ! Zero out global shared target arrays upfront
-   cache%alist(:) = 0.0_wp
-
-   !$omp parallel default(none) &
-   !$omp shared(cache, mol, self, list) &
-   !$omp private(iat, izp, jat, kat, jzp, gam2, vec, r2, tmp, norm_cn, radi, radj)
-
-   !$omp do schedule(runtime)
-   do iat = 1, mol%nat
-      izp = mol%id(iat)
-      ! Effective charge width of i
-      norm_cn = cache%cn(iat) / self%avg_cn(izp)
-      radi = self%rad(izp) * exp(-self%kcnrad(izp) * norm_cn)
-
-      do kat = list%inl(iat) + 1, list%inl(iat + 1) - 1
-         jat = list%nlat(kat)
-         jzp = mol%id(jat)
-         vec = mol%xyz(:, jat) - mol%xyz(:, iat)
-         r2 = vec(1)**2 + vec(2)**2 + vec(3)**2
-         ! Effective charge width of j
-         norm_cn = cache%cn(jat) / self%avg_cn(jzp)
-         radj = self%rad(jzp) * exp(-self%kcnrad(jzp) * norm_cn)
-         ! Coulomb interaction of Gaussian charges
-         gam2 = 1.0_wp / (radi**2 + radj**2)
-         tmp = erf(sqrt(r2 * gam2)) / sqrt(r2) * cache%clist(kat)
-         cache%alist(kat) = tmp
-      end do
-
-      ! Effective hardness
-      tmp = self%eta(izp) + self%kqeta_pre * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi
-      cache%alist(list%inl(iat)) = tmp * cache%clist(list%inl(iat)) + 1.0_wp
-   end do
-   !$omp end do
-   !$omp end parallel
-
-end subroutine get_amat_0d_list
 
 !> Build the Coulomb matrix for a periodic system (3D) using Ewald summation and bond capacitance.
 subroutine get_amat_3d(self, mol, cache)
@@ -869,90 +749,6 @@ subroutine get_amat_3d(self, mol, cache)
 
 end subroutine get_amat_3d
 
-!> Build the Coulomb matrix for a periodic system using a CSR adjacency list
-subroutine get_amat_3d_list(self, mol, list, cache)
-   !> EEQBC model type
-   class(eeqbc_model), intent(in) :: self
-   !> Molecular structure data
-   type(structure_type), intent(in) :: mol
-   !> Multicharge neighborlist type
-   type(csr_list), intent(in) :: list
-   !> Multicharge cache
-   type(mchrg_cache), intent(inout) :: cache
-
-   integer :: iat, jat, izp, jzp
-   integer(i8) :: kat, img
-   real(wp) :: vec(3), gam, dtmp, capi, capj, radi, radj, norm_cn, rvdw, wsw
-   real(wp) :: atmp, adiag_tmp
-   real(wp), allocatable :: dtrans(:, :)
-
-   call get_dir_trans(mol, dtrans, cutoff)
-
-   ! Zero out global shared target arrays upfront
-   cache%alist(:) = 0.0_wp
-
-   !$omp parallel default(none) &
-   !$omp shared(cache, mol, self, list, dtrans) &
-   !$omp private(iat, izp, kat, jat, jzp, gam, vec, dtmp, norm_cn, radi, radj) &
-   !$omp private(capi, capj, rvdw, wsw, img, atmp, adiag_tmp)
-
-   !$omp do schedule(runtime)
-   do iat = 1, mol%nat
-      izp = mol%id(iat)
-      norm_cn = cache%cn(iat) / self%avg_cn(izp)
-      radi = self%rad(izp) * exp(-self%kcnrad(izp) * norm_cn)
-      capi = self%cap(izp)
-
-      ! Initialize scalar accumulator for the diagonal of this atom
-      adiag_tmp = 0.0_wp
-
-      do kat = list%inl(iat) + 1, list%inl(iat+1) - 1
-         if (cache%wsc%nimg_list(kat) == 0) cycle
-
-         jat = list%nlat(kat)
-         jzp = mol%id(jat)
-         capj = self%cap(jzp)
-         rvdw = self%rvdw(izp, jzp)
-         wsw = 1.0_wp / real(cache%wsc%nimg_list(kat), wp)
-
-         norm_cn = cache%cn(jat) / self%avg_cn(jzp)
-         radj = self%rad(jzp) * exp(-self%kcnrad(jzp) * norm_cn)
-         gam = 1.0_wp / sqrt(radi**2 + radj**2)
-
-         ! Accumulate image contributions in a local scalar
-         atmp = 0.0_wp
-         do img = cache%wsc%itr_list(kat), cache%wsc%itr_list(kat+1) - 1
-            vec = mol%xyz(:, jat) - mol%xyz(:, iat) + cache%wsc%trans(:, cache%wsc%tridx_list(img))
-            call get_amat_dir_3d(vec, gam, dtrans, self%kbc, rvdw, capi, capj, dtmp)
-            atmp = atmp + dtmp * wsw
-         end do
-
-         cache%alist(kat) = atmp
-      end do
-
-      ! Diagonal Coulomb interaction terms
-      gam = 1.0_wp / sqrt(2.0_wp * radi**2)
-      rvdw = self%rvdw(izp, izp)
-      if (cache%wsc%nimg_list(list%inl(iat)) > 0) then
-         wsw = 1.0_wp / real(cache%wsc%nimg_list(list%inl(iat)), wp)
-         do img = cache%wsc%itr_list(list%inl(iat)), cache%wsc%itr_list(list%inl(iat) + 1) - 1
-            vec = cache%wsc%trans(:, cache%wsc%tridx_list(img))
-            call get_amat_dir_3d(vec, gam, dtrans, self%kbc, rvdw, capi, capi, dtmp)
-            adiag_tmp = adiag_tmp + dtmp * wsw
-         end do
-      end if
-
-      ! Effective hardness
-      dtmp = self%eta(izp) + self%kqeta_pre * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi
-
-      ! Single safe direct write (iat is thread-exclusive)
-      cache%alist(list%inl(iat)) = adiag_tmp + cache%clist(list%inl(iat)) * dtmp + 1.0_wp
-   end do
-   !$omp end do
-   !$omp end parallel
-
-end subroutine get_amat_3d_list
-
 !> Real-space contribution to the Coulomb matrix for the EEQBC model.
 subroutine get_amat_dir_3d(rij, gam, trans, kbc, rvdw, capi, capj, amat)
    !> Distance vector between two atoms (including lattice translation)
@@ -989,7 +785,7 @@ subroutine get_amat_dir_3d(rij, gam, trans, kbc, rvdw, capi, capj, amat)
 end subroutine get_amat_dir_3d
 
 !> Compute derivatives of the Coulomb matrix (multiplied by the charge vector) for the EEQBC model.
-subroutine get_coulomb_derivs(self, mol, ndim, cache, list)
+subroutine get_coulomb_derivs(self, mol, ndim, cache)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Structure type
@@ -998,8 +794,6 @@ subroutine get_coulomb_derivs(self, mol, ndim, cache, list)
    integer, intent(in) :: ndim
    !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
-   !> Multicharge neighborlist type
-   type(csr_list), intent(in), optional :: list
 
    real(wp), allocatable :: atrace(:,:)
 
@@ -1449,60 +1243,6 @@ subroutine get_cmat_0d(self, mol, cmat)
 
 end subroutine get_cmat_0d
 
-!> Build the bond capacitance matrix for a non‑periodic system.
-subroutine get_cmat_0d_list(self, mol, list, cache)
-   !> EEQBC model type
-   class(eeqbc_model), intent(in) :: self
-   !> Molecular structure data
-   type(structure_type), intent(in) :: mol
-   !> CSR list of neighbors
-   type(csr_list), intent(in) :: list
-   !> EEQBC cache
-   type(mchrg_cache), intent(inout) :: cache
-
-   integer :: iat, jat, izp, jzp
-   integer(i8) :: kat
-   real(wp) :: vec(3), rvdw, tmp, capi, capj, r1
-   real(wp) :: diag(mol%nat)
-
-   cache%clist(:) = 0.0_wp
-   diag(:) = 0.0_wp
-
-   !$omp parallel default(none) &
-   !$omp shared(cache, mol, list, self, diag) &
-   !$omp private(iat, kat, izp, jat, jzp, vec, r1, rvdw, tmp, capi, capj)
-
-   !$omp do schedule(runtime) reduction(+:diag)
-   do iat = 1, mol%nat
-      izp = mol%id(iat)
-      capi = self%cap(izp)
-      do kat = list%inl(iat) + 1, list%inl(iat + 1) - 1
-         jat = list%nlat(kat)
-         jzp = mol%id(jat)
-         vec = mol%xyz(:, jat) - mol%xyz(:, iat)
-         r1 = norm2(vec)
-         rvdw = self%rvdw(izp, jzp)
-         capj = self%cap(jzp)
-
-         call get_cpair(self%kbc, tmp, r1, rvdw, capi, capj)
-
-         cache%clist(kat) = -tmp
-         diag(iat) = diag(iat) + tmp
-         diag(jat) = diag(jat) + tmp
-      end do
-   end do
-   !$omp end do
-
-   !$omp do schedule(static)
-   do iat = 1, mol%nat
-      cache%clist(list%inl(iat)) = diag(iat)
-   end do
-   !$omp end do
-
-   !$omp end parallel
-
-end subroutine get_cmat_0d_list
-
 !> Build the bond capacitance matrix for a periodic system.
 subroutine get_cmat_3d(self, mol, wsc, cmat)
    !> EEQBC model type
@@ -1570,88 +1310,6 @@ subroutine get_cmat_3d(self, mol, wsc, cmat)
    end if
 
 end subroutine get_cmat_3d
-
-!> Build the bond capacitance matrix for a periodic system using CSR adjacency list.
-subroutine get_cmat_3d_list(self, mol, list, cache)
-   !> EEQBC model type
-   class(eeqbc_model), intent(in) :: self
-   !> Molecular structure data
-   type(structure_type), intent(in) :: mol
-   !> Multicharge neighborlist type (CSR format)
-   type(csr_list), intent(in) :: list
-   !> EEQBC cache
-   type(mchrg_cache), intent(inout) :: cache
-
-   integer :: iat, jat, izp, jzp
-   integer(i8) :: kat, img
-   real(wp) :: vec(3), rvdw, tmp, capi, capj, wsw, ctmp
-   real(wp), allocatable :: dtrans(:, :)
-   real(wp) :: diag(mol%nat)
-
-   call get_dir_trans(mol, dtrans, cutoff)
-
-   cache%clist(:) = 0.0_wp
-   diag(:) = 0.0_wp
-
-   !$omp parallel default(none) &
-   !$omp shared(cache, mol, list, self, dtrans, diag) &
-   !$omp private(iat, izp, jat, kat, jzp, img) &
-   !$omp private(vec, rvdw, tmp, capi, capj, wsw, ctmp)
-
-   !$omp do schedule(runtime) reduction(+:diag)
-   do iat = 1, mol%nat
-      izp = mol%id(iat)
-      capi = self%cap(izp)
-
-      ! 1. Off-diagonal neighbor pairs (jat /= iat)
-      do kat = list%inl(iat) + 1, list%inl(iat+1) - 1
-         if (cache%wsc%nimg_list(kat) == 0) cycle
-
-         jat = list%nlat(kat)
-         jzp = mol%id(jat)
-         capj = self%cap(jzp)
-         rvdw = self%rvdw(izp, jzp)
-         wsw = 1.0_wp / real(cache%wsc%nimg_list(kat), wp)
-
-         ctmp = 0.0_wp
-
-         do img = cache%wsc%itr_list(kat), cache%wsc%itr_list(kat+1) - 1
-            vec = mol%xyz(:, iat) - mol%xyz(:, jat) - cache%wsc%trans(:, cache%wsc%tridx_list(img))
-
-            call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, tmp)
-
-            ctmp = ctmp - tmp * wsw
-            diag(iat) = diag(iat) + tmp * wsw
-            diag(jat) = diag(jat) + tmp * wsw
-         end do
-
-         cache%clist(kat) = ctmp
-
-      end do
-
-      ! 2. Self-interaction with periodic images R /= 0 (j = iat)
-      rvdw = self%rvdw(izp, izp)
-      wsw = 1.0_wp / real(cache%wsc%nimg_list(list%inl(iat)), wp)
-
-      do img = cache%wsc%itr_list(list%inl(iat)), cache%wsc%itr_list(list%inl(iat) + 1) - 1
-         vec = cache%wsc%trans(:, cache%wsc%tridx_list(img))
-         call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, tmp)
-         ! Direct write is safe: touches only own atom, not even a cross-thread hazard
-         diag(iat) = diag(iat) + tmp * wsw
-      end do
-
-   end do
-   !$omp end do
-
-   !$omp do schedule(static)
-   do iat = 1, mol%nat
-      cache%clist(list%inl(iat)) = diag(iat)
-   end do
-   !$omp end do
-
-   !$omp end parallel
-
-end subroutine get_cmat_3d_list
 
 !> Compute the bond capacitance between two atoms based on distance.
 subroutine get_cpair(kbc, cpair, r1, rvdw, capi, capj)
@@ -1796,68 +1454,6 @@ subroutine get_dcmat_0d(self, mol, dcdr, dcdL)
 
 end subroutine get_dcmat_0d
 
-!> Build the derivative of the bond capacitance matrix for a non‑periodic system.
-subroutine get_dcmat_0d_list(self, mol, list, cache)
-   !> EEQBC model type
-   class(eeqbc_model), intent(in) :: self
-   !> Molecular structure data
-   type(structure_type), intent(in) :: mol
-   !> Multicharge neighborlist type
-   type(csr_list), intent(in) :: list
-   !> Multicharge cache
-   type(mchrg_cache), intent(inout) :: cache
-
-   integer :: iat, jat, izp, jzp, ic, i, j
-   integer(i8) :: kat
-
-   real(wp) :: vec(3), rvdw, dG(3), dS(3, 3), capi, capj
-
-   real(wp), allocatable :: dcdrdiag(:, :), dcdL(:, :, :)
-
-   ! Zero out global shared target arrays upfront
-   cache%dcdrdiag(:, :) = 0.0_wp
-   cache%dcdL(:, :, :) = 0.0_wp
-
-   allocate(dcdrdiag, source=cache%dcdrdiag)
-   allocate(dcdL, source=cache%dcdL)
-
-   !$omp parallel default(none) &
-   !$omp shared(cache, mol, list, self) &
-   !$omp private(iat, izp, jat, kat, jzp, vec, rvdw) &
-   !$omp private(dG, dS, capi, capj, ic, i, j) &
-   !$omp reduction(+:dcdrdiag, dcdL)
-
-   !$omp do schedule(runtime)
-   do iat = 1, mol%nat
-      izp = mol%id(iat)
-      capi = self%cap(izp)
-      do kat = list%inl(iat) + 1, list%inl(iat + 1) - 1
-         jat = list%nlat(kat)
-         jzp = mol%id(jat)
-         capj = self%cap(jzp)
-         rvdw = self%rvdw(izp, jzp)
-         vec = mol%xyz(:, jat) - mol%xyz(:, iat)
-
-         call get_dcpair(self%kbc, vec, rvdw, capi, capj, dG, dS)
-
-         ! Updates for coordinate gradients (dcdrdiag)
-         dcdrdiag(:, iat) = dcdrdiag(:, iat) - dG(:)
-         dcdrdiag(:, jat) = dcdrdiag(:, jat) + dG(:)
-
-         ! Updates for strain/lattice derivatives (dcdL)
-         dcdL(:, :, iat) = dcdL(:, :, iat) + dS(:, :)
-         dcdL(:, :, jat) = dcdL(:, :, jat) + dS(:, :)
-
-      end do
-   end do
-   !$omp end do
-   !$omp end parallel
-
-   cache%dcdrdiag(:, :) = cache%dcdrdiag(:, :) + dcdrdiag(:, :)
-   cache%dcdL(:, :, :) = cache%dcdL(:, :, :) + dcdL(:, :, :)
-
-end subroutine get_dcmat_0d_list
-
 !> Build the derivative of the bond capacitance matrix for a periodic system.
 subroutine get_dcmat_3d(self, mol, wsc, dcdr, dcdL)
    !> EEQBC model type
@@ -1932,84 +1528,6 @@ subroutine get_dcmat_3d(self, mol, wsc, dcdr, dcdL)
    deallocate(dcdL_acc)
 
 end subroutine get_dcmat_3d
-
-!> Build the derivative of the bond capacitance matrix for a periodic system using a
-!> CSR adjacency list.
-subroutine get_dcmat_3d_list(self, mol, list, cache)
-   !> EEQBC model type
-   class(eeqbc_model), intent(in) :: self
-   !> Molecular structure data
-   type(structure_type), intent(in) :: mol
-   !> Multicharge neighborlist type
-   type(csr_list), intent(in) :: list
-   !> Multicharge cache
-   type(mchrg_cache), intent(inout) :: cache
-
-   integer :: iat, jat, izp, jzp
-   integer(i8) :: kat, img
-   real(wp) :: vec(3), rvdw, dG(3), dS(3, 3), capi, capj, wsw
-   real(wp), allocatable :: dtrans(:, :)
-   real(wp), allocatable :: dcdrdiag_acc(:, :), dcdL_acc(:, :, :)
-
-   call get_dir_trans(mol, dtrans, cutoff)
-
-   cache%dcdrdiag(:, :) = 0.0_wp
-   cache%dcdL(:, :, :) = 0.0_wp
-
-   allocate(dcdrdiag_acc(3, mol%nat), source=0.0_wp)
-   allocate(dcdL_acc(3, 3, mol%nat), source=0.0_wp)
-
-   !$omp parallel default(none) &
-   !$omp shared(mol, cache, list, self, dtrans) &
-   !$omp private(iat, izp, jat, kat, jzp, vec, rvdw, dG, dS, capi, capj, wsw, img) &
-   !$omp reduction(+:dcdrdiag_acc, dcdL_acc)
-
-   !$omp do schedule(runtime)
-   do iat = 1, mol%nat
-      izp = mol%id(iat)
-      capi = self%cap(izp)
-
-      do kat = list%inl(iat) + 1, list%inl(iat+1) - 1
-         if (cache%wsc%nimg_list(kat) == 0) cycle
-
-         jat = list%nlat(kat)
-         jzp = mol%id(jat)
-         capj = self%cap(jzp)
-         rvdw = self%rvdw(izp, jzp)
-         wsw = 1.0_wp / real(cache%wsc%nimg_list(kat), wp)
-
-         do img = cache%wsc%itr_list(kat), cache%wsc%itr_list(kat+1) - 1
-            vec = mol%xyz(:, jat) - mol%xyz(:, iat) + &
-               & cache%wsc%trans(:, cache%wsc%tridx_list(img))
-            call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
-
-            dcdrdiag_acc(:, iat) = dcdrdiag_acc(:, iat) - dG(:) * wsw
-            dcdrdiag_acc(:, jat) = dcdrdiag_acc(:, jat) + dG(:) * wsw
-
-            dcdL_acc(:, :, iat) = dcdL_acc(:, :, iat) + dS(:, :) * wsw
-            dcdL_acc(:, :, jat) = dcdL_acc(:, :, jat) + dS(:, :) * wsw
-         end do
-      end do
-
-      rvdw = self%rvdw(izp, izp)
-      if (cache%wsc%nimg_list(list%inl(iat)) > 0) then
-         wsw = 1.0_wp / real(cache%wsc%nimg_list(list%inl(iat)), wp)
-         do img = cache%wsc%itr_list(list%inl(iat)), cache%wsc%itr_list(list%inl(iat) + 1) - 1
-            vec = cache%wsc%trans(:, cache%wsc%tridx_list(img))
-            call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, dG, dS)
-            dcdL_acc(:, :, iat) = dcdL_acc(:, :, iat) + dS(:, :) * wsw
-         end do
-      end if
-
-   end do
-   !$omp end do
-   !$omp end parallel
-
-   cache%dcdrdiag(:, :) = dcdrdiag_acc
-   cache%dcdL(:, :, :) = dcdL_acc
-   deallocate(dcdrdiag_acc, dcdL_acc)
-
-end subroutine get_dcmat_3d_list
 
 !> Sum the derivative of bond capacitance over lattice translations.
 subroutine get_dcpair_dir(kbc, rij, trans, rvdw, capi, capj, dgpair, dspair)
@@ -2120,90 +1638,8 @@ subroutine get_dcnpair_dir(self, mol, trans, iat, jat, rij, dG_ij, dG_ji)
    end do
 end subroutine get_dcnpair_dir
 
-!> Compute the coordination number and its diagonal derivatives using a neighborlist.
-subroutine get_dcndiag_list(self, mol, trans, cn, dcndrdiag, dcndL, list)
-   !> Coordination number container
-   class(ncoord_type), intent(in) :: self
-   !> Molecular structure data
-   type(structure_type), intent(in) :: mol
-   !> Lattice points
-   real(wp), intent(in) :: trans(:, :)
-   !> Error function coordination number.
-   real(wp), intent(out) :: cn(:)
-   !> Diagonal derivative of the CN with respect to the Cartesian coordinates.
-   real(wp), intent(out) :: dcndrdiag(:, :)
-   !> Derivative of the CN with respect to strain deformations.
-   real(wp), intent(out) :: dcndL(:, :, :)
-   !> Adjacency list for neighborlist-based CN evaluation
-   type(csr_list), intent(in) :: list
-
-   integer :: iat, jat, izp, jzp, itr
-   integer(i8) :: kat
-   real(wp) :: r2, r1, rij(3), countf, countd(3), sigma(3, 3), cutoff2, den
-
-   real(wp), allocatable :: cn_local(:)
-   real(wp), allocatable :: dcndrdiag_local(:, :),  dcndL_local(:, :, :)
-
-   cn(:) = 0.0_wp
-   dcndrdiag(:, :)  = 0.0_wp
-   dcndL(:, :, :) = 0.0_wp
-   cutoff2 = self%cutoff**2
-
-   !$omp parallel default(none) &
-   !$omp shared(self, mol, list, trans, cutoff2, cn, dcndrdiag, dcndL) &
-   !$omp private(jat, kat, itr, izp, jzp, r2, rij, r1, den, countf, countd) &
-   !$omp private(sigma, cn_local, dcndrdiag_local, dcndL_local)
-   allocate(cn_local, source=cn)
-   allocate(dcndrdiag_local, source=dcndrdiag)
-   allocate(dcndL_local, source=dcndL)
-
-   !$omp do schedule(runtime)
-   do iat = 1, mol%nat
-      izp = mol%id(iat)
-      do kat = list%inl(iat), list%inl(iat+1) - 1
-         jat = list%nlat(kat)
-         jzp = mol%id(jat)
-         den = self%get_en_factor(izp, jzp)
-
-         do itr = 1, size(trans, dim=2)
-            rij = mol%xyz(:, iat) - (mol%xyz(:, jat) + trans(:, itr))
-            r2 = sum(rij**2)
-            r1 = sqrt(r2)
-
-            countf = den * self%ncoord_count(izp, jzp, r1)
-            countd = den * self%ncoord_dcount(izp, jzp, r1) * rij/r1
-            sigma = spread(countd, 1, 3) * spread(rij, 2, 3)
-
-            ! Accumulate terms for the current atom (i)
-            cn_local(iat) = cn_local(iat) + countf
-            dcndrdiag_local(:,iat) = dcndrdiag_local(:,iat) + countd
-            dcndL_local(:, :, iat) = dcndL_local(:, :, iat) + sigma
-
-            ! Accumulate terms for the neighbor atom (j), avoiding double counting for self-images
-            if (iat /= jat) then
-               cn_local(jat) = cn_local(jat) + countf * self%directed_factor
-               dcndrdiag_local(:,jat) = dcndrdiag_local(:,jat) - countd * self%directed_factor
-               dcndL_local(:, :, jat) = dcndL_local(:, :, jat) + sigma * self%directed_factor
-            end if
-
-         end do
-      end do
-   end do
-   !$omp end do
-
-   !$omp critical (ncoord_d_diag_list_)
-   cn(:)            = cn(:)            + cn_local(:)
-   dcndrdiag(:, :)  = dcndrdiag(:, :)  + dcndrdiag_local(:, :)
-   dcndL(:, :, :)   = dcndL(:, :, :)   + dcndL_local(:, :, :)
-   !$omp end critical (ncoord_d_diag_list_)
-
-   deallocate(cn_local, dcndrdiag_local, dcndL_local)
-   !$omp end parallel
-
-end subroutine get_dcndiag_list
-
 !> Accumulate the gradient and stress contributions of the EEQBC model
-subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta, list)
+subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Molecular structure data
@@ -2220,169 +1656,14 @@ subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta, list)
    real(wp), optional, intent(in) :: alpha
    !> Optional electronegativity prefactor
    real(wp), optional, intent(in) :: beta
-   !> Optional neighborlist
-   type(csr_list), intent(in), optional :: list
 
-   if (.not. present(list)) then
-      if (any(mol%periodic)) then
-         call get_grad_3d(self, mol, cache, p, gradient, sigma, alphain=alpha, betain=beta)
-      else
-         call get_grad_0d(self, mol, cache, p, gradient, sigma, alphain=alpha, betain=beta)
-      end if
+   if (any(mol%periodic)) then
+      call get_grad_3d(self, mol, cache, p, gradient, sigma, alphain=alpha, betain=beta)
    else
-      if (any(mol%periodic)) then
-         call get_grad_3d_list(self, mol, list, cache, p, gradient, sigma, alphain=alpha, betain=beta)
-      else
-         call get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain=alpha, betain=beta)
-      end if
+      call get_grad_0d(self, mol, cache, p, gradient, sigma, alphain=alpha, betain=beta)
    end if
 
 end subroutine get_grad
-
-!> Accumulate gradient and stress contributions for a non-periodic CSR system
-subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain, betain)
-   !> EEQBC model type
-   class(eeqbc_model), intent(in) :: self
-   !> Molecular structure data
-   type(structure_type), intent(in) :: mol
-   !> Multicharge neighborlist type
-   type(csr_list), intent(in) :: list
-   !> Multicharge cache
-   type(mchrg_cache), intent(in) :: cache
-   !> Solution vector
-   real(wp), intent(in) :: p(:)
-   !> Cartesian gradient
-   real(wp), intent(inout) :: gradient(:, :)
-   !> Lattice stress contribution
-   real(wp), intent(inout) :: sigma(:, :)
-   !> Optional gradient prefactor
-   real(wp), optional, intent(in) :: alphain
-   !> Optional electronegativity prefactor
-   real(wp), optional, intent(in) :: betain
-
-   real(wp) :: alpha, beta
-   integer :: iat, jat, izp, jzp
-   integer(i8) :: kat
-   real(wp) :: vec(3), r2, gam, arg, dtmp, norm_cn
-   real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3)
-   real(wp) :: W_ii, W_jj, W_ij
-   real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
-   real(wp), allocatable :: v(:), qlocacc(:), cnacc(:)
-   real(wp), allocatable :: dtrans(:, :)
-
-   alpha = 1.0_wp
-   if (present(alphain)) alpha = alphain
-   beta = 1.0_wp
-   if (present(betain)) beta = betain
-
-   allocate(dtrans, source=list%trans)
-   allocate(qlocacc(mol%nat), cnacc(mol%nat))
-   qlocacc = 0.0_wp
-   cnacc = 0.0_wp
-
-   allocate(v(mol%nat))
-   call spmv_csr(list, cache%clist, p, v, alpha=1.0_wp, beta=0.0_wp)
-
-   allocate(gradient_local(3, mol%nat), source=0.0_wp)
-   allocate(sigma_local(3, 3), source=0.0_wp)
-
-   !$omp parallel do default(none) schedule(runtime) &
-   !$omp shared(cache, mol, self, p, v, list, alpha, beta) &
-   !$omp private(iat, jat, izp, jzp, gam, vec, r2, dtmp, norm_cn, arg) &
-   !$omp private(radi, radj, dradi, dradj, dG, dS, W_ii, W_jj, W_ij) &
-   !$omp reduction(+:cnacc, qlocacc, gradient_local, sigma_local)
-
-   do iat = 1, mol%nat
-      izp = mol%id(iat)
-      norm_cn = 1.0_wp / self%avg_cn(izp)
-      radi = self%rad(izp) * exp(-self%kcnrad(izp) * cache%cn(iat) * norm_cn)
-      dradi = -self%kcnrad(izp) * norm_cn * radi
-
-      W_ii = p(iat) * cache%vrhs(iat)
-
-      do kat = list%inl(iat) + 1, list%inl(iat + 1) - 1
-         jat = list%nlat(kat)
-         jzp = mol%id(jat)
-         vec = mol%xyz(:, jat) - mol%xyz(:, iat)
-         r2 = dot_product(vec, vec)
-
-         W_jj = p(jat) * cache%vrhs(jat)
-         W_ij = p(iat) * cache%vrhs(jat) + p(jat) * cache%vrhs(iat)
-
-         norm_cn = 1.0_wp / self%avg_cn(jzp)
-         radj = self%rad(jzp) * exp(-self%kcnrad(jzp) * cache%cn(jat) * norm_cn)
-         dradj = -self%kcnrad(jzp) * norm_cn * radj
-
-         gam = 1.0_wp / sqrt(radi**2 + radj**2)
-         arg = gam * gam * r2
-         dtmp = 2.0_wp * exp(-arg) / (sqrtpi)
-
-         ! Accumulate scalar weights for CN derivatives
-         cnacc(iat) = cnacc(iat) - (dtmp * radi * dradi * gam**3.0_wp) * cache%clist(kat) * W_ij * alpha
-         cnacc(jat) = cnacc(jat) - (dtmp * radj * dradj * gam**3.0_wp) * cache%clist(kat) * W_ij * alpha
-
-         ! 1. Explicit Geometry Derivative
-         dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) - erf(sqrt(arg)) / (r2 * sqrt(r2))
-         dG = dtmp * vec
-         dS = spread(dG, 1, 3) * spread(vec, 2, 3)
-
-         gradient_local(:, iat) = gradient_local(:, iat) - dG * cache%clist(kat) * W_ij * alpha
-         gradient_local(:, jat) = gradient_local(:, jat) + dG * cache%clist(kat) * W_ij * alpha
-         sigma_local(:, :)   = sigma_local(:, :)   + dS * cache%clist(kat) * W_ij * alpha
-
-         ! 3 & 4. Capacitance derivatives
-         call get_dcpair(self%kbc, vec, self%rvdw(izp, jzp), self%cap(izp), self%cap(jzp), dG, dS)
-         dtmp = erf(sqrt(r2) * gam) / sqrt(r2)
-         gradient_local(:, iat) = gradient_local(:, iat) + dtmp * dG * W_ij * alpha &
-            & + p(iat) * cache%xtmp(jat) * dG * beta &
-            & - p(jat) * (cache%xtmp(jat) - cache%xtmp(iat)) * dG * beta
-
-         gradient_local(:, jat) = gradient_local(:, jat) - dtmp * dG * W_ij * alpha &
-            & - p(jat) * cache%xtmp(iat) * dG * beta &
-            & + p(iat) * (cache%xtmp(iat) - cache%xtmp(jat)) * dG * beta
-
-         sigma_local(:, :)   = sigma_local(:, :)   - dtmp * W_ij * dS * alpha &
-            & - p(iat) * cache%xtmp(jat) * dS * beta &
-            & - p(jat) * cache%xtmp(iat) * dS * beta
-
-         dtmp = (self%eta(jzp) + self%kqeta_pre * tanh(self%kqeta(jzp) * cache%qloc(jat)) + sqrt2pi / radj)
-         gradient_local(:, iat) = gradient_local(:, iat) - dtmp * dG * W_jj * alpha
-         dtmp = (self%eta(izp) + self%kqeta_pre * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi)
-         gradient_local(:, jat) = gradient_local(:, jat) + dtmp * dG * W_ii * alpha
-      end do
-
-      ! 5. Diagonal weight accumulation
-      qlocacc(iat) = qlocacc(iat) + self%kqeta_pre * self%kqeta(izp) &
-         & / cosh(self%kqeta(izp) * cache%qloc(iat))**2 &
-         & * W_ii * cache%clist(list%inl(iat)) * alpha &
-         & + v(iat) * self%kqchi(mol%id(iat)) * beta
-      cnacc(iat) = cnacc(iat) - sqrt2pi * dradi / (radi**2) * W_ii * cache%clist(list%inl(iat)) * alpha &
-         & + v(iat) * self%kcnchi(mol%id(iat)) * beta
-
-      ! 6. Intrinsic capacitance
-      dtmp = (self%eta(izp) + self%kqeta_pre * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi) * W_ii
-      gradient_local(:, iat) = gradient_local(:, iat) + dtmp * cache%dcdrdiag(:, iat) * alpha &
-         & + p(iat) * cache%xtmp(iat) * cache%dcdrdiag(:, iat) * beta
-
-      sigma_local(:, :)   = sigma_local(:, :)   + dtmp * cache%dcdL(:, :, iat) * alpha &
-         & + p(iat) * cache%xtmp(iat) * cache%dcdL(:, :, iat) * beta
-   end do
-   !$omp end parallel do
-
-   gradient = gradient + gradient_local
-   sigma = sigma + sigma_local
-
-   gradient_local = 0.0_wp
-   sigma_local = 0.0_wp
-
-   call self%ncoord%add_coordination_number_derivs_list(mol, dtrans, cnacc, gradient_local, sigma_local, list)
-   call self%ncoord_en%add_coordination_number_derivs_list(mol, dtrans, qlocacc, gradient_local, sigma_local, list)
-
-   gradient = gradient + gradient_local
-   sigma = sigma + sigma_local
-
-   deallocate(gradient_local, sigma_local, qlocacc, cnacc, dtrans, v)
-end subroutine get_grad_0d_list
 
 !> Accumulate gradient and stress contributions for a non-periodic system
 subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
@@ -2524,170 +1805,6 @@ subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
 
    deallocate(gradient_local, sigma_local, qlocacc, cnacc, dtrans, v)
 end subroutine get_grad_0d
-
-!> Accumulate gradient and stress contributions for a periodic CSR system
-subroutine get_grad_3d_list(self, mol, list, cache, p, gradient, sigma, alphain, betain)
-   !> EEQBC model type
-   class(eeqbc_model), intent(in) :: self
-   !> Molecular structure data
-   type(structure_type), intent(in) :: mol
-   !> Multicharge neighborlist type
-   type(csr_list), intent(in) :: list
-   !> Multicharge cache
-   type(mchrg_cache), intent(in) :: cache
-   !> Solution vector
-   real(wp), intent(in) :: p(:)
-   !> Cartesian gradient
-   real(wp), intent(inout) :: gradient(:, :)
-   !> Lattice stress contribution
-   real(wp), intent(inout) :: sigma(:, :)
-   !> Optional gradient prefactor
-   real(wp), optional, intent(in) :: alphain
-   !> Optional electronegativity prefactor
-   real(wp), optional, intent(in) :: betain
-
-   real(wp) :: alpha, beta
-   integer :: iat, jat, izp, jzp
-   integer(i8) :: kat, img
-   real(wp) :: vec(3), r2, gam, dtmp, capi, capj, dgam, rvdw, wsw
-   real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), ctmp
-   real(wp) :: W_ii, W_jj, W_ij, norm_cn
-   real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
-   real(wp), allocatable :: v(:), qlocacc(:), cnacc(:), dtrans(:, :)
-
-   alpha = 1.0_wp
-   if (present(alphain)) alpha = alphain
-   beta = 1.0_wp
-   if (present(betain)) beta = betain
-
-   call get_dir_trans(mol, dtrans, cutoff)
-   allocate(qlocacc(mol%nat), cnacc(mol%nat))
-   qlocacc = 0.0_wp
-   cnacc = 0.0_wp
-
-   allocate(gradient_local(3, mol%nat), source=0.0_wp)
-   allocate(sigma_local(3, 3), source=0.0_wp)
-
-   allocate(v(mol%nat))
-   call spmv_csr(list, cache%clist, p, v, alpha=1.0_wp, beta=0.0_wp)
-
-   !$omp parallel do default(none) schedule(runtime) &
-   !$omp shared(cache, mol, list, self, p, v, dtrans, alpha, beta) &
-   !$omp private(iat, kat, izp, jat, jzp, gam, vec, r2, dtmp, radi, radj, dradi, dradj, dG, dS, norm_cn) &
-   !$omp private(W_ii, W_jj, W_ij, wsw, capi, capj, rvdw, img, dgam, ctmp) &
-   !$omp reduction(+:cnacc, qlocacc, gradient_local, sigma_local)
-   do iat = 1, mol%nat
-      izp = mol%id(iat)
-      norm_cn = 1.0_wp / self%avg_cn(izp)
-      radi = self%rad(izp) * exp(-self%kcnrad(izp) * cache%cn(iat) * norm_cn)
-      dradi = -self%kcnrad(izp) * norm_cn * radi
-      capi = self%cap(izp)
-      W_ii = p(iat) * cache%vrhs(iat)
-
-      do kat = list%inl(iat) + 1, list%inl(iat + 1) - 1
-         jat = list%nlat(kat)
-         jzp = mol%id(jat)
-         capj = self%cap(jzp)
-         rvdw = self%rvdw(izp, jzp)
-         if (cache%wsc%nimg_list(kat) == 0) cycle
-         wsw = 1.0_wp / real(cache%wsc%nimg_list(kat), wp)
-         W_jj = p(jat) * cache%vrhs(jat)
-         W_ij = p(iat) * cache%vrhs(jat) + p(jat) * cache%vrhs(iat)
-
-         norm_cn = 1.0_wp / self%avg_cn(jzp)
-         radj = self%rad(jzp) * exp(-self%kcnrad(jzp) * cache%cn(jat) * norm_cn)
-         dradj = -self%kcnrad(jzp) * norm_cn * radj
-         gam = 1.0_wp / sqrt(radi**2 + radj**2)
-
-         do img = cache%wsc%itr_list(kat), cache%wsc%itr_list(kat+1) - 1
-            vec = mol%xyz(:, jat) - mol%xyz(:, iat) + cache%wsc%trans(:, cache%wsc%tridx_list(img))
-            call get_damat_dir(vec, dtrans, capi, capj, rvdw, self%kbc, gam, dG, dS, dgam)
-
-            cnacc(iat) = cnacc(iat) + (dgam * wsw * radi * dradi * gam**3.0_wp) * W_ij * alpha
-            cnacc(jat) = cnacc(jat) + (dgam * wsw * radj * dradj * gam**3.0_wp) * W_ij * alpha
-
-            gradient_local(:, iat) = gradient_local(:, iat) - dG * wsw * W_ij * alpha
-            gradient_local(:, jat) = gradient_local(:, jat) + dG * wsw * W_ij * alpha
-            sigma_local(:, :) = sigma_local(:, :) + dS * wsw * W_ij * alpha
-
-            call get_damat_dc_dir(vec, dtrans, capi, capj, rvdw, self%kbc, gam, dG, dS)
-            gradient_local(:, iat) = gradient_local(:, iat) + dG * wsw * W_ij * alpha
-            gradient_local(:, jat) = gradient_local(:, jat) - dG * wsw * W_ij * alpha
-            sigma_local(:, :)   = sigma_local(:, :) - W_ij * dS * wsw * alpha
-
-            call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
-            dtmp = (self%eta(jzp) + self%kqeta_pre * tanh(self%kqeta(jzp) * cache%qloc(jat)) + sqrt2pi / radj)
-            gradient_local(:, iat) = gradient_local(:, iat) - dtmp * dG * wsw * W_jj * alpha &
-               & + p(iat) * cache%xtmp(jat) * dG * wsw * beta &
-               & - p(jat) * (cache%xtmp(jat) - cache%xtmp(iat)) * dG * wsw * beta
-
-            dtmp = (self%eta(izp) + self%kqeta_pre * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi)
-            gradient_local(:, jat) = gradient_local(:, jat) + dtmp * dG * wsw * W_ii * alpha &
-               & - p(jat) * cache%xtmp(iat) * dG * wsw * beta &
-               & + p(iat) * (cache%xtmp(iat) - cache%xtmp(jat)) * dG * wsw * beta
-
-            ! Lattice Sigma Updates
-            ! This ensures the (xi - xj) term is correctly formed against the diagonal dcdL
-            sigma_local(:, :) = sigma_local(:, :) - p(iat) * cache%xtmp(jat) * dS * wsw * beta
-            sigma_local(:, :) = sigma_local(:, :) - p(jat) * cache%xtmp(iat) * dS * wsw * beta
-
-         end do
-      end do
-
-      ! Diagonal corrections
-      gam = 1.0_wp / sqrt(2.0_wp * radi**2)
-      rvdw = self%rvdw(izp, izp)
-
-      if (cache%wsc%nimg_list(list%inl(iat)) > 0) then
-         wsw = 1.0_wp / real(cache%wsc%nimg_list(list%inl(iat)), wp)
-
-         do img = cache%wsc%itr_list(list%inl(iat)), cache%wsc%itr_list(list%inl(iat) + 1) - 1
-            vec = cache%wsc%trans(:, cache%wsc%tridx_list(img))
-            call get_damat_dir(vec, dtrans, capi, capi, rvdw, self%kbc, gam, dG, dS, dgam)
-            sigma_local(:, :) = sigma_local(:, :) + dS * wsw * W_ii * alpha
-            cnacc(iat) = cnacc(iat) + (dgam * wsw * 2.0_wp * radi * dradi * gam**3.0_wp) * W_ii * alpha
-
-            call get_damat_dc_dir(vec, dtrans, capi, capi, rvdw, self%kbc, gam, dG, dS)
-            sigma_local(:, :) = sigma_local(:, :) - W_ii * dS * wsw * alpha
-
-            call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, dG, dS)
-            sigma_local(:, :) = sigma_local(:, :) - p(iat) * cache%xtmp(iat) * dS * wsw * beta
-
-            call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, ctmp)
-            ctmp = ctmp * wsw
-
-            v(iat) = v(iat) - ctmp * p(iat)
-         end do
-      end if
-
-      qlocacc(iat) = qlocacc(iat) + self%kqeta_pre * self%kqeta(izp) / &
-         & cosh(self%kqeta(izp) * cache%qloc(iat))**2 * W_ii * cache%clist(list%inl(iat)) * alpha &
-         & + v(iat) * self%kqchi(izp) * beta
-      cnacc(iat) = cnacc(iat) - sqrt2pi * dradi / (radi**2) * W_ii * cache%clist(list%inl(iat)) * alpha &
-         & + v(iat) * self%kcnchi(izp) * beta
-
-      dtmp = (self%eta(izp) + self%kqeta_pre * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi) * W_ii
-      gradient_local(:, iat) = gradient_local(:, iat) + dtmp * cache%dcdrdiag(:, iat) * alpha &
-         & + p(iat) * cache%xtmp(iat) * cache%dcdrdiag(:, iat) * beta
-      sigma_local(:, :) = sigma_local(:, :) + dtmp * cache%dcdL(:, :, iat) * alpha &
-         & + p(iat) * cache%xtmp(iat) * cache%dcdL(:, :, iat) * beta
-   end do
-   !$omp end parallel do
-
-   gradient = gradient + gradient_local
-   sigma = sigma + sigma_local
-
-   gradient_local = 0.0_wp
-   sigma_local = 0.0_wp
-
-   call self%ncoord%add_coordination_number_derivs_list(mol, dtrans, cnacc, gradient_local, sigma_local, list)
-   call self%ncoord_en%add_coordination_number_derivs_list(mol, dtrans, qlocacc, gradient_local, sigma_local, list)
-
-   gradient = gradient + gradient_local
-   sigma = sigma + sigma_local
-
-   deallocate(gradient_local, sigma_local, qlocacc, cnacc, dtrans, v)
-end subroutine get_grad_3d_list
 
 !> Accumulate gradient and stress contributions for a periodic system
 subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)

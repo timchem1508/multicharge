@@ -47,9 +47,6 @@ module multicharge_model_cache
       !> Full Maxwell capacitance matrix
       real(wp), allocatable :: cmat(:, :)
 
-      !> Compressed version of the C-matrix
-      real(wp), allocatable :: clist(:)
-
       !> Store tmp array from xvec calculation for reuse
       real(wp), allocatable :: xtmp(:)
 
@@ -58,9 +55,6 @@ module multicharge_model_cache
 
       !> Coulomb matrix
       real(wp), allocatable :: amat(:, :)
-
-      !> Compressed version of the A-matrix
-      real(wp), allocatable :: alist(:)
 
       !> Inversed amat
       real(wp), allocatable :: ainv(:, :)

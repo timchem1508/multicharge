@@ -18,7 +18,6 @@ program main
    use mctc_env, only: error_type, fatal_error, get_argument, wp, timer_type, format_time
    use mctc_io, only: structure_type, read_structure, filetype, get_filetype
    use mctc_cutoff, only: get_lattice_points
-   use mctc_csrlist, only: csr_list, new_csr_list
    use mctc_wignerseitz, only: wignerseitz_cell
    use multicharge, only: mchrg_model_type, mchrg_model, mchrg_cache, new_eeq2019_model, &
    & new_eeqbc2025_model, get_multicharge_version, &
@@ -37,13 +36,12 @@ program main
    integer :: stat, unit, model_id
    type(error_type), allocatable :: error
    type(structure_type) :: mol
-   type(csr_list), allocatable :: list
    type(wignerseitz_cell), allocatable :: wsc
    class(mchrg_model_type), allocatable :: model
    type(mchrg_cache), allocatable :: cache
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
-   logical :: grad, egrad, qgrad, json, exist, use_nlist
+   logical :: grad, egrad, qgrad, json, exist
    real(wp), allocatable :: trans(:, :)
    real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
    real(wp), allocatable :: qvec(:)
@@ -51,12 +49,11 @@ program main
    real(wp), allocatable :: charge
    real(wp), allocatable :: efield(:)
    integer, allocatable :: verbosity
-   real(wp) :: cutoff
    type(timer_type) :: timer
 
    call timer%push("total")
 
-   call get_arguments(input, model_id, use_nlist, cutoff, input_format, egrad, qgrad, charge, &
+   call get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
       efield, json, solver_input, verbosity, error)
    if (allocated(error)) then
       write(error_unit, '(a)') error%message
@@ -99,19 +96,6 @@ program main
 
    allocate(cache)
 
-   ! Create neighborlist if requested
-   if (use_nlist) then
-      call timer%push("nlist")
-      allocate(list)
-      if (any(mol%periodic)) then
-         call new_csr_list(list, mol, error, cache%wsc, cutoff)
-      else
-         call new_csr_list(list, mol, error, cutoff=cutoff)
-      end if
-      call timer%pop
-      write(output_unit, '(a, 1x, a)') "neighborlist generation time :", format_time(timer%get("nlist"))
-   end if
-
    call timer%push("model_setup")
 
    if (model_id == mchrg_model%eeq2019) then
@@ -151,13 +135,13 @@ program main
    grad = egrad .or. qgrad
 
    call timer%push("update")
-   call model%update(mol, cache, trans, grad, list)
+   call model%update(mol, cache, trans, grad)
    call timer%pop
    if (verbosity > 1) then
       write(output_unit, '(a, 1x, a)') "Get coordination number time : ", format_time(timer%get("update"))
    end if
    call model%solve(mol, solver, cache, error, &
-   & energy, gradient, sigma, qvec, dqdr, dqdL, list, efield=efield, &
+   & energy, gradient, sigma, qvec, dqdr, dqdL, efield=efield, &
    & verbosity=verbosity, unit=output_unit)
 
    if (allocated(error)) then
@@ -205,8 +189,6 @@ subroutine help(unit)
       "-tol, -tolerance, --tolerance <real>", "Provide the tolerance of the solver", &
       "-g, -eg, -grad, --grad, -egrad, --egrad", "Evaluate molecular energy gradient and virial.", &
       "-qg, -qgrad, --qgrad", "Evaluate molecular charge gradient and virial.", &
-      "-list, -nlist, --nlist", "Use neighborlist for solver (not compatible with charge gradient)", &
-      "-cut, -cutoff, --cutoff <real>", "Cutoff for neighborlist generation in Bohrs (default: 29.0 Bohr)", &
       "-v, -verbose, --verbose", "Show more", &
       "-s, -silent, --silent", "Show less", &
       "-j, -json, --json", "Provide output in JSON format to the file 'multicharge.json'", &
@@ -227,7 +209,7 @@ subroutine version(unit)
 
 end subroutine version
 
-subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
+subroutine get_arguments(input, model_id, &
 & input_format, egrad, qgrad, charge, efield, json, solver_input, verbosity, error)
 
    !> Input file name
@@ -235,12 +217,6 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
 
    !> ID of choosen model type
    integer, intent(out) :: model_id
-
-   !> Flag for neighborlist creation
-   logical, intent(out) :: use_nlist
-
-   !> Nlist cutoff
-   real(wp), intent(out) :: cutoff
 
    !> Input file format
    integer, allocatable, intent(out) :: input_format
@@ -277,11 +253,9 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
    real(wp), allocatable :: tol
 
    model_id = mchrg_model%eeq2019
-   use_nlist = .false.
    egrad = .false.
    qgrad = .false.
    json = .false.
-   cutoff = 29.0_wp
    iarg = 0
    verbosity = 1
    narg = command_argument_count()
@@ -393,16 +367,6 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
             call fatal_error(error, "Invalid tolerance")
             exit
          end if
-         case("-nlist", "-list", "--nlist")
-         use_nlist = .true.
-         case("-cut", "-cutoff", "--cutoff")
-         iarg = iarg + 1
-         call get_argument(iarg, arg)
-         read(arg, *, iostat=iostat) cutoff
-         if (iostat /= 0) then
-            call fatal_error(error, "Invalid neighborlist cutoff")
-            exit
-         end if
       end select
    end do
 
@@ -436,7 +400,6 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
       if (allocated(verbosity)) then
          solver_input%verbosity = verbosity
       end if
-      solver_input%use_nlist = use_nlist
       type is (direct_input)
       if (allocated(verbosity)) then
          solver_input%verbosity = verbosity

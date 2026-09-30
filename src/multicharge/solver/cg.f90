@@ -19,7 +19,6 @@
 module multicharge_solver_cg
    use iso_fortran_env, only : output_unit
    use mctc_env, only : error_type, fatal_error, format_time, timer_type, wp
-   use mctc_csrlist, only : csr_list, spmv_csr
    use multicharge_blas, only : axpy, dot, scal, symv
    use multicharge_solver_type, only : mchrg_solver_input, mchrg_solver_type
    implicit none
@@ -38,9 +37,6 @@ module multicharge_solver_cg
       !> Output verbosity
       integer, allocatable :: verbosity
 
-      !> Whether to use a neighborlist representation
-      logical, allocatable :: use_nlist
-
       !> Whether to use the iterative conjugate-gradient solver
       logical :: cg = .true.
    end type cg_input
@@ -56,11 +52,9 @@ module multicharge_solver_cg
       !> Output verbosity
       integer, allocatable :: verbosity
 
-      !> Whether to use a neighborlist representation
-      logical, allocatable :: use_nlist
-   contains
-      !> Solve the linear system iteratively
-      procedure :: solve
+contains
+ !> Solve the linear system iteratively
+procedure :: solve
    end type cg_solver
 
    !> Positive number used to prevent division by zero
@@ -74,9 +68,6 @@ module multicharge_solver_cg
 
    !> Default output verbosity
    integer, parameter :: verbosity_def = 0
-
-   !> Default neighborlist usage
-   logical, parameter :: use_nlist_def = .false.
 
 contains
 
@@ -106,25 +97,17 @@ subroutine new_cg_solver(self, input)
    else
       self%verbosity = verbosity_def
    end if
-   if (allocated(input%use_nlist)) then
-      self%use_nlist = input%use_nlist
-   else
-      self%use_nlist = use_nlist_def
-   end if
 
 end subroutine new_cg_solver
 
 
 !> Solve a linear system with a diagonally preconditioned CG method
-subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error)
+subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
    !> Conjugate-gradient solver instance
    class(cg_solver), intent(in) :: self
 
    !> Dense coefficient matrix of the linear system
-   real(wp), intent(in), optional :: amat(:, :)
-
-   !> Coefficient matrix values in compressed-row storage
-   real(wp), intent(in), optional :: alist(:)
+   real(wp), intent(in) :: amat(:, :)
 
    !> Right-hand side vector
    real(wp), intent(in) :: xvec(:)
@@ -137,9 +120,6 @@ subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error
 
    !> Whether to solve coupled-perturbed equations
    logical, intent(in), optional :: cpq
-
-   !> Optional neighborlist representation of the matrix
-   type(csr_list), intent(in), optional :: list
 
    !> Output unit
    integer, intent(in), optional :: new_unit
@@ -182,10 +162,6 @@ subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error
 
    type(timer_type) :: timer
    integer :: unit
-   logical :: nlist
-
-   nlist = self%use_nlist .and. .not. present(amat) .and. &
-      & present(list) .and. present(alist)
 
    ! CG cannot compute the inverse matrix
    if (present(ainv) .or. present(cpq)) then
@@ -206,11 +182,10 @@ subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error
       call fatal_error(error, "Dimension mismatch between xvec and vrhs.")
       return
    end if
-   if (.not. nlist) then
-      if (size(amat, 1) /= ndim .or. size(amat, 2) /= ndim) then
-         call fatal_error(error, "dimension mismatch.")
-         return
-      end if
+
+   if (size(amat, 1) /= ndim .or. size(amat, 2) /= ndim) then
+      call fatal_error(error, "dimension mismatch.")
+      return
    end if
 
    tol = self%cgtol
@@ -223,22 +198,14 @@ subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error
    if (self%verbosity > 1) call timer%push("initialization")
 
    ! Diagonal preconditioner
-   if (nlist) then
-      do iat = 1, ndim
-         prec(iat) = 1.0_wp / (alist(list%inl(iat)) + eps)
-      end do
-   else
-      do iat = 1, ndim
-         prec(iat) = 1.0_wp / (amat(iat, iat) + eps)
-      end do
-   end if
+   do iat = 1, ndim
+      prec(iat) = 1.0_wp / (amat(iat, iat) + eps)
+   end do
 
    ! Initial residual
-   if (nlist) then
-      call spmv_csr(list, alist, vrhs, Adir, alpha=1.0_wp, beta=0.0_wp)
-   else
-      call symv(amat, vrhs, Adir, alpha=1.0_wp, beta=0.0_wp)
-   end if
+
+   call symv(amat, vrhs, Adir, alpha=1.0_wp, beta=0.0_wp)
+
    res(:) = xvec(:) - Adir(:)
 
    ! Initial preconditioned residual precres = M^-1 * res
@@ -265,11 +232,7 @@ subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error
       if (self%verbosity > 1) call timer%push("iteration")
 
       ! Matrix-vector product
-      if (nlist) then
-         call spmv_csr(list, alist, dir, Adir, alpha=1.0_wp, beta=0.0_wp)
-      else
-         call symv(amat, dir, Adir, alpha=1.0_wp, beta=0.0_wp)
-      end if
+      call symv(amat, dir, Adir, alpha=1.0_wp, beta=0.0_wp)
 
       denom = dot(dir, Adir)
       if (abs(denom) < tol_square) then

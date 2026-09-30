@@ -29,7 +29,6 @@ module multicharge_model_type
    use mctc_io_math, only : matinv_3x3
    use mctc_cutoff, only : get_lattice_points
    use mctc_ncoord, only : ncoord_type
-   use mctc_csrlist, only : csr_list, spmv_csr
    use multicharge_blas, only : gemv, symv, gemm
    use multicharge_model_cache, only : mchrg_cache
    use multicharge_solver_type, only : mchrg_solver_type
@@ -107,17 +106,14 @@ module multicharge_model_type
 
    abstract interface
       !> Update model-dependent quantities and cache
-      subroutine update(self, mol, cache, trans, grad, list)
-         import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
+      subroutine update(self, mol, cache, trans, grad)
+         import :: mchrg_model_type, structure_type, mchrg_cache, wp
 
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
 
          !> Structure type
          type(structure_type), intent(in) :: mol
-
-         !> Multicharge neighborlist type
-         type(csr_list), intent(in), optional :: list
 
          !> Multicharge cache containing CN, local charges, and a Wigner-Seitz cell
          type(mchrg_cache), intent(inout) :: cache
@@ -130,8 +126,8 @@ module multicharge_model_type
       end subroutine update
 
       !> Construct a capacitance matrix using cached CN and charge data
-      subroutine get_capacitance_matrix(self, mol, ndim, cache, list)
-         import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
+      subroutine get_capacitance_matrix(self, mol, ndim, cache)
+         import :: mchrg_model_type, structure_type, mchrg_cache, wp
 
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
@@ -144,14 +140,11 @@ module multicharge_model_type
 
          !> Multicharge cache holding the capacitance matrix and optional derivatives
          type(mchrg_cache), intent(inout) :: cache
-
-         !> Multicharge neighborlist type
-         type(csr_list), intent(in), optional :: list
       end subroutine get_capacitance_matrix
 
       !> Coulomb interaction matrix (A-matrix) construction
-      subroutine get_coulomb_matrix(self, mol, ndim, cache, list)
-         import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
+      subroutine get_coulomb_matrix(self, mol, ndim, cache)
+         import :: mchrg_model_type, structure_type, mchrg_cache, wp
 
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
@@ -164,14 +157,11 @@ module multicharge_model_type
 
          !> Multicharge cache holding the Coulomb matrix
          type(mchrg_cache), intent(inout) :: cache
-
-         !> Multicharge neighborlist type
-         type(csr_list), intent(in), optional :: list
       end subroutine get_coulomb_matrix
 
       !> Coulomb matrix derivatives contracted with charges
-      subroutine get_coulomb_derivs(self, mol, ndim, cache, list)
-         import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
+      subroutine get_coulomb_derivs(self, mol, ndim, cache)
+         import :: mchrg_model_type, structure_type, mchrg_cache, wp
 
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
@@ -184,14 +174,11 @@ module multicharge_model_type
 
          !> Multicharge cache holding Coulomb-matrix derivatives
          type(mchrg_cache), intent(inout) :: cache
-
-         !> Multicharge neighborlist type
-         type(csr_list), intent(in), optional :: list
       end subroutine get_coulomb_derivs
 
       !> Electronegativity vector construction
-      subroutine get_xvec(self, mol, ndim, cache, list, efield)
-         import :: mchrg_model_type, mchrg_cache, structure_type, csr_list, wp
+      subroutine get_xvec(self, mol, ndim, cache, efield)
+         import :: mchrg_model_type, mchrg_cache, structure_type, wp
 
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
@@ -205,16 +192,13 @@ module multicharge_model_type
          !> Multicharge cache holding the electronegativity vector and workspace
          type(mchrg_cache), intent(inout) :: cache
 
-         !> Multicharge neighborlist type
-         type(csr_list), intent(in), optional :: list
-
          !> External electric field
          real(wp), intent(in), optional :: efield(:)
       end subroutine get_xvec
 
       !> Derivatives of electronegativity vector
-      subroutine get_xvec_derivs(self, mol, ndim, cache, list)
-         import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
+      subroutine get_xvec_derivs(self, mol, ndim, cache)
+         import :: mchrg_model_type, structure_type, mchrg_cache, wp
 
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
@@ -227,14 +211,11 @@ module multicharge_model_type
 
          !> Multicharge cache holding electronegativity-vector derivatives
          type(mchrg_cache), intent(inout) :: cache
-
-         !> Multicharge neighborlist type
-         type(csr_list), intent(in), optional :: list
       end subroutine get_xvec_derivs
 
       !> Calculate capacitance-corrected electronegativity derivatives
-      subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta, list)
-         import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
+      subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta)
+         import :: mchrg_model_type, structure_type, mchrg_cache, wp
 
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
@@ -259,9 +240,6 @@ module multicharge_model_type
 
          !> Stress scaling factor
          real(wp), intent(in), optional :: beta
-
-         !> neighborlist (each unordered pair appears once)
-         type(csr_list), optional, intent(in) :: list
       end subroutine get_grad
 
    end interface
@@ -326,7 +304,7 @@ end subroutine get_rec_trans
 
 !> Top-level solve routine with optional persistent cache
 subroutine solve(self, mol, solver, cache, error, &
-   & energy, gradient, sigma, qvec, dqdr, dqdL, list, efield, verbosity, unit)
+   & energy, gradient, sigma, qvec, dqdr, dqdL, efield, verbosity, unit)
 
    !> Electronegativity-equilibration model
    class(mchrg_model_type), intent(in) :: self
@@ -360,9 +338,6 @@ subroutine solve(self, mol, solver, cache, error, &
 
    !> Optional derivative of the atomic partial charges w.r.t. lattice vectors
    real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
-
-   !> neighborlist optional type
-   type(csr_list), intent(in), optional :: list
 
    !> Optional external electric field
    real(wp), intent(in), contiguous, optional :: efield(:)
@@ -417,9 +392,9 @@ subroutine solve(self, mol, solver, cache, error, &
    call timer%push("setup")
 
    ! Setup the system matrices and vectors
-   call self%get_capacitance_matrix(mol, ndim, cache, list)
-   call self%get_coulomb_matrix(mol, ndim, cache, list)
-   call self%get_xvec(mol, ndim, cache, list, efield)
+   call self%get_capacitance_matrix(mol, ndim, cache)
+   call self%get_coulomb_matrix(mol, ndim, cache)
+   call self%get_xvec(mol, ndim, cache, efield)
    if (.not. allocated(cache%vrhs)) then
       allocate(cache%vrhs(mol%nat + 1))
    end if
@@ -447,29 +422,22 @@ subroutine solve(self, mol, solver, cache, error, &
       allocate(unitvec(mol%nat))
       allocate(vvec(mol%nat))
       ! Initial guess
-      if (present(list)) then
-         do iat = 1, mol%nat
-            cache%uvec(iat) = 1.0_wp / (cache%alist(list%inl(iat)) + eps)
-            vvec(iat) = - cache%xvec(iat) / (cache%alist(list%inl(iat)) + eps)
-         end do
-      else
-         do iat = 1, mol%nat
-            cache%uvec(iat) = 1.0_wp / (cache%amat(iat, iat) + eps)
-            vvec(iat) = - cache%xvec(iat) / (cache%amat(iat, iat) + eps)
-         end do
-      end if
+      do iat = 1, mol%nat
+         cache%uvec(iat) = 1.0_wp / (cache%amat(iat, iat) + eps)
+         vvec(iat) = - cache%xvec(iat) / (cache%amat(iat, iat) + eps)
+      end do
 
       unitvec = 1.0_wp
 
       call print_constrained_system_message(print_unit, verbosity_solve, 'u')
       ! Constrained response: A*uvec = 1
-      call solver%solve(amat=cache%amat, alist=cache%alist, xvec=unitvec, &
-         & vrhs=cache%uvec, list=list, new_unit=print_unit, error=error)
+      call solver%solve(amat=cache%amat, xvec=unitvec, &
+         & vrhs=cache%uvec, new_unit=print_unit, error=error)
       call print_constrained_system_message(print_unit, verbosity_solve, 'v')
 
       ! Unconstrained response: A*uvec = -xvec
-      call solver%solve(amat=cache%amat, alist=cache%alist, xvec=-cache%xvec, &
-         & vrhs=vvec, list=list, new_unit=print_unit, error=error)
+      call solver%solve(amat=cache%amat, xvec=-cache%xvec, &
+         & vrhs=vvec, new_unit=print_unit, error=error)
       uvecsum = sum(cache%uvec)
       vvecsum = sum(vvec)
       ! Lagrangian multiplier
@@ -489,13 +457,8 @@ subroutine solve(self, mol, solver, cache, error, &
    ! Electrostatic energy if present
    if (present(energy)) then
       call timer%push("energy")
-      if (present(list)) then
-         call spmv_csr(list, cache%alist, cache%vrhs, cache%xvec(:mol%nat), &
-            & alpha=0.5_wp, beta=-1.0_wp)
-      else
-         call symv(cache%amat, cache%vrhs, cache%xvec(:mol%nat), &
-            & alpha=0.5_wp, beta=-1.0_wp, uplo='l')
-      end if
+      call symv(cache%amat, cache%vrhs, cache%xvec(:mol%nat), &
+         & alpha=0.5_wp, beta=-1.0_wp, uplo='l')
       if (ndim > mol%nat) then
          ! Correct xvec to exclude constraint term
          cache%xvec(:mol%nat) = cache%xvec(:mol%nat) - 0.5_wp * cache%vrhs(mol%nat + 1)
@@ -510,7 +473,7 @@ subroutine solve(self, mol, solver, cache, error, &
       call timer%push("gradient")
 
       call self%get_grad(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, &
-         & alpha=0.5_wp, beta=-1.0_wp, list=list)
+         & alpha=0.5_wp, beta=-1.0_wp)
 
       ! pop gradient timer
       call timer%pop
@@ -570,7 +533,7 @@ end subroutine solve
 !> w.r.t. charges (dF/dq), avoiding explicit differentiation
 !> of the charge solution by solving an adjoint system.
 subroutine get_external_gradient(self, mol, solver, cache, error, &
-   & dfdq, dfdr, dfdL, list, unit, verbosity)
+   & dfdq, dfdr, dfdL, unit, verbosity)
 
    !> Electronegativity-equilibration model
    class(mchrg_model_type), intent(in) :: self
@@ -595,9 +558,6 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
 
    !> External gradient w.r.t. lattice vectors
    real(wp), intent(inout) :: dfdL(:, :)
-
-   !> neighborlist optional type
-   type(csr_list), intent(in), optional :: list
 
    !> Output unit
    integer, intent(in), optional :: unit
@@ -659,8 +619,8 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
 
       ! Unconstrained response: J*yvec = dfdq
       call print_adjoint_message(print_unit, verbosity_solve)
-      call solver%solve(amat=cache%amat, alist=cache%alist, &
-         & xvec=dfdq, vrhs=yvec, list=list, error=error)
+      call solver%solve(amat=cache%amat, &
+         & xvec=dfdq, vrhs=yvec, error=error)
       if (allocated(error)) return
 
       ! Projection of uvec on yvec
@@ -683,7 +643,7 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
    ! dfdr = p^T * (db/dr - dA/dr X q)
 
    call self%get_grad(mol, cache, padj, dfdr, dfdL, alpha=-1.0_wp, &
-      & beta=1.0_wp, list=list)
+      & beta=1.0_wp)
 
    ! pop dfdr timer
    call timer%pop
@@ -695,7 +655,7 @@ end subroutine get_external_gradient
 
 !> Local charges calculation
 subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL, &
-   & list, dqlocdrij, dqlocdrji, dqlocdrdiag)
+   & dqlocdrij, dqlocdrji, dqlocdrdiag)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: self
 
@@ -714,9 +674,6 @@ subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL, &
    !> Optional derivative of local atomic partial charges w.r.t. lattice vectors
    real(wp), intent(out), optional :: dqlocdL(3, 3, mol%nat)
 
-   !> Lattice points
-   type(csr_list), intent(in), optional :: list
-
    !> Optional derivative with respect to the first atom in each pair
    real(wp), intent(out), optional :: dqlocdrij(:, :)
 
@@ -731,18 +688,12 @@ subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL, &
       dqlocdr = 0.0_wp
       dqlocdL = 0.0_wp
    end if
-   if (present(list) .and. present(dqlocdrij) .and. present(dqlocdrji) &
-      & .and. present(dqlocdrdiag) .and. present(dqlocdL)) then
-      dqlocdrij = 0.0_wp
-      dqlocdrji = 0.0_wp
-      dqlocdrdiag = 0.0_wp
-      dqlocdL = 0.0_wp
-   end if
+
    ! Get the electronegativity weighted CN for local charge
    if (allocated(self%ncoord_en)) then
       call self%ncoord_en%get_coordination_number(mol, trans, qloc, &
          & dcndr=dqlocdr, dcndrij=dqlocdrij, dcndrji=dqlocdrji, &
-         & dcndrdiag=dqlocdrdiag, dcndL=dqlocdL, list=list)
+         & dcndrdiag=dqlocdrdiag, dcndL=dqlocdL)
    end if
 
    ! Distribute the total charge equally

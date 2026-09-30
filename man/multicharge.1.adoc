@@ -38,12 +38,6 @@ Evaluate molecular energy gradient and virial
 *-qg, -qgrad, --qgrad*::
 Evaluate molecular charge gradient and virial
 
-*-list, -nlist, --nlist*::
-Use neighborlist for solver (not compatible with charge gradient)
-
-*-cut, -cutoff, --cutoff* _real_::
-Cutoff for neighborlist generation in Bohrs (default: 29.0 Bohr)
-
 *-v, -verbose, --verbose*::
 Show more output
 
