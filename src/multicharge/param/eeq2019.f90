@@ -27,36 +27,35 @@ module multicharge_param_eeq2019
    public :: get_eeq_chi, get_eeq_eta, get_eeq_rad, get_eeq_kcnchi
 
 
-   !> Element-specific electronegativity for the electronegativity equilibration charges.
+   !> Element-specific electronegativity for the EEQ charges
    interface get_eeq_chi
       module procedure get_eeq_chi_sym
       module procedure get_eeq_chi_num
    end interface get_eeq_chi
 
-   !> Element-specific chemical hardnesses for the electronegativity equilibration charges
+   !> Element-specific chemical hardnesses for the EEQ charges
    interface get_eeq_eta
-      module procedure :: get_eeq_eta_sym
-      module procedure :: get_eeq_eta_num
+      module procedure get_eeq_eta_sym
+      module procedure get_eeq_eta_num
    end interface get_eeq_eta
 
-   !> Element-specific CN scaling constant for the electronegativity equilibration charges.
+   !> Element-specific CN scaling constant for the EEQ charges
    interface get_eeq_kcnchi
-      module procedure :: get_eeq_kcnchi_sym
-      module procedure :: get_eeq_kcnchi_num
+      module procedure get_eeq_kcnchi_sym
+      module procedure get_eeq_kcnchi_num
    end interface get_eeq_kcnchi
 
-   !> Element-specific charge widths for the electronegativity equilibration charges.
+   !> Element-specific charge widths for the EEQ charges
    interface get_eeq_rad
-      module procedure :: get_eeq_rad_sym
-      module procedure :: get_eeq_rad_num
+      module procedure get_eeq_rad_sym
+      module procedure get_eeq_rad_num
    end interface get_eeq_rad
 
 
    !> Maximum atomic number allowed in EEQ calculations
    integer, parameter :: max_elem = 103
 
-
-   !> Element-specific electronegativity for the electronegativity equilibration charges.
+   !> Element-specific electronegativity for the EEQ charges
    real(wp), parameter :: eeq_chi(max_elem) = [&
       & 1.23695041_wp, 1.26590957_wp, 0.54341808_wp, 0.99666991_wp, 1.26691604_wp, &
       & 1.40028282_wp, 1.55819364_wp, 1.56866440_wp, 1.57540015_wp, 1.15056627_wp, &
@@ -80,7 +79,7 @@ module multicharge_param_eeq2019
       & 1.11003303_wp, 1.16831853_wp, 1.00887482_wp, 1.05928842_wp, 1.07672363_wp, &
       & 1.11308426_wp, 1.14340090_wp, 1.13714110_wp]
 
-   !> Element-specific chemical hardnesses for the electronegativity equilibration charges.
+   !> Element-specific chemical hardnesses for the EEQ charges
    real(wp), parameter :: eeq_eta(max_elem) = [&
       &-0.35015861_wp, 1.04121227_wp, 0.09281243_wp, 0.09412380_wp, 0.26629137_wp, &
       & 0.19408787_wp, 0.05317918_wp, 0.03151644_wp, 0.32275132_wp, 1.30996037_wp, &
@@ -104,7 +103,7 @@ module multicharge_param_eeq2019
       &-0.00095936_wp,-0.00102814_wp,-0.00104450_wp,-0.00112666_wp,-0.00101529_wp, &
       &-0.00059592_wp,-0.00012585_wp,-0.00140896_wp]
 
-   !> Element-specific CN scaling constant for the electronegativity equilibration charges.
+   !> Element-specific CN scaling constant for the EEQ charges
    real(wp), parameter :: eeq_kcnchi(max_elem) = [&
       & 0.04916110_wp, 0.10937243_wp,-0.12349591_wp,-0.02665108_wp,-0.02631658_wp, &
       & 0.06005196_wp, 0.09279548_wp, 0.11689703_wp, 0.15704746_wp, 0.07987901_wp, &
@@ -128,7 +127,7 @@ module multicharge_param_eeq2019
       & 0.00710682_wp, 0.00463050_wp, 0.00387799_wp, 0.00296795_wp, 0.00400648_wp, &
       & 0.00548481_wp, 0.01350400_wp, 0.00675380_wp]
 
-   !> Element-specific charge widths for the electronegativity equilibration charges.
+   !> Element-specific charge widths for the EEQ charges
    real(wp), parameter :: eeq_rad(max_elem) = [&
       & 0.55159092_wp, 0.66205886_wp, 0.90529132_wp, 1.51710827_wp, 2.86070364_wp, &
       & 1.88862966_wp, 1.32250290_wp, 1.23166285_wp, 1.77503721_wp, 1.11955204_wp, &
@@ -162,7 +161,7 @@ elemental function get_eeq_chi_sym(symbol) result(chi)
    !> Element symbol
    character(len=*), intent(in) :: symbol
 
-   !> electronegativity
+   !> Electronegativity
    real(wp) :: chi
 
    chi = get_eeq_chi(to_number(symbol))
@@ -176,7 +175,7 @@ elemental function get_eeq_chi_num(number) result(chi)
    !> Atomic number
    integer, intent(in) :: number
 
-   !> electronegativity
+   !> Electronegativity
    real(wp) :: chi
 
    if (number > 0 .and. number <= size(eeq_chi, dim=1)) then
@@ -194,7 +193,7 @@ elemental function get_eeq_eta_sym(symbol) result(eta)
    !> Element symbol
    character(len=*), intent(in) :: symbol
 
-   !> hardness
+   !> Hardness
    real(wp) :: eta
 
    eta = get_eeq_eta(to_number(symbol))
@@ -208,7 +207,7 @@ elemental function get_eeq_eta_num(number) result(eta)
    !> Atomic number
    integer, intent(in) :: number
 
-   !> hardness
+   !> Hardness
    real(wp) :: eta
 
    if (number > 0 .and. number <= size(eeq_eta, dim=1)) then
@@ -258,7 +257,7 @@ elemental function get_eeq_rad_sym(symbol) result(rad)
    !> Element symbol
    character(len=*), intent(in) :: symbol
 
-   !> charge width
+   !> Charge width
    real(wp) :: rad
 
    rad = get_eeq_rad(to_number(symbol))

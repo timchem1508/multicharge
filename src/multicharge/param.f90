@@ -13,6 +13,7 @@
 ! See the License for the specific language governing permissions and
 ! limitations under the License.
 
+!> Default parameter sets for the charge models
 module multicharge_param
    use mctc_data, only : get_covalent_rad, get_pauling_en, get_vdw_rad
    use mctc_env, only : error_type, wp
@@ -30,10 +31,13 @@ module multicharge_param
 
    public :: new_eeq2019_model, new_eeqbc2025_model, mchrg_model
 
+
    !> Possible charge models enumerator
    type :: TMchargeModelEnum
+
       !> Classic electronegativity equilibration model
       integer :: eeq2019 = 1
+
       !> Bond-capacitor corrected electronegativity equilibration model
       integer :: eeqbc2025 = 2
    end type TMchargeModelEnum
@@ -47,10 +51,13 @@ contains
 
    !> Construct an EEQ (2019) model with the default element-wise parameters
    subroutine new_eeq2019_model(mol, model, error)
+
       !> Molecular structure data
       type(structure_type), intent(in) :: mol
+
       !> Electronegativity equilibration model
       class(mchrg_model_type), allocatable, intent(out) :: model
+
       !> Error handling
       type(error_type), allocatable, intent(out) :: error
 
@@ -78,10 +85,13 @@ contains
 
    !> Construct an EEQBC (2025) model with the default element-wise parameters
    subroutine new_eeqbc2025_model(mol, model, error)
+
       !> Molecular structure data
       type(structure_type), intent(in) :: mol
+
       !> Electronegativity equilibration model
       class(mchrg_model_type), allocatable, intent(out) :: model
+
       !> Error handling
       type(error_type), allocatable, intent(out) :: error
 
@@ -114,9 +124,9 @@ contains
       en = merge(0.80_wp, en, mol%num == 87)
       en = merge(1.00_wp, en, mol%num == 89)
       en = merge(1.10_wp, en, mol%num == 90 .or. mol%num == 91 &
-      &.or. mol%num == 92 .or. mol%num == 95)
+      & .or. mol%num == 92 .or. mol%num == 95)
       en = merge(1.20_wp, en, mol%num == 93 .or. mol%num == 94 &
-      &.or. mol%num == 97 .or. mol%num == 103)
+      & .or. mol%num == 97 .or. mol%num == 103)
       en = en / 3.98_wp
 
       allocate(rvdw(mol%nid, mol%nid))
@@ -139,5 +149,6 @@ contains
       call move_alloc(eeqbc, model)
 
    end subroutine new_eeqbc2025_model
+
 
 end module multicharge_param

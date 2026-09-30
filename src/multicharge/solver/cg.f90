@@ -14,8 +14,10 @@
 ! limitations under the License.
 
 !> @file multicharge/solver/cg.f90
-!> Provides implementation of the conjugate gradient solver for linear systems of equations.
+!> Provides implementation of the conjugate gradient solver for linear systems
+!> of equations
 
+!> Conjugate gradient solver
 module multicharge_solver_cg
    use iso_fortran_env, only : output_unit
    use mctc_env, only : error_type, fatal_error, format_time, timer_type, wp
@@ -26,8 +28,10 @@ module multicharge_solver_cg
 
    public :: cg_solver, new_cg_solver, cg_input
 
+
    !> Input configuration for the conjugate-gradient solver
    type, extends(mchrg_solver_input) :: cg_input
+
       !> Maximum number of iterations
       integer, allocatable :: cgmiter
 
@@ -39,10 +43,12 @@ module multicharge_solver_cg
 
       !> Whether to use the iterative conjugate-gradient solver
       logical :: cg = .true.
+
    end type cg_input
 
    !> Conjugate-gradient solver with a Jacobi preconditioner
    type, extends(mchrg_solver_type) :: cg_solver
+
       !> Maximum number of iterations
       integer, allocatable :: cgmiter
 
@@ -51,10 +57,11 @@ module multicharge_solver_cg
 
       !> Output verbosity
       integer, allocatable :: verbosity
+   contains
 
-contains
- !> Solve the linear system iteratively
-procedure :: solve
+      !> Solve the linear system iteratively
+      procedure :: solve
+
    end type cg_solver
 
    !> Positive number used to prevent division by zero
@@ -69,11 +76,13 @@ procedure :: solve
    !> Default output verbosity
    integer, parameter :: verbosity_def = 0
 
+
 contains
 
 
 !> Construct a conjugate-gradient solver from its input configuration
 subroutine new_cg_solver(self, input)
+
    !> Conjugate-gradient solver instance
    class(cg_solver), intent(out) :: self
 
@@ -103,6 +112,7 @@ end subroutine new_cg_solver
 
 !> Solve a linear system with a diagonally preconditioned CG method
 subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
+
    !> Conjugate-gradient solver instance
    class(cg_solver), intent(in) :: self
 
@@ -127,41 +137,11 @@ subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
-   ! Maximal number of iterations
-   integer :: maxit
-   ! Tolerance of the solver
-   real(wp) :: tol, tol_square
-   ! Counters
-   integer :: it, iat
-   ! Size of the system
-   integer :: ndim
-   ! Search direction
-   real(wp), allocatable :: dir(:)
-   ! Norm of the RHS
-   real(wp) :: xvecnorm
-   ! Residual
-   real(wp), allocatable :: res(:)
-   ! Residual norm
-   real(wp) :: resnorm
-   ! Diagonal preconditioner
-   real(wp), allocatable :: prec(:)
-   ! Preconditioned residual
-   real(wp), allocatable :: precres(:)
-   ! amat-dir product
-   real(wp), allocatable :: Adir(:)
-   ! Denominator of the step length
-   real(wp) :: denom
-   ! Step length
-   real(wp) :: step
-   ! Update factor for search direction
-   real(wp) :: updfact
-   ! Projection of preconditioned residual and an original one
-   real(wp) :: resdot_old, resdot_new
-   ! Relative residual norm (|resnorm| / |vrhs|)
-   real(wp) :: rel_resnorm
-
+   integer :: maxit, it, iat, ndim, unit
+   real(wp) :: tol, tol_square, xvecnorm, resnorm, rel_resnorm
+   real(wp) :: denom, step, updfact, resdot_old, resdot_new
+   real(wp), allocatable :: dir(:), res(:), prec(:), precres(:), adir(:)
    type(timer_type) :: timer
-   integer :: unit
 
    ! CG cannot compute the inverse matrix
    if (present(ainv) .or. present(cpq)) then
@@ -184,7 +164,7 @@ subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
    end if
 
    if (size(amat, 1) /= ndim .or. size(amat, 2) /= ndim) then
-      call fatal_error(error, "dimension mismatch.")
+      call fatal_error(error, "Dimension mismatch of the coefficient matrix.")
       return
    end if
 
@@ -192,7 +172,7 @@ subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
    tol_square = tol**2
    maxit = self%cgmiter
 
-   allocate(res(ndim), dir(ndim), precres(ndim), Adir(ndim), prec(ndim))
+   allocate(res(ndim), dir(ndim), precres(ndim), adir(ndim), prec(ndim))
 
    if (self%verbosity > 1) call timer%push("total")
    if (self%verbosity > 1) call timer%push("initialization")
@@ -203,10 +183,8 @@ subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
    end do
 
    ! Initial residual
-
-   call symv(amat, vrhs, Adir, alpha=1.0_wp, beta=0.0_wp)
-
-   res(:) = xvec(:) - Adir(:)
+   call symv(amat, vrhs, adir, alpha=1.0_wp, beta=0.0_wp)
+   res(:) = xvec(:) - adir(:)
 
    ! Initial preconditioned residual precres = M^-1 * res
    precres(:) = res(:) * prec(:)
@@ -226,15 +204,14 @@ subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
    call print_cg_header(unit, self%verbosity, maxit, tol, timer)
 
    ! Main CG iteration loop
-
    do it = 1, maxit
 
       if (self%verbosity > 1) call timer%push("iteration")
 
       ! Matrix-vector product
-      call symv(amat, dir, Adir, alpha=1.0_wp, beta=0.0_wp)
+      call symv(amat, dir, adir, alpha=1.0_wp, beta=0.0_wp)
 
-      denom = dot(dir, Adir)
+      denom = dot(dir, adir)
       if (abs(denom) < tol_square) then
          if (self%verbosity > 0) call timer%pop
          exit
@@ -245,8 +222,8 @@ subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
 
       ! Update solution vrhs = vrhs + step * dir
       call axpy(xvec=dir, yvec=vrhs, alpha=step)
-      !Update residual res = res - step * amat * dir
-      call axpy(xvec=Adir, yvec=res, alpha=-step)
+      ! Update residual res = res - step * amat * dir
+      call axpy(xvec=adir, yvec=res, alpha=-step)
 
       ! Compute the new residual norm
       resnorm = dot(res, res)
@@ -272,7 +249,7 @@ subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
       call scal(alpha=updfact, xvec=dir)
       call axpy(xvec=precres, yvec=dir, alpha=1.0_wp)
 
-      ! iteration timer pop
+      ! Stop the iteration timer
       if (self%verbosity > 1) call timer%pop
 
       ! Print iteration progress
@@ -281,9 +258,9 @@ subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
 
       if (it == maxit) then
          if (self%verbosity > 1) then
-            ! pop "iteration"
+            ! Stop the iteration timer
             call timer%pop
-            ! pop "total"
+            ! Stop the total timer
             call timer%pop
          end if
          call fatal_error(error, "CG did not converge within max iterations.")
@@ -292,7 +269,7 @@ subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
 
    end do
 
-   ! pop total
+   ! Stop the total timer
    if (self%verbosity > 1) call timer%pop
 
    ! Print final summary
@@ -303,6 +280,7 @@ end subroutine solve
 
 !> Print header for CG solver
 subroutine print_cg_header(unit, verbosity, maxit, tol, timer)
+
    !> Output unit
    integer, intent(in) :: unit
 
@@ -328,7 +306,7 @@ subroutine print_cg_header(unit, verbosity, maxit, tol, timer)
          & format_time(timer%get("initialization"))
       write(unit, '(a)') ''
       write(unit, '(2X,A,6X,A,8X,A,6X,A,4X,A)') &
-         'iter', '|residual|', 'step', 'relative residual', 'Time / s'
+         & 'iter', '|residual|', 'step', 'relative residual', 'Time / s'
    else if (verbosity == 1) then
       write(unit, '(a)') "Using Conjugate Gradient Solver"
       write(unit, '(a)')
@@ -337,13 +315,15 @@ subroutine print_cg_header(unit, verbosity, maxit, tol, timer)
       write(unit, '(a)') "Preconditioner : Jacobi (Diagonal)"
       write(unit, '(a)') ''
       write(unit, '(2X,A,6X,A,8X,A,6X,A)') &
-         'iter', '|residual|', 'step', 'relative residual'
+         & 'iter', '|residual|', 'step', 'relative residual'
    end if
+
 end subroutine print_cg_header
 
 
 !> Print convergence message
 subroutine print_cg_convergence(unit, iter, res_norm, verbosity)
+
    !> Output unit
    integer, intent(in) :: unit
 
@@ -362,12 +342,14 @@ subroutine print_cg_convergence(unit, iter, res_norm, verbosity)
          "CG converged in ", iter, " iterations with residual norm ", res_norm
       write(unit, '(a)') ''
    end if
+
 end subroutine print_cg_convergence
 
 
 !> Print iteration progress
 subroutine print_cg_iteration(unit, iter, res_norm, step, rel_resnorm, &
-   & verbosity, timer)
+      & verbosity, timer)
+
    !> Output unit
    integer, intent(in) :: unit
 
@@ -395,11 +377,13 @@ subroutine print_cg_iteration(unit, iter, res_norm, step, rel_resnorm, &
       write(unit, '(i6,*(1x, es15.5))') iter, res_norm, step, rel_resnorm, &
          & timer%get("iteration")
    end if
+
 end subroutine print_cg_iteration
 
 
-!> Print final summary
+!> Print the final timing summary
 subroutine print_cg_final(unit, timer, verbosity)
+
    !> Output unit
    integer, intent(in) :: unit
 
@@ -410,9 +394,12 @@ subroutine print_cg_final(unit, timer, verbosity)
    integer, intent(in) :: verbosity
 
    if (verbosity > 1) then
-      write(unit, '(a, 1x, a)') "CG total time : ", format_time(timer%get("total"))
+      write(unit, '(a, 1x, a)') "CG total time : ", &
+         & format_time(timer%get("total"))
       write(unit, '(a)') ''
    end if
+
 end subroutine print_cg_final
+
 
 end module multicharge_solver_cg

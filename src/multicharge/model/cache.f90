@@ -14,17 +14,17 @@
 ! limitations under the License.
 
 !> @file multicharge/model/cache.f90
-!> Contains the cache baseclass for the charge models and a container for mutable cache data
+!> Contains the cache container for mutable data of the charge models
 
 !> Cache for charge models
 module multicharge_model_cache
    use mctc_env, only : wp
-   use mctc_io, only : structure_type
    use mctc_wignerseitz, only : wignerseitz_cell
    implicit none
    private
 
    public :: mchrg_cache
+
 
    !> Cache for the charge model
    type :: mchrg_cache
@@ -80,7 +80,7 @@ module multicharge_model_cache
       !> Derivative of Maxwell capacitance matrix w.r.t positions
       real(wp), allocatable :: dcdr(:, :, :)
 
-      !> Derivative of Maxwell capacitance matrix w.r.t positions in compressed format
+      !> Derivative of Maxwell capacitance matrix w.r.t positions, compressed
       real(wp), allocatable :: dcdrdiag(:, :)
 
       !> Derivative of Maxwell capacitance matrix w.r.t lattice vectors
@@ -100,6 +100,8 @@ module multicharge_model_cache
 
       !> Logical flag for gradient calculation
       logical :: grad
+
    end type mchrg_cache
+
 
 end module multicharge_model_cache

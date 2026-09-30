@@ -24,6 +24,7 @@ module multicharge_wignerseitz
 
    public :: new_wignerseitz_cell
 
+
    !> Small cutoff threshold to create only closest cells
    real(wp), parameter :: thr = sqrt(epsilon(0.0_wp))
 
@@ -51,7 +52,7 @@ subroutine new_wignerseitz_cell(self, mol)
    call get_lattice_points(mol%periodic, mol%lattice, thr, trans)
    ntr = size(trans, 2)
    allocate(self%nimg(mol%nat, mol%nat), self%tridx(ntr, mol%nat, mol%nat), &
-   & tridx(ntr))
+      & tridx(ntr))
 
    self%nimg_max = 0
    !$omp parallel do default(none) schedule(runtime) collapse(2) &
@@ -71,7 +72,7 @@ subroutine new_wignerseitz_cell(self, mol)
 end subroutine new_wignerseitz_cell
 
 
-!> Determine the periodic images belonging to the Wigner-Seitz cell of an atom pair
+!> Determine the periodic images in the Wigner-Seitz cell of an atom pair
 subroutine get_pairs(iws, trans, rij, list)
 
    !> Number of periodic images belonging to the Wigner-Seitz cell

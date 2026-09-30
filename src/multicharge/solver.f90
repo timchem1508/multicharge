@@ -20,7 +20,6 @@
 !> Provides a reexport of the solvers implementations
 
 !> Proxy module to reexport the solver implementations
-
 module multicharge_solver
    use mctc_env, only : error_type, fatal_error
    use multicharge_solver_type, only : mchrg_solver_type, mchrg_solver_input
@@ -34,6 +33,7 @@ module multicharge_solver
    public :: direct_solver, new_direct_solver, direct_input
    public :: cg_solver, new_cg_solver, cg_input
    public :: new_mchrg_solver
+
 
 contains
 
@@ -71,5 +71,6 @@ subroutine new_mchrg_solver(solver, input, error)
    end select
 
 end subroutine new_mchrg_solver
+
 
 end module multicharge_solver

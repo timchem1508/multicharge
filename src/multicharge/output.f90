@@ -24,7 +24,8 @@ module multicharge_output
    implicit none
    private
 
-   public :: write_ascii_model, write_ascii_properties, write_ascii_results, json_results
+   public :: write_ascii_model, write_ascii_properties, write_ascii_results
+   public :: json_results
 
 
 contains
@@ -49,7 +50,7 @@ subroutine write_ascii_model(unit, mol, model, verbosity, timer)
    real(wp), intent(in) :: timer
 
    integer :: isp
-   real(wp), parameter :: sqrt2pi = sqrt(2.0_wp/pi)
+   real(wp), parameter :: sqrt2pi = sqrt(2.0_wp / pi)
 
    write(unit, '(a, ":")') "Charge model parameter"
    write(unit, '(54("-"))')
@@ -58,7 +59,7 @@ subroutine write_ascii_model(unit, mol, model, verbosity, timer)
    do isp = 1, mol%nid
       write(unit, '(i4, 1x, a4, *(1x,f10.4))') &
       & mol%num(isp), mol%sym(isp), model%chi(isp), model%kcnchi(isp), &
-      & model%eta(isp) + sqrt2pi/model%rad(isp), model%rad(isp) * autoaa
+      & model%eta(isp) + sqrt2pi / model%rad(isp), model%rad(isp) * autoaa
    end do
    write(unit, '(54("-"),/)')
 
@@ -105,8 +106,7 @@ subroutine write_ascii_properties(unit, mol, model, cn, qvec)
       & model%chi(isp) - model%kcnchi(isp) * sqrt(cn(iat))
    end do
    write(unit, '(54("-"))')
-   write(unit, '(a7,26x,f10.4)') &
-   & "Σ", sum(qvec)
+   write(unit, '(a7,26x,f10.4)') "Σ", sum(qvec)
    write(unit, '(54("-"),/)')
 
 end subroutine write_ascii_properties
@@ -178,14 +178,16 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL)
       write(unit, '(a,":", t25, es20.13, 1x, a)') &
       & "Charge gradient norm", norm2(dqdr), "a.u./a0"
       write(unit, '(72("-"))')
-      write(unit, '(a10,1x,a4,3x,a6,1x,a4,3x,*(1x,a12))') "#", "Z", "#", "A", "dQ(Z)/dx(A)", "dQ(Z)/dy(A)", "dQ(Z)/dz(A)"
+      write(unit, '(a10,1x,a4,3x,a6,1x,a4,3x,*(1x,a12))') &
+         & "#", "Z", "#", "A", "dQ(Z)/dx(A)", "dQ(Z)/dy(A)", "dQ(Z)/dz(A)"
       write(unit, '(72("-"))')
       do iat = 1, mol%nat
          isp = mol%id(iat)
          do jat = 1, mol%nat
             jsp = mol%id(jat)
             write(unit, '(i10,1x,i3,1x,a2,1x,i6,1x,i3,1x,a2,*(2x ,es11.3))') &
-            & iat, mol%num(isp), mol%sym(isp), jat, mol%num(jsp), mol%sym(jsp), dqdr(:, jat, iat)
+            & iat, mol%num(isp), mol%sym(isp), jat, mol%num(jsp), mol%sym(jsp), &
+            & dqdr(:, jat, iat)
          end do
       end do
       write(unit, '(72("-"))')
@@ -194,7 +196,8 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL)
       write(unit, '(a,":")') &
       & "Charge virial"
       write(unit, '(62("-"))')
-      write(unit, '(a10,1x,a4,3x,a9,1x,*(1x, a10))')  "#", "Z", "component", "x", "y", "z"
+      write(unit, '(a10,1x,a4,3x,a9,1x,*(1x, a10))') &
+         & "#", "Z", "component", "x", "y", "z"
       write(unit, '(62("-"))')
       do iat = 1, mol%nat
          isp = mol%id(iat)
@@ -312,6 +315,7 @@ subroutine write_json_array(unit, array, indent)
    end do
    if (allocated(indent)) write(unit, '(/,a)', advance='no') repeat(indent, 1)
    write(unit, '("]")', advance='no')
+
 end subroutine write_json_array
 
 

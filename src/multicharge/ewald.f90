@@ -23,13 +23,17 @@ module multicharge_ewald
 
    public :: get_alpha
 
+
+   !> Two times pi
    real(wp), parameter :: twopi = 2 * pi
+
+   !> Tolerance for the difference in real and reciprocal space decline
    real(wp), parameter :: eps = sqrt(epsilon(0.0_wp))
 
    abstract interface
       !> Returns the max. value of a term in the reciprocal space part of the Ewald
       !> summation for a given vector length.
-      pure function get_rec_term_gen(gg, alpha, vol) result(gTerm)
+      pure function get_rec_term_gen(gg, alpha, vol) result(gterm)
          import :: wp
 
          !> Length of the reciprocal space vector
@@ -42,7 +46,7 @@ module multicharge_ewald
          real(wp), intent(in) :: vol
 
          !> Reciprocal term
-         real(wp) :: gTerm
+         real(wp) :: gterm
 
       end function get_rec_term_gen
    end interface
@@ -63,7 +67,7 @@ subroutine get_alpha(lattice, alpha)
    real(wp) :: vol, rec_lat(3, 3)
 
    vol = abs(matdet_3x3(lattice))
-   rec_lat = twopi*transpose(matinv_3x3(lattice))
+   rec_lat = twopi * transpose(matinv_3x3(lattice))
 
    call search_alpha(lattice, rec_lat, vol, eps, alpha)
 
@@ -173,8 +177,8 @@ pure function rec_dir_diff(alpha, get_rec_term, rlen, dlen, volume) result(diff)
    real(wp) :: diff
 
    diff = ((get_rec_term(4*rlen, alpha, volume) &
-   & - get_rec_term(5*rlen, alpha, volume))) &
-   & - (get_dir_term(2*dlen, alpha) - get_dir_term(3*dlen, alpha))
+      & - get_rec_term(5*rlen, alpha, volume))) &
+      & - (get_dir_term(2*dlen, alpha) - get_dir_term(3*dlen, alpha))
 
 end function rec_dir_diff
 
@@ -192,7 +196,7 @@ pure function get_dir_term(rr, alpha) result(dval)
    !> Real space term
    real(wp) :: dval
 
-   dval = erfc(alpha*rr)/rr
+   dval = erfc(alpha * rr) / rr
 
 end function get_dir_term
 
@@ -213,7 +217,7 @@ pure function get_rec_term_3d(gg, alpha, vol) result(rval)
    !> Reciprocal term
    real(wp) :: rval
 
-   rval = 4.0_wp*pi*(exp(-0.25_wp*gg*gg/(alpha**2))/(vol*gg*gg))
+   rval = 4.0_wp * pi * (exp(-0.25_wp * gg * gg / (alpha**2)) / (vol * gg * gg))
 
 end function get_rec_term_3d
 
