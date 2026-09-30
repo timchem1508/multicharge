@@ -18,7 +18,6 @@
 
 module multicharge_solver_type
    use mctc_env, only : error_type, wp
-   use mctc_csrlist, only : csr_list
    implicit none
    private
 
@@ -37,17 +36,14 @@ module multicharge_solver_type
 
    abstract interface
       !> Solve the linear system of equations
-      subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error)
-         import :: mchrg_solver_type, error_type, wp, csr_list
+      subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
+         import :: mchrg_solver_type, error_type, wp
 
          !> Solver instance
          class(mchrg_solver_type), intent(in) :: self
 
          !> Dense coefficient matrix of the linear system
-         real(wp), intent(in), optional :: amat(:, :)
-
-         !> Coefficient matrix values in compressed-row storage
-         real(wp), intent(in), optional :: alist(:)
+         real(wp), intent(in):: amat(:, :)
 
          !> Right-hand side vector
          real(wp), intent(in) :: xvec(:)
@@ -60,9 +56,6 @@ module multicharge_solver_type
 
          !> Flag for coupled-perturbed equations
          logical, intent(in), optional :: cpq
-
-         !> Optional neighborlist representation of the matrix
-         type(csr_list), intent(in), optional :: list
 
          !> Output unit
          integer, intent(in), optional :: new_unit

@@ -698,32 +698,4 @@ subroutine test_cg_random_spd(error)
 
 end subroutine test_cg_random_spd
 
-! Additional subroutine for vector output
-
-subroutine write_vector(vector, name, unit)
-   implicit none
-   real(wp),intent(in) :: vector(:)
-   character(len=*),intent(in),optional :: name
-   integer, intent(in),optional :: unit
-   integer :: d
-   integer :: iunit, j
-
-   d = size(vector, dim=1)
-
-   if (present(unit)) then
-      iunit = unit
-   else
-      iunit = output_unit
-   end if
-
-   if (present(name)) write(iunit,'(/,"vector printed:",1x,a)') name
-
-   do j = 1, d
-      write(iunit, '(i6)', advance='no') j
-      write(iunit, '(1x,f15.10)', advance='no') vector(j)
-      write(iunit, '(a)')
-   end do
-
-end subroutine write_vector
-
 end module test_solver

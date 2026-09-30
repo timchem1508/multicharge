@@ -19,7 +19,6 @@
 module multicharge_solver_direct
    use iso_fortran_env, only : output_unit
    use mctc_env, only : error_type, fatal_error, format_time, timer_type, wp
-   use mctc_csrlist, only : csr_list
    use multicharge_blas, only : symv
    use multicharge_lapack, only : sytrf, sytri, sytrs
    use multicharge_solver_type, only : mchrg_solver_input, mchrg_solver_type
@@ -71,15 +70,12 @@ end subroutine new_direct_solver
 
 
 !> Solve a dense symmetric linear system using LAPACK
-subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error)
+subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
    !> Direct solver instance
    class(direct_solver), intent(in) :: self
 
    !> Dense coefficient matrix of the linear system
-   real(wp), intent(in), optional :: amat(:, :)
-
-   !> Coefficient matrix values in compressed-row storage
-   real(wp), intent(in), optional :: alist(:)
+   real(wp), intent(in) :: amat(:, :)
 
    !> Right-hand side vector
    real(wp), intent(in) :: xvec(:)
@@ -92,9 +88,6 @@ subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error
 
    !> Whether to solve coupled-perturbed equations
    logical, intent(in), optional :: cpq
-
-   !> Optional neighborlist representation of the matrix
-   type(csr_list), intent(in), optional :: list
 
    !> Output unit (optional)
    integer, intent(in), optional :: new_unit
@@ -129,54 +122,51 @@ subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error
    ! Dimensions match check
    ndim = size(xvec)
 
-   if (present(amat)) then
-      if (size(amat, 1) /= ndim .or. size(amat, 2) /= ndim) then
-         call fatal_error(error, "solve_direct: dimension mismatch.")
-         return
-      end if
+   if (size(amat, 1) /= ndim .or. size(amat, 2) /= ndim) then
+      call fatal_error(error, "solve_direct: dimension mismatch.")
+      return
+   end if
 
-      allocate(invmat(ndim, ndim))
-      invmat = amat
-      vrhs = xvec
+   allocate(invmat(ndim, ndim))
+   invmat = amat
+   vrhs = xvec
 
-      want_cpq = .false.
-      if (present(cpq)) want_cpq = cpq
+   want_cpq = .false.
+   if (present(cpq)) want_cpq = cpq
 
-      ! Factorize the Coulomb matrix
-      allocate(ipiv(ndim))
-      call sytrf(invmat, ipiv, info=local_info, uplo='l')
+   ! Factorize the Coulomb matrix
+   allocate(ipiv(ndim))
+   call sytrf(invmat, ipiv, info=local_info, uplo='l')
+   if (local_info /= 0) then
+      call fatal_error(error, "Bunch-Kaufman factorization failed.")
+      return
+   end if
+
+   if (want_cpq) then
+      ! Inverted matrix is needed for coupled-perturbed equations
+      call sytri(invmat, ipiv, info=local_info, uplo='l')
       if (local_info /= 0) then
-         call fatal_error(error, "Bunch-Kaufman factorization failed.")
+         call fatal_error(error, "Inversion of factorized matrix failed.")
          return
       end if
-
-      if (want_cpq) then
-         ! Inverted matrix is needed for coupled-perturbed equations
-         call sytri(invmat, ipiv, info=local_info, uplo='l')
-         if (local_info /= 0) then
-            call fatal_error(error, "Inversion of factorized matrix failed.")
-            return
-         end if
-         ! Solve the linear system
-         call symv(invmat, xvec, vrhs, uplo='l')
-         do ic = 1, ndim
-            do jc = ic + 1, ndim
-               invmat(ic, jc) = invmat(jc, ic)
-            end do
+      ! Solve the linear system
+      call symv(invmat, xvec, vrhs, uplo='l')
+      do ic = 1, ndim
+         do jc = ic + 1, ndim
+            invmat(ic, jc) = invmat(jc, ic)
          end do
-      else
-         ! Solve the linear system
-         call sytrs(invmat, vrhs, ipiv, info=local_info, uplo='l')
-         if (local_info /= 0) then
-            call fatal_error(error, "Solution of linear system failed.")
-            return
-         end if
-
+      end do
+   else
+      ! Solve the linear system
+      call sytrs(invmat, vrhs, ipiv, info=local_info, uplo='l')
+      if (local_info /= 0) then
+         call fatal_error(error, "Solution of linear system failed.")
+         return
       end if
-
-      if (present(ainv)) ainv = invmat
 
    end if
+
+   if (present(ainv)) ainv = invmat
 
    ! pop solve timer
    call timer%pop
