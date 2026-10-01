@@ -29,7 +29,7 @@ module multicharge_model_type
    use mctc_io_math, only : matinv_3x3
    use mctc_cutoff, only : get_lattice_points
    use mctc_ncoord, only : ncoord_type
-   use mctc_csrlist, only : csr_list, spmv_csr
+   use mctc_csrlist, only : csr_list, spgemv_csr, spsymv_csr
    use multicharge_blas, only : gemv, symv, gemm
    use multicharge_model_cache, only : mchrg_cache
    use multicharge_solver_type, only : mchrg_solver_type
@@ -376,7 +376,7 @@ subroutine solve(self, mol, solver, cache, error, &
    integer :: iat, ndim
 
    real(wp), allocatable :: unitvec(:)
-   real(wp), allocatable :: vvec(:)
+   real(wp), allocatable :: vvec(:), avec(:)
    real(wp) :: uvecsum
    real(wp) :: vvecsum
    real(wp) :: lambda
@@ -490,8 +490,15 @@ subroutine solve(self, mol, solver, cache, error, &
    if (present(energy)) then
       call timer%push("energy")
       if (present(list)) then
-         call spmv_csr(list, cache%alist, cache%vrhs, cache%xvec(:mol%nat), &
-            & alpha=0.5_wp, beta=-1.0_wp)
+         allocate(avec(mol%nat))
+         if (list%complete) then
+            call spgemv_csr(mol%nat, cache%alist, list%inl, list%nlat, &
+               & cache%vrhs, avec)
+         else
+            call spsymv_csr(mol%nat, cache%alist, list%inl, list%nlat, &
+               & cache%vrhs, avec)
+         end if
+         cache%xvec(:mol%nat) = 0.5_wp * avec - cache%xvec(:mol%nat)
       else
          call symv(cache%amat, cache%vrhs, cache%xvec(:mol%nat), &
             & alpha=0.5_wp, beta=-1.0_wp, uplo='l')

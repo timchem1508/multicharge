@@ -20,7 +20,7 @@
 module multicharge_solver_cg
    use iso_fortran_env, only : output_unit
    use mctc_env, only : error_type, fatal_error, format_time, timer_type, wp
-   use mctc_csrlist, only : csr_list, spmv_csr
+   use mctc_csrlist, only : csr_list, spgemv_csr, spsymv_csr
    use multicharge_blas, only : axpy, dot, scal, symv
    use multicharge_solver_type, only : mchrg_solver_input, mchrg_solver_type
    implicit none
@@ -237,7 +237,11 @@ subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error
 
    ! Initial residual
    if (nlist) then
-      call spmv_csr(list, alist, vrhs, Adir, alpha=1.0_wp, beta=0.0_wp)
+      if (list%complete) then
+         call spgemv_csr(ndim, alist, list%inl, list%nlat, vrhs, Adir)
+      else
+         call spsymv_csr(ndim, alist, list%inl, list%nlat, vrhs, Adir)
+      end if
    else
       call symv(amat, vrhs, Adir, alpha=1.0_wp, beta=0.0_wp)
    end if
@@ -268,7 +272,11 @@ subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error
 
       ! Matrix-vector product
       if (nlist) then
-         call spmv_csr(list, alist, dir, Adir, alpha=1.0_wp, beta=0.0_wp)
+         if (list%complete) then
+            call spgemv_csr(ndim, alist, list%inl, list%nlat, dir, Adir)
+         else
+            call spsymv_csr(ndim, alist, list%inl, list%nlat, dir, Adir)
+         end if
       else
          call symv(amat, dir, Adir, alpha=1.0_wp, beta=0.0_wp)
       end if
