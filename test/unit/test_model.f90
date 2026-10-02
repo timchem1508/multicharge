@@ -16,11 +16,11 @@
 module test_model
    use iso_fortran_env, only: output_unit
    use mctc_env, only: wp
-   use mctc_env_testing, only: new_unittest, unittest_type, error_type, test_failed
+   use mctc_env_testing, only: new_unittest, unittest_type, error_type, test_failed, check
    use mctc_io_structure, only: structure_type, new
    use mstore, only: get_structure
    use multicharge_blas, only: gemv
-   use multicharge_model_type, only: mchrg_model_type
+   use multicharge_model_type, only: mchrg_model_type, hess_index
    use multicharge_model_eeqbc, only: eeqbc_model
    use multicharge_param, only: new_eeq2019_model, new_eeqbc2025_model
    use multicharge_model_cache, only: mchrg_cache
@@ -70,6 +70,7 @@ subroutine collect_model(testsuite)
    & new_unittest("eeq-dadr-znooh", test_eeq_dadr_znooh), &
    & new_unittest("eeq-dbdr-znooh", test_eeq_dbdr_znooh), &
    & new_unittest("gradient-znooh", test_g_znooh), &
+   & new_unittest("hessian-znooh", test_hess_znooh), &
    & new_unittest("dqdr-znooh", test_dqdr_znooh), &
    & new_unittest("eeq-dfdr-mb06", test_eeq_dfdr_mb06), &
    & new_unittest("eeq-dfdr-mb10", test_eeq_dfdr_mb10), &
@@ -705,6 +706,149 @@ subroutine test_numgrad(error, mol, model)
    end if
 
 end subroutine test_numgrad
+
+!> Check the semi-numerical Hessian against central differences of the
+!> analytical gradient and verify that both storage layouts are equivalent
+subroutine test_numhess(error, mol, model)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular structure data
+   type(structure_type), intent(inout) :: mol
+
+   !> Electronegativity equilibration model
+   class(mchrg_model_type), intent(in) :: model
+
+   type(mchrg_cache), allocatable :: cache
+
+   ! Solver variables
+   class(mchrg_solver_type), allocatable :: solver
+   class(mchrg_solver_input), allocatable :: solver_input
+   real(wp) :: tol = 1.0e-15_wp
+   integer :: maxiter = 1000
+   integer :: verbosity = 0
+
+   integer :: i, j, ij, jat, jc, ndim
+   real(wp), parameter :: step = 1.0e-6_wp
+   real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :), qvec(:)
+   real(wp), allocatable :: gr(:, :), gl(:, :), sr(:, :), sl(:, :)
+   real(wp), allocatable :: numhess(:, :), hess_packed(:), hess_dense(:, :)
+   real(wp), allocatable :: press(:, :, :, :)
+
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+    type is (cg_input)
+      solver_input%cgtol = tol
+      solver_input%cgmiter = maxiter
+      solver_input%verbosity = verbosity
+   end select
+   call solver_maker(solver, solver_input, error)
+   if (allocated(error)) return
+
+   ndim = 3*mol%nat
+   allocate(energy(mol%nat), gradient(3, mol%nat), sigma(3, 3), qvec(mol%nat))
+   allocate(gr(3, mol%nat), gl(3, mol%nat), sr(3, 3), sl(3, 3))
+   allocate(numhess(ndim, ndim), hess_packed(ndim*(ndim + 1)/2), hess_dense(ndim, ndim))
+   allocate(press(3, 3, 3, mol%nat))
+
+   ! Reference Hessian from central differences of the analytical gradient
+   lp: do jat = 1, mol%nat
+      do jc = 1, 3
+         mol%xyz(jc, jat) = mol%xyz(jc, jat) + step
+         call displaced_gradient(mol, model, solver, error, gr, sr)
+         if (allocated(error)) exit lp
+
+         mol%xyz(jc, jat) = mol%xyz(jc, jat) - 2*step
+         call displaced_gradient(mol, model, solver, error, gl, sl)
+         if (allocated(error)) exit lp
+
+         mol%xyz(jc, jat) = mol%xyz(jc, jat) + step
+         numhess(:, 3*(jat - 1) + jc) = reshape(0.5_wp*(gr - gl)/step, [ndim])
+      end do
+   end do lp
+   if (allocated(error)) return
+
+   ! The packed layout can only hold the symmetric part
+   numhess(:, :) = 0.5_wp*(numhess + transpose(numhess))
+
+   energy(:) = 0.0_wp
+   gradient(:, :) = 0.0_wp
+   sigma(:, :) = 0.0_wp
+   allocate(cache)
+   call model%get_numhess(mol, solver, cache, error, qvec, energy, gradient, sigma, &
+   & hess_packed, press, unit=output_unit, verbosity=verbosity)
+   if (allocated(error)) return
+
+   energy(:) = 0.0_wp
+   gradient(:, :) = 0.0_wp
+   sigma(:, :) = 0.0_wp
+   deallocate(cache)
+   allocate(cache)
+   call model%get_numhess(mol, solver, cache, error, qvec, energy, gradient, sigma, &
+   & hess_dense, press, unit=output_unit, verbosity=verbosity)
+   if (allocated(error)) return
+
+   ! Both layouts are evaluated in separate runs, so they agree only up to the
+   ! reproducibility of the threaded solver
+   ij = 0
+   do i = 1, ndim
+      do j = 1, i
+         ij = ij + 1
+         call check(error, hess_dense(j, i), hess_packed(ij), thr=thr1)
+         if (allocated(error)) return
+         call check(error, hess_dense(i, j), hess_packed(ij), thr=thr1)
+         if (allocated(error)) return
+      end do
+   end do
+
+   if (any(abs(hess_dense - numhess) > thr2)) then
+      call test_failed(error, "Second derivative of energy does not match")
+      print'(a)', "Hessian:"
+      print'(3es21.14)', hess_dense
+      print'(a)', "numhess:"
+      print'(3es21.14)', numhess
+      print'(a)', "diff:"
+      print'(3es21.14)', hess_dense - numhess
+   end if
+
+end subroutine test_numhess
+
+
+!> Analytical gradient and virial of a displaced structure using a fresh cache
+subroutine displaced_gradient(mol, model, solver, error, gradient, sigma)
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Electronegativity equilibration model
+   class(mchrg_model_type), intent(in) :: model
+
+   !> The solver instance
+   class(mchrg_solver_type), intent(in) :: solver
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Energy gradient
+   real(wp), intent(out) :: gradient(:, :)
+
+   !> Virial
+   real(wp), intent(out) :: sigma(:, :)
+
+   type(mchrg_cache), allocatable :: cache
+   real(wp), parameter :: trans(3, 1) = 0.0_wp
+
+   gradient(:, :) = 0.0_wp
+   sigma(:, :) = 0.0_wp
+
+   allocate(cache)
+   call model%update(mol, cache, trans, .true.)
+   call model%solve(mol, solver, cache, error, gradient=gradient, sigma=sigma, &
+   & unit=output_unit)
+
+end subroutine displaced_gradient
+
 
 subroutine test_numsigma(error, mol, model)
 
@@ -1421,6 +1565,31 @@ subroutine test_g_h2plus(error)
    call test_numgrad(error, mol, model)
 
 end subroutine test_g_h2plus
+
+subroutine test_hess_znooh(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   integer, parameter :: nat = 4
+   real(wp), parameter :: charge = -1.0_wp
+   integer, parameter :: num(nat) = [30, 8, 8, 1]
+   real(wp), parameter :: xyz(3, nat) = reshape([ &
+   & -0.30631629283878_wp, -1.11507514203552_wp, +0.00000000000000_wp, &
+   & -0.06543072660074_wp, -4.32862093666082_wp, +0.00000000000000_wp, &
+   & -0.64012239724097_wp, +2.34966763895920_wp, +0.00000000000000_wp, &
+   & +1.01186941668051_wp, +3.09402843973713_wp, +0.00000000000000_wp],&
+   & [3, nat])
+
+   call new(mol, num, xyz, charge)
+   call new_eeq2019_model(mol, model, error)
+   if (allocated(error)) return
+   call test_numhess(error, mol, model)
+
+end subroutine test_hess_znooh
+
 
 subroutine test_eeq_dadr_znooh(error)
 

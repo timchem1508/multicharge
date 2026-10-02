@@ -20,6 +20,7 @@ module multicharge_output
    use mctc_io_convert, only : autoaa
    use mctc_io_constants, only : pi
    use multicharge_model, only : mchrg_model_type
+   use multicharge_model_type, only : hess_index
    use multicharge_version, only : get_multicharge_version
    implicit none
    private
@@ -136,13 +137,15 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, h
    !> Derivative of the partial charges w.r.t. strain deformations
    real(wp), intent(in), optional :: dqdL(:, :, :)
 
-   !> Second derivative of the energy w.r.t. the Cartesian coordinates
-   real(wp), intent(in), optional :: hess(:, :, :, :)
+   !> Second derivative of the energy w.r.t. the Cartesian coordinates in
+   !> packed lower-triangle storage
+   real(wp), intent(in), optional :: hess(:)
 
    !> Derivative of the virial w.r.t. positions (3, 3, 3, nat) or strain (3, 3, 3, 3)
    real(wp), intent(in), optional :: press(:, :, :, :)
 
    integer :: iat, jat, isp, jsp, ic, jc
+   real(wp) :: hrow(3), hnorm
    logical :: grad, qgrad
    character(len=1), parameter :: comp(3) = ["x", "y", "z"]
 
@@ -216,8 +219,12 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, h
    end if
 
    if (present(hess)) then
+      hnorm = 2.0_wp * sum(hess**2)
+      do ic = 1, 3 * mol%nat
+         hnorm = hnorm - hess(hess_index(ic, ic))**2
+      end do
       write(unit, '(a,":", t25, es20.13, 1x, a)') &
-      & "Hessian matrix norm", norm2(hess), "Eh/a0^2"
+      & "Hessian matrix norm", sqrt(hnorm), "Eh/a0^2"
       write(unit, '(78("-"))')
       write(unit, '(a10,1x,a4,3x,a6,1x,a4,3x,a9,1x,*(1x,a12))') &
       & "#", "Z", "#", "A", "component", "d2E/dxdR", "d2E/dydR", "d2E/dzdR"
@@ -227,9 +234,12 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, h
          do jat = 1, mol%nat
             jsp = mol%id(jat)
             do ic = 1, 3
+               do jc = 1, 3
+                  hrow(jc) = hess(hess_index(3 * (jat - 1) + jc, 3 * (iat - 1) + ic))
+               end do
                write(unit, '(i10,1x,i3,1x,a2,1x,i6,1x,i3,1x,a2,2x,a4,5x,*(2x,es11.3))') &
                & iat, mol%num(isp), mol%sym(isp), jat, mol%num(jsp), mol%sym(jsp), &
-               & comp(ic), hess(:, jat, ic, iat)
+               & comp(ic), hrow
             end do
          end do
       end do

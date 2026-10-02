@@ -37,7 +37,7 @@ module multicharge_model_type
    implicit none
    private
 
-   public :: mchrg_model_type, get_dir_trans, get_rec_trans
+   public :: mchrg_model_type, get_dir_trans, get_rec_trans, hess_index
 
    !> Abstract multicharge model type
    type, abstract :: mchrg_model_type
@@ -82,8 +82,14 @@ module multicharge_model_type
       !> Calculate local charges from electronegativity weighted CN
       procedure :: local_charge
 
+      !> Calculate semi-numerical Hessian in packed lower-triangle storage
+      procedure, private :: get_numhess_packed
+
+      !> Calculate semi-numerical Hessian in dense symmetric storage
+      procedure, private :: get_numhess_dense
+
       !> Calculate semi-numerical Hessian and pressure tensor
-      procedure :: get_numhess
+      generic :: get_numhess => get_numhess_packed, get_numhess_dense
 
       !> Update cache
       procedure(update), deferred :: update
@@ -788,8 +794,8 @@ end subroutine get_external_gradient
 
 !> Semi-numerical Hessian and pressure tensor from central differences of
 !> the analytical energy gradient and virial
-subroutine get_numhess(self, mol, solver, cache, error, qvec, energy, grad, sigma, &
-   & hess, press, list, unit, verbosity)
+subroutine get_numhess_packed(self, mol, solver, cache, error, qvec, energy, grad, &
+   & sigma, hess, press, list, unit, verbosity)
 
    !> Electronegativity-equilibration model
    class(mchrg_model_type), intent(in) :: self
@@ -818,8 +824,8 @@ subroutine get_numhess(self, mol, solver, cache, error, qvec, energy, grad, sigm
    !> Virial of the unperturbed system
    real(wp), intent(inout), contiguous :: sigma(:, :)
 
-   !> Hessian matrix d2E/dR2
-   real(wp), intent(out) :: hess(:, :, :, :)
+   !> Hessian matrix d2E/dR2 in packed lower-triangle storage
+   real(wp), intent(out) :: hess(:)
 
    !> Virial derivatives w.r.t. positions (3, 3, 3, nat) or strain (3, 3, 3, 3)
    real(wp), intent(out) :: press(:, :, :, :)
@@ -842,7 +848,7 @@ subroutine get_numhess(self, mol, solver, cache, error, qvec, energy, grad, sigm
    real(wp) :: lattice_orig(3, 3), eps_mat(3, 3)
    integer :: ic, jc, kc, lc, jat
 
-   hess(:, :, :, :) = 0.0_wp
+   hess(:) = 0.0_wp
    press(:, :, :, :) = 0.0_wp
 
    ! Mutable local copy of the structure
@@ -875,7 +881,8 @@ subroutine get_numhess(self, mol, solver, cache, error, qvec, energy, grad, sigm
 
          mol_work%xyz(jc, jat) = xyz_orig(jc, jat)
 
-         hess(:, :, jc, jat) = 0.5_wp * (g_plus - g_minus) / step
+         call add_hess_column(3 * (jat - 1) + jc, &
+            & 0.5_wp * (g_plus - g_minus) / step, hess)
          if (size(press, 4) == mol%nat) then
             press(:, :, jc, jat) = 0.5_wp * (s_plus - s_minus) / step
          end if
@@ -914,7 +921,125 @@ subroutine get_numhess(self, mol, solver, cache, error, qvec, energy, grad, sigm
       end do
    end if
 
-end subroutine get_numhess
+end subroutine get_numhess_packed
+
+
+!> Semi-numerical Hessian in dense symmetric storage, obtained by expanding the
+!> packed lower triangle
+subroutine get_numhess_dense(self, mol, solver, cache, error, qvec, energy, grad, &
+   & sigma, hess, press, list, unit, verbosity)
+
+   !> Electronegativity-equilibration model
+   class(mchrg_model_type), intent(in) :: self
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> The solver instance
+   class(mchrg_solver_type), intent(in) :: solver
+
+   !> Cache handling for the unperturbed system
+   type(mchrg_cache), intent(inout) :: cache
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Atomic partial charges of the unperturbed system
+   real(wp), intent(out), contiguous :: qvec(:)
+
+   !> Electrostatic energy of the unperturbed system
+   real(wp), intent(inout), contiguous :: energy(:)
+
+   !> Energy gradient of the unperturbed system
+   real(wp), intent(inout), contiguous :: grad(:, :)
+
+   !> Virial of the unperturbed system
+   real(wp), intent(inout), contiguous :: sigma(:, :)
+
+   !> Hessian matrix d2E/dR2
+   real(wp), intent(out) :: hess(:, :)
+
+   !> Virial derivatives w.r.t. positions (3, 3, 3, nat) or strain (3, 3, 3, 3)
+   real(wp), intent(out) :: press(:, :, :, :)
+
+   !> neighborlist optional type
+   type(csr_list), intent(in), optional :: list
+
+   !> Output unit
+   integer, intent(in), optional :: unit
+
+   !> Verbosity level
+   integer, intent(in), optional :: verbosity
+
+   real(wp), allocatable :: hess_packed(:)
+   integer :: idx, jdx, ij, ndim
+
+   hess(:, :) = 0.0_wp
+
+   ndim = 3 * mol%nat
+   allocate(hess_packed(ndim * (ndim + 1) / 2))
+   call self%get_numhess_packed(mol, solver, cache, error, qvec, energy, grad, sigma, &
+      & hess_packed, press, list, unit, verbosity)
+   if (allocated(error)) return
+
+   ij = 0
+   do idx = 1, ndim
+      do jdx = 1, idx
+         ij = ij + 1
+         hess(jdx, idx) = hess_packed(ij)
+         hess(idx, jdx) = hess_packed(ij)
+      end do
+   end do
+
+end subroutine get_numhess_dense
+
+
+!> Accumulate one column of the Cartesian Hessian into packed lower-triangle
+!> storage. Every off-diagonal element is reached once from each of the two
+!> displacements that contribute to it, so both estimates are averaged.
+subroutine add_hess_column(jdx, dgdr, hess)
+
+   !> Index of the displaced Cartesian coordinate
+   integer, intent(in) :: jdx
+
+   !> Derivative of the energy gradient w.r.t. the displaced coordinate
+   real(wp), intent(in) :: dgdr(:, :)
+
+   !> Packed lower-triangle Hessian
+   real(wp), intent(inout) :: hess(:)
+
+   integer :: iat, ic, idx, ij
+
+   do iat = 1, size(dgdr, 2)
+      do ic = 1, 3
+         idx = 3 * (iat - 1) + ic
+         ij = hess_index(idx, jdx)
+         if (idx == jdx) then
+            hess(ij) = dgdr(ic, iat)
+         else
+            hess(ij) = hess(ij) + 0.5_wp * dgdr(ic, iat)
+         end if
+      end do
+   end do
+
+end subroutine add_hess_column
+
+
+!> Position of a symmetric-matrix element in packed lower-triangle storage
+elemental function hess_index(idx, jdx) result(ij)
+
+   !> Row index
+   integer, intent(in) :: idx
+
+   !> Column index
+   integer, intent(in) :: jdx
+
+   !> Position in the packed lower triangle
+   integer :: ij
+
+   ij = max(idx, jdx) * (max(idx, jdx) - 1) / 2 + min(idx, jdx)
+
+end function hess_index
 
 
 !> Energy gradient and virial for a displaced structure using a fresh cache

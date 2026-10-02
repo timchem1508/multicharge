@@ -46,7 +46,7 @@ program main
    logical :: grad, egrad, qgrad, json, exist, use_nlist, numeric_hessian
    real(wp), allocatable :: trans(:, :)
    real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
-   real(wp), allocatable :: hess(:, :, :, :), press(:, :, :, :)
+   real(wp), allocatable :: hess(:), press(:, :, :, :)
    real(wp), allocatable :: qvec(:)
    real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: charge
@@ -163,7 +163,7 @@ program main
       if (.not. allocated(gradient)) allocate(gradient(3, mol%nat), sigma(3, 3))
       gradient(:, :) = 0.0_wp
       sigma(:, :) = 0.0_wp
-      allocate(hess(3, mol%nat, 3, mol%nat), press(3, 3, 3, 3))
+      allocate(hess(3 * mol%nat * (3 * mol%nat + 1) / 2), press(3, 3, 3, 3))
       call timer%push("numhess")
       call model%get_numhess(mol, solver, cache, error, qvec, energy, gradient, sigma, &
       & hess, press, list=list, unit=output_unit, verbosity=verbosity)
