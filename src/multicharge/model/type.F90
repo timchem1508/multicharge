@@ -847,15 +847,18 @@ subroutine get_numhess_packed(self, mol, solver, cache, error, qvec, energy, gra
    real(wp), allocatable :: xyz_orig(:, :)
    real(wp) :: lattice_orig(3, 3), eps_mat(3, 3)
    integer :: ic, jc, kc, lc, jat
+   logical :: periodic
 
    hess(:) = 0.0_wp
    press(:, :, :, :) = 0.0_wp
 
    ! Mutable local copy of the structure
+   periodic = any(mol%periodic)
    mol_work = mol
    allocate(xyz_orig(3, mol%nat))
    xyz_orig(:, :) = mol%xyz
-   lattice_orig(:, :) = mol%lattice
+   lattice_orig(:, :) = 0.0_wp
+   if (periodic) lattice_orig(:, :) = mol%lattice
 
    ! Evaluate the unperturbed system
    call get_lattice_points(mol%periodic, mol%lattice, self%ncoord%cutoff, trans)
@@ -900,21 +903,21 @@ subroutine get_numhess_packed(self, mol, solver, cache, error, qvec, energy, gra
          do lc = 1, 3
             eps_mat(lc, kc) = eps_mat(lc, kc) + step
             mol_work%xyz(:, :) = matmul(eps_mat, xyz_orig)
-            mol_work%lattice(:, :) = matmul(eps_mat, lattice_orig)
+            if (periodic) mol_work%lattice(:, :) = matmul(eps_mat, lattice_orig)
             call get_displaced_gradient(self, mol_work, solver, error, g_plus, s_plus, &
                & list, unit, verbosity)
             if (allocated(error)) return
 
             eps_mat(lc, kc) = eps_mat(lc, kc) - 2.0_wp * step
             mol_work%xyz(:, :) = matmul(eps_mat, xyz_orig)
-            mol_work%lattice(:, :) = matmul(eps_mat, lattice_orig)
+            if (periodic) mol_work%lattice(:, :) = matmul(eps_mat, lattice_orig)
             call get_displaced_gradient(self, mol_work, solver, error, g_minus, s_minus, &
                & list, unit, verbosity)
             if (allocated(error)) return
 
             eps_mat(lc, kc) = eps_mat(lc, kc) + step
             mol_work%xyz(:, :) = xyz_orig
-            mol_work%lattice(:, :) = lattice_orig
+            if (periodic) mol_work%lattice(:, :) = lattice_orig
 
             press(:, :, lc, kc) = 0.5_wp * (s_plus - s_minus) / step
          end do

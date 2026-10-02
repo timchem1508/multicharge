@@ -831,10 +831,10 @@ subroutine displaced_gradient(mol, model, solver, error, gradient, sigma)
    type(error_type), allocatable, intent(out) :: error
 
    !> Energy gradient
-   real(wp), intent(out) :: gradient(:, :)
+   real(wp), intent(out), contiguous :: gradient(:, :)
 
    !> Virial
-   real(wp), intent(out) :: sigma(:, :)
+   real(wp), intent(out), contiguous :: sigma(:, :)
 
    type(mchrg_cache), allocatable :: cache
    real(wp), parameter :: trans(3, 1) = 0.0_wp
