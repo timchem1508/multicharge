@@ -19,14 +19,14 @@
 
 module multicharge_solver_cg
    use iso_fortran_env, only : output_unit
-   use mctc_env, only : error_type, fatal_error, format_time, timer_type, wp
+   use mctc_env, only : error_type, fatal_error, format_time, timer_type, wp, i8
    use mctc_csrlist, only : csr_list, spgemv_csr, spsymv_csr
    use multicharge_blas, only : axpy, dot, scal, symv
    use multicharge_solver_type, only : mchrg_solver_input, mchrg_solver_type
    implicit none
    private
 
-   public :: cg_solver, new_cg_solver, cg_input
+   public :: cg_solver, new_cg_solver, cg_input, get_blocks
 
    !> Input configuration for the conjugate-gradient solver
    type, extends(mchrg_solver_input) :: cg_input
@@ -346,6 +346,132 @@ subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error
    call print_cg_final(unit, timer, self%verbosity)
 
 end subroutine solve
+
+
+!> Separate a sparse matrix into rectangular column blocks
+!>
+!> The columns of an nrow x ncol matrix in compressed-row storage are cut into
+!> contiguous groups of bsize columns, the last group may be narrower. Every
+!> block spans all rows and stores only its non-zero elements, sorted by row,
+!> in a single pass over the matrix (stable counting sort, O(nnz)). The input
+!> rows are distributed over the threads, which fill disjoint segments.
+subroutine get_blocks(error, bsize, nrow, ncol, ia, ja, a, bptr, brow, bcol, bval)
+   !$ use omp_lib, only : omp_get_max_threads, omp_get_thread_num
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Number of columns per block
+   integer, intent(in) :: bsize
+
+   !> Number of rows of the matrix
+   integer, intent(in) :: nrow
+
+   !> Number of columns of the matrix
+   integer, intent(in) :: ncol
+
+   !> Row offsets into ja and a, size nrow + 1
+   integer(i8), intent(in) :: ia(:)
+
+   !> Column indices of the non-zero elements
+   integer, intent(in) :: ja(:)
+
+   !> Non-zero elements of the matrix
+   real(wp), intent(in) :: a(:)
+
+   !> Offset of every block into brow, bcol and bval, size number of blocks + 1
+   integer(i8), allocatable, intent(out) :: bptr(:)
+
+   !> Row index of each non-zero element, sorted by row inside a block
+   integer, allocatable, intent(out) :: brow(:)
+
+   !> Column index of each non-zero element local to its block, 1 to bsize
+   integer, allocatable, intent(out) :: bcol(:)
+
+   !> Value of each non-zero element
+   real(wp), allocatable, intent(out) :: bval(:)
+
+   integer :: nblk, nthr, tid, ilo, ihi, i, ib, it
+   integer(i8) :: k, pos, total
+   integer(i8), allocatable :: cnt(:, :)
+   logical :: bad
+
+   if (bsize < 1) then
+      call fatal_error(error, "Block size must be positive.")
+      return
+   end if
+   if (size(ia) /= nrow + 1) then
+      call fatal_error(error, "Row offsets do not match the number of rows.")
+      return
+   end if
+
+   nblk = (ncol + bsize - 1) / bsize
+
+   nthr = 1
+   !$ nthr = omp_get_max_threads()
+   allocate(cnt(nblk, 0:nthr-1), source=0_i8)
+   bad = .false.
+
+   ! Count the elements of every block per thread
+   !$omp parallel default(none) num_threads(nthr) &
+   !$omp& shared(nrow, ncol, bsize, nthr, ia, ja, cnt) reduction(.or.: bad) &
+   !$omp& private(tid, ilo, ihi, i, k, ib)
+   tid = 0
+   !$ tid = omp_get_thread_num()
+   ilo = int((int(tid, i8) * nrow) / nthr) + 1
+   ihi = int((int(tid + 1, i8) * nrow) / nthr)
+   do i = ilo, ihi
+      do k = ia(i), ia(i+1) - 1
+         if (ja(k) < 1 .or. ja(k) > ncol) then
+            bad = .true.
+            cycle
+         end if
+         ib = (ja(k) - 1) / bsize + 1
+         cnt(ib, tid) = cnt(ib, tid) + 1
+      end do
+   end do
+   !$omp end parallel
+   if (bad) then
+      call fatal_error(error, "Column index out of range.")
+      return
+   end if
+
+   ! Block offsets and the first write position of every thread in each block
+   allocate(bptr(nblk + 1))
+   total = 0
+   do ib = 1, nblk
+      bptr(ib) = total + 1
+      do it = 0, nthr - 1
+         k = cnt(ib, it)
+         cnt(ib, it) = total
+         total = total + k
+      end do
+   end do
+   bptr(nblk + 1) = total + 1
+
+   allocate(brow(total), bcol(total), bval(total))
+
+   ! Scatter the elements, every thread keeps the row order inside a block
+   !$omp parallel default(none) num_threads(nthr) &
+   !$omp& shared(nrow, bsize, nthr, ia, ja, a, cnt, brow, bcol, bval) &
+   !$omp& private(tid, ilo, ihi, i, k, ib, pos)
+   tid = 0
+   !$ tid = omp_get_thread_num()
+   ilo = int((int(tid, i8) * nrow) / nthr) + 1
+   ihi = int((int(tid + 1, i8) * nrow) / nthr)
+   do i = ilo, ihi
+      do k = ia(i), ia(i+1) - 1
+         ib = (ja(k) - 1) / bsize + 1
+         pos = cnt(ib, tid) + 1
+         cnt(ib, tid) = pos
+         brow(pos) = i
+         bcol(pos) = ja(k) - (ib - 1) * bsize
+         bval(pos) = a(k)
+      end do
+   end do
+   !$omp end parallel
+
+end subroutine get_blocks
 
 
 !> Print header for CG solver
