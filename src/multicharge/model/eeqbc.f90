@@ -33,7 +33,7 @@ module multicharge_model_eeqbc
    use mctc_io, only : structure_type
    use mctc_io_constants, only : pi
    use mctc_ncoord, only : cn_count, new_ncoord, ncoord_type
-   use mctc_csrlist, only : csr_list, spmv_csr
+   use mctc_csrlist, only : csr_list, spgemv_csr, spsymv_csr
    use mctc_wignerseitz, only : wignerseitz_cell
    use multicharge_wignerseitz, only : new_wignerseitz_cell
    use multicharge_model_type, only : get_dir_trans, mchrg_model_type
@@ -353,7 +353,13 @@ subroutine get_xvec(self, mol, ndim, cache, list, efield)
    end if
 
    if (present(list)) then
-      call spmv_csr(list, cache%clist, cache%xtmp, cache%xvec, alpha=1.0_wp, beta=0.0_wp)
+      if (list%complete) then
+         call spgemv_csr(mol%nat, cache%clist, list%inl, list%nlat, &
+            & cache%xtmp, cache%xvec)
+      else
+         call spsymv_csr(mol%nat, cache%clist, list%inl, list%nlat, &
+            & cache%xtmp, cache%xvec)
+      end if
    else
       call gemv(cache%cmat, cache%xtmp, cache%xvec)
    end if
@@ -2375,7 +2381,11 @@ subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain,
    cnacc = 0.0_wp
 
    allocate(v(mol%nat))
-   call spmv_csr(list, cache%clist, p, v, alpha=1.0_wp, beta=0.0_wp)
+   if (list%complete) then
+      call spgemv_csr(mol%nat, cache%clist, list%inl, list%nlat, p, v)
+   else
+      call spsymv_csr(mol%nat, cache%clist, list%inl, list%nlat, p, v)
+   end if
 
    allocate(gradient_local(3, mol%nat), source=0.0_wp)
    allocate(sigma_local(3, 3), source=0.0_wp)
@@ -2690,7 +2700,11 @@ subroutine get_grad_3d_list(self, mol, list, cache, p, gradient, sigma, alphain,
    allocate(sigma_local(3, 3), source=0.0_wp)
 
    allocate(v(mol%nat))
-   call spmv_csr(list, cache%clist, p, v, alpha=1.0_wp, beta=0.0_wp)
+   if (list%complete) then
+      call spgemv_csr(mol%nat, cache%clist, list%inl, list%nlat, p, v)
+   else
+      call spsymv_csr(mol%nat, cache%clist, list%inl, list%nlat, p, v)
+   end if
 
    !$omp parallel do default(none) schedule(runtime) &
    !$omp shared(cache, mol, list, self, p, v, dtrans, alpha, beta) &
