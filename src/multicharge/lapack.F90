@@ -22,7 +22,7 @@ module multicharge_lapack
    implicit none
    private
 
-   public :: sytrf, sytrs, sytri
+   public :: sytrf, sytrs, sytri, potrf, potrs, syevd
 
    interface sytrf
       module procedure :: mchrg_ssytrf
@@ -42,6 +42,21 @@ module multicharge_lapack
       module procedure :: mchrg_ssytri
       module procedure :: mchrg_dsytri
    end interface sytri
+
+   interface potrf
+      module procedure :: mchrg_spotrf
+      module procedure :: mchrg_dpotrf
+   end interface potrf
+
+   interface potrs
+      module procedure :: mchrg_spotrs
+      module procedure :: mchrg_dpotrs
+   end interface potrs
+
+   interface syevd
+      module procedure :: mchrg_ssyevd
+      module procedure :: mchrg_dsyevd
+   end interface syevd
 
 
    interface lapack_sytrf
@@ -118,6 +133,83 @@ module multicharge_lapack
          real(dp), intent(in) :: work(*)
       end subroutine dsytri
    end interface lapack_sytri
+
+   interface lapack_potrf
+      pure subroutine spotrf(uplo, n, a, lda, info)
+         import :: sp, ik
+         integer(ik), intent(in) :: lda
+         real(sp), intent(inout) :: a(lda, *)
+         character(len=1), intent(in) :: uplo
+         integer(ik), intent(out) :: info
+         integer(ik), intent(in) :: n
+      end subroutine spotrf
+      pure subroutine dpotrf(uplo, n, a, lda, info)
+         import :: dp, ik
+         integer(ik), intent(in) :: lda
+         real(dp), intent(inout) :: a(lda, *)
+         character(len=1), intent(in) :: uplo
+         integer(ik), intent(out) :: info
+         integer(ik), intent(in) :: n
+      end subroutine dpotrf
+   end interface lapack_potrf
+
+   interface lapack_potrs
+      pure subroutine spotrs(uplo, n, nrhs, a, lda, b, ldb, info)
+         import :: sp, ik
+         integer(ik), intent(in) :: lda
+         integer(ik), intent(in) :: ldb
+         real(sp), intent(in) :: a(lda, *)
+         real(sp), intent(inout) :: b(ldb, *)
+         character(len=1), intent(in) :: uplo
+         integer(ik), intent(out) :: info
+         integer(ik), intent(in) :: n
+         integer(ik), intent(in) :: nrhs
+      end subroutine spotrs
+      pure subroutine dpotrs(uplo, n, nrhs, a, lda, b, ldb, info)
+         import :: dp, ik
+         integer(ik), intent(in) :: lda
+         integer(ik), intent(in) :: ldb
+         real(dp), intent(in) :: a(lda, *)
+         real(dp), intent(inout) :: b(ldb, *)
+         character(len=1), intent(in) :: uplo
+         integer(ik), intent(out) :: info
+         integer(ik), intent(in) :: n
+         integer(ik), intent(in) :: nrhs
+      end subroutine dpotrs
+   end interface lapack_potrs
+
+   interface lapack_syevd
+      pure subroutine ssyevd(jobz, uplo, n, a, lda, w, work, lwork, iwork, &
+            & liwork, info)
+         import :: sp, ik
+         character(len=1), intent(in) :: jobz
+         character(len=1), intent(in) :: uplo
+         integer(ik), intent(in) :: n
+         integer(ik), intent(in) :: lda
+         real(sp), intent(inout) :: a(lda, *)
+         real(sp), intent(out) :: w(*)
+         real(sp), intent(inout) :: work(*)
+         integer(ik), intent(in) :: lwork
+         integer(ik), intent(inout) :: iwork(*)
+         integer(ik), intent(in) :: liwork
+         integer(ik), intent(out) :: info
+      end subroutine ssyevd
+      pure subroutine dsyevd(jobz, uplo, n, a, lda, w, work, lwork, iwork, &
+            & liwork, info)
+         import :: dp, ik
+         character(len=1), intent(in) :: jobz
+         character(len=1), intent(in) :: uplo
+         integer(ik), intent(in) :: n
+         integer(ik), intent(in) :: lda
+         real(dp), intent(inout) :: a(lda, *)
+         real(dp), intent(out) :: w(*)
+         real(dp), intent(inout) :: work(*)
+         integer(ik), intent(in) :: lwork
+         integer(ik), intent(inout) :: iwork(*)
+         integer(ik), intent(in) :: liwork
+         integer(ik), intent(out) :: info
+      end subroutine dsyevd
+   end interface lapack_syevd
 
 
 contains
@@ -361,6 +453,198 @@ subroutine mchrg_dsytri(amat, ipiv, uplo, info)
       if (stat /= 0) error stop "[multicharge_lapack] dsytri failed"
    end if
 end subroutine mchrg_dsytri
+
+
+subroutine mchrg_spotrf(amat, uplo, info)
+   real(sp), intent(inout) :: amat(:, :)
+   character(len=1), intent(in), optional :: uplo
+   integer(ik), intent(out), optional :: info
+   character(len=1) :: ula
+   integer(ik) :: stat, n, lda
+   if (present(uplo)) then
+      ula = uplo
+   else
+      ula = 'u'
+   end if
+   lda = max(1, size(amat, 1))
+   n = size(amat, 2)
+   call lapack_potrf(ula, n, amat, lda, stat)
+   if (present(info)) then
+      info = stat
+   else
+      if (stat /= 0) error stop "[multicharge_lapack] spotrf failed"
+   end if
+end subroutine mchrg_spotrf
+
+
+subroutine mchrg_spotrs(amat, bmat, uplo, info)
+   real(sp), intent(in) :: amat(:, :)
+   real(sp), intent(inout) :: bmat(:, :)
+   character(len=1), intent(in), optional :: uplo
+   integer(ik), intent(out), optional :: info
+   character(len=1) :: ula
+   integer(ik) :: stat, n, nrhs, lda, ldb
+   if (present(uplo)) then
+      ula = uplo
+   else
+      ula = 'u'
+   end if
+   lda = max(1, size(amat, 1))
+   ldb = max(1, size(bmat, 1))
+   n = size(amat, 2)
+   nrhs = size(bmat, 2)
+   call lapack_potrs(ula, n, nrhs, amat, lda, bmat, ldb, stat)
+   if (present(info)) then
+      info = stat
+   else
+      if (stat /= 0) error stop "[multicharge_lapack] spotrs failed"
+   end if
+end subroutine mchrg_spotrs
+
+
+subroutine mchrg_ssyevd(amat, eval, jobz, uplo, info)
+   real(sp), intent(inout) :: amat(:, :)
+   real(sp), intent(out) :: eval(:)
+   character(len=1), intent(in), optional :: jobz
+   character(len=1), intent(in), optional :: uplo
+   integer(ik), intent(out), optional :: info
+   character(len=1) :: job, ula
+   integer(ik) :: stat, n, lda, lwork, liwork, stat_alloc, stat_dealloc
+   real(sp), allocatable :: work(:)
+   integer(ik), allocatable :: iwork(:)
+   real(sp) :: test(1)
+   integer(ik) :: itest(1)
+   if (present(jobz)) then
+      job = jobz
+   else
+      job = 'v'
+   end if
+   if (present(uplo)) then
+      ula = uplo
+   else
+      ula = 'u'
+   end if
+   lda = max(1, size(amat, 1))
+   n = size(amat, 2)
+   stat_alloc = 0_ik
+   lwork = -1_ik
+   liwork = -1_ik
+   call lapack_syevd(job, ula, n, amat, lda, eval, test, lwork, itest, liwork, &
+      & stat)
+   if (stat == 0) then
+      lwork = nint(test(1))
+      liwork = itest(1)
+      allocate(work(lwork), iwork(liwork), stat=stat_alloc)
+      if (stat_alloc==0) then
+         call lapack_syevd(job, ula, n, amat, lda, eval, work, lwork, iwork, &
+            & liwork, stat)
+      else
+         stat = -1000_ik
+      end if
+      deallocate(work, iwork, stat=stat_dealloc)
+   end if
+   if (present(info)) then
+      info = stat
+   else
+      if (stat /= 0) error stop "[multicharge_lapack] ssyevd failed"
+   end if
+end subroutine mchrg_ssyevd
+
+
+subroutine mchrg_dpotrf(amat, uplo, info)
+   real(dp), intent(inout) :: amat(:, :)
+   character(len=1), intent(in), optional :: uplo
+   integer(ik), intent(out), optional :: info
+   character(len=1) :: ula
+   integer(ik) :: stat, n, lda
+   if (present(uplo)) then
+      ula = uplo
+   else
+      ula = 'u'
+   end if
+   lda = max(1, size(amat, 1))
+   n = size(amat, 2)
+   call lapack_potrf(ula, n, amat, lda, stat)
+   if (present(info)) then
+      info = stat
+   else
+      if (stat /= 0) error stop "[multicharge_lapack] dpotrf failed"
+   end if
+end subroutine mchrg_dpotrf
+
+
+subroutine mchrg_dpotrs(amat, bmat, uplo, info)
+   real(dp), intent(in) :: amat(:, :)
+   real(dp), intent(inout) :: bmat(:, :)
+   character(len=1), intent(in), optional :: uplo
+   integer(ik), intent(out), optional :: info
+   character(len=1) :: ula
+   integer(ik) :: stat, n, nrhs, lda, ldb
+   if (present(uplo)) then
+      ula = uplo
+   else
+      ula = 'u'
+   end if
+   lda = max(1, size(amat, 1))
+   ldb = max(1, size(bmat, 1))
+   n = size(amat, 2)
+   nrhs = size(bmat, 2)
+   call lapack_potrs(ula, n, nrhs, amat, lda, bmat, ldb, stat)
+   if (present(info)) then
+      info = stat
+   else
+      if (stat /= 0) error stop "[multicharge_lapack] dpotrs failed"
+   end if
+end subroutine mchrg_dpotrs
+
+
+subroutine mchrg_dsyevd(amat, eval, jobz, uplo, info)
+   real(dp), intent(inout) :: amat(:, :)
+   real(dp), intent(out) :: eval(:)
+   character(len=1), intent(in), optional :: jobz
+   character(len=1), intent(in), optional :: uplo
+   integer(ik), intent(out), optional :: info
+   character(len=1) :: job, ula
+   integer(ik) :: stat, n, lda, lwork, liwork, stat_alloc, stat_dealloc
+   real(dp), allocatable :: work(:)
+   integer(ik), allocatable :: iwork(:)
+   real(dp) :: test(1)
+   integer(ik) :: itest(1)
+   if (present(jobz)) then
+      job = jobz
+   else
+      job = 'v'
+   end if
+   if (present(uplo)) then
+      ula = uplo
+   else
+      ula = 'u'
+   end if
+   lda = max(1, size(amat, 1))
+   n = size(amat, 2)
+   stat_alloc = 0_ik
+   lwork = -1_ik
+   liwork = -1_ik
+   call lapack_syevd(job, ula, n, amat, lda, eval, test, lwork, itest, liwork, &
+      & stat)
+   if (stat == 0) then
+      lwork = nint(test(1))
+      liwork = itest(1)
+      allocate(work(lwork), iwork(liwork), stat=stat_alloc)
+      if (stat_alloc==0) then
+         call lapack_syevd(job, ula, n, amat, lda, eval, work, lwork, iwork, &
+            & liwork, stat)
+      else
+         stat = -1000_ik
+      end if
+      deallocate(work, iwork, stat=stat_dealloc)
+   end if
+   if (present(info)) then
+      info = stat
+   else
+      if (stat /= 0) error stop "[multicharge_lapack] dsyevd failed"
+   end if
+end subroutine mchrg_dsyevd
 
 
 end module multicharge_lapack

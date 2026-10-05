@@ -185,7 +185,7 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, h
 
    if (qgrad) then
       write(unit, '(a,":", t25, es20.13, 1x, a)') &
-      & "Charge gradient norm", norm2(dqdr), "a.u./a0"
+      & "Sum over all dqdr elements", sum(dqdr), "a.u./a0"
       write(unit, '(72("-"))')
       write(unit, '(a10,1x,a4,3x,a6,1x,a4,3x,*(1x,a12))') "#", "Z", "#", "A", &
       & "dQ(Z)/dx(A)", "dQ(Z)/dy(A)", "dQ(Z)/dz(A)"

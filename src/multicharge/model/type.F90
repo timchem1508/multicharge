@@ -33,6 +33,7 @@ module multicharge_model_type
    use multicharge_blas, only : gemv, symv, gemm
    use multicharge_model_cache, only : mchrg_cache
    use multicharge_solver_type, only : mchrg_solver_type
+   use multicharge_solver_cg, only : cg_solver, get_blocks
 
    implicit none
    private
@@ -604,8 +605,10 @@ subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit)
 
    real(wp), allocatable :: daqxdr(:, :, :), daqxdL(:, :, :)
    real(wp), allocatable :: diag(:), rhs(:), sol(:)
+   real(wp), allocatable :: bmat(:, :), xmat(:, :), blocks(:, :, :)
+   integer, allocatable :: ncol(:)
    real(wp) :: scale, uvecsum
-   integer :: iat, ic, jc
+   integer :: iat, ic, jc, ivec, iblk, nrhs
 
    if (allocated(cache%ainv)) then
       ! Non-iterative solve using the inverse of the augmented matrix
@@ -630,44 +633,96 @@ subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit)
          end do
       end if
 
-      allocate(rhs(mol%nat), sol(mol%nat))
       uvecsum = sum(cache%uvec)
 
-      ! Position derivatives: J*m = db/dR - dA/dR*q, dq/dR = m - scale*u
-      do iat = 1, mol%nat
-         do ic = 1, 3
-            rhs(:) = cache%dxdr(ic, iat, :mol%nat) - cache%dadr(ic, iat, :mol%nat)
-            sol(:) = rhs / diag
-            call solver%solve(amat=cache%amat, alist=cache%alist, xvec=rhs, &
-               & vrhs=sol, list=list, new_unit=unit, error=error)
-            if (allocated(error)) return
-            scale = sum(sol) / (uvecsum + eps)
-            dqdr(ic, iat, :) = sol - scale * cache%uvec
+      select type (solver)
+      class is (cg_solver)
+         ! Block solve for all position and lattice derivatives at once:
+         ! J*M = dB/dR - dA/dR*q, columns ordered as (ic, iat) then (ic, jc)
+         nrhs = 3 * mol%nat + 9
+         allocate(bmat(mol%nat, nrhs), xmat(mol%nat, nrhs))
+         do iat = 1, mol%nat
+            do ic = 1, 3
+               ivec = ic + 3 * (iat - 1)
+               bmat(:, ivec) = cache%dxdr(ic, iat, :mol%nat) &
+                  & - cache%dadr(ic, iat, :mol%nat)
+            end do
          end do
-      end do
+         do jc = 1, 3
+            do ic = 1, 3
+               ivec = 3 * mol%nat + ic + 3 * (jc - 1)
+               bmat(:, ivec) = cache%dxdL(ic, jc, :mol%nat) &
+                  & - cache%dadL(ic, jc, :mol%nat)
+            end do
+         end do
+         do ivec = 1, nrhs
+            xmat(:, ivec) = bmat(:, ivec) / diag
+         end do
 
-      ! Lattice derivatives: J*m = db/dL - dA/dL*q, dq/dL = m - scale*u
-      do jc = 1, 3
-         do ic = 1, 3
-            rhs(:) = cache%dxdL(ic, jc, :mol%nat) - cache%dadL(ic, jc, :mol%nat)
-            sol(:) = rhs / diag
-            call solver%solve(amat=cache%amat, alist=cache%alist, xvec=rhs, &
-               & vrhs=sol, list=list, new_unit=unit, error=error)
+         call get_blocks(bmat, blocks, ncol, block_size=16)
+         ivec = 0
+         do iblk = 1, size(ncol)
+            call solver%solve_block(amat=cache%amat, alist=cache%alist, &
+               & bmat=blocks(:, :ncol(iblk), iblk), &
+               & xmat=xmat(:, ivec+1:ivec+ncol(iblk)), list=list, &
+               & new_unit=unit, error=error)
             if (allocated(error)) return
-            scale = sum(sol) / (uvecsum + eps)
-            dqdL(ic, jc, :) = sol - scale * cache%uvec
+            ivec = ivec + ncol(iblk)
          end do
-      end do
+
+         ! Projection onto the charge constraint: dq = m - scale*u
+         do ivec = 1, nrhs
+            scale = sum(xmat(:, ivec)) / (uvecsum + eps)
+            xmat(:, ivec) = xmat(:, ivec) - scale * cache%uvec
+         end do
+         do iat = 1, mol%nat
+            do ic = 1, 3
+               dqdr(ic, iat, :) = xmat(:, ic + 3 * (iat - 1))
+            end do
+         end do
+         do jc = 1, 3
+            do ic = 1, 3
+               dqdL(ic, jc, :) = xmat(:, 3 * mol%nat + ic + 3 * (jc - 1))
+            end do
+         end do
+
+      class default
+         ! Column-wise solve for solvers without block support
+         allocate(rhs(mol%nat), sol(mol%nat))
+
+         ! Position derivatives: J*m = db/dR - dA/dR*q, dq/dR = m - scale*u
+         do iat = 1, mol%nat
+            do ic = 1, 3
+               rhs(:) = cache%dxdr(ic, iat, :mol%nat) &
+                  & - cache%dadr(ic, iat, :mol%nat)
+               sol(:) = rhs / diag
+               call solver%solve(amat=cache%amat, alist=cache%alist, xvec=rhs, &
+                  & vrhs=sol, list=list, new_unit=unit, error=error)
+               if (allocated(error)) return
+               scale = sum(sol) / (uvecsum + eps)
+               dqdr(ic, iat, :) = sol - scale * cache%uvec
+            end do
+         end do
+
+         ! Lattice derivatives: J*m = db/dL - dA/dL*q, dq/dL = m - scale*u
+         do jc = 1, 3
+            do ic = 1, 3
+               rhs(:) = cache%dxdL(ic, jc, :mol%nat) &
+                  & - cache%dadL(ic, jc, :mol%nat)
+               sol(:) = rhs / diag
+               call solver%solve(amat=cache%amat, alist=cache%alist, xvec=rhs, &
+                  & vrhs=sol, list=list, new_unit=unit, error=error)
+               if (allocated(error)) return
+               scale = sum(sol) / (uvecsum + eps)
+               dqdL(ic, jc, :) = sol - scale * cache%uvec
+            end do
+         end do
+      end select
    end if
 
 end subroutine get_q_derivs
 
-
-!> Adjoint external gradient calculation using cached data
-!>
-!> This routine evaluates dF/dR and dF/dL from the derivative of the objective
-!> w.r.t. charges (dF/dq), avoiding explicit differentiation
-!> of the charge solution by solving an adjoint system.
+!> External gradient calculation using the adjoint state method
 subroutine get_external_gradient(self, mol, solver, cache, error, &
    & dfdq, dfdr, dfdL, list, unit, verbosity)
 

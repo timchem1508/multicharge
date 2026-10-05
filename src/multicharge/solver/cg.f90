@@ -15,13 +15,14 @@
 
 !> @file multicharge/solver/cg.f90
 !> Provides implementation of the conjugate gradient solver for linear systems
-!> of equations.
+!> of equations, including a block variant for multiple right-hand sides.
 
 module multicharge_solver_cg
    use iso_fortran_env, only : output_unit
    use mctc_env, only : error_type, fatal_error, format_time, timer_type, wp, i8
-   use mctc_csrlist, only : csr_list, spgemv_csr, spsymv_csr
-   use multicharge_blas, only : axpy, dot, scal, symv
+   use mctc_csrlist, only : csr_list, spgemv_csr, spsymv_csr, spmm_csr
+   use multicharge_blas, only : axpy, dot, gemm, scal, symv
+   use multicharge_lapack, only : potrf, potrs, syevd
    use multicharge_solver_type, only : mchrg_solver_input, mchrg_solver_type
    implicit none
    private
@@ -62,6 +63,9 @@ module multicharge_solver_cg
    contains
       !> Solve the linear system iteratively
       procedure :: solve
+
+      !> Solve the linear system for a block of right-hand sides
+      procedure :: solve_block
    end type cg_solver
 
    !> Positive number used to prevent division by zero
@@ -78,6 +82,13 @@ module multicharge_solver_cg
 
    !> Default neighborlist usage
    logical, parameter :: use_nlist_def = .false.
+
+   !> Default number of columns per block of right-hand sides
+   integer, parameter :: block_size_def = 64
+
+   !> Relative eigenvalue threshold of the Gram matrix for dropping linearly
+   !> dependent search directions
+   real(wp), parameter :: orth_thr = 1.0e3_wp * epsilon(1.0_wp)
 
 
 contains
@@ -348,130 +359,469 @@ subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error
 end subroutine solve
 
 
-!> Separate a sparse matrix into rectangular column blocks
-!>
-!> The columns of an nrow x ncol matrix in compressed-row storage are cut into
-!> contiguous groups of bsize columns, the last group may be narrower. Every
-!> block spans all rows and stores only its non-zero elements, sorted by row,
-!> in a single pass over the matrix (stable counting sort, O(nnz)). The input
-!> rows are distributed over the threads, which fill disjoint segments.
-subroutine get_blocks(error, bsize, nrow, ncol, ia, ja, a, bptr, brow, bcol, bval)
-   !$ use omp_lib, only : omp_get_max_threads, omp_get_thread_num
+!> Split the columns of a matrix into blocks for the block CG solver. Each
+!> block holds at most block_size columns, the last block is zero-padded.
+subroutine get_blocks(mat, box, ncol, block_size)
+   !> Matrix to split, typically a nat x nat matrix of right-hand sides
+   real(wp), intent(in) :: mat(:, :)
+
+   !> Column blocks of the matrix, dimension (size(mat, 1), block_size, nblk)
+   real(wp), allocatable, intent(out) :: box(:, :, :)
+
+   !> Number of occupied columns in each block
+   integer, allocatable, intent(out) :: ncol(:)
+
+   !> Maximum number of columns per block, default is 64
+   integer, intent(in), optional :: block_size
+
+   integer :: bsize, nrow, nvec, nblk, iblk, ivec
+
+   if (present(block_size)) then
+      bsize = max(1, block_size)
+   else
+      bsize = block_size_def
+   end if
+
+   nrow = size(mat, 1)
+   nvec = size(mat, 2)
+   bsize = max(1, min(bsize, nvec))
+   nblk = (nvec + bsize - 1) / bsize
+
+   allocate(box(nrow, bsize, nblk), source=0.0_wp)
+   allocate(ncol(nblk))
+   do iblk = 1, nblk
+      ivec = (iblk - 1) * bsize
+      ncol(iblk) = min(bsize, nvec - ivec)
+      box(:, :ncol(iblk), iblk) = mat(:, ivec+1:ivec+ncol(iblk))
+   end do
+
+end subroutine get_blocks
+
+
+!> Solve a linear system with multiple right-hand sides using the
+!> breakdown-free block conjugate gradient method with a Jacobi
+!> preconditioner (Ji, Sosonkina, Li, Co-HPC 2014). New search directions are
+!> orthonormalized by an eigendecomposition of their Gram matrix.
+subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error)
+   !> Conjugate-gradient solver instance
+   class(cg_solver), intent(in) :: self
+
+   !> Dense coefficient matrix of the linear system
+   real(wp), intent(in), optional :: amat(:, :)
+
+   !> Coefficient matrix values in compressed-row storage
+   real(wp), intent(in), optional :: alist(:)
+
+   !> Block of right-hand sides
+   real(wp), intent(in) :: bmat(:, :)
+
+   !> On input: initial guess; on output: solution
+   real(wp), intent(inout) :: xmat(:, :)
+
+   !> Optional neighborlist representation of the matrix
+   type(csr_list), intent(in), optional :: list
+
+   !> Output unit
+   integer, intent(in), optional :: new_unit
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
-   !> Number of columns per block
-   integer, intent(in) :: bsize
+   ! Maximal number of iterations
+   integer :: maxit
+   ! Tolerance of the solver
+   real(wp) :: tol, tol_square
+   ! Counters
+   integer :: it, iat, ivec
+   ! Size of the system, number of right-hand sides, rank of the search space
+   integer :: ndim, nrhs, nrank
+   ! Search directions P
+   real(wp), allocatable :: dir(:, :)
+   ! Squared norms of the right-hand sides
+   real(wp), allocatable :: bnorm(:)
+   ! Residuals R
+   real(wp), allocatable :: res(:, :)
+   ! Squared residual norms
+   real(wp), allocatable :: resnorm(:)
+   ! Diagonal preconditioner
+   real(wp), allocatable :: prec(:)
+   ! Preconditioned residuals Z
+   real(wp), allocatable :: precres(:, :)
+   ! amat-dir product Q = A P
+   real(wp), allocatable :: adir(:, :)
+   ! Cholesky factor of P^T A P
+   real(wp), allocatable :: dtad(:, :)
+   ! Step lengths alpha = (P^T Q)^-1 P^T R
+   real(wp), allocatable :: step(:, :)
+   ! Update factors beta = (P^T Q)^-1 Q^T Z
+   real(wp), allocatable :: updfact(:, :)
+   ! Largest relative residual norm over all right-hand sides
+   real(wp) :: rel_resnorm
 
-   !> Number of rows of the matrix
-   integer, intent(in) :: nrow
+   type(timer_type) :: timer
+   integer :: unit, info
+   logical :: nlist
 
-   !> Number of columns of the matrix
-   integer, intent(in) :: ncol
+   nlist = self%use_nlist .and. .not. present(amat) .and. &
+      & present(list) .and. present(alist)
 
-   !> Row offsets into ja and a, size nrow + 1
-   integer(i8), intent(in) :: ia(:)
+   if (present(new_unit)) then
+      unit = new_unit
+   else
+      unit = output_unit
+   end if
 
-   !> Column indices of the non-zero elements
-   integer, intent(in) :: ja(:)
-
-   !> Non-zero elements of the matrix
-   real(wp), intent(in) :: a(:)
-
-   !> Offset of every block into brow, bcol and bval, size number of blocks + 1
-   integer(i8), allocatable, intent(out) :: bptr(:)
-
-   !> Row index of each non-zero element, sorted by row inside a block
-   integer, allocatable, intent(out) :: brow(:)
-
-   !> Column index of each non-zero element local to its block, 1 to bsize
-   integer, allocatable, intent(out) :: bcol(:)
-
-   !> Value of each non-zero element
-   real(wp), allocatable, intent(out) :: bval(:)
-
-   integer :: nblk, nthr, tid, ilo, ihi, i, ib, it
-   integer(i8) :: k, pos, total
-   integer(i8), allocatable :: cnt(:, :)
-   logical :: bad
-
-   if (bsize < 1) then
-      call fatal_error(error, "Block size must be positive.")
+   ! Dimensions check
+   ndim = size(bmat, 1)
+   nrhs = size(bmat, 2)
+   if (size(xmat, 1) /= ndim .or. size(xmat, 2) /= nrhs) then
+      call fatal_error(error, "Dimension mismatch between bmat and xmat.")
       return
    end if
-   if (size(ia) /= nrow + 1) then
-      call fatal_error(error, "Row offsets do not match the number of rows.")
+   if (.not. nlist) then
+      if (.not. present(amat)) then
+         call fatal_error(error, "No coefficient matrix provided.")
+         return
+      end if
+      if (size(amat, 1) /= ndim .or. size(amat, 2) /= ndim) then
+         call fatal_error(error, "dimension mismatch.")
+         return
+      end if
+   end if
+   if (nrhs == 0) return
+
+   tol = self%cgtol
+   tol_square = tol**2
+   maxit = self%cgmiter
+
+   allocate(res(ndim, nrhs), dir(ndim, nrhs), precres(ndim, nrhs), &
+      & adir(ndim, nrhs), prec(ndim), bnorm(nrhs), resnorm(nrhs), &
+      & dtad(nrhs, nrhs), step(nrhs, nrhs), updfact(nrhs, nrhs))
+
+   if (self%verbosity > 1) call timer%push("total")
+   if (self%verbosity > 1) call timer%push("initialization")
+
+   ! Diagonal preconditioner
+   if (nlist) then
+      do iat = 1, ndim
+         prec(iat) = 1.0_wp / (alist(list%inl(iat)) + eps)
+      end do
+   else
+      do iat = 1, ndim
+         prec(iat) = 1.0_wp / (amat(iat, iat) + eps)
+      end do
+   end if
+
+   ! Initial residual R = B - A X
+   call block_matmul(nlist, xmat, res, amat, alist, list)
+   res(:, :) = bmat - res
+
+   ! Initial norms
+   do ivec = 1, nrhs
+      bnorm(ivec) = dot(bmat(:, ivec), bmat(:, ivec))
+      if (bnorm(ivec) < tol_square) bnorm(ivec) = 1.0_wp
+      resnorm(ivec) = dot(res(:, ivec), res(:, ivec))
+   end do
+   rel_resnorm = maxval(resnorm / bnorm)
+
+   ! Initial search directions P = orth(M^-1 R)
+   do ivec = 1, nrhs
+      dir(:, ivec) = prec * res(:, ivec)
+   end do
+   call orthonormalize(dir, nrank, error)
+   if (allocated(error)) return
+
+   if (self%verbosity > 1) call timer%pop
+
+   ! Print header
+   call print_block_cg_header(unit, self%verbosity, maxit, tol, nrhs, timer)
+
+   ! Initial guess is already converged
+   if (rel_resnorm <= tol_square .or. nrank == 0) then
+      if (self%verbosity > 0) then
+         call print_cg_convergence(unit, 0, sqrt(maxval(resnorm)), &
+            & self%verbosity)
+      end if
+      if (self%verbosity > 1) call timer%pop
+      call print_cg_final(unit, timer, self%verbosity)
       return
    end if
 
-   nblk = (ncol + bsize - 1) / bsize
+   ! Main block CG iteration loop
 
-   nthr = 1
-   !$ nthr = omp_get_max_threads()
-   allocate(cnt(nblk, 0:nthr-1), source=0_i8)
-   bad = .false.
+   do it = 1, maxit
 
-   ! Count the elements of every block per thread
-   !$omp parallel default(none) num_threads(nthr) &
-   !$omp& shared(nrow, ncol, bsize, nthr, ia, ja, cnt) reduction(.or.: bad) &
-   !$omp& private(tid, ilo, ihi, i, k, ib)
-   tid = 0
-   !$ tid = omp_get_thread_num()
-   ilo = int((int(tid, i8) * nrow) / nthr) + 1
-   ihi = int((int(tid + 1, i8) * nrow) / nthr)
-   do i = ilo, ihi
-      do k = ia(i), ia(i+1) - 1
-         if (ja(k) < 1 .or. ja(k) > ncol) then
-            bad = .true.
-            cycle
+      if (self%verbosity > 1) call timer%push("iteration")
+
+      ! Matrix-block product Q = A P
+      call block_matmul(nlist, dir(:, :nrank), adir(:, :nrank), amat, alist, &
+         & list)
+
+      ! Cholesky factorization of P^T Q
+      call gemm(dir(:, :nrank), adir(:, :nrank), dtad(:nrank, :nrank), &
+         & transa='t')
+      call potrf(dtad(:nrank, :nrank), info=info)
+      if (info /= 0) then
+         if (self%verbosity > 1) call timer%pop
+         if (self%verbosity > 1) call timer%pop
+         call fatal_error(error, &
+            & "Block CG: P^T A P is not positive definite.")
+         return
+      end if
+
+      ! Step lengths alpha = (P^T Q)^-1 (P^T R)
+      call gemm(dir(:, :nrank), res, step(:nrank, :), transa='t')
+      call potrs(dtad(:nrank, :nrank), step(:nrank, :))
+
+      ! Update solution X = X + P alpha
+      call gemm(dir(:, :nrank), step(:nrank, :), xmat, beta=1.0_wp)
+      ! Update residual R = R - Q alpha
+      call gemm(adir(:, :nrank), step(:nrank, :), res, alpha=-1.0_wp, &
+         & beta=1.0_wp)
+
+      ! Compute the new residual norms
+      do ivec = 1, nrhs
+         resnorm(ivec) = dot(res(:, ivec), res(:, ivec))
+      end do
+
+      ! Largest relative residual norm to check convergence
+      rel_resnorm = maxval(resnorm / bnorm)
+
+      if (rel_resnorm <= tol_square) then
+         if (self%verbosity > 1) call timer%pop
+         if (self%verbosity > 0) then
+            call print_cg_convergence(unit, it, sqrt(maxval(resnorm)), &
+               & self%verbosity)
          end if
-         ib = (ja(k) - 1) / bsize + 1
-         cnt(ib, tid) = cnt(ib, tid) + 1
+         exit
+      end if
+
+      ! Updated preconditioned residuals Z = M^-1 R
+      do ivec = 1, nrhs
+         precres(:, ivec) = prec * res(:, ivec)
       end do
+
+      ! Update factors (P^T Q)^-1 (Q^T Z), beta is their negative
+      call gemm(adir(:, :nrank), precres, updfact(:nrank, :), transa='t')
+      call potrs(dtad(:nrank, :nrank), updfact(:nrank, :))
+
+      ! Update search directions P = orth(Z + P beta)
+      call gemm(dir(:, :nrank), updfact(:nrank, :), precres, alpha=-1.0_wp, &
+         & beta=1.0_wp)
+      dir(:, :) = precres
+      call orthonormalize(dir, nrank, error)
+      if (allocated(error)) then
+         if (self%verbosity > 1) call timer%pop
+         if (self%verbosity > 1) call timer%pop
+         return
+      end if
+
+      ! iteration timer pop
+      if (self%verbosity > 1) call timer%pop
+
+      ! Print iteration progress
+      call print_block_cg_iteration(unit, it, sqrt(maxval(resnorm)), nrank, &
+         & sqrt(rel_resnorm), self%verbosity, timer)
+
+      if (nrank == 0) then
+         if (self%verbosity > 1) call timer%pop
+         call fatal_error(error, "Block CG: search space collapsed.")
+         return
+      end if
+
+      if (it == maxit) then
+         if (self%verbosity > 1) call timer%pop
+         call fatal_error(error, &
+            & "Block CG did not converge within max iterations.")
+         return
+      end if
+
    end do
-   !$omp end parallel
-   if (bad) then
-      call fatal_error(error, "Column index out of range.")
+
+   ! pop total
+   if (self%verbosity > 1) call timer%pop
+
+   ! Print final summary
+   call print_cg_final(unit, timer, self%verbosity)
+
+end subroutine solve_block
+
+
+!> Multiply the coefficient matrix with a block of vectors, avec = A vec,
+!> using either the dense matrix or its compressed-row representation
+subroutine block_matmul(nlist, vec, avec, amat, alist, list)
+   !> Whether to use the compressed-row representation
+   logical, intent(in) :: nlist
+
+   !> Block of input vectors
+   real(wp), intent(in) :: vec(:, :)
+
+   !> Block of output vectors
+   real(wp), intent(inout) :: avec(:, :)
+
+   !> Dense coefficient matrix of the linear system
+   real(wp), intent(in), optional :: amat(:, :)
+
+   !> Coefficient matrix values in compressed-row storage
+   real(wp), intent(in), optional :: alist(:)
+
+   !> Optional neighborlist representation of the matrix
+   type(csr_list), intent(in), optional :: list
+
+   character(len=2) :: matdescra
+   integer :: ndim, nvec
+
+   ndim = size(vec, 1)
+   nvec = size(vec, 2)
+
+   if (nlist) then
+      if (list%complete) then
+         matdescra = "G "
+      else
+         matdescra = "SU"
+      end if
+      call spmm_csr("N", ndim, nvec, ndim, 1.0_wp, matdescra, alist, &
+         & list%nlat, list%inl(1:ndim), list%inl(2:ndim+1), vec, ndim, &
+         & 0.0_wp, avec, ndim)
+   else
+      call gemm(amat, vec, avec)
+   end if
+
+end subroutine block_matmul
+
+
+!> Replace a block of vectors by an orthonormal basis of its column space.
+!> The basis is obtained from the eigendecomposition of the Gram matrix
+!> vec^T vec, eigenvectors with negligible eigenvalues are dropped and the
+!> remaining columns of vec are zeroed.
+subroutine orthonormalize(vec, nrank, error)
+   !> On input: block of vectors; on output: orthonormal basis in the first
+   !> nrank columns
+   real(wp), intent(inout) :: vec(:, :)
+
+   !> Rank of the block of vectors
+   integer, intent(out) :: nrank
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   integer :: nvec, ivec, jvec, info
+   real(wp) :: vnorm
+   real(wp), allocatable :: gram(:, :), eval(:), evec(:, :), tmp(:, :)
+
+   nvec = size(vec, 2)
+   allocate(gram(nvec, nvec), eval(nvec))
+
+   ! Gram matrix and its eigendecomposition in ascending order
+   call gemm(vec, vec, gram, transa='t')
+   call syevd(gram, eval, info=info)
+   if (info /= 0) then
+      call fatal_error(error, "Block CG: eigendecomposition failed.")
       return
    end if
 
-   ! Block offsets and the first write position of every thread in each block
-   allocate(bptr(nblk + 1))
-   total = 0
-   do ib = 1, nblk
-      bptr(ib) = total + 1
-      do it = 0, nthr - 1
-         k = cnt(ib, it)
-         cnt(ib, it) = total
-         total = total + k
-      end do
+   ! Keep the dominant eigenvectors, largest eigenvalue first
+   nrank = 0
+   if (eval(nvec) > eps) then
+      nrank = count(eval > orth_thr * eval(nvec))
+   end if
+   if (nrank == 0) then
+      vec(:, :) = 0.0_wp
+      return
+   end if
+   allocate(evec(nvec, nrank))
+   do ivec = 1, nrank
+      evec(:, ivec) = gram(:, nvec - ivec + 1)
    end do
-   bptr(nblk + 1) = total + 1
 
-   allocate(brow(total), bcol(total), bval(total))
-
-   ! Scatter the elements, every thread keeps the row order inside a block
-   !$omp parallel default(none) num_threads(nthr) &
-   !$omp& shared(nrow, bsize, nthr, ia, ja, a, cnt, brow, bcol, bval) &
-   !$omp& private(tid, ilo, ihi, i, k, ib, pos)
-   tid = 0
-   !$ tid = omp_get_thread_num()
-   ilo = int((int(tid, i8) * nrow) / nthr) + 1
-   ihi = int((int(tid + 1, i8) * nrow) / nthr)
-   do i = ilo, ihi
-      do k = ia(i), ia(i+1) - 1
-         ib = (ja(k) - 1) / bsize + 1
-         pos = cnt(ib, tid) + 1
-         cnt(ib, tid) = pos
-         brow(pos) = i
-         bcol(pos) = ja(k) - (ib - 1) * bsize
-         bval(pos) = a(k)
-      end do
+   ! New basis vec V, normalized column by column
+   allocate(tmp, source=vec)
+   call gemm(tmp, evec, vec(:, :nrank))
+   do ivec = 1, nrank
+      vnorm = sqrt(dot(vec(:, ivec), vec(:, ivec)))
+      call scal(alpha=1.0_wp / vnorm, xvec=vec(:, ivec))
    end do
-   !$omp end parallel
+   do jvec = nrank + 1, nvec
+      vec(:, jvec) = 0.0_wp
+   end do
 
-end subroutine get_blocks
+end subroutine orthonormalize
+
+
+!> Print header for block CG solver
+subroutine print_block_cg_header(unit, verbosity, maxit, tol, nrhs, timer)
+   !> Output unit
+   integer, intent(in) :: unit
+
+   !> Verbosity level
+   integer, intent(in) :: verbosity
+
+   !> Maximum number of iterations
+   integer, intent(in) :: maxit
+
+   !> Convergence tolerance
+   real(wp), intent(in) :: tol
+
+   !> Number of right-hand sides
+   integer, intent(in) :: nrhs
+
+   !> Timer holding the accumulated initialization time
+   type(timer_type), intent(in), optional :: timer
+
+   if (verbosity > 0) then
+      write(unit, '(a)') "Using Block Conjugate Gradient Solver"
+      write(unit, '(a)')
+      write(unit, '(a, 1x, i6)') "Max iterations : ", maxit
+      write(unit, '(a, 1x, es10.2)') "Tolerance      : ", tol
+      write(unit, '(a, 1x, i6)') "Right-hand sides:", nrhs
+      write(unit, '(a)') "Preconditioner : Jacobi (Diagonal)"
+   end if
+   if (verbosity > 1) then
+      write(unit, '(a, 1x, a)') "Initialisation time:", &
+         & format_time(timer%get("initialization"))
+      write(unit, '(a)') ''
+      write(unit, '(2X,A,6X,A,8X,A,2X,A,4X,A)') &
+         'iter', '|residual|', 'rank', 'relative residual', 'Time / s'
+   else if (verbosity == 1) then
+      write(unit, '(a)') ''
+      write(unit, '(2X,A,6X,A,8X,A,2X,A)') &
+         'iter', '|residual|', 'rank', 'relative residual'
+   end if
+end subroutine print_block_cg_header
+
+
+!> Print block CG iteration progress
+subroutine print_block_cg_iteration(unit, iter, res_norm, nrank, rel_resnorm, &
+   & verbosity, timer)
+   !> Output unit
+   integer, intent(in) :: unit
+
+   !> Current iteration number
+   integer, intent(in) :: iter
+
+   !> Largest residual norm over all right-hand sides
+   real(wp), intent(in) :: res_norm
+
+   !> Current rank of the search space
+   integer, intent(in) :: nrank
+
+   !> Largest relative residual norm over all right-hand sides
+   real(wp), intent(in) :: rel_resnorm
+
+   !> Verbosity level
+   integer, intent(in) :: verbosity
+
+   !> Timer holding the accumulated iteration time
+   type(timer_type), intent(in), optional :: timer
+
+   if (verbosity == 1) then
+      write(unit, '(i6, 1x, es15.5, 1x, i11, 1x, es15.5)') &
+         & iter, res_norm, nrank, rel_resnorm
+   else if (verbosity > 1) then
+      write(unit, '(i6, 1x, es15.5, 1x, i11, *(1x, es15.5))') &
+         & iter, res_norm, nrank, rel_resnorm, timer%get("iteration")
+   end if
+end subroutine print_block_cg_iteration
 
 
 !> Print header for CG solver

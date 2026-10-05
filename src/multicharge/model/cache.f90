@@ -96,11 +96,26 @@ module multicharge_model_cache
       !> Coulomb matrix derivatives w.r.t positions
       real(wp), allocatable :: dadr(:, :, :)
 
+      !> Linear combination of the dA/dr*q and db/dr
+      real(wp), allocatable :: dabdr(:, :, :)
+
+      !> Linear combination of the dA/dL*q and db/dL
+      real(wp), allocatable :: dabdL(:, :, :)
+
+      !> Linear combination of the dA/dr*q and db/dr in compressed format
+      real(wp), allocatable :: dabdrlist(:, :)
+
+      !> Coulomb matrix derivatives w.r.t positions in compressed format
+      real(wp), allocatable :: dadrlist(:, :)
+
       !> Coulomb matrix derivatives w.r.t lattice vectors
       real(wp), allocatable :: dadL(:, :, :)
 
       !> Electronegativity derivatives w.r.t positions
       real(wp), allocatable :: dxdr(:, :, :)
+
+      !> Electronegativity derivatives w.r.t positions in compressed format
+      real(wp), allocatable :: dxdrlist(:, :)
 
       !> Electronegativity derivatives w.r.t lattice vectors
       real(wp), allocatable :: dxdL(:, :, :)

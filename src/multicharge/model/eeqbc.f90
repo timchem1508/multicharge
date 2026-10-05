@@ -555,6 +555,150 @@ subroutine get_xvec_derivs_0d(self, mol, ndim, cache)
 
 end subroutine get_xvec_derivs_0d
 
+!> Compute the linear combination of the Coulomb matrix derivatives (multiplied
+!> by the charge vector) and the electronegativity vector derivatives,
+!> alpha * dA/dR*q + beta * dX/dR, for a non-periodic system.
+subroutine get_partial_derivs_0d(self, mol, ndim, cache, alpha, beta)
+   !> EEQBC model type
+   class(eeqbc_model), intent(in) :: self
+   !> Structure type
+   type(structure_type), intent(in) :: mol
+   !> System size
+   integer, intent(in) :: ndim
+   !> Multicharge cache
+   type(mchrg_cache), intent(inout) :: cache
+   !> dA/dR*q multiplier
+   real(wp), intent(in) :: alpha
+   !> dX/dR multiplier
+   real(wp), intent(in) :: beta
+
+   integer :: iat, izp, jat, jzp
+   real(wp) :: vec(3), r2, gam, arg, dtmp, norm_cn, hardi, wtmp, wcni
+   real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), dgamdL(3, 3)
+   real(wp), allocatable :: dtmpdr(:, :, :), dtmpdL(:, :, :)
+
+   allocate(dtmpdr(3, mol%nat, ndim), dtmpdL(3, 3, ndim))
+
+   dtmpdr(:, :, :) = 0.0_wp
+   dtmpdL(:, :, :) = 0.0_wp
+
+   !$omp parallel do default(none) schedule(runtime) &
+   !$omp shared(mol, self, cache, dtmpdr, dtmpdL) &
+   !$omp private(iat, izp)
+   do iat = 1, mol%nat
+      izp = mol%id(iat)
+      ! CN and effective charge derivative
+      dtmpdr(:, :, iat) = self%kcnchi(izp) * cache%dcndr(:, :, iat) &
+      & + self%kqchi(izp) * cache%dqlocdr(:, :, iat)
+      dtmpdL(:, :, iat) = self%kcnchi(izp) * cache%dcndL(:, :, iat) &
+      & + self%kqchi(izp) * cache%dqlocdL(:, :, iat)
+   end do
+   !$omp end parallel do
+
+   ! EN derivative through the capacitance matrix, initializes dabdr and dabdL
+   call gemm(dtmpdr, cache%cmat, cache%dabdr, alpha=beta)
+   call gemm(dtmpdL, cache%cmat, cache%dabdL, alpha=beta)
+
+   ! Each iteration only updates the derivatives of row iat (last index)
+   !$omp parallel do default(none) schedule(runtime) &
+   !$omp shared(cache, mol, self, alpha, beta) &
+   !$omp private(iat, izp, jat, jzp, gam, vec, r2, dtmp, norm_cn, arg, hardi) &
+   !$omp private(wtmp, wcni, radi, radj, dradi, dradj, dgamdL, dG, dS)
+   do iat = 1, mol%nat
+      izp = mol%id(iat)
+      ! Effective charge width of i
+      norm_cn = 1.0_wp / self%avg_cn(izp)
+      radi = self%rad(izp) * exp(-self%kcnrad(izp) * cache%cn(iat) * norm_cn)
+      dradi = -self%kcnrad(izp) * norm_cn * radi
+      ! Effective hardness of i
+      hardi = self%eta(izp) + self%kqeta_pre &
+      & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi
+      wcni = 0.0_wp
+      do jat = 1, mol%nat
+         if (jat == iat) cycle
+         jzp = mol%id(jat)
+         vec = mol%xyz(:, jat) - mol%xyz(:, iat)
+         r2 = vec(1)**2 + vec(2)**2 + vec(3)**2
+         ! Effective charge width of j
+         norm_cn = 1.0_wp / self%avg_cn(jzp)
+         radj = self%rad(jzp) * exp(-self%kcnrad(jzp) * cache%cn(jat) * norm_cn)
+         dradj = -self%kcnrad(jzp) * norm_cn * radj
+
+         ! EN derivative: capacitance matrix derivative
+         cache%dabdr(:, iat, iat) = +beta * cache%xtmp(jat) * cache%dcdr(:, iat, &
+         & jat) + cache%dabdr(:, iat, iat)
+         cache%dabdr(:, jat, iat) = +beta * (cache%xtmp(jat) - cache%xtmp(iat)) &
+         & * cache%dcdr(:, jat, iat) + cache%dabdr(:, jat, iat)
+         cache%dabdL(:, :, iat) = +beta * cache%xtmp(jat) * spread(cache%dcdr(:, &
+         & iat, jat), 1, 3) * spread(-vec, 2, 3) + cache%dabdL(:, :, iat)
+
+         ! Coulomb interaction of Gaussian charges
+         gam = 1.0_wp / sqrt(radi**2 + radj**2)
+         arg = gam * gam * r2
+
+         ! Explicit derivative
+         dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) &
+            & - erf(sqrt(arg)) / (r2 * sqrt(r2))
+         dG(:) = alpha * dtmp * vec * cache%vrhs(jat) * cache%cmat(jat, iat)
+         dS(:, :) = spread(dG, 1, 3) * spread(vec, 2, 3)
+         cache%dabdr(:, iat, iat) = cache%dabdr(:, iat, iat) - dG
+         cache%dabdr(:, jat, iat) = cache%dabdr(:, jat, iat) + dG
+         cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) + dS
+
+         ! Effective charge width derivative, CN of i is collected in wcni
+         wtmp = alpha * 2.0_wp * exp(-arg) / sqrtpi * cache%vrhs(jat) &
+         & * cache%cmat(jat, iat)
+         wcni = wcni - wtmp * radi * dradi * gam**3
+         cache%dabdr(:, :, iat) = -wtmp * radj * dradj * gam**3 &
+         & * cache%dcndr(:, :, jat) + cache%dabdr(:, :, iat)
+         dgamdL(:, :) = -(radi * dradi * cache%dcndL(:, :, &
+         & iat) + radj * dradj * cache%dcndL(:, :, jat)) * gam**3
+         cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) + wtmp * dgamdL
+
+         ! Capacitance derivative off-diagonal
+         dtmp = alpha * erf(sqrt(r2) * gam) / (sqrt(r2)) * cache%vrhs(jat)
+         cache%dabdr(:, iat, iat) = -dtmp * cache%dcdr(:, jat, iat) &
+         & + cache%dabdr(:, iat, iat)
+         cache%dabdr(:, jat, iat) = +dtmp * cache%dcdr(:, jat, iat) &
+         & + cache%dabdr(:, jat, iat)
+         cache%dabdL(:, :, iat) = -dtmp * spread(cache%dcdr(:, iat, jat), 2, 3) &
+         & * spread(vec, 1, 3) + cache%dabdL(:, :, iat)
+
+         ! Capacitance derivative diagonal
+         dtmp = alpha * hardi * cache%vrhs(iat)
+         cache%dabdr(:, jat, iat) = -dtmp * cache%dcdr(:, jat, iat) &
+         & + cache%dabdr(:, jat, iat)
+      end do
+
+      ! EN derivative: capacitance matrix derivative diagonal
+      cache%dabdr(:, iat, iat) = +beta * cache%xtmp(iat) * cache%dcdr(:, iat, &
+      & iat) + cache%dabdr(:, iat, iat)
+      cache%dabdL(:, :, iat) = +beta * cache%xtmp(iat) * cache%dcdL(:, :, &
+      & iat) + cache%dabdL(:, :, iat)
+
+      ! Hardness derivative
+      dtmp = alpha * self%kqeta_pre * self%kqeta(izp) &
+      & / cosh(self%kqeta(izp) * cache%qloc(iat))**2 * cache%vrhs(iat) &
+      & * cache%cmat(iat, iat)
+      cache%dabdr(:, :, iat) = +dtmp * cache%dqlocdr(:, :, iat) + cache%dabdr(:, :, iat)
+      cache%dabdL(:, :, iat) = +dtmp * cache%dqlocdL(:, :, iat) + cache%dabdL(:, :, iat)
+
+      ! Effective charge width derivative
+      dtmp = -alpha * sqrt2pi * dradi / (radi**2) * cache%vrhs(iat) * cache%cmat(iat, iat)
+      cache%dabdr(:, :, iat) = +(dtmp + wcni) * cache%dcndr(:, :, iat) &
+      & + cache%dabdr(:, :, iat)
+      cache%dabdL(:, :, iat) = +dtmp * cache%dcndL(:, :, iat) + cache%dabdL(:, :, iat)
+
+      ! Capacitance derivative
+      dtmp = alpha * hardi * cache%vrhs(iat)
+      cache%dabdr(:, iat, iat) = +dtmp * cache%dcdr(:, iat, iat) &
+      & + cache%dabdr(:, iat, iat)
+      cache%dabdL(:, :, iat) = +dtmp * cache%dcdL(:, :, iat) + cache%dabdL(:, :, iat)
+   end do
+   !$omp end parallel do
+
+end subroutine get_partial_derivs_0d
+
 !> Compute electronegativity-vector derivatives for a periodic system
 subroutine get_xvec_derivs_3d(self, mol, ndim, cache)
    !> EEQBC model type
@@ -1226,6 +1370,114 @@ subroutine get_damat_0d(self, mol, cache, atrace)
    !$omp end parallel
 
 end subroutine get_damat_0d
+
+!> Build derivatives of the Coulomb matrix (multiplied by the charge vector) for a
+!> non-periodic system using a complete neighborlist.
+!>
+!> The derivative d(A*q)_i/dR_k is stored in the row of atom i at the position of
+!> its neighbor k, the diagonal entry at list%inl(i) holds d(A*q)_i/dR_i.
+!> Contributions outside the sparsity pattern of the list are neglected.
+subroutine get_damat_0d_list(self, mol, list, cache)
+   !> EEQBC model type
+   class(eeqbc_model), intent(in) :: self
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+   !> Multicharge neighborlist type (complete)
+   type(csr_list), intent(in) :: list
+   !> Multicharge cache
+   type(mchrg_cache), intent(inout) :: cache
+
+   integer :: iat, jat, izp, jzp
+   integer(i8) :: kat, lat
+   real(wp) :: vec(3), r2, gam, arg, dtmp, norm_cn, hardi, wtmp, wcni
+   real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), dgamdL(3, 3)
+   real(wp) :: dGc(3), dSc(3, 3)
+
+   if (.not. allocated(cache%dadrlist)) allocate(cache%dadrlist(3, size(list%nlat)))
+   if (.not. allocated(cache%dadL)) allocate(cache%dadL(3, 3, mol%nat))
+
+   !$omp parallel do default(none) schedule(runtime) &
+   !$omp shared(cache, mol, list, self) &
+   !$omp private(iat, jat, izp, jzp, kat, lat, vec, r2, gam, arg, dtmp, norm_cn) &
+   !$omp private(hardi, wtmp, wcni, radi, radj, dradi, dradj, dG, dS, dgamdL, dGc, dSc)
+   do iat = 1, mol%nat
+      izp = mol%id(iat)
+      ! Effective charge width of i
+      norm_cn = 1.0_wp / self%avg_cn(izp)
+      radi = self%rad(izp) * exp(-self%kcnrad(izp) * cache%cn(iat) * norm_cn)
+      dradi = -self%kcnrad(izp) * norm_cn * radi
+      ! Effective hardness of i
+      hardi = self%eta(izp) + self%kqeta_pre &
+      & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi
+
+      ! Row iat is exclusive to this thread
+      cache%dadrlist(:, list%inl(iat):list%inl(iat + 1) - 1) = 0.0_wp
+      cache%dadL(:, :, iat) = 0.0_wp
+      wcni = 0.0_wp
+
+      do kat = list%inl(iat) + 1, list%inl(iat + 1) - 1
+         jat = list%nlat(kat)
+         jzp = mol%id(jat)
+         vec = mol%xyz(:, jat) - mol%xyz(:, iat)
+         r2 = vec(1)**2 + vec(2)**2 + vec(3)**2
+         ! Effective charge width of j
+         norm_cn = 1.0_wp / self%avg_cn(jzp)
+         radj = self%rad(jzp) * exp(-self%kcnrad(jzp) * cache%cn(jat) * norm_cn)
+         dradj = -self%kcnrad(jzp) * norm_cn * radj
+
+         ! Coulomb interaction of Gaussian charges
+         gam = 1.0_wp / sqrt(radi**2 + radj**2)
+         arg = gam * gam * r2
+
+         ! Explicit derivative
+         dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) &
+            & - erf(sqrt(arg)) / (r2 * sqrt(r2))
+         dG(:) = dtmp * vec * cache%vrhs(jat) * cache%clist(kat)
+         dS(:, :) = spread(dG, 1, 3) * spread(vec, 2, 3)
+         cache%dadrlist(:, list%inl(iat)) = cache%dadrlist(:, list%inl(iat)) - dG
+         cache%dadrlist(:, kat) = cache%dadrlist(:, kat) + dG
+         cache%dadL(:, :, iat) = cache%dadL(:, :, iat) + dS
+
+         ! Effective charge width derivative, CN of i is collected in wcni
+         wtmp = 2.0_wp * exp(-arg) / sqrtpi * cache%vrhs(jat) * cache%clist(kat)
+         wcni = wcni - wtmp * radi * dradi * gam**3
+         dgamdL(:, :) = -(radi * dradi * cache%dcndL(:, :, &
+         & iat) + radj * dradj * cache%dcndL(:, :, jat)) * gam**3
+         cache%dadL(:, :, iat) = cache%dadL(:, :, iat) + wtmp * dgamdL
+         dtmp = -wtmp * radj * dradj * gam**3
+         do lat = list%inl(iat), list%inl(iat + 1) - 1
+            cache%dadrlist(:, lat) = cache%dadrlist(:, lat) &
+            & + dtmp * cache%dcndr(:, list%nlat(lat), jat)
+         end do
+
+         ! Capacitance derivative, dC_ij/dR_i = +dGc and dC_ii/dR_j = +dGc
+         call get_dcpair(self%kbc, vec, self%rvdw(izp, jzp), self%cap(izp), &
+         & self%cap(jzp), dGc, dSc)
+         dtmp = erf(sqrt(r2) * gam) / sqrt(r2) * cache%vrhs(jat) &
+         & - hardi * cache%vrhs(iat)
+         cache%dadrlist(:, list%inl(iat)) = cache%dadrlist(:, list%inl(iat)) &
+         & + dtmp * dGc
+         cache%dadrlist(:, kat) = cache%dadrlist(:, kat) - dtmp * dGc
+         cache%dadL(:, :, iat) = cache%dadL(:, :, iat) - dtmp * dSc
+      end do
+
+      ! Hardness derivative
+      dtmp = self%kqeta_pre * self%kqeta(izp) &
+      & / cosh(self%kqeta(izp) * cache%qloc(iat))**2 * cache%vrhs(iat) &
+      & * cache%clist(list%inl(iat))
+      ! Effective charge width derivative
+      wtmp = -sqrt2pi * dradi / (radi**2) * cache%vrhs(iat) * cache%clist(list%inl(iat))
+      do lat = list%inl(iat), list%inl(iat + 1) - 1
+         cache%dadrlist(:, lat) = cache%dadrlist(:, lat) &
+         & + dtmp * cache%dqlocdr(:, list%nlat(lat), iat) &
+         & + (wtmp + wcni) * cache%dcndr(:, list%nlat(lat), iat)
+      end do
+      cache%dadL(:, :, iat) = cache%dadL(:, :, iat) + dtmp * cache%dqlocdL(:, :, iat) &
+      & + wtmp * cache%dcndL(:, :, iat)
+   end do
+   !$omp end parallel do
+
+end subroutine get_damat_0d_list
 
 !> Build derivatives of the Coulomb matrix for a periodic system.
 subroutine get_damat_3d(self, mol, cache, atrace)

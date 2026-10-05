@@ -96,7 +96,13 @@ subroutine collect_model(testsuite)
    & new_unittest("eeqbc-dqdL-mb11", test_eeqbc_dqdL_mb11), &
    & new_unittest("eeqbc-dqdL-mb12", test_eeqbc_dqdL_mb12), &
    & new_unittest("eeqbc-dfdr-mb06", test_eeqbc_dfdr_mb06), &
-   & new_unittest("eeqbc-dfdr-mb10", test_eeqbc_dfdr_mb10) &
+   & new_unittest("eeqbc-dfdr-mb10", test_eeqbc_dfdr_mb10), &
+   & new_unittest("eeq-dqdr-cg-mb09", test_eeq_dqdr_cg_mb09), &
+   & new_unittest("eeq-dqdr-cg-lys", test_eeq_dqdr_cg_lys), &
+   & new_unittest("eeq-dqdL-cg-mb11", test_eeq_dqdL_cg_mb11), &
+   & new_unittest("eeqbc-dqdr-cg-mb09", test_eeqbc_dqdr_cg_mb09), &
+   & new_unittest("eeqbc-dqdr-cg-lys", test_eeqbc_dqdr_cg_lys), &
+   & new_unittest("eeqbc-dqdL-cg-mb11", test_eeqbc_dqdL_cg_mb11) &
    & ]
 
 end subroutine collect_model
@@ -941,7 +947,7 @@ subroutine test_numsigma(error, mol, model)
 
 end subroutine test_numsigma
 
-subroutine test_numdqdr(error, mol, model)
+subroutine test_numdqdr(error, mol, model, cg)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -951,6 +957,9 @@ subroutine test_numdqdr(error, mol, model)
 
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
+
+   !> Use the conjugate-gradient solver instead of the direct solver
+   logical, intent(in), optional :: cg
 
    type(mchrg_cache), allocatable :: cache
 
@@ -965,6 +974,7 @@ subroutine test_numdqdr(error, mol, model)
    real(wp), allocatable :: ql(:), qr(:), dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: numdr(:, :, :)
    logical :: grad = .true.
+   logical :: use_cg
 
    allocate(direct_input :: solver_input)
    select type (solver_input)
@@ -997,6 +1007,24 @@ subroutine test_numdqdr(error, mol, model)
    end do lp
    if (allocated(error)) return
 
+   ! Analytic derivatives from the CG solver, while the finite-difference
+   ! reference above keeps the direct solver to avoid iterative noise
+   use_cg = .false.
+   if (present(cg)) use_cg = cg
+   if (use_cg) then
+      deallocate(solver, solver_input, cache)
+      allocate(cg_input :: solver_input)
+      select type (solver_input)
+       type is (cg_input)
+         solver_input%cgtol = 1.0e-15_wp
+         solver_input%cgmiter = 1000
+         solver_input%verbosity = verbosity
+      end select
+      call solver_maker(solver, solver_input, error)
+      if (allocated(error)) return
+      allocate(cache)
+   end if
+
    call model%update(mol, cache, trans, grad)
    call model%solve(mol, solver, cache, error, &
    & dqdr=dqdr, dqdL=dqdL, unit=output_unit)
@@ -1014,7 +1042,7 @@ subroutine test_numdqdr(error, mol, model)
 
 end subroutine test_numdqdr
 
-subroutine test_numdqdL(error, mol, model)
+subroutine test_numdqdL(error, mol, model, cg)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -1024,6 +1052,9 @@ subroutine test_numdqdL(error, mol, model)
 
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
+
+   !> Use the conjugate-gradient solver instead of the direct solver
+   logical, intent(in), optional :: cg
 
    type(mchrg_cache), allocatable :: cache
 
@@ -1040,6 +1071,7 @@ subroutine test_numdqdL(error, mol, model)
    real(wp), allocatable :: lattr(:, :), xyz(:, :), numdL(:, :, :)
    real(wp) :: eps(3, 3)
    logical :: grad = .true.
+   logical :: use_cg
 
    allocate(direct_input :: solver_input)
    select type (solver_input)
@@ -1080,6 +1112,24 @@ subroutine test_numdqdL(error, mol, model)
       end do
    end do lp
    if (allocated(error)) return
+
+   ! Analytic derivatives from the CG solver, while the finite-difference
+   ! reference above keeps the direct solver to avoid iterative noise
+   use_cg = .false.
+   if (present(cg)) use_cg = cg
+   if (use_cg) then
+      deallocate(solver, solver_input, cache)
+      allocate(cg_input :: solver_input)
+      select type (solver_input)
+       type is (cg_input)
+         solver_input%cgtol = 1.0e-15_wp
+         solver_input%cgmiter = 1000
+         solver_input%verbosity = verbosity
+      end select
+      call solver_maker(solver, solver_input, error)
+      if (allocated(error)) return
+      allocate(cache)
+   end if
 
    call model%update(mol, cache, trans, grad)
    call model%solve(mol, solver, cache, error, &
@@ -2173,5 +2223,101 @@ subroutine test_eeqbc_dfdr_mb10(error)
    call test_dfdr(error, mol, dfdq, model)
 
 end subroutine test_eeqbc_dfdr_mb10
+
+
+subroutine test_eeq_dqdr_cg_mb09(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "MB16-43", "09")
+   call new_eeq2019_model(mol, model, error)
+   if (allocated(error)) return
+   call test_numdqdr(error, mol, model, cg=.true.)
+
+end subroutine test_eeq_dqdr_cg_mb09
+
+
+subroutine test_eeq_dqdr_cg_lys(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "Amino20x4", "LYS_xao")
+   call new_eeq2019_model(mol, model, error)
+   if (allocated(error)) return
+   call test_numdqdr(error, mol, model, cg=.true.)
+
+end subroutine test_eeq_dqdr_cg_lys
+
+
+subroutine test_eeq_dqdL_cg_mb11(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "MB16-43", "11")
+   call new_eeq2019_model(mol, model, error)
+   if (allocated(error)) return
+   call test_numdqdL(error, mol, model, cg=.true.)
+
+end subroutine test_eeq_dqdL_cg_mb11
+
+
+subroutine test_eeqbc_dqdr_cg_mb09(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "MB16-43", "09")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_numdqdr(error, mol, model, cg=.true.)
+
+end subroutine test_eeqbc_dqdr_cg_mb09
+
+
+subroutine test_eeqbc_dqdr_cg_lys(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "Amino20x4", "LYS_xao")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_numdqdr(error, mol, model, cg=.true.)
+
+end subroutine test_eeqbc_dqdr_cg_lys
+
+
+subroutine test_eeqbc_dqdL_cg_mb11(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "MB16-43", "11")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_numdqdL(error, mol, model, cg=.true.)
+
+end subroutine test_eeqbc_dqdL_cg_mb11
 
 end module test_model

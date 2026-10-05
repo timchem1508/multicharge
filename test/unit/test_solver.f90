@@ -25,7 +25,8 @@ module test_solver
    use multicharge_charge, only: get_charges, get_eeq_charges, get_eeqbc_charges
    use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
    use multicharge_solver_direct, only : direct_solver, new_direct_solver, direct_input
-   use multicharge_solver_cg, only : cg_solver, new_cg_solver, cg_input
+   use multicharge_solver_cg, only : cg_solver, new_cg_solver, cg_input, get_blocks
+   use mctc_csrlist, only : csr_list
    implicit none
    private
 
@@ -53,7 +54,10 @@ subroutine collect_solver(testsuite)
    & new_unittest("cg-spd-large", test_cg_spd_large), &
    & new_unittest("cg-ill-conditioned", test_cg_ill_conditioned), &
    & new_unittest("cg-zero-rhs", test_cg_zero_rhs), &
-   & new_unittest("cg-random-spd", test_cg_random_spd) &
+   & new_unittest("cg-random-spd", test_cg_random_spd), &
+   & new_unittest("block-cg-get-blocks", test_get_blocks), &
+   & new_unittest("block-cg-dense", test_block_cg_dense), &
+   & new_unittest("block-cg-sparse", test_block_cg_sparse) &
    & ]
 
 end subroutine collect_solver
@@ -734,5 +738,170 @@ subroutine write_vector(vector, name, unit)
    end do
 
 end subroutine write_vector
+
+
+!> Test: Splitting a square matrix into column blocks
+subroutine test_get_blocks(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   integer, parameter :: n = 150
+   real(wp) :: mat(n, n)
+   real(wp), allocatable :: blocks(:, :, :)
+   integer, allocatable :: ncol(:)
+   integer :: iblk, ivec
+
+   call random_number(mat)
+   call get_blocks(mat, blocks, ncol)
+
+   if (any(shape(blocks) /= [n, 64, 3])) then
+      call test_failed(error, "Wrong shape of the column blocks")
+      return
+   end if
+   if (any(ncol /= [64, 64, 22])) then
+      call test_failed(error, "Wrong number of columns per block")
+      return
+   end if
+   do iblk = 1, size(ncol)
+      ivec = (iblk - 1) * 64
+      if (any(blocks(:, :ncol(iblk), iblk) /= &
+         & mat(:, ivec+1:ivec+ncol(iblk)))) then
+         call test_failed(error, "Column blocks do not match the matrix")
+         return
+      end if
+   end do
+   if (any(blocks(:, ncol(3)+1:, 3) /= 0.0_wp)) then
+      call test_failed(error, "Last column block is not zero-padded")
+   end if
+
+end subroutine test_get_blocks
+
+
+!> Test: Block CG with a dense matrix, inverting a random SPD matrix block-wise
+subroutine test_block_cg_dense(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   integer, parameter :: n = 150
+   real(wp), allocatable :: amat(:, :), ainv(:, :), unity(:, :)
+   real(wp), allocatable :: blocks(:, :, :), xmat(:, :)
+   integer, allocatable :: ncol(:)
+   integer :: i, iblk, ivec
+   type(cg_solver) :: solver
+
+   call new_cg_solver(solver, cg_input(cgtol=1.0e-12_wp, cgmiter=1000, &
+      & verbosity=0, use_nlist=.false.))
+
+   call random_spd(n, amat)
+   allocate(unity(n, n), source=0.0_wp)
+   do i = 1, n
+      unity(i, i) = 1.0_wp
+   end do
+
+   call get_blocks(unity, blocks, ncol)
+   allocate(ainv(n, n))
+   do iblk = 1, size(ncol)
+      ivec = (iblk - 1) * size(blocks, 2)
+      allocate(xmat(n, ncol(iblk)), source=0.0_wp)
+      call solver%solve_block(amat=amat, bmat=blocks(:, :ncol(iblk), iblk), &
+         & xmat=xmat, error=error)
+      if (allocated(error)) return
+      ainv(:, ivec+1:ivec+ncol(iblk)) = xmat
+      deallocate(xmat)
+   end do
+
+   if (any(abs(matmul(amat, ainv) - unity) > thr_rel)) then
+      call test_failed(error, "Block CG failed to invert a dense SPD matrix")
+      print '(a, es12.4)', "Max deviation: ", &
+         & maxval(abs(matmul(amat, ainv) - unity))
+   end if
+
+end subroutine test_block_cg_dense
+
+
+!> Test: Block CG with an upper-triangular CSR matrix against the dense solve
+subroutine test_block_cg_sparse(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   integer, parameter :: n = 120, nrhs = 64, band = 5
+   real(wp), allocatable :: amat(:, :), alist(:), bmat(:, :)
+   real(wp), allocatable :: xdense(:, :), xsparse(:, :)
+   integer :: iat, jat, nnz
+   type(csr_list) :: list
+   type(cg_solver) :: solver
+
+   ! Banded diagonally dominant SPD matrix
+   allocate(amat(n, n), source=0.0_wp)
+   do iat = 1, n
+      amat(iat, iat) = 2.0_wp * band + 1.0_wp + real(iat, wp) / n
+      do jat = iat + 1, min(n, iat + band)
+         amat(iat, jat) = -1.0_wp / real(jat - iat, wp)
+         amat(jat, iat) = amat(iat, jat)
+      end do
+   end do
+
+   ! Upper triangle in CSR format, diagonal element first in each row
+   list%complete = .false.
+   allocate(list%inl(n + 1), list%nlat(n * (band + 1)), alist(n * (band + 1)))
+   nnz = 0
+   do iat = 1, n
+      list%inl(iat) = nnz + 1
+      do jat = iat, min(n, iat + band)
+         nnz = nnz + 1
+         list%nlat(nnz) = jat
+         alist(nnz) = amat(iat, jat)
+      end do
+   end do
+   list%inl(n + 1) = nnz + 1
+
+   allocate(bmat(n, nrhs))
+   call random_number(bmat)
+   allocate(xdense(n, nrhs), xsparse(n, nrhs), source=0.0_wp)
+
+   call new_cg_solver(solver, cg_input(cgtol=1.0e-12_wp, cgmiter=1000, &
+      & verbosity=0, use_nlist=.false.))
+   call solver%solve_block(amat=amat, bmat=bmat, xmat=xdense, error=error)
+   if (allocated(error)) return
+
+   call new_cg_solver(solver, cg_input(cgtol=1.0e-12_wp, cgmiter=1000, &
+      & verbosity=0, use_nlist=.true.))
+   call solver%solve_block(alist=alist(:nnz), bmat=bmat, xmat=xsparse, &
+      & list=list, error=error)
+   if (allocated(error)) return
+
+   if (any(abs(matmul(amat, xsparse) - bmat) > thr_rel)) then
+      call test_failed(error, "Block CG failed for a sparse SPD matrix")
+      return
+   end if
+   if (any(abs(xsparse - xdense) > thr_rel)) then
+      call test_failed(error, "Sparse and dense block CG solutions differ")
+   end if
+
+end subroutine test_block_cg_sparse
+
+
+!> Generate a well-conditioned random SPD matrix
+subroutine random_spd(n, amat)
+
+   !> Dimension of the matrix
+   integer, intent(in) :: n
+
+   !> Random SPD matrix
+   real(wp), allocatable, intent(out) :: amat(:, :)
+
+   integer :: i
+
+   allocate(amat(n, n))
+   call random_number(amat)
+   amat = 0.5_wp * (amat + transpose(amat))
+   do i = 1, n
+      amat(i, i) = amat(i, i) + real(n, wp)
+   end do
+
+end subroutine random_spd
 
 end module test_solver
