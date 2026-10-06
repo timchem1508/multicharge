@@ -84,7 +84,7 @@ module multicharge_solver_cg
    logical, parameter :: use_nlist_def = .false.
 
    !> Default number of columns per block of right-hand sides
-   integer, parameter :: block_size_def = 64
+   integer, parameter :: block_size_def = 16
 
    !> Relative eigenvalue threshold of the Gram matrix for dropping linearly
    !> dependent search directions
