@@ -412,6 +412,20 @@ subroutine get_xvec(self, mol, ndim, cache, list, efield)
 
 end subroutine get_xvec
 
+subroutine get_partial(self, mol, ndim, cache, list)
+   !> EEQBC model type
+   class(eeqbc_model), intent(in) :: self
+   !> Structure type
+   type(structure_type), intent(in) :: mol
+   !> System size
+   integer, intent(in) :: ndim
+   !> Multicharge cache
+   type(mchrg_cache), intent(inout) :: cache
+   !> Multicharge neighborlist type
+   type(csr_list), intent(in), optional :: list
+
+end subroutine get_partial
+
 !> Compute electronegativity-vector derivatives with respect to positions and
 !> lattice parameters
 subroutine get_xvec_derivs(self, mol, ndim, cache, list)
@@ -426,14 +440,30 @@ subroutine get_xvec_derivs(self, mol, ndim, cache, list)
    !> Multicharge neighborlist type
    type(csr_list), intent(in), optional :: list
 
-   if (.not. allocated(cache%dcndr)) then
-      allocate(cache%dcndr(3, mol%nat, mol%nat))
-   end if
-   if (.not. allocated(cache%dcndL)) then
-      allocate(cache%dcndL(3, 3, mol%nat))
+   if (prsent(list)) then
+      if (.not. allocated(cache%dcndrij) .or. .not. allocated(cache%dcndrji) &
+         & .or. .not. allocated(cache%dcndrdiag) .or. .not. allocated(cache%dcndL)) then
+         allocate(cache%dcndrij(3, mol%nat), cache%dcndrji(3, mol%nat))
+         allocate(cache%dcndrdiag(3, mol%nat))
+      end if
+      if (.not. allocated(cache%dcndL)) then
+         allocate(cache%dcndL(3, 3, mol%nat))
+      end if
       call self%ncoord%get_coordination_number(mol, cache%trans, cache%cn, &
-      & dcndr=cache%dcndr, dcndL=cache%dcndL)
+         & dcndrij=cache%dcndrij, dcndrji=cache%dcndrji, dcndrdiag=cache%dcndrdiag, &
+         & dcndL=cache%dcndL, list=list)
+   else
+      if (.not. allocated(cache%dcndr) ) then
+         allocate(cache%dcndr(3, mol%nat, mol%nat))
+      end if
+      if (.not. allocated(cache%dcndL)) then
+         allocate(cache%dcndL(3, 3, mol%nat))
+      end if
+      call self%ncoord%get_coordination_number(mol, cache%trans, cache%cn, &
+         & dcndr=cache%dcndr, dcndL=cache%dcndL)
    end if
+
+
    if (.not. allocated(cache%dqlocdr)) then
       allocate(cache%dqlocdr(3, mol%nat, mol%nat))
    end if
@@ -444,12 +474,10 @@ subroutine get_xvec_derivs(self, mol, ndim, cache, list)
    end if
 
    if (any(mol%periodic)) then
-
       if (.not. allocated(cache%dxdr)) allocate(cache%dxdr(3, mol%nat, ndim))
       if (.not. allocated(cache%dxdL)) allocate(cache%dxdL(3, 3, ndim))
       call get_xvec_derivs_3d(self, mol, ndim, cache)
    else
-
       if (.not. allocated(cache%dxdr)) allocate(cache%dxdr(3, mol%nat, ndim))
       if (.not. allocated(cache%dxdL)) allocate(cache%dxdL(3, 3, ndim))
       call get_xvec_derivs_0d(self, mol, ndim, cache)

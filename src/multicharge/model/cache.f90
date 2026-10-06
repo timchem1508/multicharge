@@ -78,8 +78,14 @@ module multicharge_model_cache
       !> Coordination number gradient w.r.t the lattice vectors
       real(wp), allocatable :: dcndL(:, :, :)
 
+      !> Listed version of the coordination number derivatives
+      real(wp), allocatable :: dcndrij(:, :), dcndrji(:, :), dcndrdiag(:, :)
+
       !> Local charge derivatives w.r.t positions
       real(wp), allocatable :: dqlocdr(:, :, :)
+
+      !> Listed version of the local charge derivatives
+      real(wp), allocatable :: dqlocdrij(:, :), dqlocdrji(:, :), dqlocdrdiag(:, :)
 
       !> Local charge derivatives w.r.t lattice vectors
       real(wp), allocatable :: dqlocdL(:, :, :)

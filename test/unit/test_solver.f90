@@ -755,16 +755,16 @@ subroutine test_get_blocks(error)
    call random_number(mat)
    call get_blocks(mat, blocks, ncol)
 
-   if (any(shape(blocks) /= [n, 64, 3])) then
+   if (any(shape(blocks) /= [n, 16, 10])) then
       call test_failed(error, "Wrong shape of the column blocks")
       return
    end if
-   if (any(ncol /= [64, 64, 22])) then
+   if (any(ncol /= [spread(16, 1, 9), 6])) then
       call test_failed(error, "Wrong number of columns per block")
       return
    end if
    do iblk = 1, size(ncol)
-      ivec = (iblk - 1) * 64
+      ivec = (iblk - 1) * 16
       if (any(blocks(:, :ncol(iblk), iblk) /= &
          & mat(:, ivec+1:ivec+ncol(iblk)))) then
          call test_failed(error, "Column blocks do not match the matrix")
@@ -827,7 +827,7 @@ subroutine test_block_cg_sparse(error)
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
-   integer, parameter :: n = 120, nrhs = 64, band = 5
+   integer, parameter :: n = 120, nrhs = 16, band = 5
    real(wp), allocatable :: amat(:, :), alist(:), bmat(:, :)
    real(wp), allocatable :: xdense(:, :), xsparse(:, :)
    integer :: iat, jat, nnz

@@ -371,7 +371,7 @@ subroutine get_blocks(mat, box, ncol, block_size)
    !> Number of occupied columns in each block
    integer, allocatable, intent(out) :: ncol(:)
 
-   !> Maximum number of columns per block, default is 64
+   !> Maximum number of columns per block, default is 16
    integer, intent(in), optional :: block_size
 
    integer :: bsize, nrow, nvec, nblk, iblk, ivec
@@ -517,17 +517,22 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error)
    res(:, :) = bmat - res
 
    ! Initial norms
+   !$omp parallel do private(ivec) &
+   !$omp shared(bmat, bnorm, res, resnorm, tol_square, nrhs)
    do ivec = 1, nrhs
       bnorm(ivec) = dot(bmat(:, ivec), bmat(:, ivec))
       if (bnorm(ivec) < tol_square) bnorm(ivec) = 1.0_wp
       resnorm(ivec) = dot(res(:, ivec), res(:, ivec))
    end do
+   !$omp end parallel do
    rel_resnorm = maxval(resnorm / bnorm)
 
    ! Initial search directions P = orth(M^-1 R)
+   !$omp parallel do private(ivec) shared(dir, prec, res, nrhs)
    do ivec = 1, nrhs
       dir(:, ivec) = prec * res(:, ivec)
    end do
+   !$omp end parallel do
    call orthonormalize(dir, nrank, error)
    if (allocated(error)) return
 
@@ -580,9 +585,11 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error)
          & beta=1.0_wp)
 
       ! Compute the new residual norms
+      !$omp parallel do private(ivec) shared(res, resnorm, nrhs)
       do ivec = 1, nrhs
          resnorm(ivec) = dot(res(:, ivec), res(:, ivec))
       end do
+      !$omp end parallel do
 
       ! Largest relative residual norm to check convergence
       rel_resnorm = maxval(resnorm / bnorm)
