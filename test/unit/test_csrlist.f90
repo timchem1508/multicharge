@@ -16,7 +16,7 @@
 !> Unit tests for CSR-list based multicharge calculations
 module test_csrlist
    use iso_fortran_env, only : output_unit
-   use mctc_env, only : wp
+   use mctc_env, only : wp, i8
    use mctc_env_testing, only : new_unittest, unittest_type, error_type, test_failed
    use mctc_cutoff, only : get_lattice_points
    use mctc_io_structure, only : structure_type, new
@@ -28,6 +28,8 @@ module test_csrlist
    use multicharge_model_eeqbc, only : eeqbc_model
    use multicharge_param, only : new_eeq2019_model, new_eeqbc2025_model
    use multicharge_model_cache, only : mchrg_cache
+   use multicharge_ncoord, only : get_dcndr_pair, get_dqlocdr_pair
+   use mctc_ncoord, only : ncoord_type
    use multicharge_charge, only : get_charges, get_eeq_charges, get_eeqbc_charges
    use multicharge_solver_type, only : mchrg_solver_type, mchrg_solver_input
    use multicharge_solver_direct, only : direct_solver, new_direct_solver, direct_input
@@ -76,7 +78,14 @@ subroutine collect_csrlist(testsuite)
    & new_unittest("eeqbc-gradient-ice-supercell", test_eeqbc_g_ice222), &
    & new_unittest("eeqbc-api-mb01", test_eeqbc_api_mb01), &
    & new_unittest("eeqbc-api-mb02", test_eeqbc_api_mb02), &
-   & new_unittest("eeqbc-api-actinides", test_eeqbc_api_actinides) &
+   & new_unittest("eeqbc-api-actinides", test_eeqbc_api_actinides), &
+   & new_unittest("pair-derivs-mb01", test_pair_derivs_mb01), &
+   & new_unittest("pair-derivs-charged", test_pair_derivs_charged), &
+   & new_unittest("pair-derivs-co2", test_pair_derivs_co2), &
+   & new_unittest("pair-derivs-ice", test_pair_derivs_ice), &
+   & new_unittest("partial-derivs-mb01", test_partial_derivs_mb01), &
+   & new_unittest("partial-derivs-co2", test_partial_derivs_co2), &
+   & new_unittest("partial-derivs-ice", test_partial_derivs_ice) &
    & ]
 
 end subroutine collect_csrlist
@@ -1024,5 +1033,352 @@ subroutine test_eeqbc_api_actinides(error)
    call test_api(error, mol, model, qref=ref)
 
 end subroutine test_eeqbc_api_actinides
+
+
+!> Rebuild dense CN derivatives from the pair derivatives and compare them
+subroutine check_pair_derivs(error, mol, ncoord, trans, local, cn, dcndr, dcndL)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Coordination number container
+   class(ncoord_type), intent(in) :: ncoord
+
+   !> Lattice points
+   real(wp), intent(in) :: trans(:, :)
+
+   !> Evaluate local charge derivatives instead of CN derivatives
+   logical, intent(in) :: local
+
+   !> Coordination numbers or local charges
+   real(wp), intent(in) :: cn(:)
+
+   !> Reference derivative w.r.t. the Cartesian coordinates
+   real(wp), intent(in) :: dcndr(:, :, :)
+
+   !> Reference derivative w.r.t. strain deformations
+   real(wp), intent(in) :: dcndL(:, :, :)
+
+   integer :: iat, jat, itr
+   real(wp) :: vec(3), dpair(3, 2)
+   real(wp), allocatable :: dcndr_pair(:, :, :), dcndL_pair(:, :, :)
+
+   allocate(dcndr_pair(3, mol%nat, mol%nat), dcndL_pair(3, 3, mol%nat), &
+      & source=0.0_wp)
+
+   do iat = 1, mol%nat
+      do jat = 1, iat
+         do itr = 1, size(trans, 2)
+            vec = mol%xyz(:, iat) - (mol%xyz(:, jat) + trans(:, itr))
+            if (local) then
+               dpair = get_dqlocdr_pair(ncoord, mol, iat, jat, vec, cn)
+            else
+               dpair = get_dcndr_pair(ncoord, mol, iat, jat, vec, cn)
+            end if
+
+            dcndr_pair(:, iat, iat) = dcndr_pair(:, iat, iat) + dpair(:, 1)
+            dcndr_pair(:, jat, iat) = dcndr_pair(:, jat, iat) - dpair(:, 1)
+            dcndr_pair(:, iat, jat) = dcndr_pair(:, iat, jat) + dpair(:, 2)
+            dcndr_pair(:, jat, jat) = dcndr_pair(:, jat, jat) - dpair(:, 2)
+
+            dcndL_pair(:, :, iat) = dcndL_pair(:, :, iat) &
+               & + spread(dpair(:, 1), 2, 3) * spread(vec, 1, 3)
+            dcndL_pair(:, :, jat) = dcndL_pair(:, :, jat) &
+               & + spread(dpair(:, 2), 2, 3) * spread(vec, 1, 3)
+         end do
+      end do
+   end do
+
+   if (any(abs(dcndr_pair - dcndr) > thr1)) then
+      call test_failed(error, "Pair derivatives w.r.t. positions do not match")
+      print'(es21.14)', maxval(abs(dcndr_pair - dcndr))
+      return
+   end if
+
+   if (any(abs(dcndL_pair - dcndL) > thr1)) then
+      call test_failed(error, "Pair derivatives w.r.t. strain do not match")
+      print'(es21.14)', maxval(abs(dcndL_pair - dcndL))
+      return
+   end if
+
+end subroutine check_pair_derivs
+
+
+!> Check pair derivatives of the CN and the local charges of a model
+subroutine test_pair_derivs(error, mol, model)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Electronegativity equilibration model
+   class(mchrg_model_type), intent(in) :: model
+
+   real(wp), allocatable :: trans(:, :)
+   real(wp), allocatable :: cn(:), dcndr(:, :, :), dcndL(:, :, :)
+   real(wp), allocatable :: qloc(:), dqlocdr(:, :, :), dqlocdL(:, :, :)
+
+   allocate(cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat))
+   allocate(qloc(mol%nat), dqlocdr(3, mol%nat, mol%nat), dqlocdL(3, 3, mol%nat))
+
+   call get_lattice_points(mol%periodic, mol%lattice, model%ncoord%cutoff, trans)
+
+   call model%ncoord%get_coordination_number(mol, trans, cn, dcndr=dcndr, &
+      & dcndL=dcndL)
+   call check_pair_derivs(error, mol, model%ncoord, trans, .false., cn, &
+      & dcndr, dcndL)
+   if (allocated(error)) return
+
+   call model%local_charge(mol, trans, qloc, dqlocdr=dqlocdr, dqlocdL=dqlocdL)
+   call check_pair_derivs(error, mol, model%ncoord_en, trans, .true., qloc, &
+      & dqlocdr, dqlocdL)
+
+end subroutine test_pair_derivs
+
+
+subroutine test_pair_derivs_mb01(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "MB16-43", "01")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_pair_derivs(error, mol, model)
+
+end subroutine test_pair_derivs_mb01
+
+
+subroutine test_pair_derivs_charged(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "MB16-43", "02")
+   mol%charge = -2.0_wp
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_pair_derivs(error, mol, model)
+
+end subroutine test_pair_derivs_charged
+
+
+subroutine test_pair_derivs_co2(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "X23", "CO2")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_pair_derivs(error, mol, model)
+
+end subroutine test_pair_derivs_co2
+
+
+subroutine test_pair_derivs_ice(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "ICE10", "vi")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_pair_derivs(error, mol, model)
+
+end subroutine test_pair_derivs_ice
+
+
+!> Expand the neighborlist storage of the partial derivatives into a dense array
+subroutine expand_partial_derivs(mol, list, cache, dabdr)
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Upper-triangle CSR neighbour list
+   type(csr_list), intent(in) :: list
+
+   !> Cache holding the partial derivatives in neighborlist storage
+   type(mchrg_cache), intent(in) :: cache
+
+   !> Dense partial derivatives
+   real(wp), intent(out) :: dabdr(:, :, :)
+
+   integer :: iat, jat
+   integer(i8) :: kat
+
+   dabdr(:, :, :) = 0.0_wp
+   do iat = 1, mol%nat
+      dabdr(:, iat, iat) = cache%dabdrdiag(:, iat)
+      do kat = list%inl(iat) + 1, list%inl(iat + 1) - 1
+         jat = list%nlat(kat)
+         dabdr(:, iat, jat) = dabdr(:, iat, jat) + cache%dabdrij(:, kat)
+         dabdr(:, jat, iat) = dabdr(:, jat, iat) + cache%dabdrji(:, kat)
+      end do
+   end do
+
+end subroutine expand_partial_derivs
+
+
+!> Compare the partial derivatives and charge derivatives obtained with the
+!> neighbour list against the dense evaluation
+subroutine test_partial_derivs(error, mol, model)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular structure data
+   type(structure_type), intent(inout) :: mol
+
+   !> Electronegativity equilibration model
+   class(mchrg_model_type), intent(in) :: model
+
+   class(mchrg_solver_type), allocatable :: solver
+   class(mchrg_solver_input), allocatable :: solver_input
+   type(mchrg_cache), allocatable :: cache1, cache2
+   type(csr_list), allocatable :: list
+   integer :: ndim, iscale
+   real(wp), parameter :: scales(2, 2) = reshape([1.0_wp, 0.0_wp, 0.0_wp, 1.0_wp], &
+      & [2, 2])
+   real(wp), allocatable :: trans(:, :), dabdr(:, :, :)
+   real(wp), allocatable :: dqdr1(:, :, :), dqdL1(:, :, :)
+   real(wp), allocatable :: dqdr2(:, :, :), dqdL2(:, :, :)
+
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      solver_input%cgtol = 1.0e-15_wp
+      solver_input%cgmiter = 1000
+      solver_input%verbosity = 0
+      solver_input%use_nlist = .true.
+   end select
+   ndim = mol%nat
+   call solver_maker(solver, solver_input, error)
+   if (allocated(error)) return
+
+   call get_lattice_points(mol%periodic, mol%lattice, model%ncoord%cutoff, trans)
+   allocate(dabdr(3, mol%nat, ndim))
+   allocate(dqdr1(3, mol%nat, mol%nat), dqdL1(3, 3, mol%nat))
+   allocate(dqdr2(3, mol%nat, mol%nat), dqdL2(3, 3, mol%nat))
+
+   ! Dense reference
+   allocate(cache1)
+   call model%update(mol, cache1, trans, grad=.true.)
+   call model%solve(mol, solver, cache1, error, dqdr=dqdr1, dqdL=dqdL1, &
+      & unit=output_unit)
+   if (allocated(error)) return
+
+   ! Neighbour list
+   allocate(cache2, list)
+   if (any(mol%periodic)) then
+      call new_csr_list(list, mol, error, cache2%wsc, cutoff=cutoff)
+   else
+      call new_csr_list(list, mol, error, cutoff=cutoff)
+   end if
+   if (allocated(error)) return
+   call model%update(mol, cache2, trans, grad=.true., list=list)
+   call model%solve(mol, solver, cache2, error, dqdr=dqdr2, dqdL=dqdL2, list=list, &
+      & unit=output_unit)
+   if (allocated(error)) return
+
+   if (any(abs(dqdr2 - dqdr1) > thr2)) then
+      call test_failed(error, "Charge derivatives w.r.t. positions do not match")
+      print'(es21.14)', maxval(abs(dqdr2 - dqdr1))
+      return
+   end if
+   if (any(abs(dqdL2 - dqdL1) > thr2)) then
+      call test_failed(error, "Charge derivatives w.r.t. strain do not match")
+      print'(es21.14)', maxval(abs(dqdL2 - dqdL1))
+      return
+   end if
+
+   ! Coulomb matrix and electronegativity parts separately, same charges
+   cache2%vrhs(:) = cache1%vrhs
+   do iscale = 1, 2
+      call model%get_partial_derivs(mol, ndim, cache1, scales(1, iscale), &
+         & scales(2, iscale))
+      call model%get_partial_derivs(mol, ndim, cache2, scales(1, iscale), &
+         & scales(2, iscale), list=list)
+      call expand_partial_derivs(mol, list, cache2, dabdr)
+
+      if (any(abs(dabdr - cache1%dabdr) > thr2)) then
+         call test_failed(error, "Partial derivatives w.r.t. positions do not match")
+         print'(es21.14)', maxval(abs(dabdr - cache1%dabdr))
+         return
+      end if
+      if (any(abs(cache2%dabdL - cache1%dabdL) > thr2)) then
+         call test_failed(error, "Partial derivatives w.r.t. strain do not match")
+         print'(es21.14)', maxval(abs(cache2%dabdL - cache1%dabdL))
+         return
+      end if
+   end do
+
+end subroutine test_partial_derivs
+
+
+subroutine test_partial_derivs_mb01(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "MB16-43", "01")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_partial_derivs(error, mol, model)
+
+end subroutine test_partial_derivs_mb01
+
+
+subroutine test_partial_derivs_co2(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "X23", "CO2")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_partial_derivs(error, mol, model)
+
+end subroutine test_partial_derivs_co2
+
+
+subroutine test_partial_derivs_ice(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "ICE10", "vi")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_partial_derivs(error, mol, model)
+
+end subroutine test_partial_derivs_ice
+
 
 end module test_csrlist

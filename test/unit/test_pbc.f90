@@ -440,11 +440,12 @@ subroutine test_dbdr(error, mol, model)
 
    ! Analytical gradient
    call model%update(mol, cache, trans, grad)
-   call model%get_capacitance_matrix(mol, ndim, cache)
-   call model%get_xvec(mol, ndim, cache) ! need to call this for xtmp in cache (eeqbc)
-   call model%get_xvec_derivs(mol, ndim, cache)
+   ! Solve for the charges to set up the capacitance matrix and xtmp (eeqbc)
+   call model%solve(mol, solver, cache, error, unit=output_unit)
+   if (allocated(error)) return
+   call model%get_partial_derivs(mol, ndim, cache, alpha=0.0_wp, beta=1.0_wp)
 
-   dbdr = cache%dxdr
+   dbdr = cache%dabdr
 
    if (any(abs(dbdr(:, :, :) - numgrad(:, :, :)) > thr2)) then
       call test_failed(error, "Derivative of the b vector does not match")
@@ -547,11 +548,12 @@ subroutine test_dbdL(error, mol, model)
 
    ! Analytical gradient
    call model%update(mol, cache, trans, grad)
-   call model%get_capacitance_matrix(mol, ndim, cache)
-   call model%get_xvec(mol, ndim, cache) ! need to call this for xtmp in cache (eeqbc)
-   call model%get_xvec_derivs(mol, ndim, cache)
+   ! Solve for the charges to set up the capacitance matrix and xtmp (eeqbc)
+   call model%solve(mol, solver, cache, error, unit=output_unit)
+   if (allocated(error)) return
+   call model%get_partial_derivs(mol, ndim, cache, alpha=0.0_wp, beta=1.0_wp)
 
-   dbdL = cache%dxdL
+   dbdL = cache%dabdL
 
    if (any(abs(dbdL(:, :, :) - numsigma(:, :, :)) > thr2)) then
       call test_failed(error, "Derivative of the b vector does not match")
@@ -683,16 +685,16 @@ subroutine test_dadr(error, mol, model)
    ! Analytical gradient
    call model%update(mol, cache, trans, grad)
    call model%get_capacitance_matrix(mol, ndim, cache)
-   call model%get_coulomb_derivs(mol, ndim, cache)
+   call model%get_partial_derivs(mol, ndim, cache, alpha=1.0_wp, beta=0.0_wp)
 
-   if (any(abs(cache%dadr(:, :, :) - numgrad(:, :, :)) > thr2_local)) then
+   if (any(abs(cache%dabdr(:, :, :) - numgrad(:, :, :)) > thr2_local)) then
       call test_failed(error, "Derivative of the A matrix does not match")
       print'(a)', "dadr:"
-      print'(3es21.12)', cache%dadr
+      print'(3es21.12)', cache%dabdr
       print'(a)', "numgrad:"
       print'(3es21.12)', numgrad
       print'(a)', "diff:"
-      print'(3es21.12)', cache%dadr - numgrad
+      print'(3es21.12)', cache%dabdr - numgrad
    end if
 
 end subroutine test_dadr
@@ -792,17 +794,17 @@ subroutine test_dadL(error, mol, model)
 
    call model%update(mol, cache, trans, grad)
    call model%get_capacitance_matrix(mol, ndim, cache)
-   call model%get_coulomb_derivs(mol, ndim, cache)
+   call model%get_partial_derivs(mol, ndim, cache, alpha=1.0_wp, beta=0.0_wp)
    if (allocated(error)) return
 
-   if (any(abs(cache%dadL(:, :, :) - numsigma(:, :, :)) > thr2)) then
+   if (any(abs(cache%dabdL(:, :, :) - numsigma(:, :, :)) > thr2)) then
       call test_failed(error, "Derivative of the A matrix does not match")
       print'(a)', "dadL:"
-      print'(3es21.12)', cache%dadL
+      print'(3es21.12)', cache%dabdL
       print'(a)', "numsigma:"
       print'(3es21.12)', numsigma
       print'(a)', "diff:"
-      print'(3es21.12)', cache%dadL - numsigma
+      print'(3es21.12)', cache%dabdL - numsigma
    end if
 
 end subroutine test_dadL

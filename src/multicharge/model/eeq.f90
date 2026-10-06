@@ -34,6 +34,7 @@ module multicharge_model_eeq
    use multicharge_ewald, only : get_alpha
    use multicharge_model_type, only : mchrg_model_type, get_dir_trans, get_rec_trans
    use multicharge_model_cache, only : mchrg_cache
+   use multicharge_ncoord, only : add_dcndr
    implicit none
    private
 
@@ -48,12 +49,10 @@ module multicharge_model_eeq
       procedure :: get_capacitance_matrix
       !> Calculate Coulomb matrix
       procedure :: get_coulomb_matrix
-      !> Calculate derivatives of Coulomb matrix multiplied by charge
-      procedure :: get_coulomb_derivs
+      !> Calculate alpha * dA/dR*q + beta * dX/dR
+      procedure :: get_partial_derivs
       !> Calculate right-hand side (electronegativity vector)
       procedure :: get_xvec
-      !> Calculate EN vector derivatives
-      procedure :: get_xvec_derivs
       !> Calculate gradient
       procedure :: get_grad
    end type eeq_model
@@ -138,19 +137,8 @@ subroutine update(self, mol, cache, trans, grad, list)
 
    cache%trans = trans
 
-   ! Refer CN arrays in cache
-   if (grad) then
-      if (.not. allocated(cache%dcndr)) then
-         allocate(cache%dcndr(3, mol%nat, mol%nat))
-      end if
-      if (.not. allocated(cache%dcndL)) then
-         allocate(cache%dcndL(3, 3, mol%nat))
-      end if
-      call self%ncoord%get_coordination_number(mol, trans, cache%cn, cache%dcndr, &
-      & cache%dcndL)
-   else
-      call self%ncoord%get_coordination_number(mol, trans, cache%cn)
-   end if
+   ! CN derivatives are evaluated on-the-fly from the pairs
+   call self%ncoord%get_coordination_number(mol, trans, cache%cn)
 
    if (any(mol%periodic)) then
       ! Create WSC
@@ -226,50 +214,6 @@ subroutine get_xvec(self, mol, ndim, cache, list, efield)
    end if
 
 end subroutine get_xvec
-
-
-!> Compute derivatives of the electronegativity vector with respect to atomic
-!> positions and lattice parameters.
-subroutine get_xvec_derivs(self, mol, ndim, cache, list)
-   !> EEQ model type
-   class(eeq_model), intent(in) :: self
-   !> Structure type
-   type(structure_type), intent(in) :: mol
-   !> System size
-   integer, intent(in) :: ndim
-   !> Multicharge cache (provides CN derivatives, stores x‑vector derivatives)
-   type(mchrg_cache), intent(inout) :: cache
-   !> Multicharge neighborlist type
-   type(csr_list), intent(in), optional :: list
-
-   real(wp), parameter :: reg = 1.0e-14_wp
-
-   integer :: iat, izp
-   real(wp) :: tmp
-
-   if (.not. allocated(cache%dxdr)) then
-      allocate(cache%dxdr(3, mol%nat, ndim))
-   end if
-   if (.not. allocated(cache%dxdL)) then
-      allocate(cache%dxdL(3, 3, ndim))
-   end if
-
-   cache%dxdr(:, :, :) = 0.0_wp
-   cache%dxdL(:, :, :) = 0.0_wp
-
-   !$omp parallel do default(none) schedule(runtime) &
-   !$omp shared(mol, self, cache) &
-   !$omp private(iat, izp, tmp)
-   do iat = 1, mol%nat
-      izp = mol%id(iat)
-      tmp = self%kcnchi(izp) / sqrt(cache%cn(iat) + reg)
-      cache%dxdr(:, :, iat) = 0.5_wp * tmp * cache%dcndr(:, :, iat) + cache%dxdr(:, :, &
-      & iat)
-      cache%dxdL(:, :, iat) = 0.5_wp * tmp * cache%dcndL(:, :, iat) + cache%dxdL(:, :, &
-      & iat)
-   end do
-
-end subroutine get_xvec_derivs
 
 
 !> Assemble the Coulomb matrix (periodic or non‑periodic).
@@ -484,77 +428,93 @@ subroutine get_amat_rec_3d(rij, vol, alp, trans, amat)
 end subroutine get_amat_rec_3d
 
 
-!> Compute the derivatives of the Coulomb matrix (multiplied by the charge vector).
-subroutine get_coulomb_derivs(self, mol, ndim, cache, list)
+!> Compute the linear combination of the Coulomb matrix derivatives (multiplied
+!> by the charge vector) and the electronegativity vector derivatives,
+!> alpha * dA/dR*q + beta * dX/dR, w.r.t. positions and strain
+subroutine get_partial_derivs(self, mol, ndim, cache, alpha, beta, list)
    !> EEQ model type
    class(eeq_model), intent(in) :: self
    !> Structure type
    type(structure_type), intent(in) :: mol
    !> System size
    integer, intent(in) :: ndim
-   !> Multicharge cache (provides charges and will store derivatives)
+   !> Multicharge cache (provides CNs and charges, stores the derivatives)
    type(mchrg_cache), intent(inout) :: cache
+   !> dA/dR*q multiplier
+   real(wp), intent(in) :: alpha
+   !> dX/dR multiplier
+   real(wp), intent(in) :: beta
    !> Multicharge neighborlist type
    type(csr_list), intent(in), optional :: list
 
-   real(wp), allocatable :: atrace(:,:)
-
-   integer :: iat
-
-   allocate(atrace(3, mol%nat))
-
-   if (.not. allocated(cache%dadr)) then
-      allocate(cache%dadr(3, mol%nat, ndim))
-   end if
-   if (.not. allocated(cache%dadL)) then
-      allocate(cache%dadL(3, 3, ndim))
-   end if
+   if (.not. allocated(cache%dabdr)) allocate(cache%dabdr(3, mol%nat, ndim))
+   if (.not. allocated(cache%dabdL)) allocate(cache%dabdL(3, 3, ndim))
 
    if (any(mol%periodic)) then
-      call get_damat_3d(self, mol, cache%wsc, cache%alpha, &
-         & cache%vrhs, cache%dadr, cache%dadL, atrace)
+      call get_partial_derivs_3d(self, mol, cache, alpha, beta)
    else
-      call get_damat_0d(self, mol, cache%vrhs, cache%dadr, cache%dadL, atrace)
+      call get_partial_derivs_0d(self, mol, cache, alpha, beta)
    end if
 
+end subroutine get_partial_derivs
+
+
+!> Add the electronegativity vector derivatives, beta * dX/dR, with
+!> X(i) = -chi(i) + kcnchi(i) * sqrt(CN(i))
+subroutine add_xvec_derivs(self, mol, cache, beta)
+   !> EEQ model type
+   class(eeq_model), intent(in) :: self
+   !> Structure type
+   type(structure_type), intent(in) :: mol
+   !> Multicharge cache
+   type(mchrg_cache), intent(inout) :: cache
+   !> dX/dR multiplier
+   real(wp), intent(in) :: beta
+
+   real(wp), parameter :: reg = 1.0e-14_wp
+
+   integer :: iat, izp
+   real(wp), allocatable :: weight(:)
+
+   allocate(weight(mol%nat))
    do iat = 1, mol%nat
-      cache%dadr(:, iat, iat) = atrace(:, iat) + cache%dadr(:, iat, iat)
+      izp = mol%id(iat)
+      weight(iat) = beta * 0.5_wp * self%kcnchi(izp) / sqrt(cache%cn(iat) + reg)
    end do
-end subroutine get_coulomb_derivs
+   call add_dcndr(self%ncoord, mol, cache%trans, cache%cn, weight, &
+      & cache%dabdr, cache%dabdL)
+
+end subroutine add_xvec_derivs
 
 
-!> Build the derivatives of the Coulomb matrix for a non‑periodic system.
-subroutine get_damat_0d(self, mol, qvec, dadr, dadL, atrace)
+!> Compute alpha * dA/dR*q + beta * dX/dR for a non-periodic system
+subroutine get_partial_derivs_0d(self, mol, cache, alpha, beta)
    !> EEQ model type
    class(eeq_model), intent(in) :: self
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
-   !> Charge vector (right‑hand side)
-   real(wp), intent(in) :: qvec(:)
-   !> Derivative of Coulomb matrix w.r.t. atomic positions (3 × nat × ndim)
-   real(wp), intent(out) :: dadr(:, :, :)
-   !> Derivative of Coulomb matrix w.r.t. lattice parameters (3 × 3 × ndim)
-   real(wp), intent(out) :: dadL(:, :, :)
-   !> Trace-like array for diagonal contributions
-   real(wp), intent(out) :: atrace(:, :)
+   !> Multicharge cache
+   type(mchrg_cache), intent(inout) :: cache
+   !> dA/dR*q multiplier
+   real(wp), intent(in) :: alpha
+   !> dX/dR multiplier
+   real(wp), intent(in) :: beta
 
    integer :: iat, jat, izp, jzp
    real(wp) :: vec(3), r2, gam, arg, dtmp, dG(3), dS(3, 3)
 
-   real(wp), allocatable :: atrace_local(:, :)
-   real(wp), allocatable :: dadr_local(:, :, :), dadL_local(:, :, :)
+   ! Thread-private arrays for reduction
+   real(wp), allocatable :: dabdr_local(:, :, :), dabdL_local(:, :, :)
 
-   atrace(:, :) = 0.0_wp
-   dadr(:, :, :) = 0.0_wp
-   dadL(:, :, :) = 0.0_wp
+   cache%dabdr(:, :, :) = 0.0_wp
+   cache%dabdL(:, :, :) = 0.0_wp
 
    !$omp parallel default(none) &
-   !$omp shared(atrace, dadr, dadL, mol, self, qvec) &
+   !$omp shared(cache, mol, self, alpha) &
    !$omp private(iat, izp, jat, jzp, gam, r2, vec, dG, dS, dtmp, arg) &
-   !$omp private(atrace_local, dadr_local, dadL_local)
-   allocate(atrace_local, source=atrace)
-   allocate(dadr_local, source=dadr)
-   allocate(dadL_local, source=dadL)
+   !$omp private(dabdr_local, dabdL_local)
+   allocate(dabdr_local(3, mol%nat, size(cache%dabdr, 3)), source=0.0_wp)
+   allocate(dabdL_local(3, 3, size(cache%dabdL, 3)), source=0.0_wp)
    !$omp do schedule(runtime)
    do iat = 1, mol%nat
       izp = mol%id(iat)
@@ -566,71 +526,63 @@ subroutine get_damat_0d(self, mol, qvec, dadr, dadL, atrace)
          arg = gam * gam * r2
          dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) - erf(sqrt(arg)) &
          & / (r2 * sqrt(r2))
-         dG = dtmp * vec
+         dG = alpha * dtmp * vec
          dS = spread(dG, 1, 3) * spread(vec, 2, 3)
-         atrace_local(:, iat) = -dG * qvec(jat) + atrace_local(:, iat)
-         atrace_local(:, jat) = +dG * qvec(iat) + atrace_local(:, jat)
-         dadr_local(:, iat, jat) = -dG * qvec(iat)
-         dadr_local(:, jat, iat) = +dG * qvec(jat)
-         dadL_local(:, :, jat) = +dS * qvec(iat) + dadL_local(:, :, jat)
-         dadL_local(:, :, iat) = +dS * qvec(jat) + dadL_local(:, :, iat)
+         dabdr_local(:, iat, iat) = dabdr_local(:, iat, iat) - dG * cache%vrhs(jat)
+         dabdr_local(:, jat, jat) = dabdr_local(:, jat, jat) + dG * cache%vrhs(iat)
+         dabdr_local(:, iat, jat) = dabdr_local(:, iat, jat) - dG * cache%vrhs(iat)
+         dabdr_local(:, jat, iat) = dabdr_local(:, jat, iat) + dG * cache%vrhs(jat)
+         dabdL_local(:, :, jat) = dabdL_local(:, :, jat) + dS * cache%vrhs(iat)
+         dabdL_local(:, :, iat) = dabdL_local(:, :, iat) + dS * cache%vrhs(jat)
       end do
    end do
    !$omp end do
-   !$omp critical (get_damat_0d_)
-   atrace(:, :) = atrace(:, :) + atrace_local(:, :)
-   dadr(:, :, :) = dadr(:, :, :) + dadr_local(:, :, :)
-   dadL(:, :, :) = dadL(:, :, :) + dadL_local(:, :, :)
-   !$omp end critical (get_damat_0d_)
-   deallocate(dadL_local, dadr_local, atrace_local)
+   !$omp critical (get_partial_derivs_0d_)
+   cache%dabdr(:, :, :) = cache%dabdr + dabdr_local
+   cache%dabdL(:, :, :) = cache%dabdL + dabdL_local
+   !$omp end critical (get_partial_derivs_0d_)
+   deallocate(dabdr_local, dabdL_local)
    !$omp end parallel
 
-end subroutine get_damat_0d
+   call add_xvec_derivs(self, mol, cache, beta)
+
+end subroutine get_partial_derivs_0d
 
 
-!> Build the derivatives of the Coulomb matrix for a periodic system.
-subroutine get_damat_3d(self, mol, wsc, alpha, qvec, dadr, dadL, atrace)
+!> Compute alpha * dA/dR*q + beta * dX/dR for a periodic system
+subroutine get_partial_derivs_3d(self, mol, cache, alpha, beta)
    !> EEQ model type
    class(eeq_model), intent(in) :: self
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
-   !> Wigner–Seitz cell
-   type(wignerseitz_cell), intent(in) :: wsc
-   !> Ewald splitting parameter
+   !> Multicharge cache
+   type(mchrg_cache), intent(inout) :: cache
+   !> dA/dR*q multiplier
    real(wp), intent(in) :: alpha
-   !> Charge vector (right‑hand side)
-   real(wp), intent(in) :: qvec(:)
-   !> Derivative of Coulomb matrix w.r.t. atomic positions (3 × nat × ndim)
-   real(wp), intent(out) :: dadr(:, :, :)
-   !> Derivative of Coulomb matrix w.r.t. lattice parameters (3 × 3 × ndim)
-   real(wp), intent(out) :: dadL(:, :, :)
-   !> Trace-like array for diagonal contributions
-   real(wp), intent(out) :: atrace(:, :)
+   !> dX/dR multiplier
+   real(wp), intent(in) :: beta
 
    integer :: iat, jat, izp, jzp, img
    real(wp) :: vol, gam, wsw, vec(3), dG(3), dS(3, 3)
    real(wp) :: dGd(3), dSd(3, 3), dGr(3), dSr(3, 3)
    real(wp), allocatable :: dtrans(:, :), rtrans(:, :)
 
-   real(wp), allocatable :: atrace_local(:, :)
-   real(wp), allocatable :: dadr_local(:, :, :), dadL_local(:, :, :)
+   ! Thread-private arrays for reduction
+   real(wp), allocatable :: dabdr_local(:, :, :), dabdL_local(:, :, :)
 
-   atrace(:, :) = 0.0_wp
-   dadr(:, :, :) = 0.0_wp
-   dadL(:, :, :) = 0.0_wp
+   cache%dabdr(:, :, :) = 0.0_wp
+   cache%dabdL(:, :, :) = 0.0_wp
 
    vol = abs(matdet_3x3(mol%lattice))
    call get_dir_trans(mol, dtrans)
    call get_rec_trans(mol, rtrans)
 
    !$omp parallel default(none) &
-   !$omp shared(mol, self, wsc, alpha, vol, dtrans, rtrans, qvec) &
-   !$omp shared(atrace, dadr, dadL) &
+   !$omp shared(mol, self, cache, alpha, vol, dtrans, rtrans) &
    !$omp private(iat, izp, jat, jzp, img, gam, wsw, vec, dG, dS) &
-   !$omp private(dGr, dSr, dGd, dSd, atrace_local, dadr_local, dadL_local)
-   allocate(atrace_local, source=atrace)
-   allocate(dadr_local, source=dadr)
-   allocate(dadL_local, source=dadL)
+   !$omp private(dGr, dSr, dGd, dSd, dabdr_local, dabdL_local)
+   allocate(dabdr_local(3, mol%nat, size(cache%dabdr, 3)), source=0.0_wp)
+   allocate(dabdL_local(3, 3, size(cache%dabdL, 3)), source=0.0_wp)
    !$omp do schedule(runtime)
    do iat = 1, mol%nat
       izp = mol%id(iat)
@@ -639,44 +591,47 @@ subroutine get_damat_3d(self, mol, wsc, alpha, qvec, dadr, dadL, atrace)
          dG(:) = 0.0_wp
          dS(:, :) = 0.0_wp
          gam = 1.0_wp / sqrt(self%rad(izp)**2 + self%rad(jzp)**2)
-         wsw = 1.0_wp / real(wsc%nimg(jat, iat), wp)
-         do img = 1, wsc%nimg(jat, iat)
-            vec = mol%xyz(:, jat) - mol%xyz(:, iat) + wsc%trans(:, wsc%tridx(img, jat, &
-            & iat))
-            call get_damat_dir_3d(vec, gam, alpha, dtrans, dGd, dSd)
-            call get_damat_rec_3d(vec, vol, alpha, rtrans, dGr, dSr)
+         wsw = 1.0_wp / real(cache%wsc%nimg(jat, iat), wp)
+         do img = 1, cache%wsc%nimg(jat, iat)
+            vec = mol%xyz(:, jat) - mol%xyz(:, iat) + cache%wsc%trans(:, &
+            & cache%wsc%tridx(img, jat, iat))
+            call get_damat_dir_3d(vec, gam, cache%alpha, dtrans, dGd, dSd)
+            call get_damat_rec_3d(vec, vol, cache%alpha, rtrans, dGr, dSr)
             dG = dG + (dGd + dGr) * wsw
             dS = dS + (dSd + dSr) * wsw
          end do
-         atrace_local(:, iat) = -dG * qvec(jat) + atrace_local(:, iat)
-         atrace_local(:, jat) = +dG * qvec(iat) + atrace_local(:, jat)
-         dadr_local(:, iat, jat) = -dG * qvec(iat) + dadr_local(:, iat, jat)
-         dadr_local(:, jat, iat) = +dG * qvec(jat) + dadr_local(:, jat, iat)
-         dadL_local(:, :, jat) = +dS * qvec(iat) + dadL_local(:, :, jat)
-         dadL_local(:, :, iat) = +dS * qvec(jat) + dadL_local(:, :, iat)
+         dG = alpha * dG
+         dS = alpha * dS
+         dabdr_local(:, iat, iat) = dabdr_local(:, iat, iat) - dG * cache%vrhs(jat)
+         dabdr_local(:, jat, jat) = dabdr_local(:, jat, jat) + dG * cache%vrhs(iat)
+         dabdr_local(:, iat, jat) = dabdr_local(:, iat, jat) - dG * cache%vrhs(iat)
+         dabdr_local(:, jat, iat) = dabdr_local(:, jat, iat) + dG * cache%vrhs(jat)
+         dabdL_local(:, :, jat) = dabdL_local(:, :, jat) + dS * cache%vrhs(iat)
+         dabdL_local(:, :, iat) = dabdL_local(:, :, iat) + dS * cache%vrhs(jat)
       end do
 
       dS(:, :) = 0.0_wp
       gam = 1.0_wp / sqrt(2.0_wp * self%rad(izp)**2)
-      wsw = 1.0_wp / real(wsc%nimg(iat, iat), wp)
-      do img = 1, wsc%nimg(iat, iat)
-         vec = wsc%trans(:, wsc%tridx(img, iat, iat))
-         call get_damat_dir_3d(vec, gam, alpha, dtrans, dGd, dSd)
-         call get_damat_rec_3d(vec, vol, alpha, rtrans, dGr, dSr)
+      wsw = 1.0_wp / real(cache%wsc%nimg(iat, iat), wp)
+      do img = 1, cache%wsc%nimg(iat, iat)
+         vec = cache%wsc%trans(:, cache%wsc%tridx(img, iat, iat))
+         call get_damat_dir_3d(vec, gam, cache%alpha, dtrans, dGd, dSd)
+         call get_damat_rec_3d(vec, vol, cache%alpha, rtrans, dGr, dSr)
          dS = dS + (dSd + dSr) * wsw
       end do
-      dadL_local(:, :, iat) = +dS * qvec(iat) + dadL_local(:, :, iat)
+      dabdL_local(:, :, iat) = dabdL_local(:, :, iat) + alpha * dS * cache%vrhs(iat)
    end do
    !$omp end do
-   !$omp critical (get_damat_3d_)
-   atrace(:, :) = atrace(:, :) + atrace_local(:, :)
-   dadr(:, :, :) = dadr(:, :, :) + dadr_local(:, :, :)
-   dadL(:, :, :) = dadL(:, :, :) + dadL_local(:, :, :)
-   !$omp end critical (get_damat_3d_)
-   deallocate(dadL_local, dadr_local, atrace_local)
+   !$omp critical (get_partial_derivs_3d_)
+   cache%dabdr(:, :, :) = cache%dabdr + dabdr_local
+   cache%dabdL(:, :, :) = cache%dabdL + dabdL_local
+   !$omp end critical (get_partial_derivs_3d_)
+   deallocate(dabdr_local, dabdL_local)
    !$omp end parallel
 
-end subroutine get_damat_3d
+   call add_xvec_derivs(self, mol, cache, beta)
+
+end subroutine get_partial_derivs_3d
 
 
 !> Real‑space contribution to the Coulomb matrix derivatives.

@@ -72,24 +72,6 @@ module multicharge_model_cache
       !> Constraint response: jamt*uvec=1
       real(wp), allocatable :: uvec(:)
 
-      !> Coordination number gradient w.r.t the positions
-      real(wp), allocatable :: dcndr(:, :, :)
-
-      !> Coordination number gradient w.r.t the lattice vectors
-      real(wp), allocatable :: dcndL(:, :, :)
-
-      !> Listed version of the coordination number derivatives
-      real(wp), allocatable :: dcndrij(:, :), dcndrji(:, :), dcndrdiag(:, :)
-
-      !> Local charge derivatives w.r.t positions
-      real(wp), allocatable :: dqlocdr(:, :, :)
-
-      !> Listed version of the local charge derivatives
-      real(wp), allocatable :: dqlocdrij(:, :), dqlocdrji(:, :), dqlocdrdiag(:, :)
-
-      !> Local charge derivatives w.r.t lattice vectors
-      real(wp), allocatable :: dqlocdL(:, :, :)
-
       !> Derivative of Maxwell capacitance matrix w.r.t positions
       real(wp), allocatable :: dcdr(:, :, :)
 
@@ -99,32 +81,23 @@ module multicharge_model_cache
       !> Derivative of Maxwell capacitance matrix w.r.t lattice vectors
       real(wp), allocatable :: dcdL(:, :, :)
 
-      !> Coulomb matrix derivatives w.r.t positions
-      real(wp), allocatable :: dadr(:, :, :)
-
-      !> Linear combination of the dA/dr*q and db/dr
+      !> Linear combination alpha * dA/dR*q + beta * dX/dR w.r.t. positions,
+      !> dabdr(:, x, b) is the derivative of component b w.r.t. atom x
       real(wp), allocatable :: dabdr(:, :, :)
 
-      !> Linear combination of the dA/dL*q and db/dL
+      !> Linear combination alpha * dA/dL*q + beta * dX/dL w.r.t. strain
       real(wp), allocatable :: dabdL(:, :, :)
 
-      !> Linear combination of the dA/dr*q and db/dr in compressed format
-      real(wp), allocatable :: dabdrlist(:, :)
+      !> Neighborlist storage of dabdr, derivative of the neighbor j w.r.t. the
+      !> central atom i of each list entry
+      real(wp), allocatable :: dabdrij(:, :)
 
-      !> Coulomb matrix derivatives w.r.t positions in compressed format
-      real(wp), allocatable :: dadrlist(:, :)
+      !> Neighborlist storage of dabdr, derivative of the central atom i w.r.t.
+      !> the neighbor j of each list entry
+      real(wp), allocatable :: dabdrji(:, :)
 
-      !> Coulomb matrix derivatives w.r.t lattice vectors
-      real(wp), allocatable :: dadL(:, :, :)
-
-      !> Electronegativity derivatives w.r.t positions
-      real(wp), allocatable :: dxdr(:, :, :)
-
-      !> Electronegativity derivatives w.r.t positions in compressed format
-      real(wp), allocatable :: dxdrlist(:, :)
-
-      !> Electronegativity derivatives w.r.t lattice vectors
-      real(wp), allocatable :: dxdL(:, :, :)
+      !> Neighborlist storage of dabdr, derivative of each atom w.r.t. itself
+      real(wp), allocatable :: dabdrdiag(:, :)
 
       !> Logical flag for gradient calculation
       logical :: grad

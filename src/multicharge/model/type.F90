@@ -23,7 +23,8 @@
 !> Abstract base type and shared operations for charge models
 module multicharge_model_type
    use iso_fortran_env, only : output_unit
-   use mctc_env, only : timer_type, format_time, error_type, fatal_error, wp, ik => IK
+   use mctc_env, only : timer_type, format_time, error_type, fatal_error, wp, i8, &
+      & ik => IK
    use mctc_io, only : structure_type
    use mctc_io_constants, only : pi
    use mctc_io_math, only : matinv_3x3
@@ -101,14 +102,12 @@ module multicharge_model_type
       !> Calculate right-hand side (electronegativity)
       procedure(get_xvec), deferred :: get_xvec
 
-      !> Calculate electronegativity-vector gradients
-      procedure(get_xvec_derivs), deferred :: get_xvec_derivs
 
       !> Calculate Coulomb matrix
       procedure(get_coulomb_matrix), deferred :: get_coulomb_matrix
 
-      !> Calculate Coulomb matrix derivatives
-      procedure(get_coulomb_derivs), deferred :: get_coulomb_derivs
+      !> Calculate alpha * dA/dR*q + beta * dX/dR
+      procedure(get_partial_derivs), deferred :: get_partial_derivs
 
       !> Calculate capacitance-corrected electronegativity derivatives
       procedure(get_grad), deferred :: get_grad
@@ -135,7 +134,7 @@ module multicharge_model_type
          !> Lattice vectors
          real(wp), intent(in) :: trans(:, :)
 
-         !> Flag to compute derivatives (dcndr, dcndL, dqlocdr, dqlocdL)
+         !> Flag to compute derivatives
          logical, intent(in) :: grad
       end subroutine update
 
@@ -179,8 +178,10 @@ module multicharge_model_type
          type(csr_list), intent(in), optional :: list
       end subroutine get_coulomb_matrix
 
-      !> Coulomb matrix derivatives contracted with charges
-      subroutine get_coulomb_derivs(self, mol, ndim, cache, list)
+      !> Linear combination of the Coulomb matrix derivatives contracted with the
+      !> charges and the electronegativity vector derivatives,
+      !> alpha * dA/dR*q + beta * dX/dR, w.r.t. positions and strain
+      subroutine get_partial_derivs(self, mol, ndim, cache, alpha, beta, list)
          import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
 
          !> Multicharge model type
@@ -192,12 +193,18 @@ module multicharge_model_type
          !> System size
          integer, intent(in) :: ndim
 
-         !> Multicharge cache holding Coulomb-matrix derivatives
+         !> Multicharge cache holding the partial derivatives
          type(mchrg_cache), intent(inout) :: cache
 
-         !> Multicharge neighborlist type
+         !> Multiplier of the Coulomb matrix derivatives, dA/dR*q
+         real(wp), intent(in) :: alpha
+
+         !> Multiplier of the electronegativity vector derivatives, dX/dR
+         real(wp), intent(in) :: beta
+
+         !> Multicharge neighborlist type (upper triangle)
          type(csr_list), intent(in), optional :: list
-      end subroutine get_coulomb_derivs
+      end subroutine get_partial_derivs
 
       !> Electronegativity vector construction
       subroutine get_xvec(self, mol, ndim, cache, list, efield)
@@ -221,26 +228,6 @@ module multicharge_model_type
          !> External electric field
          real(wp), intent(in), optional :: efield(:)
       end subroutine get_xvec
-
-      !> Derivatives of electronegativity vector
-      subroutine get_xvec_derivs(self, mol, ndim, cache, list)
-         import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
-
-         !> Multicharge model type
-         class(mchrg_model_type), intent(in) :: self
-
-         !> Structure type
-         type(structure_type), intent(in) :: mol
-
-         !> System size
-         integer, intent(in) :: ndim
-
-         !> Multicharge cache holding electronegativity-vector derivatives
-         type(mchrg_cache), intent(inout) :: cache
-
-         !> Multicharge neighborlist type
-         type(csr_list), intent(in), optional :: list
-      end subroutine get_xvec_derivs
 
       !> Calculate capacitance-corrected electronegativity derivatives
       subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta, list)
@@ -534,22 +521,15 @@ subroutine solve(self, mol, solver, cache, error, &
 
    ! Calculate charge derivatives if requested
    if (cpq) then
-      call timer%push("dxdr_setup")
-      call self%get_xvec_derivs(mol, ndim, cache)
+      ! Right-hand sides of the response equations, dX/dR - dA/dR*q
+      call timer%push("dabdr_setup")
+      call self%get_partial_derivs(mol, ndim, cache, alpha=-1.0_wp, beta=1.0_wp, &
+         & list=list)
       call timer%pop
       if (verbosity_solve > 1) then
          write(output_unit, '(a, 1x, a)') &
-            & "Electronegativity derivatives setup time : ", &
-            & format_time(timer%get("dxdr_setup"))
-         write(output_unit, '(a)') ''
-      end if
-      call timer%push("dadr_setup")
-      call self%get_coulomb_derivs(mol, ndim, cache)
-      call timer%pop
-      if (verbosity_solve > 1) then
-         write(output_unit, '(a, 1x, a)') &
-            & "Coulomb matrix derivatives setup time : ", &
-            & format_time(timer%get("dadr_setup"))
+            & "Partial derivatives setup time : ", &
+            & format_time(timer%get("dabdr_setup"))
          write(output_unit, '(a)') ''
       end if
 
@@ -608,16 +588,28 @@ subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit)
    real(wp), allocatable :: bmat(:, :), xmat(:, :), blocks(:, :, :)
    integer, allocatable :: ncol(:)
    real(wp) :: scale, uvecsum
-   integer :: iat, ic, jc, ivec, iblk, nrhs
+   integer :: iat, jat, ic, jc, ivec, iblk, nrhs
+   integer(i8) :: kat
+
+   ! Right-hand sides dX/dR - dA/dR*q, expanded from the neighborlist storage
+   allocate(daqxdr(3, mol%nat, ndim), source=0.0_wp)
+   allocate(daqxdL(3, 3, ndim), source=0.0_wp)
+   if (present(list)) then
+      do iat = 1, mol%nat
+         daqxdr(:, iat, iat) = cache%dabdrdiag(:, iat)
+         do kat = list%inl(iat) + 1, list%inl(iat + 1) - 1
+            jat = list%nlat(kat)
+            daqxdr(:, iat, jat) = daqxdr(:, iat, jat) + cache%dabdrij(:, kat)
+            daqxdr(:, jat, iat) = daqxdr(:, jat, iat) + cache%dabdrji(:, kat)
+         end do
+      end do
+   else
+      daqxdr(:, :, :mol%nat) = cache%dabdr(:, :, :mol%nat)
+   end if
+   daqxdL(:, :, :mol%nat) = cache%dabdL(:, :, :mol%nat)
 
    if (allocated(cache%ainv)) then
       ! Non-iterative solve using the inverse of the augmented matrix
-      allocate(daqxdr(3, mol%nat, ndim), source=0.0_wp)
-      allocate(daqxdL(3, 3, ndim), source=0.0_wp)
-      do iat = 1, mol%nat
-         daqxdr(:, :, iat) = cache%dxdr(:, :, iat) - cache%dadr(:, :, iat)
-         daqxdL(:, :, iat) = cache%dxdL(:, :, iat) - cache%dadL(:, :, iat)
-      end do
       call gemm(daqxdr, cache%ainv(:, :mol%nat), dqdr, alpha=1.0_wp)
       call gemm(daqxdL, cache%ainv(:, :mol%nat), dqdL, alpha=1.0_wp)
    else
@@ -644,15 +636,13 @@ subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit)
          do iat = 1, mol%nat
             do ic = 1, 3
                ivec = ic + 3 * (iat - 1)
-               bmat(:, ivec) = cache%dxdr(ic, iat, :mol%nat) &
-                  & - cache%dadr(ic, iat, :mol%nat)
+               bmat(:, ivec) = daqxdr(ic, iat, :mol%nat)
             end do
          end do
          do jc = 1, 3
             do ic = 1, 3
                ivec = 3 * mol%nat + ic + 3 * (jc - 1)
-               bmat(:, ivec) = cache%dxdL(ic, jc, :mol%nat) &
-                  & - cache%dadL(ic, jc, :mol%nat)
+               bmat(:, ivec) = daqxdL(ic, jc, :mol%nat)
             end do
          end do
          do ivec = 1, nrhs
@@ -693,8 +683,7 @@ subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit)
          ! Position derivatives: J*m = db/dR - dA/dR*q, dq/dR = m - scale*u
          do iat = 1, mol%nat
             do ic = 1, 3
-               rhs(:) = cache%dxdr(ic, iat, :mol%nat) &
-                  & - cache%dadr(ic, iat, :mol%nat)
+               rhs(:) = daqxdr(ic, iat, :mol%nat)
                sol(:) = rhs / diag
                call solver%solve(amat=cache%amat, alist=cache%alist, xvec=rhs, &
                   & vrhs=sol, list=list, new_unit=unit, error=error)
@@ -707,8 +696,7 @@ subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit)
          ! Lattice derivatives: J*m = db/dL - dA/dL*q, dq/dL = m - scale*u
          do jc = 1, 3
             do ic = 1, 3
-               rhs(:) = cache%dxdL(ic, jc, :mol%nat) &
-                  & - cache%dadL(ic, jc, :mol%nat)
+               rhs(:) = daqxdL(ic, jc, :mol%nat)
                sol(:) = rhs / diag
                call solver%solve(amat=cache%amat, alist=cache%alist, xvec=rhs, &
                   & vrhs=sol, list=list, new_unit=unit, error=error)

@@ -23,6 +23,7 @@ srcs += files(
   'ewald.f90',
   'lapack.F90',
   'model.f90',
+  'ncoord.f90',
   'output.f90',
   'param.f90',
   'version.f90',
