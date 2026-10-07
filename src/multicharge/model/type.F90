@@ -1161,7 +1161,7 @@ end subroutine get_displaced_gradient
 
 !> Local charges calculation
 subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL, &
-   & list, dqlocdrij, dqlocdrji, dqlocdrdiag)
+   & list, dqlocdrlist)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: self
 
@@ -1184,31 +1184,21 @@ subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL, &
    type(csr_list), intent(in), optional :: list
 
    !> Optional derivative with respect to the first atom in each pair
-   real(wp), intent(out), optional :: dqlocdrij(:, :)
-
-   !> Optional derivative with respect to the second atom in each pair
-   real(wp), intent(out), optional :: dqlocdrji(:, :)
-
-   !> Optional derivative with respect to the diagonal atom in each pair
-   real(wp), intent(out), optional :: dqlocdrdiag(:, :)
+   real(wp), intent(out), optional :: dqlocdrlist(:, :)
 
    qloc = 0.0_wp
    if (present(dqlocdr) .and. present(dqlocdL)) then
       dqlocdr = 0.0_wp
       dqlocdL = 0.0_wp
    end if
-   if (present(list) .and. present(dqlocdrij) .and. present(dqlocdrji) &
-      & .and. present(dqlocdrdiag) .and. present(dqlocdL)) then
-      dqlocdrij = 0.0_wp
-      dqlocdrji = 0.0_wp
-      dqlocdrdiag = 0.0_wp
+   if (present(list) .and. present(dqlocdrlist) .and. present(dqlocdL)) then
+      dqlocdrlist = 0.0_wp
       dqlocdL = 0.0_wp
    end if
    ! Get the electronegativity weighted CN for local charge
    if (allocated(self%ncoord_en)) then
       call self%ncoord_en%get_coordination_number(mol, trans, qloc, &
-         & dcndr=dqlocdr, dcndrij=dqlocdrij, dcndrji=dqlocdrji, &
-         & dcndrdiag=dqlocdrdiag, dcndL=dqlocdL, list=list)
+         & dcndr=dqlocdr, dcndrlist=dqlocdrlist, dcndL=dqlocdL, list=list)
    end if
 
    ! Distribute the total charge equally
