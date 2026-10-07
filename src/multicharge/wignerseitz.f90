@@ -89,10 +89,12 @@ subroutine get_pairs(iws, trans, rij, list)
    logical :: mask(size(list))
    real(wp) :: dist(size(list)), vec(3), r2
    integer :: itr, img, pos
+   integer :: index(size(list))
 
    iws = 0
    img = 0
    list(:) = 0
+   index(:) = 0
    mask(:) = .true.
 
    do itr = 1, size(trans, 2)
@@ -101,6 +103,8 @@ subroutine get_pairs(iws, trans, rij, list)
       if (r2 < thr) cycle
       img = img + 1
       dist(img) = r2
+      ! Skipped images shift the position in dist against the index into trans
+      index(img) = itr
    end do
 
    if (img == 0) return
@@ -111,7 +115,7 @@ subroutine get_pairs(iws, trans, rij, list)
    mask(pos) = .false.
 
    iws = 1
-   list(iws) = pos
+   list(iws) = index(pos)
    if (img <= iws) return
 
    do
@@ -119,7 +123,7 @@ subroutine get_pairs(iws, trans, rij, list)
       if (abs(dist(pos) - r2) > tol) exit
       mask(pos) = .false.
       iws = iws + 1
-      list(iws) = pos
+      list(iws) = index(pos)
    end do
 
 end subroutine get_pairs

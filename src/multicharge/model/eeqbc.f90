@@ -452,9 +452,7 @@ subroutine get_partial_derivs(self, mol, ndim, cache, alpha, beta, list)
 
 end subroutine get_partial_derivs
 
-!> Compute the linear combination of the Coulomb matrix derivatives (multiplied
-!> by the charge vector) and the electronegativity vector derivatives,
-!> alpha * dA/dR*q + beta * dX/dR, for a non-periodic system.
+!> Compute the alpha * dA/dR*q + beta * dX/dR, for a non-periodic system.
 subroutine get_partial_derivs_0d(self, mol, ndim, cache, alpha, beta)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
@@ -489,25 +487,23 @@ subroutine get_partial_derivs_0d(self, mol, ndim, cache, alpha, beta)
    !$omp parallel do default(none) schedule(runtime) &
    !$omp shared(self, mol, cache, qshift, dcndr, dcndL, dqlocdr, dqlocdL) &
    !$omp shared(dtmpdr, dtmpdL) &
-   !$omp private(iat, izp, jat, itr, vec, dpair, spair)
+   !$omp private(iat, izp, jat, vec, dpair, spair)
    do iat = 1, mol%nat
       izp = mol%id(iat)
       do jat = 1, mol%nat
-         do itr = 1, size(cache%trans, 2)
-            vec = mol%xyz(:, iat) - (mol%xyz(:, jat) + cache%trans(:, itr))
+         vec = mol%xyz(:, iat) - mol%xyz(:, jat)
 
-            call get_pair_derivs(self%ncoord, mol, iat, jat, vec, cache%cn(iat), &
-               & cache%cn(jat), dpair, spair)
-            dcndr(:, iat, iat) = dcndr(:, iat, iat) + dpair(:, 1)
-            dcndr(:, jat, iat) = dcndr(:, jat, iat) - dpair(:, 1)
-            dcndL(:, :, iat) = dcndL(:, :, iat) + spair(:, :, 1)
+         call get_pair_derivs(self%ncoord, mol, iat, jat, vec, cache%cn(iat), &
+            & cache%cn(jat), dpair, spair)
+         dcndr(:, iat, iat) = dcndr(:, iat, iat) + dpair(:, 1)
+         dcndr(:, jat, iat) = dcndr(:, jat, iat) - dpair(:, 1)
+         dcndL(:, :, iat) = dcndL(:, :, iat) + spair(:, :, 1)
 
-            call get_pair_derivs(self%ncoord_en, mol, iat, jat, vec, &
-               & cache%qloc(iat) - qshift, cache%qloc(jat) - qshift, dpair, spair)
-            dqlocdr(:, iat, iat) = dqlocdr(:, iat, iat) + dpair(:, 1)
-            dqlocdr(:, jat, iat) = dqlocdr(:, jat, iat) - dpair(:, 1)
-            dqlocdL(:, :, iat) = dqlocdL(:, :, iat) + spair(:, :, 1)
-         end do
+         call get_pair_derivs(self%ncoord_en, mol, iat, jat, vec, &
+            & cache%qloc(iat) - qshift, cache%qloc(jat) - qshift, dpair, spair)
+         dqlocdr(:, iat, iat) = dqlocdr(:, iat, iat) + dpair(:, 1)
+         dqlocdr(:, jat, iat) = dqlocdr(:, jat, iat) - dpair(:, 1)
+         dqlocdL(:, :, iat) = dqlocdL(:, :, iat) + spair(:, :, 1)
       end do
 
       ! CN and effective charge derivative of the electronegativity
@@ -619,9 +615,7 @@ subroutine get_partial_derivs_0d(self, mol, ndim, cache, alpha, beta)
 
 end subroutine get_partial_derivs_0d
 
-!> Compute the linear combination of the Coulomb matrix derivatives (multiplied
-!> by the charge vector) and the electronegativity vector derivatives,
-!> alpha * dA/dR*q + beta * dX/dR, for a periodic system.
+!> Compute the alpha * dA/dR*q + beta * dX/dR, for a periodic system.
 subroutine get_partial_derivs_3d(self, mol, ndim, cache, alpha, beta)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
@@ -867,12 +861,7 @@ subroutine get_partial_derivs_3d(self, mol, ndim, cache, alpha, beta)
 end subroutine get_partial_derivs_3d
 
 !> Compute alpha * dA/dR*q + beta * dX/dR for a non-periodic system using a
-!> complete neighborlist, which has to contain every pair within the CN cutoff.
-!>
-!> All derivatives are kept in list storage, the entry of a neighbor in the row
-!> of atom a holds the derivative of the quantity of a (CN, local charge or
-!> component of dabdr) w.r.t. that neighbor. Contributions outside the sparsity
-!> pattern of the list are neglected.
+!> complete neighborlist
 subroutine get_partial_derivs_0d_list(self, mol, list, cache, alpha, beta)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
@@ -911,28 +900,27 @@ subroutine get_partial_derivs_0d_list(self, mol, list, cache, alpha, beta)
    !$omp parallel do default(none) schedule(runtime) &
    !$omp shared(self, mol, list, cache, qshift, dcndr, dcndL, dqlocdr, dqlocdL) &
    !$omp shared(dtmpdr, dtmpdL) &
-   !$omp private(iat, izp, jat, kat, itr, ist, ien, vec, dpair, spair)
+   !$omp private(iat, izp, jat, kat, ist, ien, vec, dpair, spair)
    do iat = 1, mol%nat
       izp = mol%id(iat)
       ist = list%inl(iat)
       ien = list%inl(iat + 1) - 1
       do kat = ist, ien
          jat = list%nlat(kat)
-         do itr = 1, size(cache%trans, 2)
-            vec = mol%xyz(:, iat) - (mol%xyz(:, jat) + cache%trans(:, itr))
+         vec = mol%xyz(:, iat) - mol%xyz(:, jat)
 
-            call get_pair_derivs(self%ncoord, mol, iat, jat, vec, cache%cn(iat), &
-               & cache%cn(jat), dpair, spair)
-            dcndr(:, ist) = dcndr(:, ist) + dpair(:, 1)
-            dcndr(:, kat) = dcndr(:, kat) - dpair(:, 1)
-            dcndL(:, :, iat) = dcndL(:, :, iat) + spair(:, :, 1)
+         call get_pair_derivs(self%ncoord, mol, iat, jat, vec, cache%cn(iat), &
+            & cache%cn(jat), dpair, spair)
+         dcndr(:, ist) = dcndr(:, ist) + dpair(:, 1)
+         dcndr(:, kat) = dcndr(:, kat) - dpair(:, 1)
+         dcndL(:, :, iat) = dcndL(:, :, iat) + spair(:, :, 1)
 
-            call get_pair_derivs(self%ncoord_en, mol, iat, jat, vec, &
-               & cache%qloc(iat) - qshift, cache%qloc(jat) - qshift, dpair, spair)
-            dqlocdr(:, ist) = dqlocdr(:, ist) + dpair(:, 1)
-            dqlocdr(:, kat) = dqlocdr(:, kat) - dpair(:, 1)
-            dqlocdL(:, :, iat) = dqlocdL(:, :, iat) + spair(:, :, 1)
-         end do
+         call get_pair_derivs(self%ncoord_en, mol, iat, jat, vec, &
+            & cache%qloc(iat) - qshift, cache%qloc(jat) - qshift, dpair, spair)
+         dqlocdr(:, ist) = dqlocdr(:, ist) + dpair(:, 1)
+         dqlocdr(:, kat) = dqlocdr(:, kat) - dpair(:, 1)
+         dqlocdL(:, :, iat) = dqlocdL(:, :, iat) + spair(:, :, 1)
+
       end do
 
       ! CN and effective charge derivative of the electronegativity
@@ -1075,11 +1063,7 @@ subroutine get_partial_derivs_0d_list(self, mol, list, cache, alpha, beta)
 end subroutine get_partial_derivs_0d_list
 
 !> Compute alpha * dA/dR*q + beta * dX/dR for a periodic system using a
-!> complete neighborlist with Wigner-Seitz images, which has to contain every
-!> pair within the CN cutoff.
-!>
-!> The storage follows get_partial_derivs_0d_list, contributions outside the
-!> sparsity pattern of the list are neglected.
+!> complete neighborlist with Wigner-Seitz images
 subroutine get_partial_derivs_3d_list(self, mol, list, cache, alpha, beta)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self

@@ -45,7 +45,8 @@ subroutine collect_wignerseitz(testsuite)
       & new_unittest("lattice-points-0d", test_latticepoints_0d), &
       & new_unittest("lattice-points-3d", test_latticepoints_3d), &
       & new_unittest("wignerseitz-cell-0d", test_wsc_0d), &
-      & new_unittest("wignerseitz-cell-3d", test_wsc_3d) &
+      & new_unittest("wignerseitz-cell-3d", test_wsc_3d), &
+      & new_unittest("wignerseitz-images-3d", test_wsc_images_3d) &
       & ]
 
 end subroutine collect_wignerseitz
@@ -147,5 +148,56 @@ subroutine test_wsc_3d(error)
    if (allocated(error)) return
 
 end subroutine test_wsc_3d
+
+!> Check that the Wigner-Seitz images are the nearest images of each pair,
+!> exclude the atom itself, and that the self-images are inversion symmetric
+subroutine test_wsc_images_3d(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   type(wignerseitz_cell) :: wsc
+   integer :: iat, jat, img, itr, nimg
+   real(wp) :: vec(3), r2min
+   real(wp), allocatable :: r2(:)
+
+   call get_structure(mol, "X23", "CO2")
+
+   call new_wignerseitz_cell(wsc, mol)
+
+   allocate(r2(size(wsc%trans, 2)))
+   do iat = 1, mol%nat
+      do jat = 1, mol%nat
+         vec(:) = mol%xyz(:, iat) - mol%xyz(:, jat)
+         do itr = 1, size(wsc%trans, 2)
+            r2(itr) = sum((vec - wsc%trans(:, itr))**2)
+         end do
+         r2min = minval(r2, mask=r2 >= thr2)
+
+         nimg = wsc%nimg(jat, iat)
+         if (abs(r2(wsc%tridx(1, jat, iat)) - r2min) > thr) then
+            call test_failed(error, "First Wigner-Seitz image is not the nearest image")
+            return
+         end if
+
+         do img = 1, nimg
+            itr = wsc%tridx(img, jat, iat)
+            if (r2(itr) < thr2) then
+               call test_failed(error, "Wigner-Seitz images contain the atom itself")
+               return
+            end if
+
+            if (iat /= jat) cycle
+            if (.not. any(norm2(wsc%trans(:, wsc%tridx(:nimg, iat, iat)) &
+               & + spread(wsc%trans(:, itr), 2, nimg), dim=1) < thr)) then
+               call test_failed(error, "Self-images are not inversion symmetric")
+               return
+            end if
+         end do
+      end do
+   end do
+
+end subroutine test_wsc_images_3d
 
 end module test_wignerseitz
