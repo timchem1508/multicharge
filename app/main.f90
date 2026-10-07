@@ -100,14 +100,14 @@ program main
 
    allocate(cache)
 
-   ! Create neighborlist if requested
+   ! Create neighborlist if requested, charge derivatives need a complete list
    if (use_nlist) then
       call timer%push("nlist")
       allocate(list)
       if (any(mol%periodic)) then
-         call new_csr_list(list, mol, error, cache%wsc, cutoff)
+         call new_csr_list(list, mol, error, cache%wsc, cutoff, complete=qgrad)
       else
-         call new_csr_list(list, mol, error, cutoff=cutoff)
+         call new_csr_list(list, mol, error, cutoff=cutoff, complete=qgrad)
       end if
       call timer%pop
       write(output_unit, '(a, 1x, a)') "neighborlist generation time :", &
@@ -233,7 +233,7 @@ subroutine help(unit)
       "-hess, -numhess, --numhess", &
       & "Evaluate semi-numerical Hessian and pressure tensor.", &
       "-list, -nlist, --nlist", &
-      & "Use neighborlist for solver (not compatible with charge gradient)", &
+      & "Use neighborlist for solver (complete list with charge gradient)", &
       "-cut, -cutoff, --cutoff <real>", &
       & "Cutoff for neighborlist generation in Bohrs (default: 29.0 Bohr)", &
       "-v, -verbose, --verbose", "Show more", &

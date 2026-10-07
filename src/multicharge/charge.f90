@@ -60,7 +60,7 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, list, efield)
    !> Derivative of the partial charges w.r.t. strain deformations
    real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
 
-   !> neighborlist
+   !> Neighborlist, complete if the charge derivatives are requested
    type(csr_list), intent(in), optional :: list
 
    !> Optional external electric field
@@ -78,7 +78,7 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, list, efield)
    allocate(solver)
    call new_cg_solver(solver, solver_input)
 
-   grad = present(dqdr) .and. present(dqdL) .and. .not. present(list)
+   grad = present(dqdr) .and. present(dqdL)
 
    allocate(cache)
    call get_lattice_points(mol%periodic, mol%lattice, mchrg_model%ncoord%cutoff, trans)

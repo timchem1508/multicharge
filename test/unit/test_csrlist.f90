@@ -28,7 +28,7 @@ module test_csrlist
    use multicharge_model_eeqbc, only : eeqbc_model
    use multicharge_param, only : new_eeq2019_model, new_eeqbc2025_model
    use multicharge_model_cache, only : mchrg_cache
-   use multicharge_ncoord, only : get_dcndr_pair, get_dqlocdr_pair
+   use multicharge_ncoord, only : get_pair_derivs
    use mctc_ncoord, only : ncoord_type
    use multicharge_charge, only : get_charges, get_eeq_charges, get_eeqbc_charges
    use multicharge_solver_type, only : mchrg_solver_type, mchrg_solver_input
@@ -1036,7 +1036,7 @@ end subroutine test_eeqbc_api_actinides
 
 
 !> Rebuild dense CN derivatives from the pair derivatives and compare them
-subroutine check_pair_derivs(error, mol, ncoord, trans, local, cn, dcndr, dcndL)
+subroutine check_pair_derivs(error, mol, ncoord, trans, cn, dcndr, dcndL)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -1050,10 +1050,7 @@ subroutine check_pair_derivs(error, mol, ncoord, trans, local, cn, dcndr, dcndL)
    !> Lattice points
    real(wp), intent(in) :: trans(:, :)
 
-   !> Evaluate local charge derivatives instead of CN derivatives
-   logical, intent(in) :: local
-
-   !> Coordination numbers or local charges
+   !> Coordination numbers including the maximum CN cutoff
    real(wp), intent(in) :: cn(:)
 
    !> Reference derivative w.r.t. the Cartesian coordinates
@@ -1063,7 +1060,7 @@ subroutine check_pair_derivs(error, mol, ncoord, trans, local, cn, dcndr, dcndL)
    real(wp), intent(in) :: dcndL(:, :, :)
 
    integer :: iat, jat, itr
-   real(wp) :: vec(3), dpair(3, 2)
+   real(wp) :: vec(3), dpair(3, 2), spair(3, 3, 2)
    real(wp), allocatable :: dcndr_pair(:, :, :), dcndL_pair(:, :, :)
 
    allocate(dcndr_pair(3, mol%nat, mol%nat), dcndL_pair(3, 3, mol%nat), &
@@ -1073,21 +1070,16 @@ subroutine check_pair_derivs(error, mol, ncoord, trans, local, cn, dcndr, dcndL)
       do jat = 1, iat
          do itr = 1, size(trans, 2)
             vec = mol%xyz(:, iat) - (mol%xyz(:, jat) + trans(:, itr))
-            if (local) then
-               dpair = get_dqlocdr_pair(ncoord, mol, iat, jat, vec, cn)
-            else
-               dpair = get_dcndr_pair(ncoord, mol, iat, jat, vec, cn)
-            end if
+            call get_pair_derivs(ncoord, mol, iat, jat, vec, cn(iat), cn(jat), &
+               & dpair, spair)
 
             dcndr_pair(:, iat, iat) = dcndr_pair(:, iat, iat) + dpair(:, 1)
             dcndr_pair(:, jat, iat) = dcndr_pair(:, jat, iat) - dpair(:, 1)
             dcndr_pair(:, iat, jat) = dcndr_pair(:, iat, jat) + dpair(:, 2)
             dcndr_pair(:, jat, jat) = dcndr_pair(:, jat, jat) - dpair(:, 2)
 
-            dcndL_pair(:, :, iat) = dcndL_pair(:, :, iat) &
-               & + spread(dpair(:, 1), 2, 3) * spread(vec, 1, 3)
-            dcndL_pair(:, :, jat) = dcndL_pair(:, :, jat) &
-               & + spread(dpair(:, 2), 2, 3) * spread(vec, 1, 3)
+            dcndL_pair(:, :, iat) = dcndL_pair(:, :, iat) + spair(:, :, 1)
+            dcndL_pair(:, :, jat) = dcndL_pair(:, :, jat) + spair(:, :, 2)
          end do
       end do
    end do
@@ -1130,13 +1122,14 @@ subroutine test_pair_derivs(error, mol, model)
 
    call model%ncoord%get_coordination_number(mol, trans, cn, dcndr=dcndr, &
       & dcndL=dcndL)
-   call check_pair_derivs(error, mol, model%ncoord, trans, .false., cn, &
-      & dcndr, dcndL)
+   call check_pair_derivs(error, mol, model%ncoord, trans, cn, dcndr, dcndL)
    if (allocated(error)) return
 
+   ! The maximum CN cutoff acts on the local charges before the total charge
+   ! is distributed
    call model%local_charge(mol, trans, qloc, dqlocdr=dqlocdr, dqlocdL=dqlocdL)
-   call check_pair_derivs(error, mol, model%ncoord_en, trans, .true., qloc, &
-      & dqlocdr, dqlocdL)
+   call check_pair_derivs(error, mol, model%ncoord_en, trans, &
+      & qloc - mol%charge / real(mol%nat, wp), dqlocdr, dqlocdL)
 
 end subroutine test_pair_derivs
 
@@ -1206,31 +1199,28 @@ subroutine test_pair_derivs_ice(error)
 end subroutine test_pair_derivs_ice
 
 
-!> Expand the neighborlist storage of the partial derivatives into a dense array
+!> Expand the complete neighbour list storage of the partial derivatives
 subroutine expand_partial_derivs(mol, list, cache, dabdr)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
 
-   !> Upper-triangle CSR neighbour list
+   !> Complete CSR neighbour list
    type(csr_list), intent(in) :: list
 
-   !> Cache holding the partial derivatives in neighborlist storage
+   !> Cache holding the partial derivatives in neighbour list storage
    type(mchrg_cache), intent(in) :: cache
 
    !> Dense partial derivatives
    real(wp), intent(out) :: dabdr(:, :, :)
 
-   integer :: iat, jat
+   integer :: iat
    integer(i8) :: kat
 
    dabdr(:, :, :) = 0.0_wp
    do iat = 1, mol%nat
-      dabdr(:, iat, iat) = cache%dabdrdiag(:, iat)
-      do kat = list%inl(iat) + 1, list%inl(iat + 1) - 1
-         jat = list%nlat(kat)
-         dabdr(:, iat, jat) = dabdr(:, iat, jat) + cache%dabdrij(:, kat)
-         dabdr(:, jat, iat) = dabdr(:, jat, iat) + cache%dabdrji(:, kat)
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         dabdr(:, list%nlat(kat), iat) = cache%dabdrlist(:, kat)
       end do
    end do
 
@@ -1238,7 +1228,8 @@ end subroutine expand_partial_derivs
 
 
 !> Compare the partial derivatives and charge derivatives obtained with the
-!> neighbour list against the dense evaluation
+!> complete neighbour list against the dense evaluation with the block CG and
+!> the direct solver
 subroutine test_partial_derivs(error, mol, model)
 
    !> Error handling
@@ -1250,9 +1241,9 @@ subroutine test_partial_derivs(error, mol, model)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   class(mchrg_solver_type), allocatable :: solver
-   class(mchrg_solver_input), allocatable :: solver_input
-   type(mchrg_cache), allocatable :: cache1, cache2
+   class(mchrg_solver_type), allocatable :: solver, direct
+   class(mchrg_solver_input), allocatable :: solver_input, direct_in
+   type(mchrg_cache), allocatable :: cache1, cache2, cache3
    type(csr_list), allocatable :: list
    integer :: ndim, iscale
    real(wp), parameter :: scales(2, 2) = reshape([1.0_wp, 0.0_wp, 0.0_wp, 1.0_wp], &
@@ -1260,6 +1251,7 @@ subroutine test_partial_derivs(error, mol, model)
    real(wp), allocatable :: trans(:, :), dabdr(:, :, :)
    real(wp), allocatable :: dqdr1(:, :, :), dqdL1(:, :, :)
    real(wp), allocatable :: dqdr2(:, :, :), dqdL2(:, :, :)
+   real(wp), allocatable :: dqdr3(:, :, :), dqdL3(:, :, :)
 
    allocate(cg_input :: solver_input)
    select type (solver_input)
@@ -1273,24 +1265,40 @@ subroutine test_partial_derivs(error, mol, model)
    call solver_maker(solver, solver_input, error)
    if (allocated(error)) return
 
+   allocate(direct_input :: direct_in)
+   select type (direct_in)
+   type is (direct_input)
+      direct_in%verbosity = 0
+   end select
+   call solver_maker(direct, direct_in, error)
+   if (allocated(error)) return
+
    call get_lattice_points(mol%periodic, mol%lattice, model%ncoord%cutoff, trans)
    allocate(dabdr(3, mol%nat, ndim))
    allocate(dqdr1(3, mol%nat, mol%nat), dqdL1(3, 3, mol%nat))
    allocate(dqdr2(3, mol%nat, mol%nat), dqdL2(3, 3, mol%nat))
+   allocate(dqdr3(3, mol%nat, mol%nat), dqdL3(3, 3, mol%nat))
 
-   ! Dense reference
+   ! Dense reference with the block CG solver
    allocate(cache1)
    call model%update(mol, cache1, trans, grad=.true.)
    call model%solve(mol, solver, cache1, error, dqdr=dqdr1, dqdL=dqdL1, &
       & unit=output_unit)
    if (allocated(error)) return
 
-   ! Neighbour list
+   ! Dense reference with the direct solver
+   allocate(cache3)
+   call model%update(mol, cache3, trans, grad=.true.)
+   call model%solve(mol, direct, cache3, error, dqdr=dqdr3, dqdL=dqdL3, &
+      & unit=output_unit)
+   if (allocated(error)) return
+
+   ! Complete neighbour list, solved column by column
    allocate(cache2, list)
    if (any(mol%periodic)) then
-      call new_csr_list(list, mol, error, cache2%wsc, cutoff=cutoff)
+      call new_csr_list(list, mol, error, cache2%wsc, cutoff=cutoff, complete=.true.)
    else
-      call new_csr_list(list, mol, error, cutoff=cutoff)
+      call new_csr_list(list, mol, error, cutoff=cutoff, complete=.true.)
    end if
    if (allocated(error)) return
    call model%update(mol, cache2, trans, grad=.true., list=list)
@@ -1298,14 +1306,14 @@ subroutine test_partial_derivs(error, mol, model)
       & unit=output_unit)
    if (allocated(error)) return
 
-   if (any(abs(dqdr2 - dqdr1) > thr2)) then
+   if (any(abs(dqdr2 - dqdr1) > thr2) .or. any(abs(dqdr2 - dqdr3) > thr2)) then
       call test_failed(error, "Charge derivatives w.r.t. positions do not match")
-      print'(es21.14)', maxval(abs(dqdr2 - dqdr1))
+      print'(2es21.14)', maxval(abs(dqdr2 - dqdr1)), maxval(abs(dqdr2 - dqdr3))
       return
    end if
-   if (any(abs(dqdL2 - dqdL1) > thr2)) then
+   if (any(abs(dqdL2 - dqdL1) > thr2) .or. any(abs(dqdL2 - dqdL3) > thr2)) then
       call test_failed(error, "Charge derivatives w.r.t. strain do not match")
-      print'(es21.14)', maxval(abs(dqdL2 - dqdL1))
+      print'(2es21.14)', maxval(abs(dqdL2 - dqdL1)), maxval(abs(dqdL2 - dqdL3))
       return
    end if
 

@@ -88,16 +88,9 @@ module multicharge_model_cache
       !> Linear combination alpha * dA/dL*q + beta * dX/dL w.r.t. strain
       real(wp), allocatable :: dabdL(:, :, :)
 
-      !> Neighborlist storage of dabdr, derivative of the neighbor j w.r.t. the
-      !> central atom i of each list entry
-      real(wp), allocatable :: dabdrij(:, :)
-
-      !> Neighborlist storage of dabdr, derivative of the central atom i w.r.t.
-      !> the neighbor j of each list entry
-      real(wp), allocatable :: dabdrji(:, :)
-
-      !> Neighborlist storage of dabdr, derivative of each atom w.r.t. itself
-      real(wp), allocatable :: dabdrdiag(:, :)
+      !> Complete neighborlist storage of dabdr, the entry of a neighbor in the
+      !> row of atom i holds the derivative of component i w.r.t. that neighbor
+      real(wp), allocatable :: dabdrlist(:, :)
 
       !> Logical flag for gradient calculation
       logical :: grad

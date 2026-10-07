@@ -202,7 +202,7 @@ module multicharge_model_type
          !> Multiplier of the electronegativity vector derivatives, dX/dR
          real(wp), intent(in) :: beta
 
-         !> Multicharge neighborlist type (upper triangle)
+         !> Multicharge neighborlist type (complete)
          type(csr_list), intent(in), optional :: list
       end subroutine get_partial_derivs
 
@@ -386,6 +386,14 @@ subroutine solve(self, mol, solver, cache, error, &
    ! Calculate gradient if the respective arrays are present
    grad = present(gradient) .and. present(sigma)
    cpq = present(dqdr) .and. present(dqdL)
+
+   ! Charge derivatives are evaluated row by row on a complete neighborlist
+   if (cpq .and. present(list)) then
+      if (.not. list%complete) then
+         call fatal_error(error, "Charge derivatives require a complete neighborlist")
+         return
+      end if
+   end if
 
    if (.not. present(verbosity)) then
       verbosity_solve = 0
@@ -584,65 +592,56 @@ subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit)
    integer, intent(in), optional :: unit
 
    real(wp), allocatable :: daqxdr(:, :, :), daqxdL(:, :, :)
-   real(wp), allocatable :: diag(:), rhs(:), sol(:)
+   real(wp), allocatable :: diag(:), rhs(:), sol(:), bvec(:, :)
    real(wp), allocatable :: bmat(:, :), xmat(:, :), blocks(:, :, :)
    integer, allocatable :: ncol(:)
    real(wp) :: scale, uvecsum
    integer :: iat, jat, ic, jc, ivec, iblk, nrhs
-   integer(i8) :: kat
-
-   ! Right-hand sides dX/dR - dA/dR*q, expanded from the neighborlist storage
-   allocate(daqxdr(3, mol%nat, ndim), source=0.0_wp)
-   allocate(daqxdL(3, 3, ndim), source=0.0_wp)
-   if (present(list)) then
-      do iat = 1, mol%nat
-         daqxdr(:, iat, iat) = cache%dabdrdiag(:, iat)
-         do kat = list%inl(iat) + 1, list%inl(iat + 1) - 1
-            jat = list%nlat(kat)
-            daqxdr(:, iat, jat) = daqxdr(:, iat, jat) + cache%dabdrij(:, kat)
-            daqxdr(:, jat, iat) = daqxdr(:, jat, iat) + cache%dabdrji(:, kat)
-         end do
-      end do
-   else
-      daqxdr(:, :, :mol%nat) = cache%dabdr(:, :, :mol%nat)
-   end if
-   daqxdL(:, :, :mol%nat) = cache%dabdL(:, :, :mol%nat)
+   integer(i8) :: kat, lat
 
    if (allocated(cache%ainv)) then
       ! Non-iterative solve using the inverse of the augmented matrix
+      allocate(daqxdr(3, mol%nat, ndim), source=0.0_wp)
+      allocate(daqxdL(3, 3, ndim), source=0.0_wp)
+      daqxdr(:, :, :mol%nat) = cache%dabdr(:, :, :mol%nat)
+      daqxdL(:, :, :mol%nat) = cache%dabdL(:, :, :mol%nat)
       call gemm(daqxdr, cache%ainv(:, :mol%nat), dqdr, alpha=1.0_wp)
       call gemm(daqxdL, cache%ainv(:, :mol%nat), dqdL, alpha=1.0_wp)
+      return
+   end if
+
+   ! Iterative solve with projection onto the charge constraint
+   allocate(diag(mol%nat))
+   if (present(list)) then
+      do iat = 1, mol%nat
+         diag(iat) = cache%alist(list%inl(iat)) + eps
+      end do
    else
-      ! Iterative solve with projection onto the charge constraint
-      allocate(diag(mol%nat))
-      if (present(list)) then
-         do iat = 1, mol%nat
-            diag(iat) = cache%alist(list%inl(iat)) + eps
-         end do
-      else
-         do iat = 1, mol%nat
-            diag(iat) = cache%amat(iat, iat) + eps
-         end do
-      end if
+      do iat = 1, mol%nat
+         diag(iat) = cache%amat(iat, iat) + eps
+      end do
+   end if
 
-      uvecsum = sum(cache%uvec)
+   uvecsum = sum(cache%uvec)
 
+   ! Block solve for all position and lattice derivatives at once, the
+   ! neighborlist storage is solved column by column below
+   if (.not. present(list)) then
       select type (solver)
       class is (cg_solver)
-         ! Block solve for all position and lattice derivatives at once:
          ! J*M = dB/dR - dA/dR*q, columns ordered as (ic, iat) then (ic, jc)
          nrhs = 3 * mol%nat + 9
          allocate(bmat(mol%nat, nrhs), xmat(mol%nat, nrhs))
          do iat = 1, mol%nat
             do ic = 1, 3
                ivec = ic + 3 * (iat - 1)
-               bmat(:, ivec) = daqxdr(ic, iat, :mol%nat)
+               bmat(:, ivec) = cache%dabdr(ic, iat, :mol%nat)
             end do
          end do
          do jc = 1, 3
             do ic = 1, 3
                ivec = 3 * mol%nat + ic + 3 * (jc - 1)
-               bmat(:, ivec) = daqxdL(ic, jc, :mol%nat)
+               bmat(:, ivec) = cache%dabdL(ic, jc, :mol%nat)
             end do
          end do
          do ivec = 1, nrhs
@@ -675,38 +674,52 @@ subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit)
                dqdL(ic, jc, :) = xmat(:, 3 * mol%nat + ic + 3 * (jc - 1))
             end do
          end do
-
-      class default
-         ! Column-wise solve for solvers without block support
-         allocate(rhs(mol%nat), sol(mol%nat))
-
-         ! Position derivatives: J*m = db/dR - dA/dR*q, dq/dR = m - scale*u
-         do iat = 1, mol%nat
-            do ic = 1, 3
-               rhs(:) = daqxdr(ic, iat, :mol%nat)
-               sol(:) = rhs / diag
-               call solver%solve(amat=cache%amat, alist=cache%alist, xvec=rhs, &
-                  & vrhs=sol, list=list, new_unit=unit, error=error)
-               if (allocated(error)) return
-               scale = sum(sol) / (uvecsum + eps)
-               dqdr(ic, iat, :) = sol - scale * cache%uvec
-            end do
-         end do
-
-         ! Lattice derivatives: J*m = db/dL - dA/dL*q, dq/dL = m - scale*u
-         do jc = 1, 3
-            do ic = 1, 3
-               rhs(:) = daqxdL(ic, jc, :mol%nat)
-               sol(:) = rhs / diag
-               call solver%solve(amat=cache%amat, alist=cache%alist, xvec=rhs, &
-                  & vrhs=sol, list=list, new_unit=unit, error=error)
-               if (allocated(error)) return
-               scale = sum(sol) / (uvecsum + eps)
-               dqdL(ic, jc, :) = sol - scale * cache%uvec
-            end do
-         end do
+         return
       end select
    end if
+
+   ! Column-wise solve for neighborlists and solvers without block support
+   allocate(rhs(mol%nat), sol(mol%nat), bvec(3, mol%nat))
+
+   ! Position derivatives: J*m = db/dR - dA/dR*q, dq/dR = m - scale*u
+   do iat = 1, mol%nat
+      if (present(list)) then
+         ! Derivatives of the neighbors w.r.t. iat, stored in their own rows
+         bvec(:, :) = 0.0_wp
+         do kat = list%inl(iat), list%inl(iat + 1) - 1
+            jat = list%nlat(kat)
+            do lat = list%inl(jat), list%inl(jat + 1) - 1
+               if (list%nlat(lat) == iat) exit
+            end do
+            bvec(:, jat) = cache%dabdrlist(:, lat)
+         end do
+      else
+         bvec(:, :) = cache%dabdr(:, iat, :mol%nat)
+      end if
+
+      do ic = 1, 3
+         rhs(:) = bvec(ic, :)
+         sol(:) = rhs / diag
+         call solver%solve(amat=cache%amat, alist=cache%alist, xvec=rhs, &
+            & vrhs=sol, list=list, new_unit=unit, error=error)
+         if (allocated(error)) return
+         scale = sum(sol) / (uvecsum + eps)
+         dqdr(ic, iat, :) = sol - scale * cache%uvec
+      end do
+   end do
+
+   ! Lattice derivatives: J*m = db/dL - dA/dL*q, dq/dL = m - scale*u
+   do jc = 1, 3
+      do ic = 1, 3
+         rhs(:) = cache%dabdL(ic, jc, :mol%nat)
+         sol(:) = rhs / diag
+         call solver%solve(amat=cache%amat, alist=cache%alist, xvec=rhs, &
+            & vrhs=sol, list=list, new_unit=unit, error=error)
+         if (allocated(error)) return
+         scale = sum(sol) / (uvecsum + eps)
+         dqdL(ic, jc, :) = sol - scale * cache%uvec
+      end do
+   end do
 
 end subroutine get_q_derivs
 
