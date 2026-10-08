@@ -22,7 +22,6 @@ module test_csrlist
    use mctc_io_structure, only : structure_type, new
    use mctc_csrlist, only : csr_list, new_csr_list
    use mstore, only : get_structure
-   use mctc_wignerseitz, only : new_wignerseitz_cell, wignerseitz_cell
    use multicharge_blas, only : gemv
    use multicharge_model_type, only : mchrg_model_type
    use multicharge_model_eeqbc, only : eeqbc_model
@@ -266,7 +265,8 @@ subroutine test_components(error, mol, model)
    real(wp) :: trans(3, 1) = 0.0_wp
    real(wp), allocatable :: cmat(:, :), amat(:, :)
 
-   integer :: iat, jat, kat, ndim
+   integer :: iat, jat, ndim
+   integer(i8) :: kat
 
    allocate(cg_input :: solver_input)
    select type (solver_input)
@@ -373,8 +373,6 @@ subroutine gen_test_periodic(error, mol, model)
    real(wp), allocatable :: amat_dir(:,:)
    real(wp), allocatable :: amat_list(:,:)
 
-   integer :: iat, jat, kat
-
    allocate(cg_input :: solver_input)
    select type (solver_input)
       type is (cg_input)
@@ -455,14 +453,10 @@ subroutine test_grad(error, mol, model)
 
    type(csr_list), allocatable :: list
 
-   integer :: iat, jat, kat, ic, ndim
+   integer :: ndim
    real(wp), parameter :: trans(3, 1) = 0.0_wp
    real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
    real(wp), allocatable :: numgrad(:, :), numsigma(:, :)
-   real(wp) :: er, el
-   real(wp), allocatable :: dcmat_list(:, :, :), damat_list(:, :, :)
-   real(wp), allocatable :: dxvec_list(:, :, :), dcn_list(:, :, :), dqloc_list(:, :, :)
-   logical :: grad = .true.
 
    allocate(cg_input :: solver_input)
    select type (solver_input)
@@ -546,16 +540,12 @@ subroutine test_grad_periodic(error, mol, model)
    integer :: verbosity = 0
 
    type(csr_list), allocatable :: list
-   type(wignerseitz_cell), allocatable :: wsc
 
-   integer :: iat, jat, kat, ic, ndim
+   integer :: iat, ndim
    real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
    real(wp), allocatable :: numgrad(:, :), numsigma(:, :)
-   real(wp) :: er, el
    real(wp), allocatable :: trans(:, :)
-   real(wp), allocatable :: dcmat_list(:, :, :), damat_list(:, :, :), dcdrdiag(:, :)
-   real(wp), allocatable :: dxvec_list(:, :, :), dcn_list(:, :, :), dqloc_list(:, :, :)
-   logical :: grad = .true.
+   real(wp), allocatable :: dcdrdiag(:, :)
 
    allocate(cg_input :: solver_input)
    select type (solver_input)
@@ -707,9 +697,6 @@ subroutine test_eeqbc_q_mb01(error)
    &-3.99729823174914E-2_wp,  8.48742713551116E-1_wp, -4.49898375805073E-1_wp, &
    & 1.16388636122213E+0_wp]
 
-   real(wp), allocatable :: qvec(:)
-   real(wp), parameter :: trans(3, 1) = 0.0_wp
-
    call get_structure(mol, "MB16-43", "01")
 
    call new_eeqbc2025_model(mol, model, error)
@@ -735,8 +722,6 @@ subroutine test_eeqbc_q_mb02(error)
    &-6.15231036823021E-1_wp,  1.47042131652275E-2_wp, -1.44439879995398E-2_wp, &
    &-5.51084063597411E-1_wp]
 
-   real(wp), parameter :: trans(3, 1) = 0.0_wp
-
    call get_structure(mol, "MB16-43", "02")
 
    call new_eeqbc2025_model(mol, model, error)
@@ -760,8 +745,6 @@ subroutine test_eeqbc_q_actinides(error)
    & 1.78293689441428E-1_wp, -2.11018657500951E-1_wp, -1.03628773361279E-1_wp, &
    &-1.71248308078648E-1_wp,  2.54400229067594E-1_wp, -5.83023049918706E-2_wp, &
    & 2.01328580342047E-1_wp,  1.47326155413513E-1_wp]
-
-   real(wp), parameter :: trans(3, 1) = 0.0_wp
 
    call get_structure(mol, "f-block", "Fr_to_Lr")
 
@@ -787,8 +770,6 @@ subroutine test_eeqbc_e_mb03(error)
    &-9.94227733791934E-1_wp, -1.58035207823740E-1_wp, -1.51308961030806E+0_wp, &
    &-4.01533041771599E-3_wp]
 
-   real(wp), parameter :: trans(3, 1) = 0.0_wp
-
    call get_structure(mol, "MB16-43", "03")
 
    call new_eeqbc2025_model(mol, model, error)
@@ -813,8 +794,6 @@ subroutine test_eeqbc_e_mb04(error)
    &-1.06116580759546E-2_wp, -1.45309833473282E+0_wp, -2.30657216723778E-2_wp, &
    & 1.53766210354731E-6_wp]
 
-   real(wp), parameter :: trans(3, 1) = 0.0_wp
-
    call get_structure(mol, "MB16-43", "04")
 
    call new_eeqbc2025_model(mol, model, error)
@@ -831,8 +810,6 @@ subroutine test_eeqbc_g_mb05(error)
    type(structure_type) :: mol
    class(mchrg_model_type), allocatable :: model
 
-   real(wp), parameter :: trans(3, 1) = 0.0_wp
-
    call get_structure(mol, "MB16-43", "05")
 
    call new_eeqbc2025_model(mol, model, error)
@@ -848,8 +825,6 @@ subroutine test_eeqbc_g_mb06(error)
 
    type(structure_type) :: mol
    class(mchrg_model_type), allocatable :: model
-
-   real(wp), parameter :: trans(3, 1) = 0.0_wp
 
    call get_structure(mol, "MB16-43", "06")
 
@@ -970,9 +945,6 @@ subroutine test_eeqbc_api_mb01(error)
    &-3.99729823174914E-2_wp,  8.48742713551116E-1_wp, -4.49898375805073E-1_wp, &
    & 1.16388636122213E+0_wp]
 
-   real(wp), allocatable :: qvec(:)
-   real(wp), parameter :: trans(3, 1) = 0.0_wp
-
    call get_structure(mol, "MB16-43", "01")
 
    call new_eeqbc2025_model(mol, model, error)
@@ -998,8 +970,6 @@ subroutine test_eeqbc_api_mb02(error)
    &-6.15231036823021E-1_wp,  1.47042131652275E-2_wp, -1.44439879995398E-2_wp, &
    &-5.51084063597411E-1_wp]
 
-   real(wp), parameter :: trans(3, 1) = 0.0_wp
-
    call get_structure(mol, "MB16-43", "02")
 
    call new_eeqbc2025_model(mol, model, error)
@@ -1023,8 +993,6 @@ subroutine test_eeqbc_api_actinides(error)
    & 1.78293689441428E-1_wp, -2.11018657500951E-1_wp, -1.03628773361279E-1_wp, &
    &-1.71248308078648E-1_wp,  2.54400229067594E-1_wp, -5.83023049918706E-2_wp, &
    & 2.01328580342047E-1_wp,  1.47326155413513E-1_wp]
-
-   real(wp), parameter :: trans(3, 1) = 0.0_wp
 
    call get_structure(mol, "f-block", "Fr_to_Lr")
 

@@ -2646,7 +2646,7 @@ subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
    real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3)
    real(wp) :: W_ii, W_jj, W_ij
    real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
-   real(wp), allocatable :: v(:), qlocacc(:), cnacc(:)
+   real(wp), allocatable :: v(:), ptmp(:), qlocacc(:), cnacc(:)
    real(wp), allocatable :: dtrans(:, :)
 
    alpha = 1.0_wp
@@ -2659,8 +2659,12 @@ subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
    qlocacc = 0.0_wp
    cnacc = 0.0_wp
 
-   allocate(v(mol%nat))
-   call symv(cache%cmat(:mol%nat, :mol%nat), p, v, alpha=1.0_wp, beta=0.0_wp, uplo='l')
+   ! Zero-pad p to the full cmat instead of copying its atomic block, the
+   ! constraint row and column of cmat vanish apart from the diagonal
+   allocate(ptmp(size(cache%cmat, 1)), source=0.0_wp)
+   ptmp(:mol%nat) = p
+   allocate(v(size(cache%cmat, 1)))
+   call symv(cache%cmat, ptmp, v, alpha=1.0_wp, beta=0.0_wp, uplo='l')
 
    allocate(gradient_local(3, mol%nat), source=0.0_wp)
    allocate(sigma_local(3, 3), source=0.0_wp)
@@ -2773,7 +2777,7 @@ subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
    gradient = gradient + gradient_local
    sigma = sigma + sigma_local
 
-   deallocate(gradient_local, sigma_local, qlocacc, cnacc, dtrans, v)
+   deallocate(gradient_local, sigma_local, qlocacc, cnacc, dtrans, v, ptmp)
 end subroutine get_grad_0d
 
 !> Accumulate gradient and stress contributions for a periodic CSR system
@@ -2991,7 +2995,7 @@ subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
    real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), norm_cn
    real(wp) :: W_ii, W_jj, W_ij
    real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
-   real(wp), allocatable :: qlocacc(:), cnacc(:), dtrans(:, :), v(:)
+   real(wp), allocatable :: qlocacc(:), cnacc(:), dtrans(:, :), v(:), ptmp(:)
 
    alpha = 1.0_wp
    if (present(alphain)) alpha = alphain
@@ -3004,8 +3008,12 @@ subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
    qlocacc = 0.0_wp
    cnacc = 0.0_wp
 
-   allocate(v(mol%nat))
-   call symv(cache%cmat(:mol%nat, :mol%nat), p, v, alpha=1.0_wp, beta=0.0_wp, uplo='l')
+   ! Zero-pad p to the full cmat instead of copying its atomic block, the
+   ! constraint row and column of cmat vanish apart from the diagonal
+   allocate(ptmp(size(cache%cmat, 1)), source=0.0_wp)
+   ptmp(:mol%nat) = p
+   allocate(v(size(cache%cmat, 1)))
+   call symv(cache%cmat, ptmp, v, alpha=1.0_wp, beta=0.0_wp, uplo='l')
 
    allocate(gradient_local(3, mol%nat), source=0.0_wp)
    allocate(sigma_local(3, 3), source=0.0_wp)
@@ -3142,7 +3150,7 @@ subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
    gradient = gradient + gradient_local
    sigma = sigma + sigma_local
 
-   deallocate(gradient_local, sigma_local, qlocacc, cnacc, dtrans, v)
+   deallocate(gradient_local, sigma_local, qlocacc, cnacc, dtrans, v, ptmp)
 end subroutine get_grad_3d
 
 end module multicharge_model_eeqbc

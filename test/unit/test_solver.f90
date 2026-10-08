@@ -14,7 +14,6 @@
 ! limitations under the License.
 
 module test_solver
-   use iso_fortran_env, only : output_unit
    use mctc_env, only: wp
    use mctc_env_testing, only: new_unittest, unittest_type, error_type, test_failed
    use mctc_io_structure, only: structure_type, new
@@ -102,9 +101,6 @@ subroutine test_cg_identity_2x2(error)
    real(wp) :: amat(n, n), xvec(n), vrhs(n)
    real(wp) :: expected(n)
 
-   ! Timer variables
-   real(wp) :: start_cg, end_cg, start_direct, end_direct
-
    ! Solver variables
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
@@ -133,10 +129,8 @@ subroutine test_cg_identity_2x2(error)
    vrhs = [0.0_wp, 0.0_wp]
 
    ! Solve iteratively
-   call cpu_time(start_cg)
    call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
    if (allocated(error)) return
-   call cpu_time(end_cg)
 
    ! Reference direct solver
    deallocate(solver_input)
@@ -148,9 +142,8 @@ subroutine test_cg_identity_2x2(error)
    end select
    call solver_maker(solver, solver_input,  error)
    expected = [0.0_wp, 0.0_wp]
-   call cpu_time(start_direct)
    call solver%solve(amat=amat, xvec=xvec, vrhs=expected,  error=error)
-   call cpu_time(end_direct)
+   if (allocated(error)) return
 
    ! Check solution
    if (any(abs(vrhs - expected) > thr)) then
@@ -159,11 +152,6 @@ subroutine test_cg_identity_2x2(error)
       print'(3es21.14)', vrhs
       print'(a)', "Expected:"
       print'(3es21.14)', expected
-   else
-      print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
-      print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', &
-      & (end_direct-start_direct)/(end_cg-start_cg)
    end if
 
 end subroutine test_cg_identity_2x2
@@ -178,9 +166,6 @@ subroutine test_cg_diagonal_5x5(error)
    real(wp) :: amat(n, n), xvec(n), vrhs(n)
    real(wp) :: expected(n), diag(n)
    integer :: i
-
-   ! Timer variables
-   real(wp) :: start_cg, end_cg, start_direct, end_direct
 
    ! Solver variables
    class(mchrg_solver_type), allocatable :: solver
@@ -212,10 +197,8 @@ subroutine test_cg_diagonal_5x5(error)
    vrhs = [0.0_wp, 0.0_wp, 0.0_wp, 0.0_wp, 0.0_wp]
 
    ! Solve
-   call cpu_time(start_cg)
    call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
    if (allocated(error)) return
-   call cpu_time(end_cg)
 
    ! Reference direct solver
    deallocate(solver_input)
@@ -226,10 +209,9 @@ subroutine test_cg_diagonal_5x5(error)
       solver_input%verbosity = verbosity
    end select
    call solver_maker(solver, solver_input,  error)
-   call cpu_time(start_direct)
    expected = [0.0_wp, 0.0_wp, 0.0_wp, 0.0_wp, 0.0_wp]
    call solver%solve(amat=amat, xvec=xvec, vrhs=expected, error=error)
-   call cpu_time(end_direct)
+   if (allocated(error)) return
 
    ! Check solution
    if (any(abs(vrhs - expected) > thr)) then
@@ -238,11 +220,6 @@ subroutine test_cg_diagonal_5x5(error)
       print'(3es21.14)', vrhs
       print'(a)', "Expected:"
       print'(3es21.14)', expected
-   else
-      print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
-      print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', &
-      & (end_direct-start_direct)/(end_cg-start_cg)
    end if
 
 end subroutine test_cg_diagonal_5x5
@@ -256,9 +233,6 @@ subroutine test_cg_spd_small(error)
    integer, parameter :: n = 3
    real(wp) :: amat(n, n), xvec(n), vrhs(n)
    real(wp) :: expected(n)
-
-   ! Timer variables
-   real(wp) :: start_cg, end_cg, start_direct, end_direct
 
    ! Solver variables
    class(mchrg_solver_type), allocatable :: solver
@@ -288,10 +262,8 @@ subroutine test_cg_spd_small(error)
    vrhs = [0.0_wp, 0.0_wp, 0.0_wp]
 
    ! Solve
-   call cpu_time(start_cg)
    call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
    if (allocated(error)) return
-   call cpu_time(end_cg)
 
    ! Reference direct solver
    deallocate(solver_input)
@@ -303,9 +275,8 @@ subroutine test_cg_spd_small(error)
    end select
    call solver_maker(solver, solver_input,  error)
    expected = [1.0_wp, 1.0_wp, 1.0_wp]
-   call cpu_time(start_direct)
    call solver%solve(amat=amat, xvec=xvec, vrhs=expected, error=error)
-   call cpu_time(end_direct)
+   if (allocated(error)) return
 
    ! Check solution
    if (any(abs(vrhs - expected) > thr)) then
@@ -314,11 +285,6 @@ subroutine test_cg_spd_small(error)
       print'(3es21.14)', vrhs
       print'(a)', "Expected:"
       print'(3es21.14)', expected
-   else
-      print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
-      print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', &
-      & (end_direct-start_direct)/(end_cg-start_cg)
    end if
 
 end subroutine test_cg_spd_small
@@ -333,9 +299,6 @@ subroutine test_cg_spd_large(error)
    real(wp), allocatable :: amat(:,:), xvec(:), vrhs(:)
    real(wp), allocatable :: expected(:), b(:)
    integer :: i, j
-
-   ! Timer variables
-   real(wp) :: start_cg, end_cg, start_direct, end_direct
 
    ! Solver variables
    class(mchrg_solver_type), allocatable :: solver
@@ -382,10 +345,8 @@ subroutine test_cg_spd_large(error)
    xvec = b
 
    ! Solve
-   call cpu_time(start_cg)
    call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
    if (allocated(error)) return
-   call cpu_time(end_cg)
 
    ! Reference direct solver
    deallocate(solver_input)
@@ -398,22 +359,16 @@ subroutine test_cg_spd_large(error)
    call solver_maker(solver, solver_input,  error)
 
    ! Reference solution
-   call cpu_time(start_direct)
    call solver%solve(amat=amat, xvec=xvec, vrhs=expected, error=error)
-   call cpu_time(end_direct)
+   if (allocated(error)) return
 
    ! Check solution
    if (any(abs(vrhs - expected) / max(1.0_wp, abs(expected)) > thr_rel)) then
-      call test_failed(error, "CG solver failed for medium SPD matrix")
+      call test_failed(error, "CG solver failed for large SPD matrix")
       print'(a)', "Solution:"
       print'(3es21.14)', vrhs
       print'(a)', "Expected:"
       print'(3es21.14)', expected
-   else
-      print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
-      print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', &
-      & (end_direct-start_direct)/(end_cg-start_cg)
    end if
 
 end subroutine test_cg_spd_large
@@ -428,9 +383,6 @@ subroutine test_cg_ill_conditioned(error)
    real(wp) :: amat(n, n), xvec(n), vrhs(n)
    real(wp) :: expected(n), b(n)
    integer :: i
-
-   ! Timer variables
-   real(wp) :: start_cg, end_cg, start_direct, end_direct
 
    ! Solver variables
    class(mchrg_solver_type), allocatable :: solver
@@ -468,10 +420,8 @@ subroutine test_cg_ill_conditioned(error)
    xvec = b
 
    ! Solve
-   call cpu_time(start_cg)
    call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
    if (allocated(error)) return
-   call cpu_time(end_cg)
 
    ! Reference direct solver
    deallocate(solver_input)
@@ -484,22 +434,16 @@ subroutine test_cg_ill_conditioned(error)
    call solver_maker(solver, solver_input,  error)
 
    ! Reference solution
-   call cpu_time(start_direct)
    call solver%solve(amat=amat, xvec=xvec, vrhs=expected, error=error)
-   call cpu_time(end_direct)
+   if (allocated(error)) return
 
    ! Check solution
    if (any(abs(vrhs - expected) / max(1.0_wp, abs(expected)) > thr_rel)) then
-      call test_failed(error, "CG solver failed for medium SPD matrix")
+      call test_failed(error, "CG solver failed for ill-conditioned matrix")
       print'(a)', "Solution:"
       print'(3es21.14)', vrhs
       print'(a)', "Expected:"
       print'(3es21.14)', expected
-   else
-      print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
-      print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', &
-      & (end_direct-start_direct)/(end_cg-start_cg)
    end if
 
 end subroutine test_cg_ill_conditioned
@@ -514,9 +458,6 @@ subroutine test_cg_zero_rhs(error)
    real(wp) :: amat(n, n), xvec(n), vrhs(n)
    real(wp) :: expected(n)
    integer :: i
-
-   ! Timer variables
-   real(wp) :: start_cg, end_cg, start_direct, end_direct
 
    ! Solver variables
    class(mchrg_solver_type), allocatable :: solver
@@ -538,8 +479,10 @@ subroutine test_cg_zero_rhs(error)
    amat = 0.0_wp
    do i = 1, n
       amat(i,i) = real(i, wp)
-      if (i > 1) amat(i,i-1) = 0.1_wp
-      if (i < n) amat(i,i+1) = 0.1_wp
+   end do
+   do i = 1, n - 1
+      amat(i,i+1) = 0.1_wp
+      amat(i+1,i) = 0.1_wp
    end do
 
    ! Zero RHS
@@ -552,10 +495,8 @@ subroutine test_cg_zero_rhs(error)
    expected = 0.0_wp
 
    ! Solve
-   call cpu_time(start_cg)
    call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
    if (allocated(error)) return
-   call cpu_time(end_cg)
 
    ! Reference direct solver
    deallocate(solver_input)
@@ -568,22 +509,16 @@ subroutine test_cg_zero_rhs(error)
    call solver_maker(solver, solver_input,  error)
 
    ! Reference solution
-   call cpu_time(start_direct)
    call solver%solve(amat=amat, xvec=xvec, vrhs=expected, error=error)
-   call cpu_time(end_direct)
+   if (allocated(error)) return
 
    ! Check solution
    if (any(abs(vrhs - expected) / max(1.0_wp, abs(expected)) > thr_rel)) then
-      call test_failed(error, "CG solver failed for medium SPD matrix")
+      call test_failed(error, "CG solver failed for zero right-hand side")
       print'(a)', "Solution:"
       print'(3es21.14)', vrhs
       print'(a)', "Expected:"
       print'(3es21.14)', expected
-   else
-      print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
-      print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', &
-      & (end_direct-start_direct)/(end_cg-start_cg)
    end if
 
 end subroutine test_cg_zero_rhs
@@ -600,9 +535,6 @@ subroutine test_cg_random_spd(error)
    integer :: i, j, k, seed_size
    integer, allocatable :: seed(:)
    real(wp) :: r
-
-   ! Timer variables
-   real(wp) :: start_cg, end_cg, start_direct, end_direct
 
    ! Solver variables
    class(mchrg_solver_type), allocatable :: solver
@@ -675,10 +607,8 @@ subroutine test_cg_random_spd(error)
    xvec = b
 
    ! Solve
-   call cpu_time(start_cg)
    call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
    if (allocated(error)) return
-   call cpu_time(end_cg)
 
    ! Reference direct solver
    deallocate(solver_input)
@@ -691,53 +621,19 @@ subroutine test_cg_random_spd(error)
    call solver_maker(solver, solver_input,  error)
 
    ! Reference solution
-   call cpu_time(start_direct)
    call solver%solve(amat=amat, xvec=xvec, vrhs=expected, error=error)
-   call cpu_time(end_direct)
+   if (allocated(error)) return
 
    ! Check solution
    if (any(abs(vrhs - expected) / max(1.0_wp, abs(expected)) > thr_rel)) then
-      call test_failed(error, "CG solver failed for medium SPD matrix")
+      call test_failed(error, "CG solver failed for random SPD matrix")
       print'(a)', "Solution:"
       print'(3es21.14)', vrhs
       print'(a)', "Expected:"
       print'(3es21.14)', expected
-   else
-      print '("CG Solver CPU Time : ",f6.3," seconds.")',end_cg-start_cg
-      print '("Direct Solver CPU Time : ",f6.3," seconds.")',end_direct-start_direct
-      print '("CG Solver ime profit : ",f6.3)', &
-      & (end_direct-start_direct)/(end_cg-start_cg)
    end if
 
 end subroutine test_cg_random_spd
-
-! Additional subroutine for vector output
-
-subroutine write_vector(vector, name, unit)
-   implicit none
-   real(wp),intent(in) :: vector(:)
-   character(len=*),intent(in),optional :: name
-   integer, intent(in),optional :: unit
-   integer :: d
-   integer :: iunit, j
-
-   d = size(vector, dim=1)
-
-   if (present(unit)) then
-      iunit = unit
-   else
-      iunit = output_unit
-   end if
-
-   if (present(name)) write(iunit,'(/,"vector printed:",1x,a)') name
-
-   do j = 1, d
-      write(iunit, '(i6)', advance='no') j
-      write(iunit, '(1x,f15.10)', advance='no') vector(j)
-      write(iunit, '(a)')
-   end do
-
-end subroutine write_vector
 
 
 !> Test: Splitting a square matrix into column blocks
@@ -747,11 +643,12 @@ subroutine test_get_blocks(error)
    type(error_type), allocatable, intent(out) :: error
 
    integer, parameter :: n = 150
-   real(wp) :: mat(n, n)
+   real(wp), allocatable :: mat(:, :)
    real(wp), allocatable :: blocks(:, :, :)
    integer, allocatable :: ncol(:)
    integer :: iblk, ivec
 
+   allocate(mat(n, n))
    call random_number(mat)
    call get_blocks(mat, blocks, ncol)
 
@@ -765,13 +662,14 @@ subroutine test_get_blocks(error)
    end if
    do iblk = 1, size(ncol)
       ivec = (iblk - 1) * 16
-      if (any(blocks(:, :ncol(iblk), iblk) /= &
-         & mat(:, ivec+1:ivec+ncol(iblk)))) then
+      if (any(abs(blocks(:, :ncol(iblk), iblk) &
+         & - mat(:, ivec+1:ivec+ncol(iblk))) > thr)) then
          call test_failed(error, "Column blocks do not match the matrix")
          return
       end if
    end do
-   if (any(blocks(:, ncol(3)+1:, 3) /= 0.0_wp)) then
+   iblk = size(ncol)
+   if (any(abs(blocks(:, ncol(iblk)+1:, iblk)) > thr)) then
       call test_failed(error, "Last column block is not zero-padded")
    end if
 

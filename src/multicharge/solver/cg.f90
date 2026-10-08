@@ -562,10 +562,15 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error)
       call block_matmul(nlist, dir(:, :nrank), adir(:, :nrank), amat, alist, &
          & list)
 
+      ! Shrink the small matrices to the current rank to keep them contiguous
+      if (size(dtad, 1) /= nrank) then
+         deallocate(dtad, step, updfact)
+         allocate(dtad(nrank, nrank), step(nrank, nrhs), updfact(nrank, nrhs))
+      end if
+
       ! Cholesky factorization of P^T Q
-      call gemm(dir(:, :nrank), adir(:, :nrank), dtad(:nrank, :nrank), &
-         & transa='t')
-      call potrf(dtad(:nrank, :nrank), info=info)
+      call gemm(dir(:, :nrank), adir(:, :nrank), dtad, transa='t')
+      call potrf(dtad, info=info)
       if (info /= 0) then
          if (self%verbosity > 1) call timer%pop
          if (self%verbosity > 1) call timer%pop
@@ -575,14 +580,13 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error)
       end if
 
       ! Step lengths alpha = (P^T Q)^-1 (P^T R)
-      call gemm(dir(:, :nrank), res, step(:nrank, :), transa='t')
-      call potrs(dtad(:nrank, :nrank), step(:nrank, :))
+      call gemm(dir(:, :nrank), res, step, transa='t')
+      call potrs(dtad, step)
 
       ! Update solution X = X + P alpha
-      call gemm(dir(:, :nrank), step(:nrank, :), xmat, beta=1.0_wp)
+      call gemm(dir(:, :nrank), step, xmat, beta=1.0_wp)
       ! Update residual R = R - Q alpha
-      call gemm(adir(:, :nrank), step(:nrank, :), res, alpha=-1.0_wp, &
-         & beta=1.0_wp)
+      call gemm(adir(:, :nrank), step, res, alpha=-1.0_wp, beta=1.0_wp)
 
       ! Compute the new residual norms
       !$omp parallel do private(ivec) shared(res, resnorm, nrhs)
@@ -609,12 +613,11 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error)
       end do
 
       ! Update factors (P^T Q)^-1 (Q^T Z), beta is their negative
-      call gemm(adir(:, :nrank), precres, updfact(:nrank, :), transa='t')
-      call potrs(dtad(:nrank, :nrank), updfact(:nrank, :))
+      call gemm(adir(:, :nrank), precres, updfact, transa='t')
+      call potrs(dtad, updfact)
 
       ! Update search directions P = orth(Z + P beta)
-      call gemm(dir(:, :nrank), updfact(:nrank, :), precres, alpha=-1.0_wp, &
-         & beta=1.0_wp)
+      call gemm(dir(:, :nrank), updfact, precres, alpha=-1.0_wp, beta=1.0_wp)
       dir(:, :) = precres
       call orthonormalize(dir, nrank, error)
       if (allocated(error)) then
@@ -704,7 +707,7 @@ end subroutine block_matmul
 subroutine orthonormalize(vec, nrank, error)
    !> On input: block of vectors; on output: orthonormal basis in the first
    !> nrank columns
-   real(wp), intent(inout) :: vec(:, :)
+   real(wp), contiguous, intent(inout) :: vec(:, :)
 
    !> Rank of the block of vectors
    integer, intent(out) :: nrank
