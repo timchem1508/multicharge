@@ -539,6 +539,8 @@ subroutine solve(self, mol, solver, cache, error, &
 
    ! Calculate charge derivatives if requested
    if (cpq) then
+      call timer%push("setup_gradient")
+
       ! Right-hand sides of the response equations, dX/dR - dA/dR*q
       call timer%push("dabdr_setup")
       call self%get_partial_derivs(mol, ndim, cache, alpha=-1.0_wp, beta=1.0_wp, &
