@@ -236,6 +236,10 @@ subroutine help(unit)
       & "Use neighborlist for solver (complete list with charge gradient)", &
       "-cut, -cutoff, --cutoff <real>", &
       & "Cutoff for neighborlist generation in Bohrs (default: 29.0 Bohr)", &
+      "-ainvthr, --ainvthr <real>", &
+      & "Relative threshold for the inverse in charge gradients (cg, list)", &
+      "-qgk, --qgrad-kernel <dense|sparse>", &
+      & "Contraction for charge gradients (cg, list, default: auto)", &
       "-v, -verbose, --verbose", "Show more", &
       "-s, -silent, --silent", "Show less", &
       "-j, -json, --json", &
@@ -306,9 +310,9 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
    integer :: iarg, narg, iostat
    character(len=:), allocatable :: arg
 
-   character(len=:), allocatable :: solver_name
+   character(len=:), allocatable :: solver_name, qgrad_kernel
    integer, allocatable :: maxiter
-   real(wp), allocatable :: tol
+   real(wp), allocatable :: tol, ainvthr
 
    model_id = mchrg_model%eeq2019
    use_nlist = .false.
@@ -432,6 +436,26 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
          end if
          case("-nlist", "-list", "--nlist")
          use_nlist = .true.
+         case("-ainvthr", "--ainvthr")
+         allocate(ainvthr)
+         iarg = iarg + 1
+         call get_argument(iarg, arg)
+         read(arg, *, iostat=iostat) ainvthr
+         if (iostat /= 0) then
+            call fatal_error(error, "Invalid threshold for the inverse")
+            exit
+         end if
+         case("-qgk", "--qgrad-kernel")
+         iarg = iarg + 1
+         call get_argument(iarg, qgrad_kernel)
+         if (.not. allocated(qgrad_kernel)) then
+            call fatal_error(error, "Missing argument for charge gradient kernel")
+            exit
+         end if
+         if (qgrad_kernel /= "dense" .and. qgrad_kernel /= "sparse") then
+            call fatal_error(error, "Invalid charge gradient kernel")
+            exit
+         end if
          case("-cut", "-cutoff", "--cutoff")
          iarg = iarg + 1
          call get_argument(iarg, arg)
@@ -467,9 +491,21 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
          solver_input%verbosity = verbosity
       end if
       solver_input%use_nlist = use_nlist
+      if (allocated(ainvthr)) then
+         solver_input%ainvthr = ainvthr
+      end if
+      if (allocated(qgrad_kernel)) then
+         solver_input%sparse_qgrad = qgrad_kernel == "sparse"
+      end if
       type is (direct_input)
       if (allocated(verbosity)) then
          solver_input%verbosity = verbosity
+      end if
+      if ((allocated(ainvthr) .or. allocated(qgrad_kernel)) &
+         & .and. .not. allocated(error)) then
+         call fatal_error(error, &
+            & "Inverse threshold and charge gradient kernel require the cg solver.")
+         return
       end if
    end select
 

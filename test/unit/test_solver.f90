@@ -14,7 +14,7 @@
 ! limitations under the License.
 
 module test_solver
-   use mctc_env, only: wp
+   use mctc_env, only: wp, i8
    use mctc_env_testing, only: new_unittest, unittest_type, error_type, test_failed
    use mctc_io_structure, only: structure_type, new
    use mstore, only: get_structure
@@ -56,7 +56,13 @@ subroutine collect_solver(testsuite)
    & new_unittest("cg-random-spd", test_cg_random_spd), &
    & new_unittest("block-cg-get-blocks", test_get_blocks), &
    & new_unittest("block-cg-dense", test_block_cg_dense), &
-   & new_unittest("block-cg-sparse", test_block_cg_sparse) &
+   & new_unittest("block-cg-sparse", test_block_cg_sparse), &
+   & new_unittest("cg-invert-dense", test_cg_invert_dense), &
+   & new_unittest("cg-invert-sparse-complete", test_cg_invert_sparse_complete), &
+   & new_unittest("cg-invert-sparse-upper", test_cg_invert_sparse_upper), &
+   & new_unittest("cg-invert-no-matrix", test_cg_invert_no_matrix), &
+   & new_unittest("cg-invert-list", test_cg_invert_list), &
+   & new_unittest("cg-invert-list-upper", test_cg_invert_list_upper) &
    & ]
 
 end subroutine collect_solver
@@ -780,6 +786,310 @@ subroutine test_block_cg_sparse(error)
    end if
 
 end subroutine test_block_cg_sparse
+
+
+!> Test: Block-CG inversion of a dense random SPD matrix
+subroutine test_cg_invert_dense(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   integer, parameter :: n = 150
+   real(wp), allocatable :: amat(:, :), ainv(:, :)
+   type(cg_solver) :: solver
+
+   call new_cg_solver(solver, cg_input(cgtol=1.0e-14_wp, cgmiter=1000, &
+      & verbosity=0, use_nlist=.false.))
+
+   call random_spd(n, amat)
+   allocate(ainv(n, n))
+   call solver%invert(amat=amat, ainv=ainv, error=error)
+   if (allocated(error)) return
+
+   call check_inverse(error, amat, ainv)
+
+end subroutine test_cg_invert_dense
+
+
+!> Test: Block-CG inversion of a banded SPD matrix in complete CSR storage
+subroutine test_cg_invert_sparse_complete(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   call test_cg_invert_sparse_gen(error, complete=.true.)
+
+end subroutine test_cg_invert_sparse_complete
+
+
+!> Test: Block-CG inversion of a banded SPD matrix in upper-triangular CSR
+subroutine test_cg_invert_sparse_upper(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   call test_cg_invert_sparse_gen(error, complete=.false.)
+
+end subroutine test_cg_invert_sparse_upper
+
+
+!> Test: Block-CG inversion without a coefficient matrix reports an error
+subroutine test_cg_invert_no_matrix(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   real(wp) :: ainv(4, 4)
+   type(cg_solver) :: solver
+
+   call new_cg_solver(solver, cg_input(cgtol=1.0e-14_wp, cgmiter=1000, &
+      & verbosity=0, use_nlist=.false.))
+
+   call solver%invert(ainv=ainv, error=error)
+   if (.not. allocated(error)) then
+      call test_failed(error, "Missing coefficient matrix was not reported")
+      return
+   end if
+   deallocate(error)
+
+end subroutine test_cg_invert_no_matrix
+
+
+!> Invert a banded SPD matrix in CSR storage and compare to the dense inverse
+subroutine test_cg_invert_sparse_gen(error, complete)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Store the complete matrix instead of its upper triangle
+   logical, intent(in) :: complete
+
+   integer, parameter :: n = 120, band = 5
+   real(wp), allocatable :: amat(:, :), alist(:), adense(:, :), asparse(:, :)
+   type(csr_list) :: list
+   type(cg_solver) :: solver
+
+   call banded_spd(n, band, amat)
+   call dense_to_csr(amat, complete, alist, list)
+   allocate(adense(n, n), asparse(n, n))
+
+   call new_cg_solver(solver, cg_input(cgtol=1.0e-14_wp, cgmiter=1000, &
+      & verbosity=0, use_nlist=.false.))
+   call solver%invert(amat=amat, ainv=adense, error=error)
+   if (allocated(error)) return
+
+   call new_cg_solver(solver, cg_input(cgtol=1.0e-14_wp, cgmiter=1000, &
+      & verbosity=0, use_nlist=.true.))
+   call solver%invert(alist=alist, ainv=asparse, list=list, error=error)
+   if (allocated(error)) return
+
+   call check_inverse(error, amat, asparse)
+   if (allocated(error)) return
+   if (any(abs(asparse - adense) > thr1)) then
+      call test_failed(error, "Sparse and dense block-CG inverses differ")
+      print '(a, es12.4)', "Max deviation: ", maxval(abs(asparse - adense))
+   end if
+
+end subroutine test_cg_invert_sparse_gen
+
+
+!> Test: Block-CG inversion on the pattern of a complete list, for a matrix
+!> of interleaved atom groups whose inverse has the same pattern
+subroutine test_cg_invert_list(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   integer, parameter :: n = 90, ngroup = 7
+   real(wp), allocatable :: amat(:, :), alist(:), adense(:, :), ainvlist(:)
+   type(csr_list) :: list
+   type(cg_solver) :: solver
+   integer :: iat
+   integer(i8) :: kat
+   real(wp) :: dev
+
+   call grouped_spd(n, ngroup, amat)
+   call dense_to_csr(amat, .true., alist, list)
+   allocate(adense(n, n), ainvlist(size(list%nlat)))
+
+   call new_cg_solver(solver, cg_input(cgtol=1.0e-14_wp, cgmiter=1000, &
+      & verbosity=0, use_nlist=.false.))
+   call solver%invert(amat=amat, ainv=adense, error=error)
+   if (allocated(error)) return
+
+   call new_cg_solver(solver, cg_input(cgtol=1.0e-14_wp, cgmiter=1000, &
+      & verbosity=0, use_nlist=.true.))
+   call solver%invert_list(alist, list, ainvlist, error=error)
+   if (allocated(error)) return
+
+   dev = 0.0_wp
+   do iat = 1, n
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         dev = max(dev, abs(ainvlist(kat) - adense(list%nlat(kat), iat)))
+      end do
+   end do
+   if (dev > thr1) then
+      call test_failed(error, "Inverse on the list differs from the dense inverse")
+      print '(a, es12.4)', "Max deviation: ", dev
+   end if
+
+end subroutine test_cg_invert_list
+
+
+!> Test: Block-CG inversion on an upper-triangular list reports an error
+subroutine test_cg_invert_list_upper(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   integer, parameter :: n = 20, band = 3
+   real(wp), allocatable :: amat(:, :), alist(:), ainvlist(:)
+   type(csr_list) :: list
+   type(cg_solver) :: solver
+
+   call banded_spd(n, band, amat)
+   call dense_to_csr(amat, .false., alist, list)
+   allocate(ainvlist(size(list%nlat)))
+
+   call new_cg_solver(solver, cg_input(cgtol=1.0e-14_wp, cgmiter=1000, &
+      & verbosity=0, use_nlist=.true.))
+   call solver%invert_list(alist, list, ainvlist, error=error)
+   if (.not. allocated(error)) then
+      call test_failed(error, "Upper-triangular list was not reported")
+      return
+   end if
+   deallocate(error)
+
+end subroutine test_cg_invert_list_upper
+
+
+!> Check that a matrix is the symmetric inverse of an SPD matrix
+subroutine check_inverse(error, amat, ainv)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> SPD matrix
+   real(wp), intent(in) :: amat(:, :)
+
+   !> Approximate inverse of the matrix
+   real(wp), intent(in) :: ainv(:, :)
+
+   real(wp), allocatable :: unity(:, :)
+   integer :: i
+
+   allocate(unity(size(amat, 1), size(amat, 1)), source=0.0_wp)
+   do i = 1, size(amat, 1)
+      unity(i, i) = 1.0_wp
+   end do
+
+   if (any(abs(matmul(amat, ainv) - unity) > thr1)) then
+      call test_failed(error, "Block-CG inverse does not invert the matrix")
+      print '(a, es12.4)', "Max deviation: ", &
+         & maxval(abs(matmul(amat, ainv) - unity))
+      return
+   end if
+   if (any(abs(ainv - transpose(ainv)) > thr1)) then
+      call test_failed(error, "Block-CG inverse is not symmetric")
+      print '(a, es12.4)', "Max asymmetry: ", maxval(abs(ainv - transpose(ainv)))
+   end if
+
+end subroutine check_inverse
+
+
+!> Generate a banded, diagonally dominant SPD matrix
+subroutine banded_spd(n, band, amat)
+
+   !> Dimension of the matrix
+   integer, intent(in) :: n
+
+   !> Number of off-diagonals on each side
+   integer, intent(in) :: band
+
+   !> Banded SPD matrix
+   real(wp), allocatable, intent(out) :: amat(:, :)
+
+   integer :: iat, jat
+
+   allocate(amat(n, n), source=0.0_wp)
+   do iat = 1, n
+      amat(iat, iat) = 2.0_wp * band + 1.0_wp + real(iat, wp) / n
+      do jat = iat + 1, min(n, iat + band)
+         amat(iat, jat) = -1.0_wp / real(jat - iat, wp)
+         amat(jat, iat) = amat(iat, jat)
+      end do
+   end do
+
+end subroutine banded_spd
+
+
+!> Generate an SPD matrix coupling only atoms of the same group, the groups
+!> interleave as the remainder of the atom index
+subroutine grouped_spd(n, ngroup, amat)
+
+   !> Dimension of the matrix
+   integer, intent(in) :: n
+
+   !> Number of groups
+   integer, intent(in) :: ngroup
+
+   !> Grouped SPD matrix
+   real(wp), allocatable, intent(out) :: amat(:, :)
+
+   integer :: iat, jat
+
+   allocate(amat(n, n), source=0.0_wp)
+   do iat = 1, n
+      do jat = 1, n
+         if (jat == iat .or. mod(iat, ngroup) /= mod(jat, ngroup)) cycle
+         amat(jat, iat) = -1.0_wp / real(1 + abs(iat - jat), wp)
+      end do
+      amat(iat, iat) = sum(abs(amat(:, iat))) + 1.0_wp + real(iat, wp) / n
+   end do
+
+end subroutine grouped_spd
+
+
+!> Compressed-row storage of the nonzero elements of a symmetric matrix with
+!> the diagonal element first in each row
+subroutine dense_to_csr(amat, complete, alist, list)
+
+   !> Dense symmetric matrix
+   real(wp), intent(in) :: amat(:, :)
+
+   !> Store the complete matrix instead of its upper triangle
+   logical, intent(in) :: complete
+
+   !> Matrix values in compressed-row storage
+   real(wp), allocatable, intent(out) :: alist(:)
+
+   !> Compressed-row index of the matrix
+   type(csr_list), intent(out) :: list
+
+   integer :: n, iat, jat, jmin, nnz
+
+   n = size(amat, 1)
+   nnz = count(abs(amat) > 0.0_wp)
+   list%complete = complete
+   allocate(list%inl(n + 1), list%nlat(nnz), alist(nnz))
+   nnz = 0
+   do iat = 1, n
+      list%inl(iat) = nnz + 1
+      nnz = nnz + 1
+      list%nlat(nnz) = iat
+      alist(nnz) = amat(iat, iat)
+      jmin = 1
+      if (.not. complete) jmin = iat + 1
+      do jat = jmin, n
+         if (jat == iat .or. .not. abs(amat(jat, iat)) > 0.0_wp) cycle
+         nnz = nnz + 1
+         list%nlat(nnz) = jat
+         alist(nnz) = amat(jat, iat)
+      end do
+   end do
+   list%inl(n + 1) = nnz + 1
+
+end subroutine dense_to_csr
 
 
 !> Generate a well-conditioned random SPD matrix

@@ -34,7 +34,7 @@ module multicharge_model_type
    use multicharge_blas, only : gemv, symv, gemm
    use multicharge_model_cache, only : mchrg_cache
    use multicharge_solver_type, only : mchrg_solver_type
-   use multicharge_solver_cg, only : cg_solver, get_blocks
+   use multicharge_solver_cg, only : cg_solver
 
    implicit none
    private
@@ -268,6 +268,16 @@ module multicharge_model_type
 
    !> Smallest positive working-precision number
    real(wp), parameter :: eps = tiny(1.0_wp)
+
+   !> Number of atoms per slab when expanding neighborlist derivatives
+   integer, parameter :: slab_size = 512
+
+   !> Number of columns per block in the sparse charge derivative contraction
+   integer, parameter :: sparse_block = 8
+
+   !> Cost of a multiplication in the sparse charge derivative contraction
+   !> relative to one in the dense slabs, chooses between both
+   real(wp), parameter :: sparse_cost = 16.0_wp
 
 
 contains
@@ -591,12 +601,10 @@ subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit)
    !> Output unit
    integer, intent(in), optional :: unit
 
-   real(wp), allocatable :: daqxdr(:, :, :), daqxdL(:, :, :)
+   real(wp), allocatable :: daqxdr(:, :, :), daqxdL(:, :, :), ainv(:, :)
    real(wp), allocatable :: diag(:), rhs(:), sol(:), bvec(:, :)
-   real(wp), allocatable :: bmat(:, :), xmat(:, :), blocks(:, :, :)
-   integer, allocatable :: ncol(:)
    real(wp) :: scale, uvecsum
-   integer :: iat, jat, ic, jc, ivec, iblk, nrhs
+   integer :: iat, jat, ic, jc
    integer(i8) :: kat, lat
 
    if (allocated(cache%ainv)) then
@@ -611,6 +619,50 @@ subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit)
    end if
 
    ! Iterative solve with projection onto the charge constraint
+   uvecsum = sum(cache%uvec)
+
+   ! Inverse of J by block CG instead of 3N+9 solves with the columns of
+   ! dB/dR - dA/dR*q, then dq/dR = (dB/dR - dA/dR*q)^T (P J^-1)^T
+   select type (solver)
+   class is (cg_solver)
+      if (present(list)) then
+         ! J^-1 decays fast with the distance and is kept on the pattern of the
+         ! list, the dense part of (P J^-1)^T = J^-1 - u*u^T/sum(u) is the
+         ! rank-1 term of the charge constraint, which is rebuilt from uvec
+         if (allocated(cache%ainvlist)) then
+            if (size(cache%ainvlist, kind=i8) /= size(list%nlat, kind=i8)) &
+               & deallocate(cache%ainvlist)
+         end if
+         if (.not. allocated(cache%ainvlist)) then
+            allocate(cache%ainvlist(size(list%nlat, kind=i8)))
+         end if
+         call solver%invert_list(cache%alist, list, cache%ainvlist, &
+            & new_unit=unit, error=error)
+         if (allocated(error)) return
+
+         call get_q_derivs_list(mol, solver, cache, list, dqdr, dqdL, unit)
+         return
+      end if
+
+      allocate(ainv(mol%nat, mol%nat))
+      call solver%invert(amat=cache%amat, ainv=ainv, new_unit=unit, &
+         & error=error)
+      if (allocated(error)) return
+
+      ! Projection onto the charge constraint, (P J^-1)^T = J^-1 - u*u^T/sum(u)
+      !$omp parallel do default(none) schedule(runtime) &
+      !$omp shared(mol, cache, ainv, uvecsum) private(jat, scale)
+      do jat = 1, mol%nat
+         scale = cache%uvec(jat) / (uvecsum + eps)
+         ainv(:, jat) = ainv(:, jat) - scale * cache%uvec
+      end do
+
+      call gemm(cache%dabdr(:, :, :mol%nat), ainv, dqdr)
+      call gemm(cache%dabdL(:, :, :mol%nat), ainv, dqdL)
+      return
+   end select
+
+   ! Column-wise solve for solvers without block support
    allocate(diag(mol%nat))
    if (present(list)) then
       do iat = 1, mol%nat
@@ -621,64 +673,6 @@ subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit)
          diag(iat) = cache%amat(iat, iat) + eps
       end do
    end if
-
-   uvecsum = sum(cache%uvec)
-
-   ! Block solve for all position and lattice derivatives at once, the
-   ! neighborlist storage is solved column by column below
-   if (.not. present(list)) then
-      select type (solver)
-      class is (cg_solver)
-         ! J*M = dB/dR - dA/dR*q, columns ordered as (ic, iat) then (ic, jc)
-         nrhs = 3 * mol%nat + 9
-         allocate(bmat(mol%nat, nrhs), xmat(mol%nat, nrhs))
-         do iat = 1, mol%nat
-            do ic = 1, 3
-               ivec = ic + 3 * (iat - 1)
-               bmat(:, ivec) = cache%dabdr(ic, iat, :mol%nat)
-            end do
-         end do
-         do jc = 1, 3
-            do ic = 1, 3
-               ivec = 3 * mol%nat + ic + 3 * (jc - 1)
-               bmat(:, ivec) = cache%dabdL(ic, jc, :mol%nat)
-            end do
-         end do
-         do ivec = 1, nrhs
-            xmat(:, ivec) = bmat(:, ivec) / diag
-         end do
-
-         call get_blocks(bmat, blocks, ncol, block_size=16)
-         ivec = 0
-         do iblk = 1, size(ncol)
-            call solver%solve_block(amat=cache%amat, alist=cache%alist, &
-               & bmat=blocks(:, :ncol(iblk), iblk), &
-               & xmat=xmat(:, ivec+1:ivec+ncol(iblk)), list=list, &
-               & new_unit=unit, error=error)
-            if (allocated(error)) return
-            ivec = ivec + ncol(iblk)
-         end do
-
-         ! Projection onto the charge constraint: dq = m - scale*u
-         do ivec = 1, nrhs
-            scale = sum(xmat(:, ivec)) / (uvecsum + eps)
-            xmat(:, ivec) = xmat(:, ivec) - scale * cache%uvec
-         end do
-         do iat = 1, mol%nat
-            do ic = 1, 3
-               dqdr(ic, iat, :) = xmat(:, ic + 3 * (iat - 1))
-            end do
-         end do
-         do jc = 1, 3
-            do ic = 1, 3
-               dqdL(ic, jc, :) = xmat(:, 3 * mol%nat + ic + 3 * (jc - 1))
-            end do
-         end do
-         return
-      end select
-   end if
-
-   ! Column-wise solve for neighborlists and solvers without block support
    allocate(rhs(mol%nat), sol(mol%nat), bvec(3, mol%nat))
 
    ! Position derivatives: J*m = db/dR - dA/dR*q, dq/dR = m - scale*u
@@ -722,6 +716,251 @@ subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit)
    end do
 
 end subroutine get_q_derivs
+
+
+!> Charge derivatives from the inverse S = J^-1 on the pattern of the complete
+!> neighborlist, dq/dR = B^T S - (B^T u) u^T / sum(u) with B = dB/dR - dA/dR*q,
+!> where the rank-1 charge constraint term is formed from uvec
+subroutine get_q_derivs_list(mol, solver, cache, list, dqdr, dqdL, unit)
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Conjugate-gradient solver with the contraction settings
+   class(cg_solver), intent(in) :: solver
+
+   !> Cache with the inverse on the neighborlist
+   type(mchrg_cache), intent(in) :: cache
+
+   !> Complete neighborlist
+   type(csr_list), intent(in) :: list
+
+   !> Derivative of the atomic partial charges w.r.t. atomic positions
+   real(wp), intent(out) :: dqdr(:, :, :)
+
+   !> Derivative of the atomic partial charges w.r.t. lattice vectors
+   real(wp), intent(out) :: dqdL(:, :, :)
+
+   !> Output unit
+   integer, intent(in), optional :: unit
+
+   integer :: iat, jat
+   integer(i8) :: kat, nkeep
+   real(wp) :: thr, nmul_sparse, nmul_dense, uvecsum, scale
+   real(wp) :: wlat(3, 3)
+   real(wp), allocatable :: wvec(:, :)
+   logical :: sparse
+
+   ! Elements of the inverse below the threshold are skipped
+   thr = 0.0_wp
+   do iat = 1, mol%nat
+      thr = max(thr, cache%ainvlist(list%inl(iat)))
+   end do
+   if (allocated(solver%ainvthr)) then
+      thr = solver%ainvthr * thr
+   else
+      thr = 0.0_wp
+   end if
+
+   ! Multiplications of the sparse contraction against the dense slabs
+   nkeep = 0_i8
+   nmul_sparse = 0.0_wp
+   do iat = 1, mol%nat
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         if (abs(cache%ainvlist(kat)) <= thr) cycle
+         jat = list%nlat(kat)
+         nkeep = nkeep + 1_i8
+         nmul_sparse = nmul_sparse + real(list%inl(jat + 1) - list%inl(jat), wp)
+      end do
+   end do
+   nmul_dense = real(mol%nat, wp)**3
+   if (allocated(solver%sparse_qgrad)) then
+      sparse = solver%sparse_qgrad
+   else
+      sparse = sparse_cost * nmul_sparse < nmul_dense
+   end if
+
+   if (present(unit) .and. solver%verbosity > 0) then
+      write(unit, '(a, 1x, i0, a, i0)') "Inverse elements on neighborlist :", &
+         & nkeep, " of ", size(list%nlat, kind=i8)
+      write(unit, '(a, 1x, a)') "Charge derivative contraction    :", &
+         & trim(merge("sparse     ", "dense slabs", sparse))
+      write(unit, '(a)') ''
+   end if
+
+   if (sparse) then
+      call get_dqdr_sparse(mol%nat, list, cache%ainvlist, cache%dabdrlist, thr, &
+         & dqdr)
+   else
+      call get_dqdr_slab(mol%nat, list, cache%ainvlist, cache%dabdrlist, thr, &
+         & dqdr)
+   end if
+
+   ! Contractions with the constraint response, w = B^T u
+   uvecsum = sum(cache%uvec)
+   allocate(wvec(3, mol%nat), source=0.0_wp)
+   wlat(:, :) = 0.0_wp
+   do iat = 1, mol%nat
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         jat = list%nlat(kat)
+         wvec(:, jat) = wvec(:, jat) + cache%dabdrlist(:, kat) * cache%uvec(iat)
+      end do
+      wlat(:, :) = wlat + cache%dabdL(:, :, iat) * cache%uvec(iat)
+   end do
+
+   ! Charge constraint term and the lattice derivatives B_L^T S
+   !$omp parallel do default(none) schedule(runtime) &
+   !$omp shared(mol, list, cache, thr, uvecsum, wvec, wlat, dqdr, dqdL) &
+   !$omp private(iat, jat, kat, scale)
+   do jat = 1, mol%nat
+      scale = cache%uvec(jat) / (uvecsum + eps)
+      dqdr(:, :, jat) = dqdr(:, :, jat) - scale * wvec
+      dqdL(:, :, jat) = -scale * wlat
+      do kat = list%inl(jat), list%inl(jat + 1) - 1
+         if (abs(cache%ainvlist(kat)) <= thr) cycle
+         iat = list%nlat(kat)
+         dqdL(:, :, jat) = dqdL(:, :, jat) &
+            & + cache%ainvlist(kat) * cache%dabdL(:, :, iat)
+      end do
+   end do
+
+end subroutine get_q_derivs_list
+
+
+!> Position derivatives B^T S with B and the rows of S expanded into dense
+!> slabs of atoms, contracted by matrix multiplication
+subroutine get_dqdr_slab(nat, list, ainvlist, dabdrlist, thr, dqdr)
+
+   !> Number of atoms
+   integer, intent(in) :: nat
+
+   !> Complete neighborlist
+   type(csr_list), intent(in) :: list
+
+   !> Inverse of the Coulomb matrix on the neighborlist
+   real(wp), intent(in) :: ainvlist(:)
+
+   !> Derivatives B = dB/dR - dA/dR*q on the neighborlist
+   real(wp), intent(in) :: dabdrlist(:, :)
+
+   !> Threshold below which elements of the inverse are skipped
+   real(wp), intent(in) :: thr
+
+   !> Position derivatives without the charge constraint term
+   real(wp), intent(out) :: dqdr(:, :, :)
+
+   integer :: ioff, irow, nrow, nslab, iat, jat
+   integer(i8) :: kat
+   real(wp), allocatable :: bslab(:, :, :), sslab(:, :)
+
+   ! S is symmetric, the rows of a slab are stored as columns
+   nslab = min(nat, slab_size)
+   allocate(bslab(3, nat, nslab), sslab(nat, nslab))
+   dqdr(:, :, :) = 0.0_wp
+   do ioff = 0, nat - 1, nslab
+      nrow = min(nslab, nat - ioff)
+      !$omp parallel do default(none) schedule(runtime) &
+      !$omp shared(list, ainvlist, dabdrlist, thr, bslab, sslab, ioff, nrow) &
+      !$omp private(irow, iat, jat, kat)
+      do irow = 1, nrow
+         iat = ioff + irow
+         bslab(:, :, irow) = 0.0_wp
+         sslab(:, irow) = 0.0_wp
+         do kat = list%inl(iat), list%inl(iat + 1) - 1
+            jat = list%nlat(kat)
+            bslab(:, jat, irow) = bslab(:, jat, irow) + dabdrlist(:, kat)
+            if (abs(ainvlist(kat)) > thr) sslab(jat, irow) = ainvlist(kat)
+         end do
+      end do
+      call gemm(bslab(:, :, :nrow), sslab(:, :nrow), dqdr, transb='t', &
+         & beta=1.0_wp)
+   end do
+
+end subroutine get_dqdr_slab
+
+
+!> Position derivatives B^T S from the sparse matrices, one block of columns of
+!> S per task. The rows of B needed by a block are streamed once into a local
+!> accumulator, which pays off over the dense slabs for large systems.
+subroutine get_dqdr_sparse(nat, list, ainvlist, dabdrlist, thr, dqdr)
+
+   !> Number of atoms
+   integer, intent(in) :: nat
+
+   !> Complete neighborlist
+   type(csr_list), intent(in) :: list
+
+   !> Inverse of the Coulomb matrix on the neighborlist
+   real(wp), intent(in) :: ainvlist(:)
+
+   !> Derivatives B = dB/dR - dA/dR*q on the neighborlist
+   real(wp), intent(in) :: dabdrlist(:, :)
+
+   !> Threshold below which elements of the inverse are skipped
+   real(wp), intent(in) :: thr
+
+   !> Position derivatives without the charge constraint term
+   real(wp), intent(out) :: dqdr(:, :, :)
+
+   integer :: iat, jat, xat, joff, ncol, ib, iu, nu
+   integer(i8) :: kat, lat
+   ! Accumulator of the block columns, acc(:, ib, x) = dq_(joff+ib)/dR_x
+   real(wp), allocatable :: acc(:, :, :)
+   ! Elements S(a, joff+ib) of the rows a held by the block columns
+   real(wp), allocatable :: sblk(:, :)
+   ! Position of a row in the union of rows and the union itself
+   integer, allocatable :: mark(:), ulist(:)
+
+   !$omp parallel default(none) &
+   !$omp shared(nat, list, ainvlist, dabdrlist, thr, dqdr) &
+   !$omp private(iat, jat, xat, joff, ncol, ib, iu, nu, kat, lat) &
+   !$omp private(acc, sblk, mark, ulist)
+   allocate(acc(3, sparse_block, nat), sblk(sparse_block, nat), mark(nat), &
+      & ulist(nat))
+   mark(:) = 0
+   !$omp do schedule(dynamic)
+   do joff = 0, nat - 1, sparse_block
+      ncol = min(sparse_block, nat - joff)
+
+      ! Union of the rows of S held by the block columns
+      nu = 0
+      do ib = 1, ncol
+         jat = joff + ib
+         do kat = list%inl(jat), list%inl(jat + 1) - 1
+            if (abs(ainvlist(kat)) <= thr) cycle
+            iat = list%nlat(kat)
+            if (mark(iat) == 0) then
+               nu = nu + 1
+               mark(iat) = nu
+               ulist(nu) = iat
+               sblk(:, nu) = 0.0_wp
+            end if
+            sblk(ib, mark(iat)) = ainvlist(kat)
+         end do
+      end do
+
+      ! dq_j/dR_x = sum_a S(a, j) B(:, x, a) with B(:, :, a) in the row of a
+      acc(:, :ncol, :) = 0.0_wp
+      do iu = 1, nu
+         iat = ulist(iu)
+         mark(iat) = 0
+         do lat = list%inl(iat), list%inl(iat + 1) - 1
+            xat = list%nlat(lat)
+            do ib = 1, ncol
+               acc(:, ib, xat) = acc(:, ib, xat) + sblk(ib, iu) * dabdrlist(:, lat)
+            end do
+         end do
+      end do
+      do ib = 1, ncol
+         dqdr(:, :, joff + ib) = acc(:, ib, :)
+      end do
+   end do
+   !$omp end do
+   deallocate(acc, sblk, mark, ulist)
+   !$omp end parallel
+
+end subroutine get_dqdr_sparse
+
 
 !> External gradient calculation using the adjoint state method
 subroutine get_external_gradient(self, mol, solver, cache, error, &

@@ -66,6 +66,10 @@ module multicharge_model_cache
       !> Inversed amat
       real(wp), allocatable :: ainv(:, :)
 
+      !> Inverse of amat on the pattern of the complete neighborlist, the
+      !> charge constraint part -uvec*uvec^T/sum(uvec) is not stored
+      real(wp), allocatable :: ainvlist(:)
+
       !> Solution of the ES equation
       real(wp), allocatable :: vrhs(:)
 
