@@ -19,7 +19,8 @@
 
 !> Cache for charge models
 module multicharge_model_cache
-   use mctc_env, only : wp
+   use mctc_env, only : wp, i8
+   use mctc_csrlist, only : csr_list
    use mctc_io, only : structure_type
    use mctc_wignerseitz, only : wignerseitz_cell
    implicit none
@@ -96,8 +97,55 @@ module multicharge_model_cache
       !> row of atom i holds the derivative of component i w.r.t. that neighbor
       real(wp), allocatable :: dabdrlist(:, :)
 
+      !> Compressed-row pattern of the position derivatives of the charges, row j
+      !> holds the atoms whose displacement changes the charge of atom j
+      type(csr_list) :: dqdrpat
+
+      !> Position derivatives of the charges on dqdrpat without the charge
+      !> constraint term, the entry of atom i in row j holds dq_j/dR_i
+      real(wp), allocatable :: dqdrlist(:, :)
+
+      !> Factors of the charge constraint term of the position derivatives,
+      !> dq_j/dR_i = dqdrlist(:, (j, i)) - dqdrscal(:, i) * uvec(j)
+      real(wp), allocatable :: dqdrscal(:, :)
+
       !> Logical flag for gradient calculation
       logical :: grad
+   contains
+
+      !> Position derivatives of the charge of one atom from the compressed storage
+      procedure :: get_dqdr_row
+
    end type mchrg_cache
+
+
+contains
+
+
+!> Position derivatives of the charge of one atom w.r.t. all atomic positions,
+!> expanded from the compressed storage dqdrlist and the charge constraint term
+subroutine get_dqdr_row(self, jat, dqdr)
+
+   !> Cache with the compressed position derivatives
+   class(mchrg_cache), intent(in) :: self
+
+   !> Atom of the charge
+   integer, intent(in) :: jat
+
+   !> Derivatives dq_j/dR_i for all atoms i, dimension (3, nat)
+   real(wp), intent(out) :: dqdr(:, :)
+
+   integer :: iat
+   integer(i8) :: kat
+
+   do iat = 1, size(dqdr, 2)
+      dqdr(:, iat) = -self%dqdrscal(:, iat) * self%uvec(jat)
+   end do
+   do kat = self%dqdrpat%inl(jat), self%dqdrpat%inl(jat + 1) - 1
+      iat = self%dqdrpat%nlat(kat)
+      dqdr(:, iat) = dqdr(:, iat) + self%dqdrlist(:, kat)
+   end do
+
+end subroutine get_dqdr_row
 
 end module multicharge_model_cache

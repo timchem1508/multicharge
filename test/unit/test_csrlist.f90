@@ -1209,18 +1209,18 @@ subroutine test_partial_derivs(error, mol, model)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   class(mchrg_solver_type), allocatable :: solver, direct, sparse
+   class(mchrg_solver_type), allocatable :: solver, direct
    class(mchrg_solver_input), allocatable :: solver_input, direct_in
    type(mchrg_cache), allocatable :: cache1, cache2, cache3
    type(csr_list), allocatable :: list
-   integer :: ndim, iscale
+   integer :: ndim, iscale, jat
    real(wp), parameter :: scales(2, 2) = reshape([1.0_wp, 0.0_wp, 0.0_wp, 1.0_wp], &
       & [2, 2])
    real(wp), allocatable :: trans(:, :), dabdr(:, :, :)
    real(wp), allocatable :: dqdr1(:, :, :), dqdL1(:, :, :)
    real(wp), allocatable :: dqdr2(:, :, :), dqdL2(:, :, :)
    real(wp), allocatable :: dqdr3(:, :, :), dqdL3(:, :, :)
-   real(wp), allocatable :: dqdr4(:, :, :), dqdL4(:, :, :)
+   real(wp), allocatable :: dqrow(:, :), dqdL4(:, :, :)
 
    allocate(cg_input :: solver_input)
    select type (solver_input)
@@ -1247,7 +1247,7 @@ subroutine test_partial_derivs(error, mol, model)
    allocate(dqdr1(3, mol%nat, mol%nat), dqdL1(3, 3, mol%nat))
    allocate(dqdr2(3, mol%nat, mol%nat), dqdL2(3, 3, mol%nat))
    allocate(dqdr3(3, mol%nat, mol%nat), dqdL3(3, 3, mol%nat))
-   allocate(dqdr4(3, mol%nat, mol%nat), dqdL4(3, 3, mol%nat))
+   allocate(dqrow(3, mol%nat), dqdL4(3, 3, mol%nat))
 
    ! Dense reference with the block CG solver
    allocate(cache1)
@@ -1287,20 +1287,22 @@ subroutine test_partial_derivs(error, mol, model)
       return
    end if
 
-   ! Sparse contraction of the inverse on the list instead of dense slabs
-   select type (solver_input)
-   type is (cg_input)
-      solver_input%sparse_qgrad = .true.
-   end select
-   call solver_maker(sparse, solver_input, error)
-   if (allocated(error)) return
-   call model%solve(mol, sparse, cache2, error, dqdr=dqdr4, dqdL=dqdL4, list=list, &
+   ! Position derivatives only in compressed storage, without a dense dqdr
+   call model%solve(mol, solver, cache2, error, dqdL=dqdL4, list=list, &
       & unit=output_unit)
    if (allocated(error)) return
 
-   if (any(abs(dqdr4 - dqdr2) > thr1) .or. any(abs(dqdL4 - dqdL2) > thr1)) then
-      call test_failed(error, "Sparse and dense slab contractions do not match")
-      print'(2es21.14)', maxval(abs(dqdr4 - dqdr2)), maxval(abs(dqdL4 - dqdL2))
+   do jat = 1, mol%nat
+      call cache2%get_dqdr_row(jat, dqrow)
+      if (any(abs(dqrow - dqdr2(:, :, jat)) > thr1)) then
+         call test_failed(error, "Compressed charge derivatives do not match")
+         print'(es21.14)', maxval(abs(dqrow - dqdr2(:, :, jat)))
+         return
+      end if
+   end do
+   if (any(abs(dqdL4 - dqdL2) > thr1)) then
+      call test_failed(error, "Charge derivatives w.r.t. strain without dqdr differ")
+      print'(es21.14)', maxval(abs(dqdL4 - dqdL2))
       return
    end if
 

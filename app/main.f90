@@ -110,7 +110,7 @@ program main
          call new_csr_list(list, mol, error, cutoff=cutoff, complete=qgrad)
       end if
       call timer%pop
-      write(output_unit, '(a, 1x, a)') "neighborlist generation time :", &
+      write(output_unit, '(a, 1x, a)') "Neighborlist generation time :", &
       & format_time(timer%get("nlist"))
    end if
 
@@ -144,10 +144,11 @@ program main
       sigma(:, :) = 0.0_wp
    end if
 
+   ! With a neighborlist the position derivatives of the charges stay in
+   ! compressed storage in the cache instead of a dense dqdr
    if (qgrad) then
-      allocate(dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat))
-      dqdr(:, :, :) = 0.0_wp
-      dqdL(:, :, :) = 0.0_wp
+      allocate(dqdL(3, 3, mol%nat), source=0.0_wp)
+      if (.not. use_nlist) allocate(dqdr(3, mol%nat, mol%nat), source=0.0_wp)
    end if
 
    grad = egrad .or. qgrad
@@ -184,7 +185,8 @@ program main
    end if
 
    call write_ascii_properties(output_unit, mol, model, cache%cn, qvec)
-   call write_ascii_results(output_unit, mol, energy, gradient, sigma, dqdr, dqdL, hess, press)
+   call write_ascii_results(output_unit, mol, energy, gradient, sigma, dqdr, dqdL, hess, &
+   & press, cache)
 
    call timer%pop
    if (verbosity > 1) then
@@ -195,7 +197,7 @@ program main
    if (json) then
       open(file=json_output, newunit=unit)
       call json_results(unit, "  ", energy=sum(energy), gradient=gradient, dqdr=dqdr, &
-      & charges=qvec, cn=cache%cn)
+      & charges=qvec, cn=cache%cn, cache=cache)
       close(unit)
       write(output_unit, '(a)') &
          "[Info] JSON dump of results written to '"//json_output//"'"
@@ -224,7 +226,7 @@ subroutine help(unit)
       "-e, -efield, --efield <x>,<y>,<z>", &
       & "Provide the external electric field in atomic units", &
       "-solver, --solver <type>", &
-      & "Provide the partial charge solver: 'cg' or 'direct' (default)", &
+      & "Provide the partial charge solver: 'cg' or 'direct' (default, cg with nlist)", &
       "-it, -maxiter, --maxiter <int>", "Provide the maximal number of CG iterations", &
       "-tol, -tolerance, --tolerance <real>", "Provide the tolerance of the solver", &
       "-g, -eg, -grad, --grad, -egrad, --egrad", &
@@ -238,8 +240,8 @@ subroutine help(unit)
       & "Cutoff for neighborlist generation in Bohrs (default: 29.0 Bohr)", &
       "-ainvthr, --ainvthr <real>", &
       & "Relative threshold for the inverse in charge gradients (cg, list)", &
-      "-qgk, --qgrad-kernel <dense|sparse>", &
-      & "Contraction for charge gradients (cg, list, default: auto)", &
+      "-ainvbuf, --ainvbuf <real>", &
+      & "Buffer in Bohr of the subsystems for the inverse (cg, list, default: 0)", &
       "-v, -verbose, --verbose", "Show more", &
       "-s, -silent, --silent", "Show less", &
       "-j, -json, --json", &
@@ -310,9 +312,9 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
    integer :: iarg, narg, iostat
    character(len=:), allocatable :: arg
 
-   character(len=:), allocatable :: solver_name, qgrad_kernel
+   character(len=:), allocatable :: solver_name
    integer, allocatable :: maxiter
-   real(wp), allocatable :: tol, ainvthr
+   real(wp), allocatable :: tol, ainvthr, ainvbuf
 
    model_id = mchrg_model%eeq2019
    use_nlist = .false.
@@ -445,15 +447,13 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
             call fatal_error(error, "Invalid threshold for the inverse")
             exit
          end if
-         case("-qgk", "--qgrad-kernel")
+         case("-ainvbuf", "--ainvbuf")
+         allocate(ainvbuf)
          iarg = iarg + 1
-         call get_argument(iarg, qgrad_kernel)
-         if (.not. allocated(qgrad_kernel)) then
-            call fatal_error(error, "Missing argument for charge gradient kernel")
-            exit
-         end if
-         if (qgrad_kernel /= "dense" .and. qgrad_kernel /= "sparse") then
-            call fatal_error(error, "Invalid charge gradient kernel")
+         call get_argument(iarg, arg)
+         read(arg, *, iostat=iostat) ainvbuf
+         if (iostat /= 0) then
+            call fatal_error(error, "Invalid buffer for the inverse")
             exit
          end if
          case("-cut", "-cutoff", "--cutoff")
@@ -467,16 +467,13 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
       end select
    end do
 
-   if ((allocated(maxiter) .or. allocated(tol)) .and. .not. allocated(solver_input)) then
-      call fatal_error(error, &
-         & "Maximal number of iterations and tolerance cannot be used alongside "&
-         & //"the cg solver.")
-      return
-   end if
-
-   ! Default solver is direct
+   ! Default solver is direct, only the cg solver supports a neighborlist
    if (.not. allocated(solver_input)) then
-      allocate(direct_input :: solver_input)
+      if (use_nlist) then
+         allocate(cg_input :: solver_input)
+      else
+         allocate(direct_input :: solver_input)
+      end if
    end if
 
    select type(solver_input)
@@ -494,17 +491,26 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
       if (allocated(ainvthr)) then
          solver_input%ainvthr = ainvthr
       end if
-      if (allocated(qgrad_kernel)) then
-         solver_input%sparse_qgrad = qgrad_kernel == "sparse"
+      if (allocated(ainvbuf)) then
+         solver_input%ainvbuf = ainvbuf
       end if
       type is (direct_input)
       if (allocated(verbosity)) then
          solver_input%verbosity = verbosity
       end if
-      if ((allocated(ainvthr) .or. allocated(qgrad_kernel)) &
-         & .and. .not. allocated(error)) then
+      if (allocated(error)) return
+      if (allocated(maxiter) .or. allocated(tol)) then
          call fatal_error(error, &
-            & "Inverse threshold and charge gradient kernel require the cg solver.")
+            & "Maximal number of iterations and tolerance require the cg solver.")
+         return
+      end if
+      if (allocated(ainvthr) .or. allocated(ainvbuf)) then
+         call fatal_error(error, &
+            & "Inverse threshold and inverse buffer require the cg solver.")
+         return
+      end if
+      if (use_nlist) then
+         call fatal_error(error, "The direct solver does not support a neighborlist.")
          return
       end if
    end select

@@ -28,7 +28,7 @@ module multicharge_solver_cg
    implicit none
    private
 
-   public :: cg_solver, new_cg_solver, cg_input, get_blocks
+   public :: cg_solver, new_cg_solver, cg_input
 
    !> Input configuration for the conjugate-gradient solver
    type, extends(mchrg_solver_input) :: cg_input
@@ -44,16 +44,15 @@ module multicharge_solver_cg
       !> Whether to use a neighborlist representation
       logical, allocatable :: use_nlist
 
-      !> Threshold for skipping elements of the inverse in the charge
-      !> derivatives, relative to its largest diagonal element
+      !> Threshold for dropping elements of the inverse in the charge
+      !> derivatives on a neighborlist, relative to its largest diagonal
+      !> element, which makes the compressed derivatives sparser
       real(wp), allocatable :: ainvthr
 
-      !> Whether to contract the charge derivatives with the sparse inverse
-      !> instead of dense slabs, chosen from an operation count if not set
-      logical, allocatable :: sparse_qgrad
-
-      !> Whether to use the iterative conjugate-gradient solver
-      logical :: cg = .true.
+      !> Buffer distance in Bohr of the subsystems for the inverse on the
+      !> neighborlist beyond the rows of the block atoms, at most the cutoff of
+      !> the list is effective
+      real(wp), allocatable :: ainvbuf
    end type cg_input
 
    !> Conjugate-gradient solver with a Jacobi preconditioner
@@ -70,13 +69,15 @@ module multicharge_solver_cg
       !> Whether to use a neighborlist representation
       logical, allocatable :: use_nlist
 
-      !> Threshold for skipping elements of the inverse in the charge
-      !> derivatives, relative to its largest diagonal element
+      !> Threshold for dropping elements of the inverse in the charge
+      !> derivatives on a neighborlist, relative to its largest diagonal
+      !> element, which makes the compressed derivatives sparser
       real(wp), allocatable :: ainvthr
 
-      !> Whether to contract the charge derivatives with the sparse inverse
-      !> instead of dense slabs, chosen from an operation count if not set
-      logical, allocatable :: sparse_qgrad
+      !> Buffer distance in Bohr of the subsystems for the inverse on the
+      !> neighborlist beyond the rows of the block atoms, at most the cutoff of
+      !> the list is effective
+      real(wp), allocatable :: ainvbuf
    contains
       !> Solve the linear system iteratively
       procedure :: solve
@@ -84,7 +85,7 @@ module multicharge_solver_cg
       !> Solve the linear system for a block of right-hand sides
       procedure :: solve_block
 
-      !> Invert the coefficient matrix block-wise
+      !> Invert the dense coefficient matrix block-wise
       procedure :: invert
 
       !> Invert the coefficient matrix on the pattern of its neighborlist
@@ -108,6 +109,9 @@ module multicharge_solver_cg
 
    !> Default threshold for skipping elements of the inverse
    real(wp), parameter :: ainvthr_def = 0.0_wp
+
+   !> Default buffer distance around the subsystems of the inverse
+   real(wp), parameter :: ainvbuf_def = 0.0_wp
 
    !> Default number of columns per block of right-hand sides
    integer, parameter :: block_size_def = 16
@@ -155,7 +159,11 @@ subroutine new_cg_solver(self, input)
    else
       self%ainvthr = ainvthr_def
    end if
-   if (allocated(input%sparse_qgrad)) self%sparse_qgrad = input%sparse_qgrad
+   if (allocated(input%ainvbuf)) then
+      self%ainvbuf = input%ainvbuf
+   else
+      self%ainvbuf = ainvbuf_def
+   end if
 
 end subroutine new_cg_solver
 
@@ -252,6 +260,10 @@ subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error
       return
    end if
    if (.not. nlist) then
+      if (.not. present(amat)) then
+         call fatal_error(error, "No coefficient matrix provided.")
+         return
+      end if
       if (size(amat, 1) /= ndim .or. size(amat, 2) /= ndim) then
          call fatal_error(error, "dimension mismatch.")
          return
@@ -391,50 +403,12 @@ subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error
 end subroutine solve
 
 
-!> Split the columns of a matrix into blocks for the block CG solver. Each
-!> block holds at most block_size columns, the last block is zero-padded.
-subroutine get_blocks(mat, box, ncol, block_size)
-   !> Matrix to split, typically a nat x nat matrix of right-hand sides
-   real(wp), intent(in) :: mat(:, :)
-
-   !> Column blocks of the matrix, dimension (size(mat, 1), block_size, nblk)
-   real(wp), allocatable, intent(out) :: box(:, :, :)
-
-   !> Number of occupied columns in each block
-   integer, allocatable, intent(out) :: ncol(:)
-
-   !> Maximum number of columns per block, default is 16
-   integer, intent(in), optional :: block_size
-
-   integer :: bsize, nrow, nvec, nblk, iblk, ivec
-
-   if (present(block_size)) then
-      bsize = max(1, block_size)
-   else
-      bsize = block_size_def
-   end if
-
-   nrow = size(mat, 1)
-   nvec = size(mat, 2)
-   bsize = max(1, min(bsize, nvec))
-   nblk = (nvec + bsize - 1) / bsize
-
-   allocate(box(nrow, bsize, nblk), source=0.0_wp)
-   allocate(ncol(nblk))
-   do iblk = 1, nblk
-      ivec = (iblk - 1) * bsize
-      ncol(iblk) = min(bsize, nvec - ivec)
-      box(:, :ncol(iblk), iblk) = mat(:, ivec+1:ivec+ncol(iblk))
-   end do
-
-end subroutine get_blocks
-
-
 !> Solve a linear system with multiple right-hand sides using the
 !> breakdown-free block conjugate gradient method with a Jacobi
 !> preconditioner (Ji, Sosonkina, Li, Co-HPC 2014). New search directions are
 !> orthonormalized by an eigendecomposition of their Gram matrix.
-subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error)
+subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
+   & niter)
    !> Conjugate-gradient solver instance
    class(cg_solver), intent(in) :: self
 
@@ -458,6 +432,9 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
+
+   !> Number of iterations until convergence
+   integer, intent(out), optional :: niter
 
    ! Maximal number of iterations
    integer :: maxit
@@ -496,6 +473,7 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error)
 
    nlist = self%use_nlist .and. .not. present(amat) .and. &
       & present(list) .and. present(alist)
+   if (present(niter)) niter = 0
 
    if (present(new_unit)) then
       unit = new_unit
@@ -636,6 +614,7 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error)
             call print_cg_convergence(unit, it, sqrt(maxval(resnorm)), &
                & self%verbosity)
          end if
+         if (present(niter)) niter = it
          exit
       end if
 
@@ -689,26 +668,20 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error)
 end subroutine solve_block
 
 
-!> Invert a symmetric positive definite matrix with the block CG solver. The
-!> columns of the inverse are solved in blocks. Since the inverse is symmetric,
-!> the rows K of a block that belong to earlier columns are already known and
-!> only the trailing rows U are solved from A_UU X_U = I_U - A_UK X_K, which
-!> shrinks with every block.
-subroutine invert(self, amat, alist, ainv, list, new_unit, error)
+!> Invert a dense symmetric positive definite matrix with the block CG solver.
+!> The columns of the inverse are solved in blocks. Since the inverse is
+!> symmetric, the rows K of a block that belong to earlier columns are already
+!> known and only the trailing rows U are solved from A_UU X_U = I_U - A_UK X_K,
+!> which shrinks with every block.
+subroutine invert(self, amat, ainv, new_unit, error)
    !> Conjugate-gradient solver instance
    class(cg_solver), intent(in) :: self
 
    !> Dense coefficient matrix of the linear system
-   real(wp), intent(in), optional :: amat(:, :)
-
-   !> Coefficient matrix values in compressed-row storage
-   real(wp), intent(in), optional :: alist(:)
+   real(wp), intent(in) :: amat(:, :)
 
    !> Inverse of the coefficient matrix
    real(wp), intent(out) :: ainv(:, :)
-
-   !> Optional neighborlist representation of the matrix
-   type(csr_list), intent(in), optional :: list
 
    !> Output unit
    integer, intent(in), optional :: new_unit
@@ -731,14 +704,6 @@ subroutine invert(self, amat, alist, ainv, list, new_unit, error)
    ! Storage of the dense trailing matrix A_UU
    real(wp), allocatable, target :: abuf(:)
    real(wp), pointer :: asub(:, :)
-   ! Trailing matrix A_UU in compressed-row storage
-   real(wp), allocatable :: alsub(:)
-   type(csr_list) :: lsub
-
-   logical :: nlist
-
-   nlist = self%use_nlist .and. .not. present(amat) .and. &
-      & present(list) .and. present(alist)
 
    ! Dimensions check
    ndim = size(ainv, 1)
@@ -746,37 +711,17 @@ subroutine invert(self, amat, alist, ainv, list, new_unit, error)
       call fatal_error(error, "Inverse matrix must be square.")
       return
    end if
-   if (nlist) then
-      if (size(list%inl) < ndim + 1) then
-         call fatal_error(error, "Dimension mismatch between list and ainv.")
-         return
-      end if
-   else
-      if (.not. present(amat)) then
-         call fatal_error(error, "No coefficient matrix provided.")
-         return
-      end if
-      if (size(amat, 1) /= ndim .or. size(amat, 2) /= ndim) then
-         call fatal_error(error, "dimension mismatch.")
-         return
-      end if
+   if (size(amat, 1) /= ndim .or. size(amat, 2) /= ndim) then
+      call fatal_error(error, "dimension mismatch.")
+      return
    end if
    if (ndim == 0) return
 
-   allocate(diag(ndim), xknown(ndim, block_size_def))
-   if (nlist) then
-      do iat = 1, ndim
-         diag(iat) = alist(list%inl(iat)) + eps
-      end do
-      lsub%complete = list%complete
-      allocate(lsub%inl(ndim + 1), lsub%nlat(size(list%nlat)), &
-         & alsub(size(alist)))
-   else
-      do iat = 1, ndim
-         diag(iat) = amat(iat, iat) + eps
-      end do
-      allocate(abuf(int(ndim, i8) * ndim))
-   end if
+   allocate(diag(ndim), xknown(ndim, block_size_def), &
+      & abuf(int(ndim, i8) * ndim))
+   do iat = 1, ndim
+      diag(iat) = amat(iat, iat) + eps
+   end do
 
    do ioff = 0, ndim - 1, block_size_def
       ncol = min(block_size_def, ndim - ioff)
@@ -793,16 +738,11 @@ subroutine invert(self, amat, alist, ainv, list, new_unit, error)
       do ivec = 1, ncol
          bsub(ivec, ivec) = 1.0_wp
       end do
-      if (nlist) then
-         call get_trailing_csr(ioff, alist, list, xknown(:ioff, :ncol), alsub, &
-            & lsub, bsub)
-      else
-         asub(1:nsub, 1:nsub) => abuf(1:int(nsub, i8) * nsub)
-         asub(:, :) = amat(ioff + 1:, ioff + 1:)
-         if (ioff > 0) then
-            call gemm(amat(ioff + 1:, :ioff), xknown(:ioff, :ncol), bsub, &
-               & alpha=-1.0_wp, beta=1.0_wp)
-         end if
+      asub(1:nsub, 1:nsub) => abuf(1:int(nsub, i8) * nsub)
+      asub(:, :) = amat(ioff + 1:, ioff + 1:)
+      if (ioff > 0) then
+         call gemm(amat(ioff + 1:, :ioff), xknown(:ioff, :ncol), bsub, &
+            & alpha=-1.0_wp, beta=1.0_wp)
       end if
 
       ! Initial guess from the diagonal of the trailing matrix
@@ -811,13 +751,8 @@ subroutine invert(self, amat, alist, ainv, list, new_unit, error)
          xsub(:, ivec) = bsub(:, ivec) / diag(ioff + 1:)
       end do
 
-      if (nlist) then
-         call self%solve_block(alist=alsub, bmat=bsub, xmat=xsub, list=lsub, &
-            & new_unit=new_unit, error=error)
-      else
-         call self%solve_block(amat=asub, bmat=bsub, xmat=xsub, &
-            & new_unit=new_unit, error=error)
-      end if
+      call self%solve_block(amat=asub, bmat=bsub, xmat=xsub, &
+         & new_unit=new_unit, error=error)
       if (allocated(error)) return
 
       ainv(ioff + 1:, ioff + 1:ioff + ncol) = xsub
@@ -829,11 +764,14 @@ end subroutine invert
 
 !> Invert a symmetric positive definite matrix in complete compressed-row
 !> storage with the block CG solver and keep only the elements on the pattern
-!> of the matrix. The block columns are solved from the trailing systems as in
-!> invert, but the known rows X_K are taken from the rows of the block columns
-!> on the pattern. This is accurate if the inverse decays faster than the
-!> pattern extends, elements outside of it are dropped.
-subroutine invert_list(self, alist, list, ainvlist, new_unit, error)
+!> of the matrix. The columns are solved in blocks of spatially close atoms,
+!> each from A_SS X_S = I_S on the subsystem S of the atoms in the rows of the
+!> block atoms, extended by the atoms within the buffer distance beyond the
+!> radius of these rows. The inverse decays fast with the distance, without a
+!> buffer the error of the subsystem is of the order of the elements outside
+!> of the pattern, which are dropped. The blocks are independent and solved in
+!> parallel.
+subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    !> Conjugate-gradient solver instance
    class(cg_solver), intent(in) :: self
 
@@ -846,28 +784,32 @@ subroutine invert_list(self, alist, list, ainvlist, new_unit, error)
    !> Inverse of the coefficient matrix on the pattern of the list
    real(wp), intent(out) :: ainvlist(:)
 
+   !> Cartesian coordinates for spatially compact blocks and the buffer of the
+   !> subsystems, the blocks follow the atom order if absent
+   real(wp), intent(in), optional :: xyz(:, :)
+
    !> Output unit
    integer, intent(in), optional :: new_unit
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
-   ! Size of the system, offset and number of columns of the current block
-   integer :: ndim, ioff, ncol
-   ! Number of trailing rows
-   integer :: nsub
-   ! Counters
-   integer :: iat, jat, ivec
-   integer(i8) :: kat
-   ! Diagonal of the coefficient matrix
-   real(wp), allocatable :: diag(:)
-   ! Known rows X_K of the block columns
-   real(wp), allocatable :: xknown(:, :)
-   ! Right-hand sides and solutions of the trailing system
-   real(wp), allocatable :: bsub(:, :), xsub(:, :)
-   ! Trailing matrix A_UU in compressed-row storage
-   real(wp), allocatable :: alsub(:)
-   type(csr_list) :: lsub
+   ! Size of the system, number of blocks and counters
+   integer :: ndim, nblk, iblk, iat
+   ! Atoms ordered into blocks of columns
+   integer, allocatable :: order(:)
+   ! Local index of the atoms in the subsystem of a block, zero outside
+   integer, allocatable :: loc(:)
+   ! Size of the subsystem and number of iterations of a block
+   integer :: nsub, niter, maxsub, maxiter
+   integer(i8) :: sumsub, sumiter
+   ! Coordinates and buffer distance of the subsystems
+   real(wp), allocatable :: pos(:, :)
+   real(wp) :: buffer
+   ! Solver for the blocks without output
+   type(cg_solver) :: blksolver
+   integer :: unit
+   logical :: failed, skip
 
    if (.not. self%use_nlist) then
       call fatal_error(error, "Inversion on a neighborlist requires use_nlist.")
@@ -890,162 +832,334 @@ subroutine invert_list(self, alist, list, ainvlist, new_unit, error)
       return
    end if
    ndim = size(list%inl) - 1
+   if (present(xyz)) then
+      if (size(xyz, 1) /= 3 .or. size(xyz, 2) < ndim) then
+         call fatal_error(error, "Dimension mismatch between list and xyz.")
+         return
+      end if
+   end if
+   buffer = self%ainvbuf
+   if (buffer > 0.0_wp .and. .not. present(xyz)) then
+      call fatal_error(error, &
+         & "Buffer of the inversion subsystems requires coordinates.")
+      return
+   end if
    if (ndim <= 0) return
 
-   allocate(diag(ndim), xknown(ndim, block_size_def))
+   if (present(new_unit)) then
+      unit = new_unit
+   else
+      unit = output_unit
+   end if
+
+   ! Blocks of spatially close atoms
+   allocate(order(ndim))
    do iat = 1, ndim
-      diag(iat) = alist(list%inl(iat)) + eps
+      order(iat) = iat
    end do
-   lsub%complete = .true.
-   allocate(lsub%inl(ndim + 1), lsub%nlat(size(list%nlat)), alsub(size(alist)))
-   ainvlist(:) = 0.0_wp
+   if (present(xyz)) then
+      pos = xyz(:, :ndim)
+      call get_spatial_order(pos, order, block_size_def)
+   else
+      allocate(pos(3, 0))
+   end if
+   nblk = (ndim + block_size_def - 1) / block_size_def
 
-   do ioff = 0, ndim - 1, block_size_def
-      ncol = min(block_size_def, ndim - ioff)
-      nsub = ndim - ioff
+   call new_cg_solver(blksolver, cg_input(cgmiter=self%cgmiter, &
+      & cgtol=self%cgtol, verbosity=0, use_nlist=.true.))
 
-      ! Rows of the block columns known from earlier columns, A^-1 = A^-T,
-      ! restricted to the pattern of the rows
-      xknown(:ioff, :ncol) = 0.0_wp
-      do ivec = 1, ncol
-         iat = ioff + ivec
-         do kat = list%inl(iat), list%inl(iat + 1) - 1
-            jat = list%nlat(kat)
-            if (jat <= ioff) xknown(jat, ivec) = ainvlist(kat)
-         end do
-      end do
-
-      ! Trailing system A_UU X_U = I_U - A_UK X_K
-      allocate(bsub(nsub, ncol), source=0.0_wp)
-      do ivec = 1, ncol
-         bsub(ivec, ivec) = 1.0_wp
-      end do
-      call get_trailing_csr(ioff, alist, list, xknown(:ioff, :ncol), alsub, &
-         & lsub, bsub)
-
-      ! Initial guess from the diagonal of the trailing matrix
-      allocate(xsub(nsub, ncol))
-      do ivec = 1, ncol
-         xsub(:, ivec) = bsub(:, ivec) / diag(ioff + 1:)
-      end do
-
-      call self%solve_block(alist=alsub, bmat=bsub, xmat=xsub, list=lsub, &
-         & new_unit=new_unit, error=error)
-      if (allocated(error)) return
-
-      ! Block columns into every row holding one of them, the rows K of the
-      ! block columns are the known elements
-      !$omp parallel do default(none) schedule(runtime) &
-      !$omp shared(ndim, ioff, ncol, list, ainvlist, xsub, xknown) &
-      !$omp private(iat, jat, kat)
-      do iat = 1, ndim
-         do kat = list%inl(iat), list%inl(iat + 1) - 1
-            jat = list%nlat(kat) - ioff
-            if (jat < 1 .or. jat > ncol) cycle
-            if (iat > ioff) then
-               ainvlist(kat) = xsub(iat - ioff, jat)
-            else
-               ainvlist(kat) = xknown(iat, jat)
-            end if
-         end do
-      end do
-      deallocate(bsub, xsub)
+   failed = .false.
+   sumsub = 0_i8
+   sumiter = 0_i8
+   maxsub = 0
+   maxiter = 0
+   !$omp parallel default(none) &
+   !$omp shared(ndim, nblk, order, alist, list, ainvlist, pos, buffer, &
+   !$omp& blksolver, error, failed) &
+   !$omp private(iblk, loc, nsub, niter, skip) &
+   !$omp reduction(+:sumsub, sumiter) reduction(max:maxsub, maxiter)
+   allocate(loc(ndim), source=0)
+   !$omp do schedule(dynamic)
+   do iblk = 1, nblk
+      !$omp atomic read
+      skip = failed
+      if (skip) cycle
+      call invert_block(blksolver, alist, list, &
+         & order((iblk - 1) * block_size_def + 1:min(iblk * block_size_def, ndim)), &
+         & pos, buffer, loc, ainvlist, nsub, niter, error, failed)
+      sumsub = sumsub + nsub
+      sumiter = sumiter + niter
+      maxsub = max(maxsub, nsub)
+      maxiter = max(maxiter, niter)
    end do
+   !$omp end do
+   deallocate(loc)
+   !$omp end parallel
+   if (allocated(error)) return
+
+   if (self%verbosity > 0) then
+      write(unit, '(a, 1x, i0, a, i0, a)') "Inverse on neighborlist blocks   :", &
+         & nblk, " of ", min(block_size_def, ndim), " columns"
+      write(unit, '(a, 1x, f0.1, a, i0)') "Subsystem atoms per block        :", &
+         & real(sumsub, wp) / nblk, ", max ", maxsub
+      write(unit, '(a, 1x, f0.1, a, i0)') "Block CG iterations per block    :", &
+         & real(sumiter, wp) / nblk, ", max ", maxiter
+      write(unit, '(a)') ''
+   end if
 
 end subroutine invert_list
 
 
-!> Extract the trailing block A_UU, rows and columns ioff+1:n, of a matrix in
-!> compressed-row storage and subtract A_UK X_K from the right-hand sides
-subroutine get_trailing_csr(ioff, alist, list, xknown, alsub, lsub, bsub)
-   !> Number of leading rows and columns K
-   integer, intent(in) :: ioff
+!> Solve a block of columns of the inverse on its subsystem of the atoms in
+!> the rows of the block atoms and the neighbors of these atoms within the
+!> buffer distance beyond the row radius of a block atom. The columns are
+!> stored in the rows of the block atoms.
+subroutine invert_block(solver, alist, list, cols, xyz, buffer, loc, ainvlist, &
+   & nsub, niter, error, failed)
+   !> Conjugate-gradient solver for the block
+   type(cg_solver), intent(in) :: solver
 
    !> Coefficient matrix values in compressed-row storage
    real(wp), intent(in) :: alist(:)
 
-   !> Neighborlist representation of the matrix
+   !> Complete neighborlist representation of the matrix
    type(csr_list), intent(in) :: list
 
-   !> Known rows X_K of the block of solutions
-   real(wp), intent(in) :: xknown(:, :)
+   !> Atoms of the block columns
+   integer, intent(in) :: cols(:)
 
-   !> Values of the trailing matrix A_UU
-   real(wp), intent(inout) :: alsub(:)
+   !> Cartesian coordinates, only used with a buffer
+   real(wp), intent(in) :: xyz(:, :)
 
-   !> Compressed-row index of the trailing matrix A_UU
-   type(csr_list), intent(inout) :: lsub
+   !> Buffer distance beyond the radius of the rows of the block atoms
+   real(wp), intent(in) :: buffer
 
-   !> Right-hand sides, I_U on input and I_U - A_UK X_K on output
-   real(wp), intent(inout) :: bsub(:, :)
+   !> Local index of the atoms in the subsystem, zero on entry and exit
+   integer, intent(inout) :: loc(:)
 
-   integer :: nsub, ncol, isub, iat, jat, ivec
+   !> Inverse on the pattern of the list, the rows of the block atoms are set
+   real(wp), intent(inout) :: ainvlist(:)
+
+   !> Number of atoms in the subsystem
+   integer, intent(out) :: nsub
+
+   !> Number of block CG iterations
+   integer, intent(out) :: niter
+
+   !> Error handling, shared by all blocks
+   type(error_type), allocatable, intent(inout) :: error
+
+   !> Whether any block failed, shared by all blocks
+   logical, intent(inout) :: failed
+
+   integer :: ncol, ncore, nrej, isub, iat, jat, ivec
    integer(i8) :: kat, pos
-   real(wp), allocatable :: rsum(:)
+   real(wp) :: dist2
+   logical :: inbuf
+   ! Atoms of the subsystem and neighbors rejected for the buffer
+   integer, allocatable :: sidx(:), rej(:)
+   ! Squared radius of the rows of the block atoms extended by the buffer
+   real(wp), allocatable :: rad2(:)
+   ! Subsystem matrix A_SS in compressed-row storage
+   real(wp), allocatable :: alsub(:)
+   type(csr_list) :: lsub
+   ! Right-hand sides and solutions of the subsystem
+   real(wp), allocatable :: bsub(:, :), xsub(:, :)
+   type(error_type), allocatable :: blkerror
 
-   nsub = size(bsub, 1)
-   ncol = size(bsub, 2)
+   ncol = size(cols)
+   allocate(sidx(size(loc)))
 
-   ! Number of trailing columns in each trailing row, the diagonal stays first
-   lsub%inl(1) = 1
-   !$omp parallel do default(none) schedule(runtime) &
-   !$omp shared(nsub, ioff, list, lsub) private(isub, iat, kat)
-   do isub = 1, nsub
-      iat = ioff + isub
-      lsub%inl(isub + 1) = 0
-      do kat = list%inl(iat), list%inl(iat + 1) - 1
-         if (list%nlat(kat) > ioff) lsub%inl(isub + 1) = lsub%inl(isub + 1) + 1
-      end do
-   end do
-   do isub = 1, nsub
-      lsub%inl(isub + 1) = lsub%inl(isub + 1) + lsub%inl(isub)
-   end do
-
-   ! Trailing matrix and the A_UK X_K contributions held by the rows U
-   !$omp parallel default(none) &
-   !$omp shared(nsub, ncol, ioff, alist, list, xknown, alsub, lsub, bsub) &
-   !$omp private(isub, iat, jat, kat, pos, rsum)
-   allocate(rsum(ncol))
-   !$omp do schedule(runtime)
-   do isub = 1, nsub
-      iat = ioff + isub
-      pos = lsub%inl(isub)
-      rsum(:) = 0.0_wp
+   ! Atoms in the rows of the block atoms, the block atoms come first
+   nsub = 0
+   do ivec = 1, ncol
+      iat = cols(ivec)
       do kat = list%inl(iat), list%inl(iat + 1) - 1
          jat = list%nlat(kat)
-         if (jat > ioff) then
-            lsub%nlat(pos) = jat - ioff
-            alsub(pos) = alist(kat)
-            pos = pos + 1
-         else
-            rsum(:) = rsum + alist(kat) * xknown(jat, :)
-         end if
+         if (loc(jat) /= 0) cycle
+         nsub = nsub + 1
+         loc(jat) = nsub
+         sidx(nsub) = jat
       end do
-      bsub(isub, :) = bsub(isub, :) - rsum
    end do
-   !$omp end do
-   deallocate(rsum)
-   !$omp end parallel
 
-   ! In upper triangular storage A_UK is held by the rows K as A_KU
-   if (.not. list%complete) then
-      !$omp parallel do default(none) schedule(runtime) &
-      !$omp shared(ncol, ioff, alist, list, xknown, bsub) &
-      !$omp private(ivec, iat, jat, kat)
+   ! Neighbors of these atoms within the buffer distance beyond the radius of
+   ! the row of any block atom, rejected neighbors are marked as visited
+   if (buffer > 0.0_wp) then
+      allocate(rad2(ncol), rej(size(loc)))
       do ivec = 1, ncol
-         do jat = 1, ioff
-            do kat = list%inl(jat), list%inl(jat + 1) - 1
-               iat = list%nlat(kat)
-               if (iat > ioff) then
-                  bsub(iat - ioff, ivec) = bsub(iat - ioff, ivec) &
-                     & - alist(kat) * xknown(jat, ivec)
+         iat = cols(ivec)
+         dist2 = 0.0_wp
+         do kat = list%inl(iat), list%inl(iat + 1) - 1
+            dist2 = max(dist2, sum((xyz(:, list%nlat(kat)) - xyz(:, iat))**2))
+         end do
+         rad2(ivec) = (sqrt(dist2) + buffer)**2
+      end do
+      ncore = nsub
+      nrej = 0
+      do isub = 1, ncore
+         iat = sidx(isub)
+         do kat = list%inl(iat), list%inl(iat + 1) - 1
+            jat = list%nlat(kat)
+            if (loc(jat) /= 0) cycle
+            inbuf = .false.
+            do ivec = 1, ncol
+               dist2 = sum((xyz(:, jat) - xyz(:, cols(ivec)))**2)
+               if (dist2 <= rad2(ivec)) then
+                  inbuf = .true.
+                  exit
                end if
             end do
+            if (inbuf) then
+               nsub = nsub + 1
+               loc(jat) = nsub
+               sidx(nsub) = jat
+            else
+               nrej = nrej + 1
+               loc(jat) = -1
+               rej(nrej) = jat
+            end if
+         end do
+      end do
+      loc(rej(:nrej)) = 0
+   end if
+
+   ! Subsystem matrix with the elements in the list order, the diagonal stays
+   ! first in each row
+   lsub%complete = .true.
+   allocate(lsub%inl(nsub + 1))
+   lsub%inl(1) = 1
+   do isub = 1, nsub
+      iat = sidx(isub)
+      pos = lsub%inl(isub)
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         if (loc(list%nlat(kat)) /= 0) pos = pos + 1
+      end do
+      lsub%inl(isub + 1) = pos
+   end do
+   allocate(lsub%nlat(lsub%inl(nsub + 1) - 1), alsub(lsub%inl(nsub + 1) - 1))
+   do isub = 1, nsub
+      iat = sidx(isub)
+      pos = lsub%inl(isub)
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         jat = loc(list%nlat(kat))
+         if (jat == 0) cycle
+         lsub%nlat(pos) = jat
+         alsub(pos) = alist(kat)
+         pos = pos + 1
+      end do
+   end do
+
+   ! Unit vectors of the block columns, initial guess from the diagonal
+   allocate(bsub(nsub, ncol), xsub(nsub, ncol), source=0.0_wp)
+   do ivec = 1, ncol
+      isub = loc(cols(ivec))
+      bsub(isub, ivec) = 1.0_wp
+      xsub(isub, ivec) = 1.0_wp / (alsub(lsub%inl(isub)) + eps)
+   end do
+
+   call solver%solve_block(alist=alsub, bmat=bsub, xmat=xsub, list=lsub, &
+      & error=blkerror, niter=niter)
+   if (allocated(blkerror)) then
+      !$omp critical (invert_list_error)
+      if (.not. allocated(error)) call move_alloc(blkerror, error)
+      !$omp end critical (invert_list_error)
+      !$omp atomic write
+      failed = .true.
+   else
+      ! Columns of the symmetric inverse in the rows of the block atoms
+      do ivec = 1, ncol
+         iat = cols(ivec)
+         do kat = list%inl(iat), list%inl(iat + 1) - 1
+            ainvlist(kat) = xsub(loc(list%nlat(kat)), ivec)
          end do
       end do
    end if
 
-end subroutine get_trailing_csr
+   loc(sidx(:nsub)) = 0
+
+end subroutine invert_block
+
+
+!> Order the atoms into spatially compact blocks by recursive coordinate
+!> bisection along the largest extent, all blocks except for the last one
+!> hold exactly bsize atoms
+recursive subroutine get_spatial_order(xyz, order, bsize)
+   !> Cartesian coordinates of all atoms
+   real(wp), intent(in) :: xyz(:, :)
+
+   !> Atoms to order, reordered on output
+   integer, intent(inout) :: order(:)
+
+   !> Number of atoms per block
+   integer, intent(in) :: bsize
+
+   integer :: nat, nleft, idir
+   real(wp) :: extent(3)
+
+   nat = size(order)
+   if (nat <= bsize) return
+
+   do idir = 1, 3
+      extent(idir) = maxval(xyz(idir, order)) - minval(xyz(idir, order))
+   end do
+   idir = maxloc(extent, 1)
+   call sort_by_key(xyz(idir, order), order)
+
+   ! Half of the blocks to each side, the incomplete block goes to the right
+   nleft = ((nat + bsize - 1) / bsize / 2) * bsize
+   call get_spatial_order(xyz, order(:nleft), bsize)
+   call get_spatial_order(xyz, order(nleft + 1:), bsize)
+
+end subroutine get_spatial_order
+
+
+!> Stable sort of an index array by ascending keys with a bottom-up merge sort
+subroutine sort_by_key(key, idx)
+   !> Keys of the entries of the index array
+   real(wp), intent(in) :: key(:)
+
+   !> Index array, sorted on output
+   integer, intent(inout) :: idx(:)
+
+   integer :: n, width, lo, mid, hi, i, j, k
+   integer, allocatable :: perm(:), tmp(:)
+
+   n = size(idx)
+   allocate(perm(n), tmp(n))
+   do i = 1, n
+      perm(i) = i
+   end do
+
+   width = 1
+   do while (width < n)
+      do lo = 1, n, 2 * width
+         mid = min(lo + width - 1, n)
+         hi = min(lo + 2 * width - 1, n)
+         i = lo
+         j = mid + 1
+         k = lo
+         do while (i <= mid .and. j <= hi)
+            if (key(perm(j)) < key(perm(i))) then
+               tmp(k) = perm(j)
+               j = j + 1
+            else
+               tmp(k) = perm(i)
+               i = i + 1
+            end if
+            k = k + 1
+         end do
+         tmp(k:k + mid - i) = perm(i:mid)
+         k = k + mid - i + 1
+         tmp(k:k + hi - j) = perm(j:hi)
+      end do
+      perm(:) = tmp
+      width = 2 * width
+   end do
+
+   idx(:) = idx(perm)
+
+end subroutine sort_by_key
 
 
 !> Multiply the coefficient matrix with a block of vectors, avec = A vec,
@@ -1069,7 +1183,6 @@ subroutine block_matmul(nlist, vec, avec, amat, alist, list)
    !> Optional neighborlist representation of the matrix
    type(csr_list), intent(in), optional :: list
 
-   character(len=2) :: matdescra
    integer :: ndim, nvec
 
    ndim = size(vec, 1)
@@ -1077,18 +1190,64 @@ subroutine block_matmul(nlist, vec, avec, amat, alist, list)
 
    if (nlist) then
       if (list%complete) then
-         matdescra = "G "
+         call csr_block_matmul(alist, list, vec, avec)
       else
-         matdescra = "SU"
+         call spmm_csr("N", ndim, nvec, ndim, 1.0_wp, "SU", alist, &
+            & list%nlat, list%inl(1:ndim), list%inl(2:ndim+1), vec, ndim, &
+            & 0.0_wp, avec, ndim)
       end if
-      call spmm_csr("N", ndim, nvec, ndim, 1.0_wp, matdescra, alist, &
-         & list%nlat, list%inl(1:ndim), list%inl(2:ndim+1), vec, ndim, &
-         & 0.0_wp, avec, ndim)
    else
       call gemm(amat, vec, avec)
    end if
 
 end subroutine block_matmul
+
+
+!> Multiply a matrix in complete compressed-row storage with a block of
+!> vectors, avec = A vec. The block is transposed first, the rows of the block
+!> gathered for each matrix element are then contiguous in memory.
+subroutine csr_block_matmul(alist, list, vec, avec)
+   !> Matrix values in complete compressed-row storage
+   real(wp), intent(in) :: alist(:)
+
+   !> Complete neighborlist representation of the matrix
+   type(csr_list), intent(in) :: list
+
+   !> Block of input vectors
+   real(wp), intent(in) :: vec(:, :)
+
+   !> Block of output vectors
+   real(wp), intent(inout) :: avec(:, :)
+
+   integer :: ndim, nvec, iat
+   integer(i8) :: kat
+   real(wp), allocatable :: vect(:, :), acc(:)
+
+   ndim = size(vec, 1)
+   nvec = size(vec, 2)
+   allocate(vect(nvec, ndim))
+
+   !$omp parallel default(none) shared(ndim, nvec, alist, list, vec, avec, vect) &
+   !$omp private(iat, kat, acc)
+   allocate(acc(nvec))
+   !$omp do schedule(static)
+   do iat = 1, ndim
+      vect(:, iat) = vec(iat, :)
+   end do
+   !$omp end do
+   !$omp do schedule(guided)
+   do iat = 1, ndim
+      acc(:) = 0.0_wp
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         acc(:) = acc + alist(kat) * vect(:, list%nlat(kat))
+      end do
+      avec(iat, :) = acc
+   end do
+   !$omp end do
+   deallocate(acc)
+   !$omp end parallel
+
+end subroutine csr_block_matmul
 
 
 !> Replace a block of vectors by an orthonormal basis of its column space.

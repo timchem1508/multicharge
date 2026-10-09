@@ -20,6 +20,7 @@ module multicharge_output
    use mctc_io_convert, only : autoaa
    use mctc_io_constants, only : pi
    use multicharge_model, only : mchrg_model_type
+   use multicharge_model_cache, only : mchrg_cache
    use multicharge_model_type, only : hess_index
    use multicharge_version, only : get_multicharge_version
    implicit none
@@ -114,7 +115,8 @@ end subroutine write_ascii_properties
 
 
 !> Write the electrostatic energy, gradient, charge derivatives, and Hessian
-subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, hess, press)
+subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, hess, &
+   & press, cache)
 
    !> Unit for output
    integer, intent(in) :: unit
@@ -144,13 +146,20 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, h
    !> Derivative of the virial w.r.t. positions (3, 3, 3, nat) or strain (3, 3, 3, 3)
    real(wp), intent(in), optional :: press(:, :, :, :)
 
+   !> Cache with the derivatives of the partial charges w.r.t. the Cartesian
+   !> coordinates in compressed storage, used if dqdr is absent
+   type(mchrg_cache), intent(in), optional :: cache
+
    integer :: iat, jat, isp, jsp, ic, jc
-   real(wp) :: hrow(3), hnorm
-   logical :: grad, qgrad
+   real(wp) :: hrow(3), hnorm, dqsum
+   real(wp), allocatable :: dqrow(:, :)
+   logical :: grad, qgrad, sparse
    character(len=1), parameter :: comp(3) = ["x", "y", "z"]
 
    grad = present(gradient) .and. present(sigma)
-   qgrad = present(dqdr) .and. present(dqdL)
+   sparse = .false.
+   if (.not. present(dqdr) .and. present(cache)) sparse = allocated(cache%dqdrlist)
+   qgrad = present(dqdL) .and. (present(dqdr) .or. sparse)
 
    write(unit, '(a,":", t25, es20.13, 1x, a)') &
    & "Electrostatic energy", sum(energy), "Eh"
@@ -184,19 +193,31 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, h
    end if
 
    if (qgrad) then
+      ! The compressed derivatives are expanded one charge at a time
+      if (sparse) then
+         dqsum = sum(cache%dqdrlist) - sum(cache%uvec) * sum(cache%dqdrscal)
+      else
+         dqsum = sum(dqdr)
+      end if
       write(unit, '(a,":", t25, es20.13, 1x, a)') &
-      & "Sum over all dqdr elements", sum(dqdr), "a.u./a0"
+      & "Sum over all dqdr elements", dqsum, "a.u./a0"
       write(unit, '(72("-"))')
       write(unit, '(a10,1x,a4,3x,a6,1x,a4,3x,*(1x,a12))') "#", "Z", "#", "A", &
       & "dQ(Z)/dx(A)", "dQ(Z)/dy(A)", "dQ(Z)/dz(A)"
       write(unit, '(72("-"))')
+      allocate(dqrow(3, mol%nat))
       do iat = 1, mol%nat
          isp = mol%id(iat)
+         if (sparse) then
+            call cache%get_dqdr_row(iat, dqrow)
+         else
+            dqrow(:, :) = dqdr(:, :, iat)
+         end if
          do jat = 1, mol%nat
             jsp = mol%id(jat)
             write(unit, '(i10,1x,i3,1x,a2,1x,i6,1x,i3,1x,a2,*(2x ,es11.3))') &
             & iat, mol%num(isp), mol%sym(isp), jat, mol%num(jsp), mol%sym(jsp), &
-            & dqdr(:, jat, iat)
+            & dqrow(:, jat)
          end do
       end do
       write(unit, '(72("-"))')
@@ -285,7 +306,7 @@ end subroutine write_ascii_results
 
 
 !> Write computed properties as a JSON object
-subroutine json_results(unit, indentation, energy, gradient, dqdr, charges, cn)
+subroutine json_results(unit, indentation, energy, gradient, dqdr, charges, cn, cache)
 
    !> Unit for output
    integer, intent(in) :: unit
@@ -308,9 +329,14 @@ subroutine json_results(unit, indentation, energy, gradient, dqdr, charges, cn)
    !> Coordination numbers
    real(wp), intent(in), optional :: cn(:)
 
+   !> Cache with the derivatives of the partial charges w.r.t. the Cartesian
+   !> coordinates in compressed storage, used if dqdr is absent
+   type(mchrg_cache), intent(in), optional :: cache
+
    character(len=:), allocatable :: indent, version_string
    character(len=*), parameter :: jsonkey = "('""',a,'"":',1x)"
    real(wp), allocatable :: array(:)
+   logical :: sparse
 
    call get_multicharge_version(string=version_string)
 
@@ -337,12 +363,18 @@ subroutine json_results(unit, indentation, energy, gradient, dqdr, charges, cn)
       array = reshape(gradient, [size(gradient)])
       call write_json_array(unit, array, indent)
    end if
-   if (present(dqdr)) then
+   sparse = .false.
+   if (.not. present(dqdr) .and. present(cache)) sparse = allocated(cache%dqdrlist)
+   if (present(dqdr) .or. sparse) then
       write(unit, '(",")', advance='no')
       if (allocated(indent)) write(unit, '(/,a)', advance='no') repeat(indent, 1)
       write(unit, jsonkey, advance='no') 'dq/dr'
-      array = reshape(dqdr, [size(dqdr)])
-      call write_json_array(unit, array, indent)
+      if (sparse) then
+         call write_json_dqdr(unit, cache, indent)
+      else
+         array = reshape(dqdr, [size(dqdr)])
+         call write_json_array(unit, array, indent)
+      end if
    end if
    if (present(charges)) then
       write(unit, '(",")', advance='no')
@@ -380,13 +412,66 @@ subroutine write_json_array(unit, array, indent)
 
    write(unit, '("[")', advance='no')
    do i = 1, size(array)
-      if (allocated(indent)) write(unit, '(/,a)', advance='no') repeat(indent, 2)
-      write(unit, '(es23.16)', advance='no') array(i)
-      if (i /= size(array)) write(unit, '(",")', advance='no')
+      call write_json_element(unit, array(i), i == size(array), indent)
    end do
    if (allocated(indent)) write(unit, '(/,a)', advance='no') repeat(indent, 1)
    write(unit, '("]")', advance='no')
 end subroutine write_json_array
+
+
+!> Write the derivatives of the partial charges w.r.t. the Cartesian coordinates
+!> as a JSON array in the order of a dense dqdr, expanded from the compressed
+!> storage one charge at a time
+subroutine write_json_dqdr(unit, cache, indent)
+
+   !> Unit for output
+   integer, intent(in) :: unit
+
+   !> Cache with the compressed derivatives of the partial charges
+   type(mchrg_cache), intent(in) :: cache
+
+   !> Indentation string for pretty printing
+   character(len=:), allocatable, intent(in) :: indent
+
+   integer :: nat, iat, jat, ic
+   real(wp), allocatable :: dqrow(:, :)
+
+   nat = size(cache%dqdrscal, 2)
+   allocate(dqrow(3, nat))
+   write(unit, '("[")', advance='no')
+   do jat = 1, nat
+      call cache%get_dqdr_row(jat, dqrow)
+      do iat = 1, nat
+         do ic = 1, 3
+            call write_json_element(unit, dqrow(ic, iat), &
+               & jat == nat .and. iat == nat .and. ic == 3, indent)
+         end do
+      end do
+   end do
+   if (allocated(indent)) write(unit, '(/,a)', advance='no') repeat(indent, 1)
+   write(unit, '("]")', advance='no')
+end subroutine write_json_dqdr
+
+
+!> Write one element of a JSON array, followed by a separator unless it is last
+subroutine write_json_element(unit, value, last, indent)
+
+   !> Unit for output
+   integer, intent(in) :: unit
+
+   !> Value of the element
+   real(wp), intent(in) :: value
+
+   !> Whether this is the last element of the array
+   logical, intent(in) :: last
+
+   !> Indentation string for pretty printing
+   character(len=:), allocatable, intent(in) :: indent
+
+   if (allocated(indent)) write(unit, '(/,a)', advance='no') repeat(indent, 2)
+   write(unit, '(es23.16)', advance='no') value
+   if (.not. last) write(unit, '(",")', advance='no')
+end subroutine write_json_element
 
 
 end module multicharge_output

@@ -24,7 +24,7 @@ module test_solver
    use multicharge_charge, only: get_charges, get_eeq_charges, get_eeqbc_charges
    use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
    use multicharge_solver_direct, only : direct_solver, new_direct_solver, direct_input
-   use multicharge_solver_cg, only : cg_solver, new_cg_solver, cg_input, get_blocks
+   use multicharge_solver_cg, only : cg_solver, new_cg_solver, cg_input
    use mctc_csrlist, only : csr_list
    implicit none
    private
@@ -54,15 +54,13 @@ subroutine collect_solver(testsuite)
    & new_unittest("cg-ill-conditioned", test_cg_ill_conditioned), &
    & new_unittest("cg-zero-rhs", test_cg_zero_rhs), &
    & new_unittest("cg-random-spd", test_cg_random_spd), &
-   & new_unittest("block-cg-get-blocks", test_get_blocks), &
    & new_unittest("block-cg-dense", test_block_cg_dense), &
    & new_unittest("block-cg-sparse", test_block_cg_sparse), &
    & new_unittest("cg-invert-dense", test_cg_invert_dense), &
-   & new_unittest("cg-invert-sparse-complete", test_cg_invert_sparse_complete), &
-   & new_unittest("cg-invert-sparse-upper", test_cg_invert_sparse_upper), &
-   & new_unittest("cg-invert-no-matrix", test_cg_invert_no_matrix), &
    & new_unittest("cg-invert-list", test_cg_invert_list), &
-   & new_unittest("cg-invert-list-upper", test_cg_invert_list_upper) &
+   & new_unittest("cg-invert-list-upper", test_cg_invert_list_upper), &
+   & new_unittest("cg-invert-list-local", test_cg_invert_list_local), &
+   & new_unittest("cg-invert-list-buffer", test_cg_invert_list_buffer) &
    & ]
 
 end subroutine collect_solver
@@ -642,57 +640,16 @@ subroutine test_cg_random_spd(error)
 end subroutine test_cg_random_spd
 
 
-!> Test: Splitting a square matrix into column blocks
-subroutine test_get_blocks(error)
-
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
-
-   integer, parameter :: n = 150
-   real(wp), allocatable :: mat(:, :)
-   real(wp), allocatable :: blocks(:, :, :)
-   integer, allocatable :: ncol(:)
-   integer :: iblk, ivec
-
-   allocate(mat(n, n))
-   call random_number(mat)
-   call get_blocks(mat, blocks, ncol)
-
-   if (any(shape(blocks) /= [n, 16, 10])) then
-      call test_failed(error, "Wrong shape of the column blocks")
-      return
-   end if
-   if (any(ncol /= [spread(16, 1, 9), 6])) then
-      call test_failed(error, "Wrong number of columns per block")
-      return
-   end if
-   do iblk = 1, size(ncol)
-      ivec = (iblk - 1) * 16
-      if (any(abs(blocks(:, :ncol(iblk), iblk) &
-         & - mat(:, ivec+1:ivec+ncol(iblk))) > thr)) then
-         call test_failed(error, "Column blocks do not match the matrix")
-         return
-      end if
-   end do
-   iblk = size(ncol)
-   if (any(abs(blocks(:, ncol(iblk)+1:, iblk)) > thr)) then
-      call test_failed(error, "Last column block is not zero-padded")
-   end if
-
-end subroutine test_get_blocks
-
-
 !> Test: Block CG with a dense matrix, inverting a random SPD matrix block-wise
 subroutine test_block_cg_dense(error)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
-   integer, parameter :: n = 150
+   integer, parameter :: n = 150, nrhs = 16
    real(wp), allocatable :: amat(:, :), ainv(:, :), unity(:, :)
-   real(wp), allocatable :: blocks(:, :, :), xmat(:, :)
-   integer, allocatable :: ncol(:)
-   integer :: i, iblk, ivec
+   real(wp), allocatable :: xmat(:, :)
+   integer :: i, ivec, ncol
    type(cg_solver) :: solver
 
    call new_cg_solver(solver, cg_input(cgtol=1.0e-12_wp, cgmiter=1000, &
@@ -704,15 +661,14 @@ subroutine test_block_cg_dense(error)
       unity(i, i) = 1.0_wp
    end do
 
-   call get_blocks(unity, blocks, ncol)
    allocate(ainv(n, n))
-   do iblk = 1, size(ncol)
-      ivec = (iblk - 1) * size(blocks, 2)
-      allocate(xmat(n, ncol(iblk)), source=0.0_wp)
-      call solver%solve_block(amat=amat, bmat=blocks(:, :ncol(iblk), iblk), &
+   do ivec = 0, n - 1, nrhs
+      ncol = min(nrhs, n - ivec)
+      allocate(xmat(n, ncol), source=0.0_wp)
+      call solver%solve_block(amat=amat, bmat=unity(:, ivec+1:ivec+ncol), &
          & xmat=xmat, error=error)
       if (allocated(error)) return
-      ainv(:, ivec+1:ivec+ncol(iblk)) = xmat
+      ainv(:, ivec+1:ivec+ncol) = xmat
       deallocate(xmat)
    end do
 
@@ -811,88 +767,6 @@ subroutine test_cg_invert_dense(error)
 end subroutine test_cg_invert_dense
 
 
-!> Test: Block-CG inversion of a banded SPD matrix in complete CSR storage
-subroutine test_cg_invert_sparse_complete(error)
-
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
-
-   call test_cg_invert_sparse_gen(error, complete=.true.)
-
-end subroutine test_cg_invert_sparse_complete
-
-
-!> Test: Block-CG inversion of a banded SPD matrix in upper-triangular CSR
-subroutine test_cg_invert_sparse_upper(error)
-
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
-
-   call test_cg_invert_sparse_gen(error, complete=.false.)
-
-end subroutine test_cg_invert_sparse_upper
-
-
-!> Test: Block-CG inversion without a coefficient matrix reports an error
-subroutine test_cg_invert_no_matrix(error)
-
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
-
-   real(wp) :: ainv(4, 4)
-   type(cg_solver) :: solver
-
-   call new_cg_solver(solver, cg_input(cgtol=1.0e-14_wp, cgmiter=1000, &
-      & verbosity=0, use_nlist=.false.))
-
-   call solver%invert(ainv=ainv, error=error)
-   if (.not. allocated(error)) then
-      call test_failed(error, "Missing coefficient matrix was not reported")
-      return
-   end if
-   deallocate(error)
-
-end subroutine test_cg_invert_no_matrix
-
-
-!> Invert a banded SPD matrix in CSR storage and compare to the dense inverse
-subroutine test_cg_invert_sparse_gen(error, complete)
-
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
-
-   !> Store the complete matrix instead of its upper triangle
-   logical, intent(in) :: complete
-
-   integer, parameter :: n = 120, band = 5
-   real(wp), allocatable :: amat(:, :), alist(:), adense(:, :), asparse(:, :)
-   type(csr_list) :: list
-   type(cg_solver) :: solver
-
-   call banded_spd(n, band, amat)
-   call dense_to_csr(amat, complete, alist, list)
-   allocate(adense(n, n), asparse(n, n))
-
-   call new_cg_solver(solver, cg_input(cgtol=1.0e-14_wp, cgmiter=1000, &
-      & verbosity=0, use_nlist=.false.))
-   call solver%invert(amat=amat, ainv=adense, error=error)
-   if (allocated(error)) return
-
-   call new_cg_solver(solver, cg_input(cgtol=1.0e-14_wp, cgmiter=1000, &
-      & verbosity=0, use_nlist=.true.))
-   call solver%invert(alist=alist, ainv=asparse, list=list, error=error)
-   if (allocated(error)) return
-
-   call check_inverse(error, amat, asparse)
-   if (allocated(error)) return
-   if (any(abs(asparse - adense) > thr1)) then
-      call test_failed(error, "Sparse and dense block-CG inverses differ")
-      print '(a, es12.4)', "Max deviation: ", maxval(abs(asparse - adense))
-   end if
-
-end subroutine test_cg_invert_sparse_gen
-
-
 !> Test: Block-CG inversion on the pattern of a complete list, for a matrix
 !> of interleaved atom groups whose inverse has the same pattern
 subroutine test_cg_invert_list(error)
@@ -963,6 +837,118 @@ subroutine test_cg_invert_list_upper(error)
 end subroutine test_cg_invert_list_upper
 
 
+!> Test: Block-CG inversion on the subsystems of spatial blocks for a chain
+!> whose atom order is shuffled, the buffer reduces the subsystem error
+subroutine test_cg_invert_list_local(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   integer, parameter :: n = 300
+   real(wp), parameter :: cutoff = 3.0_wp
+   ! Deviation of the subsystems without buffer, the elements of the inverse
+   ! decay to 1e-5 within the cutoff
+   real(wp), parameter :: thr_sub = 1.0e-4_wp
+   real(wp), allocatable :: xyz(:, :), amat(:, :), alist(:), adense(:, :), &
+      & ainvlist(:)
+   type(csr_list) :: list
+   type(cg_solver) :: solver
+   real(wp) :: dev0, devb
+
+   call chain_spd(n, cutoff, xyz, amat)
+   call dense_to_csr(amat, .true., alist, list)
+   allocate(adense(n, n), ainvlist(size(list%nlat)))
+
+   call new_cg_solver(solver, cg_input(cgtol=1.0e-14_wp, cgmiter=1000, &
+      & verbosity=0, use_nlist=.false.))
+   call solver%invert(amat=amat, ainv=adense, error=error)
+   if (allocated(error)) return
+
+   ! Subsystems of the rows of the block atoms
+   call new_cg_solver(solver, cg_input(cgtol=1.0e-14_wp, cgmiter=1000, &
+      & verbosity=0, use_nlist=.true.))
+   call solver%invert_list(alist, list, ainvlist, xyz=xyz, error=error)
+   if (allocated(error)) return
+   dev0 = list_deviation(list, ainvlist, adense)
+
+   ! Subsystems extended by a buffer of the cutoff
+   call new_cg_solver(solver, cg_input(cgtol=1.0e-14_wp, cgmiter=1000, &
+      & verbosity=0, use_nlist=.true., ainvbuf=cutoff))
+   call solver%invert_list(alist, list, ainvlist, xyz=xyz, error=error)
+   if (allocated(error)) return
+   devb = list_deviation(list, ainvlist, adense)
+
+   if (dev0 > thr_sub) then
+      call test_failed(error, "Inverse on the subsystems differs from the dense inverse")
+      print '(a, es12.4)', "Max deviation: ", dev0
+      return
+   end if
+   if (devb > thr2 .or. devb > 1.0e-2_wp * dev0) then
+      call test_failed(error, "Buffer of the subsystems does not reduce the deviation")
+      print '(a, 2es12.4)', "Max deviation: ", dev0, devb
+   end if
+
+end subroutine test_cg_invert_list_local
+
+
+!> Test: Block-CG inversion with a buffer of the subsystems reports missing
+!> coordinates
+subroutine test_cg_invert_list_buffer(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   integer, parameter :: n = 30
+   real(wp), allocatable :: xyz(:, :), amat(:, :), alist(:), ainvlist(:)
+   type(csr_list) :: list
+   type(cg_solver) :: solver
+
+   call chain_spd(n, 3.0_wp, xyz, amat)
+   call dense_to_csr(amat, .true., alist, list)
+   allocate(ainvlist(size(list%nlat)))
+
+   call new_cg_solver(solver, cg_input(cgtol=1.0e-14_wp, cgmiter=1000, &
+      & verbosity=0, use_nlist=.true., ainvbuf=3.0_wp))
+   call solver%invert_list(alist, list, ainvlist, error=error)
+   if (.not. allocated(error)) then
+      call test_failed(error, "Buffer without coordinates was not reported")
+      return
+   end if
+   deallocate(error)
+
+end subroutine test_cg_invert_list_buffer
+
+
+!> Largest deviation of the inverse on the pattern of a list from the dense
+!> inverse, relative to its largest element
+function list_deviation(list, ainvlist, adense) result(dev)
+
+   !> Complete neighborlist
+   type(csr_list), intent(in) :: list
+
+   !> Inverse on the pattern of the list
+   real(wp), intent(in) :: ainvlist(:)
+
+   !> Dense inverse
+   real(wp), intent(in) :: adense(:, :)
+
+   !> Relative deviation
+   real(wp) :: dev
+
+   integer :: iat
+   integer(i8) :: kat
+
+   dev = 0.0_wp
+   do iat = 1, size(adense, 1)
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         dev = max(dev, abs(ainvlist(kat) - adense(list%nlat(kat), iat)))
+      end do
+   end do
+   dev = dev / maxval(abs(adense))
+
+end function list_deviation
+
+
 !> Check that a matrix is the symmetric inverse of an SPD matrix
 subroutine check_inverse(error, amat, ainv)
 
@@ -1021,6 +1007,44 @@ subroutine banded_spd(n, band, amat)
    end do
 
 end subroutine banded_spd
+
+
+!> Generate an SPD matrix for a chain of atoms with unit spacing, coupling
+!> atoms within the cutoff by exp(-r). The atom order is shuffled along the
+!> chain.
+subroutine chain_spd(n, cutoff, xyz, amat)
+
+   !> Number of atoms
+   integer, intent(in) :: n
+
+   !> Cutoff distance of the coupling
+   real(wp), intent(in) :: cutoff
+
+   !> Cartesian coordinates of the atoms
+   real(wp), allocatable, intent(out) :: xyz(:, :)
+
+   !> Chain SPD matrix
+   real(wp), allocatable, intent(out) :: amat(:, :)
+
+   integer :: iat, jat
+   real(wp) :: dist
+
+   allocate(xyz(3, n), source=0.0_wp)
+   do iat = 1, n
+      xyz(1, iat) = real(mod(7 * (iat - 1), n), wp)
+   end do
+
+   allocate(amat(n, n), source=0.0_wp)
+   do iat = 1, n
+      do jat = 1, n
+         dist = abs(xyz(1, iat) - xyz(1, jat))
+         if (jat == iat .or. dist > cutoff) cycle
+         amat(jat, iat) = -exp(-dist)
+      end do
+      amat(iat, iat) = sum(abs(amat(:, iat))) + 10.0_wp
+   end do
+
+end subroutine chain_spd
 
 
 !> Generate an SPD matrix coupling only atoms of the same group, the groups

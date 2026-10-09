@@ -128,57 +128,58 @@ subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error
       call write_direct_solver(unit)
    end if
 
+   ! The augmented system is only available as dense matrix
+   if (.not. present(amat)) then
+      call fatal_error(error, "The direct solver requires a dense coefficient matrix.")
+      return
+   end if
+
    ! Dimensions match check
    ndim = size(xvec)
-
-   if (present(amat)) then
-      if (size(amat, 1) /= ndim .or. size(amat, 2) /= ndim) then
-         call fatal_error(error, "solve_direct: dimension mismatch.")
-         return
-      end if
-
-      allocate(invmat(ndim, ndim))
-      invmat = amat
-      vrhs = xvec
-
-      want_cpq = .false.
-      if (present(cpq)) want_cpq = cpq
-
-      ! Factorize the Coulomb matrix
-      allocate(ipiv(ndim))
-      call sytrf(invmat, ipiv, info=local_info, uplo='l')
-      if (local_info /= 0) then
-         call fatal_error(error, "Bunch-Kaufman factorization failed.")
-         return
-      end if
-
-      if (want_cpq) then
-         ! Inverted matrix is needed for coupled-perturbed equations
-         call sytri(invmat, ipiv, info=local_info, uplo='l')
-         if (local_info /= 0) then
-            call fatal_error(error, "Inversion of factorized matrix failed.")
-            return
-         end if
-         ! Solve the linear system
-         call symv(invmat, xvec, vrhs, uplo='l')
-         do ic = 1, ndim
-            do jc = ic + 1, ndim
-               invmat(ic, jc) = invmat(jc, ic)
-            end do
-         end do
-      else
-         ! Solve the linear system
-         call sytrs(invmat, vrhs, ipiv, info=local_info, uplo='l')
-         if (local_info /= 0) then
-            call fatal_error(error, "Solution of linear system failed.")
-            return
-         end if
-
-      end if
-
-      if (present(ainv)) ainv = invmat
-
+   if (size(amat, 1) /= ndim .or. size(amat, 2) /= ndim) then
+      call fatal_error(error, "solve_direct: dimension mismatch.")
+      return
    end if
+
+   allocate(invmat(ndim, ndim))
+   invmat = amat
+   vrhs = xvec
+
+   want_cpq = .false.
+   if (present(cpq)) want_cpq = cpq
+
+   ! Factorize the Coulomb matrix
+   allocate(ipiv(ndim))
+   call sytrf(invmat, ipiv, info=local_info, uplo='l')
+   if (local_info /= 0) then
+      call fatal_error(error, "Bunch-Kaufman factorization failed.")
+      return
+   end if
+
+   if (want_cpq) then
+      ! Inverted matrix is needed for coupled-perturbed equations
+      call sytri(invmat, ipiv, info=local_info, uplo='l')
+      if (local_info /= 0) then
+         call fatal_error(error, "Inversion of factorized matrix failed.")
+         return
+      end if
+      ! Solve the linear system
+      call symv(invmat, xvec, vrhs, uplo='l')
+      do ic = 1, ndim
+         do jc = ic + 1, ndim
+            invmat(ic, jc) = invmat(jc, ic)
+         end do
+      end do
+   else
+      ! Solve the linear system
+      call sytrs(invmat, vrhs, ipiv, info=local_info, uplo='l')
+      if (local_info /= 0) then
+         call fatal_error(error, "Solution of linear system failed.")
+         return
+      end if
+   end if
+
+   if (present(ainv)) ainv = invmat
 
    ! pop solve timer
    call timer%pop
