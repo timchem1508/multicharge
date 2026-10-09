@@ -312,7 +312,8 @@ subroutine get_xvec(self, mol, ndim, cache, list, efield)
    !> External electric field
    real(wp), intent(in), optional :: efield(:)
 
-   integer :: iat, izp, img
+   integer :: iat, izp
+   integer(i8) :: img
    real(wp) :: ctmp, vec(3), rvdw, capi, wsw
    real(wp), allocatable :: dtrans(:, :)
 

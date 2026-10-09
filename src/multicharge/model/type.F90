@@ -1421,10 +1421,12 @@ subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL, &
    !> Optional derivative of local atomic partial charges w.r.t. lattice vectors
    real(wp), intent(out), optional :: dqlocdL(3, 3, mol%nat)
 
-   !> Lattice points
+   !> Multicharge neighborlist type
    type(csr_list), intent(in), optional :: list
 
-   !> Optional derivative with respect to the first atom in each pair
+   !> Optional derivative of local atomic partial charges w.r.t. atomic positions
+   !> in the CSR list layout: d(qloc_j)/d(r_i) for each list entry, with
+   !> d(qloc_i)/d(r_i) stored in the diagonal entry list%inl(i)
    real(wp), intent(out), optional :: dqlocdrlist(:, :)
 
    qloc = 0.0_wp
