@@ -16,7 +16,7 @@
 !> Unit tests for CSR-list based multicharge calculations
 module test_csrlist
    use iso_fortran_env, only : output_unit
-   use mctc_env, only : wp
+   use mctc_env, only : wp, i8
    use mctc_env_testing, only : new_unittest, unittest_type, error_type, test_failed
    use mctc_cutoff, only : get_lattice_points
    use mctc_io_structure, only : structure_type, new
@@ -257,7 +257,8 @@ subroutine test_components(error, mol, model)
    real(wp) :: trans(3, 1) = 0.0_wp
    real(wp), allocatable :: cmat(:, :), amat(:, :)
 
-   integer :: iat, jat, kat, ndim
+   integer :: iat, jat, ndim
+   integer(i8) :: kat
 
    allocate(cg_input :: solver_input)
    select type (solver_input)

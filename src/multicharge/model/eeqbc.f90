@@ -313,7 +313,8 @@ subroutine get_xvec(self, mol, ndim, cache, list, efield)
    !> External electric field
    real(wp), intent(in), optional :: efield(:)
 
-   integer :: iat, izp, img
+   integer :: iat, izp
+   integer(i8) :: img
    real(wp) :: ctmp, vec(3), rvdw, capi, wsw
    real(wp), allocatable :: dtrans(:, :)
 
@@ -2173,10 +2174,10 @@ subroutine get_dcnpair(self, mol, iat, jat, rij, dG_ij, dG_ji)
       dG_ji(:) = 0.0_wp
    else
 
-      ! dG_ij corresponds to the off-diagonal 'dcndrij'
+      ! dG_ij corresponds to the off-diagonal entry of 'dcndrlist'
       dG_ij(:) = countd * self%directed_factor
 
-      ! dG_ji corresponds to the off-diagonal 'dcndrji'
+      ! dG_ji is the mirrored entry, implicit in an upper-triangular 'dcndrlist'
       dG_ji(:) = -countd
    end if
 
