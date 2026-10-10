@@ -406,9 +406,11 @@ end subroutine solve
 !> Solve a linear system with multiple right-hand sides using the
 !> breakdown-free block conjugate gradient method with a Jacobi
 !> preconditioner (Ji, Sosonkina, Li, Co-HPC 2014). New search directions are
-!> orthonormalized by an eigendecomposition of their Gram matrix.
+!> orthonormalized by an eigendecomposition of their Gram matrix. With a
+!> subsystem, the system is restricted to the rows and columns of its atoms in
+!> a complete neighborlist, the vectors hold the subsystem atoms only.
 subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
-   & niter)
+   & niter, sidx, loc)
    !> Conjugate-gradient solver instance
    class(cg_solver), intent(in) :: self
 
@@ -435,6 +437,12 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
 
    !> Number of iterations until convergence
    integer, intent(out), optional :: niter
+
+   !> Atoms of the subsystem in the neighborlist, in the order of the vectors
+   integer, intent(in), optional :: sidx(:)
+
+   !> Index of the atoms of the neighborlist in the subsystem, zero outside
+   integer, intent(in), optional :: loc(:)
 
    ! Maximal number of iterations
    integer :: maxit
@@ -469,10 +477,11 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
 
    type(timer_type) :: timer
    integer :: unit, info
-   logical :: nlist
+   logical :: nlist, sub
 
    nlist = self%use_nlist .and. .not. present(amat) .and. &
       & present(list) .and. present(alist)
+   sub = present(sidx) .or. present(loc)
    if (present(niter)) niter = 0
 
    if (present(new_unit)) then
@@ -498,6 +507,21 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
          return
       end if
    end if
+   if (sub) then
+      if (.not. (nlist .and. present(sidx) .and. present(loc))) then
+         call fatal_error(error, &
+            & "Subsystem requires a neighborlist, sidx and loc.")
+         return
+      end if
+      if (.not. list%complete) then
+         call fatal_error(error, "Subsystem requires a complete list.")
+         return
+      end if
+      if (size(sidx) /= ndim .or. size(loc) < size(list%inl) - 1) then
+         call fatal_error(error, "Dimension mismatch of the subsystem.")
+         return
+      end if
+   end if
    if (nrhs == 0) return
 
    tol = self%cgtol
@@ -512,7 +536,11 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
    if (self%verbosity > 1) call timer%push("initialization")
 
    ! Diagonal preconditioner
-   if (nlist) then
+   if (sub) then
+      do iat = 1, ndim
+         prec(iat) = 1.0_wp / (alist(list%inl(sidx(iat))) + eps)
+      end do
+   else if (nlist) then
       do iat = 1, ndim
          prec(iat) = 1.0_wp / (alist(list%inl(iat)) + eps)
       end do
@@ -523,7 +551,7 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
    end if
 
    ! Initial residual R = B - A X
-   call block_matmul(nlist, xmat, res, amat, alist, list)
+   call block_matmul(nlist, xmat, res, amat, alist, list, sidx, loc)
    res(:, :) = bmat - res
 
    ! Initial norms
@@ -570,7 +598,7 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
 
       ! Matrix-block product Q = A P
       call block_matmul(nlist, dir(:, :nrank), adir(:, :nrank), amat, alist, &
-         & list)
+         & list, sidx, loc)
 
       ! Shrink the small matrices to the current rank to keep them contiguous
       if (size(dtad, 1) /= nrank) then
@@ -803,6 +831,9 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    ! Size of the subsystem and number of iterations of a block
    integer :: nsub, niter, maxsub, maxiter
    integer(i8) :: sumsub, sumiter
+   ! Time of the subsystem selection, the block CG and the storage of the
+   ! columns, summed over the blocks
+   real(wp) :: tblk(3), sumtime(3)
    ! Coordinates and buffer distance of the subsystems
    real(wp), allocatable :: pos(:, :)
    real(wp) :: buffer
@@ -871,13 +902,14 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    failed = .false.
    sumsub = 0_i8
    sumiter = 0_i8
+   sumtime(:) = 0.0_wp
    maxsub = 0
    maxiter = 0
    !$omp parallel default(none) &
    !$omp shared(ndim, nblk, order, alist, list, ainvlist, pos, buffer, &
    !$omp& blksolver, error, failed) &
-   !$omp private(iblk, loc, nsub, niter, skip) &
-   !$omp reduction(+:sumsub, sumiter) reduction(max:maxsub, maxiter)
+   !$omp private(iblk, loc, nsub, niter, skip, tblk) &
+   !$omp reduction(+:sumsub, sumiter, sumtime) reduction(max:maxsub, maxiter)
    allocate(loc(ndim), source=0)
    !$omp do schedule(dynamic)
    do iblk = 1, nblk
@@ -886,8 +918,9 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
       if (skip) cycle
       call invert_block(blksolver, alist, list, &
          & order((iblk - 1) * block_size_def + 1:min(iblk * block_size_def, ndim)), &
-         & pos, buffer, loc, ainvlist, nsub, niter, error, failed)
+         & pos, buffer, loc, ainvlist, nsub, niter, tblk, error, failed)
       sumsub = sumsub + nsub
+      sumtime(:) = sumtime + tblk
       sumiter = sumiter + niter
       maxsub = max(maxsub, nsub)
       maxiter = max(maxiter, niter)
@@ -904,6 +937,8 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
          & real(sumsub, wp) / nblk, ", max ", maxsub
       write(unit, '(a, 1x, f0.1, a, i0)') "Block CG iterations per block    :", &
          & real(sumiter, wp) / nblk, ", max ", maxiter
+      write(unit, '(a, 3(1x, f0.3))') "Select/CG/store time (s)         :", &
+         & sumtime
       write(unit, '(a)') ''
    end if
 
@@ -912,10 +947,11 @@ end subroutine invert_list
 
 !> Solve a block of columns of the inverse on its subsystem of the atoms in
 !> the rows of the block atoms and the neighbors of these atoms within the
-!> buffer distance beyond the row radius of a block atom. The columns are
-!> stored in the rows of the block atoms.
+!> buffer distance beyond the row radius of a block atom. The subsystem matrix
+!> is applied on the rows of the list, skipping the elements outside of the
+!> subsystem. The columns are stored in the rows of the block atoms.
 subroutine invert_block(solver, alist, list, cols, xyz, buffer, loc, ainvlist, &
-   & nsub, niter, error, failed)
+   & nsub, niter, times, error, failed)
    !> Conjugate-gradient solver for the block
    type(cg_solver), intent(in) :: solver
 
@@ -946,6 +982,10 @@ subroutine invert_block(solver, alist, list, cols, xyz, buffer, loc, ainvlist, &
    !> Number of block CG iterations
    integer, intent(out) :: niter
 
+   !> Time of the subsystem selection, the block CG and the storage of the
+   !> columns in seconds
+   real(wp), intent(out) :: times(3)
+
    !> Error handling, shared by all blocks
    type(error_type), allocatable, intent(inout) :: error
 
@@ -953,20 +993,18 @@ subroutine invert_block(solver, alist, list, cols, xyz, buffer, loc, ainvlist, &
    logical, intent(inout) :: failed
 
    integer :: ncol, ncore, nrej, isub, iat, jat, ivec
-   integer(i8) :: kat, pos
+   integer(i8) :: kat, tick(4), rate
    real(wp) :: dist2
    logical :: inbuf
    ! Atoms of the subsystem and neighbors rejected for the buffer
    integer, allocatable :: sidx(:), rej(:)
    ! Squared radius of the rows of the block atoms extended by the buffer
    real(wp), allocatable :: rad2(:)
-   ! Subsystem matrix A_SS in compressed-row storage
-   real(wp), allocatable :: alsub(:)
-   type(csr_list) :: lsub
    ! Right-hand sides and solutions of the subsystem
    real(wp), allocatable :: bsub(:, :), xsub(:, :)
    type(error_type), allocatable :: blkerror
 
+   call system_clock(tick(1), rate)
    ncol = size(cols)
    allocate(sidx(size(loc)))
 
@@ -1023,43 +1061,19 @@ subroutine invert_block(solver, alist, list, cols, xyz, buffer, loc, ainvlist, &
       end do
       loc(rej(:nrej)) = 0
    end if
-
-   ! Subsystem matrix with the elements in the list order, the diagonal stays
-   ! first in each row
-   lsub%complete = .true.
-   allocate(lsub%inl(nsub + 1))
-   lsub%inl(1) = 1
-   do isub = 1, nsub
-      iat = sidx(isub)
-      pos = lsub%inl(isub)
-      do kat = list%inl(iat), list%inl(iat + 1) - 1
-         if (loc(list%nlat(kat)) /= 0) pos = pos + 1
-      end do
-      lsub%inl(isub + 1) = pos
-   end do
-   allocate(lsub%nlat(lsub%inl(nsub + 1) - 1), alsub(lsub%inl(nsub + 1) - 1))
-   do isub = 1, nsub
-      iat = sidx(isub)
-      pos = lsub%inl(isub)
-      do kat = list%inl(iat), list%inl(iat + 1) - 1
-         jat = loc(list%nlat(kat))
-         if (jat == 0) cycle
-         lsub%nlat(pos) = jat
-         alsub(pos) = alist(kat)
-         pos = pos + 1
-      end do
-   end do
+   call system_clock(tick(2))
 
    ! Unit vectors of the block columns, initial guess from the diagonal
    allocate(bsub(nsub, ncol), xsub(nsub, ncol), source=0.0_wp)
    do ivec = 1, ncol
       isub = loc(cols(ivec))
       bsub(isub, ivec) = 1.0_wp
-      xsub(isub, ivec) = 1.0_wp / (alsub(lsub%inl(isub)) + eps)
+      xsub(isub, ivec) = 1.0_wp / (alist(list%inl(cols(ivec))) + eps)
    end do
 
-   call solver%solve_block(alist=alsub, bmat=bsub, xmat=xsub, list=lsub, &
-      & error=blkerror, niter=niter)
+   call solver%solve_block(alist=alist, bmat=bsub, xmat=xsub, list=list, &
+      & error=blkerror, niter=niter, sidx=sidx(:nsub), loc=loc)
+   call system_clock(tick(3))
    if (allocated(blkerror)) then
       !$omp critical (invert_list_error)
       if (.not. allocated(error)) call move_alloc(blkerror, error)
@@ -1077,6 +1091,8 @@ subroutine invert_block(solver, alist, list, cols, xyz, buffer, loc, ainvlist, &
    end if
 
    loc(sidx(:nsub)) = 0
+   call system_clock(tick(4))
+   times(:) = real(tick(2:4) - tick(1:3), wp) / real(rate, wp)
 
 end subroutine invert_block
 
@@ -1163,8 +1179,9 @@ end subroutine sort_by_key
 
 
 !> Multiply the coefficient matrix with a block of vectors, avec = A vec,
-!> using either the dense matrix or its compressed-row representation
-subroutine block_matmul(nlist, vec, avec, amat, alist, list)
+!> using either the dense matrix or its compressed-row representation,
+!> optionally restricted to a subsystem
+subroutine block_matmul(nlist, vec, avec, amat, alist, list, sidx, loc)
    !> Whether to use the compressed-row representation
    logical, intent(in) :: nlist
 
@@ -1183,13 +1200,21 @@ subroutine block_matmul(nlist, vec, avec, amat, alist, list)
    !> Optional neighborlist representation of the matrix
    type(csr_list), intent(in), optional :: list
 
+   !> Atoms of the subsystem in the neighborlist, in the order of the vectors
+   integer, intent(in), optional :: sidx(:)
+
+   !> Index of the atoms of the neighborlist in the subsystem, zero outside
+   integer, intent(in), optional :: loc(:)
+
    integer :: ndim, nvec
 
    ndim = size(vec, 1)
    nvec = size(vec, 2)
 
    if (nlist) then
-      if (list%complete) then
+      if (present(sidx)) then
+         call csr_sub_block_matmul(alist, list, sidx, loc, vec, avec)
+      else if (list%complete) then
          call csr_block_matmul(alist, list, vec, avec)
       else
          call spmm_csr("N", ndim, nvec, ndim, 1.0_wp, "SU", alist, &
@@ -1248,6 +1273,62 @@ subroutine csr_block_matmul(alist, list, vec, avec)
    !$omp end parallel
 
 end subroutine csr_block_matmul
+
+
+!> Multiply the subsystem block A_SS of a matrix in complete compressed-row
+!> storage with a block of vectors on the subsystem, avec = A_SS vec. The
+!> elements of the rows outside of the subsystem are skipped.
+subroutine csr_sub_block_matmul(alist, list, sidx, loc, vec, avec)
+   !> Matrix values in complete compressed-row storage
+   real(wp), intent(in) :: alist(:)
+
+   !> Complete neighborlist representation of the matrix
+   type(csr_list), intent(in) :: list
+
+   !> Atoms of the subsystem in the neighborlist, in the order of the vectors
+   integer, intent(in) :: sidx(:)
+
+   !> Index of the atoms of the neighborlist in the subsystem, zero outside
+   integer, intent(in) :: loc(:)
+
+   !> Block of input vectors
+   real(wp), intent(in) :: vec(:, :)
+
+   !> Block of output vectors
+   real(wp), intent(inout) :: avec(:, :)
+
+   integer :: ndim, nvec, isub, iat, jsub
+   integer(i8) :: kat
+   real(wp), allocatable :: vect(:, :), acc(:)
+
+   ndim = size(vec, 1)
+   nvec = size(vec, 2)
+   allocate(vect(nvec, ndim))
+
+   !$omp parallel default(none) &
+   !$omp shared(ndim, nvec, alist, list, sidx, loc, vec, avec, vect) &
+   !$omp private(isub, iat, jsub, kat, acc)
+   allocate(acc(nvec))
+   !$omp do schedule(static)
+   do isub = 1, ndim
+      vect(:, isub) = vec(isub, :)
+   end do
+   !$omp end do
+   !$omp do schedule(guided)
+   do isub = 1, ndim
+      iat = sidx(isub)
+      acc(:) = 0.0_wp
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         jsub = loc(list%nlat(kat))
+         if (jsub /= 0) acc(:) = acc + alist(kat) * vect(:, jsub)
+      end do
+      avec(isub, :) = acc
+   end do
+   !$omp end do
+   deallocate(acc)
+   !$omp end parallel
+
+end subroutine csr_sub_block_matmul
 
 
 !> Replace a block of vectors by an orthonormal basis of its column space.

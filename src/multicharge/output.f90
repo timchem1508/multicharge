@@ -200,7 +200,7 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, h
          dqsum = sum(dqdr)
       end if
       write(unit, '(a,":", t25, es20.13, 1x, a)') &
-      & "Sum over all dqdr elements", dqsum, "a.u./a0"
+      & "Sum over dqdr elements", dqsum, "a.u./a0"
       write(unit, '(72("-"))')
       write(unit, '(a10,1x,a4,3x,a6,1x,a4,3x,*(1x,a12))') "#", "Z", "#", "A", &
       & "dQ(Z)/dx(A)", "dQ(Z)/dy(A)", "dQ(Z)/dz(A)"
