@@ -21,7 +21,7 @@ module multicharge_output
    use mctc_io_constants, only : pi
    use multicharge_model, only : mchrg_model_type
    use multicharge_model_cache, only : mchrg_cache
-   use multicharge_model_type, only : hess_index
+   use multicharge_model_type, only : hess_index, get_dqdr_row
    use multicharge_version, only : get_multicharge_version
    implicit none
    private
@@ -209,7 +209,7 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, h
       do iat = 1, mol%nat
          isp = mol%id(iat)
          if (sparse) then
-            call cache%get_dqdr_row(iat, dqrow)
+            call get_dqdr_row(cache, iat, dqrow)
          else
             dqrow(:, :) = dqdr(:, :, iat)
          end if
@@ -440,7 +440,7 @@ subroutine write_json_dqdr(unit, cache, indent)
    allocate(dqrow(3, nat))
    write(unit, '("[")', advance='no')
    do jat = 1, nat
-      call cache%get_dqdr_row(jat, dqrow)
+      call get_dqdr_row(cache,jat, dqrow)
       do iat = 1, nat
          do ic = 1, 3
             call write_json_element(unit, dqrow(ic, iat), &

@@ -3154,4 +3154,146 @@ subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
    deallocate(gradient_local, sigma_local, qlocacc, cnacc, dtrans, v, ptmp)
 end subroutine get_grad_3d
 
+subroutine get_d2cpair(kbc, vec, rvdw, capi, capj, d2cpair)
+   !> Bond capacitance exponent
+   real(wp), intent(in) :: kbc
+   !> Vector between atoms
+   real(wp), intent(in) :: vec(3)
+   !> Van der Waals distance
+   real(wp), intent(in) :: rvdw
+   !> Bond capacitance of atom i
+   real(wp), intent(in) :: capi
+   !> Bond capacitance of atom j
+   real(wp), intent(in) :: capj
+   !> Derivative w.r.t. atomic position (3)
+   real(wp), intent(out) :: d2cpair(3, 3)
+
+
+   real(wp) :: r1, arg, dtmp, dtmp1, r2
+   integer :: ic, jc
+
+   d2cpair(:, :) = 0.0_wp
+
+   r1 = norm2(vec)
+   r2 = r1 * r1
+   ! Capacitance of bond between atom i and j
+   arg = -(kbc * (r1 - rvdw) / rvdw)**2
+   dtmp = -sqrt(capi * capj) * kbc * exp(arg) / (sqrtpi * rvdw)
+   dtmp1 = - 2.0_wp * kbc * kbc * (r1 - rvdw) / (rvdw * rvdw)
+
+   do ic = 1, 3
+      do jc = 1, 3
+         d2cpair(jc, ic) = dtmp * (dtmp1 - 1.0_wp / r1) * vec(ic) * vec(jc) / r2
+      end do
+      d2cpair(ic, ic) = d2cpair(ic, ic) + dtmp / r1
+   end do
+
+end subroutine get_d2cpair
+
+subroutine get_d2cmat_0d(self, mol, cache)
+   !> EEQBC model type
+   class(eeqbc_model), intent(in) :: self
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+   !> EEQBC cache
+   type(mchrg_cache), intent(inout) :: cache
+
+   integer :: iat, jat, izp, jzp
+   real(wp) :: vec(3), rvdw, dG(3), dS(3, 3), capi, capj
+
+   real(wp), allocatable :: dcdL_acc(:, :, :)
+
+   cache%d2cdr2(:, :) = 0.0_wp
+
+         !$omp parallel default(none) &
+      !$omp shared(self, mol, trans, cn, cutoff2, dEdcn, hessian, npair) &
+      !$omp private(ipair, iat, jat, izp, jzp, itr, ic, jc, ii, jj, r2, r1, rij, &
+      !$omp& den, dEdcnij, countd, countd2, box, pair_box, diagonal_local, &
+      !$omp& idamp, jdamp)
+      allocate(diagonal_local(3, 3, mol%nat), source=0.0_wp)
+
+      !$omp do schedule(runtime)
+      do ipair = 1, npair
+         iat = int(0.5_wp*(1.0_wp + sqrt(8.0_wp*real(ipair, wp) + 1.0_wp)))
+         if (iat*(iat - 1)/2 < ipair) iat = iat + 1
+         jat = ipair - (iat - 1)*(iat - 2)/2
+
+         izp = mol%id(iat)
+         jzp = mol%id(jat)
+
+   !$omp parallel default(none) &
+   !$omp shared(dcdr, mol, self) &
+   !$omp private(iat, izp, jat, jzp, vec, rvdw, dG, dS, capi, capj) &
+   !$omp reduction(+:dcdL_acc)
+
+   !$omp do schedule(runtime)
+   do iat = 1, mol%nat
+      izp = mol%id(iat)
+      capi = self%cap(izp)
+      do jat = 1, iat - 1
+         jzp = mol%id(jat)
+         capj = self%cap(jzp)
+         rvdw = self%rvdw(izp, jzp)
+         vec = mol%xyz(:, jat) - mol%xyz(:, iat)
+
+         call get_dcpair(self%kbc, vec, rvdw, capi, capj, dG, dS)
+
+         dcdr(:, iat, jat) = +dG
+         dcdr(:, jat, iat) = -dG
+
+         dcdL_acc(:, :, iat) = dcdL_acc(:, :, iat) + dS
+         dcdL_acc(:, :, jat) = dcdL_acc(:, :, jat) + dS
+      end do
+   end do
+   !$omp end do
+
+   !$omp do schedule(static)
+   do iat = 1, mol%nat
+      dcdr(:, iat, iat) = sum(dcdr(:, 1:iat-1, iat), dim=2) &
+         + sum(dcdr(:, iat+1:mol%nat, iat), dim=2)
+   end do
+   !$omp end do
+
+   !$omp end parallel
+
+   dcdL(:, :, 1:mol%nat) = dcdL_acc
+   deallocate(dcdL_acc)
+
+end subroutine get_d2cmat_0d
+
+subroutine get_d2cmat_0d()
+
+!> Compute the molecular nuclear Hessian
+subroutine get_hessian_0d(self, mol, cache, p, hessian, alphain, betain)
+   !> EEQBC model type
+   class(eeqbc_model), intent(in) :: self
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Cache for intermediate quantities
+   type(cache_type), intent(in) :: cache
+
+   !> Atomic charges
+   real(wp), intent(in) :: p(:)
+
+   !> Molecular nuclear Hessian
+   real(wp), intent(out) :: hessian(:,:)
+
+   !> Alpha parameter
+   real(wp), intent(in) :: alphain
+
+   !> Beta parameter
+   real(wp), intent(in) :: betain
+
+   real(wp) :: alpha, beta
+
+   alpha = alphain
+   beta = betain
+
+
+
+
+end subroutine get_hessian_0d
+
 end module multicharge_model_eeqbc

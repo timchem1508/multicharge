@@ -23,7 +23,7 @@ module test_csrlist
    use mctc_csrlist, only : csr_list, new_csr_list
    use mstore, only : get_structure
    use multicharge_blas, only : gemv
-   use multicharge_model_type, only : mchrg_model_type
+   use multicharge_model_type, only : mchrg_model_type, get_dqdr_row
    use multicharge_model_eeqbc, only : eeqbc_model
    use multicharge_param, only : new_eeq2019_model, new_eeqbc2025_model
    use multicharge_model_cache, only : mchrg_cache
@@ -1211,7 +1211,7 @@ subroutine test_partial_derivs(error, mol, model)
 
    class(mchrg_solver_type), allocatable :: solver, direct
    class(mchrg_solver_input), allocatable :: solver_input, direct_in
-   type(mchrg_cache), allocatable :: cache1, cache2, cache3
+   type(mchrg_cache), allocatable :: cache1, cache2, cache3, cache4
    type(csr_list), allocatable :: list
    integer :: ndim, iscale, jat
    real(wp), parameter :: scales(2, 2) = reshape([1.0_wp, 0.0_wp, 0.0_wp, 1.0_wp], &
@@ -1287,13 +1287,18 @@ subroutine test_partial_derivs(error, mol, model)
       return
    end if
 
-   ! Position derivatives only in compressed storage, without a dense dqdr
+   ! Position derivatives only in compressed storage, without a dense dqdr,
+   ! fresh cache keeps the Wigner-Seitz cell of the neighbour list
+   allocate(cache4)
+   cache4%wsc = cache2%wsc
+   call move_alloc(cache4, cache2)
+   call model%update(mol, cache2, trans, grad=.true., list=list)
    call model%solve(mol, solver, cache2, error, dqdL=dqdL4, list=list, &
       & unit=output_unit)
    if (allocated(error)) return
 
    do jat = 1, mol%nat
-      call cache2%get_dqdr_row(jat, dqrow)
+      call get_dqdr_row(cache2, jat, dqrow)
       if (any(abs(dqrow - dqdr2(:, :, jat)) > thr1)) then
          call test_failed(error, "Compressed charge derivatives do not match")
          print'(es21.14)', maxval(abs(dqrow - dqdr2(:, :, jat)))

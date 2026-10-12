@@ -109,43 +109,11 @@ module multicharge_model_cache
       !> dq_j/dR_i = dqdrlist(:, (j, i)) - dqdrscal(:, i) * uvec(j)
       real(wp), allocatable :: dqdrscal(:, :)
 
+      !> Second derivative of the Maxwell capacitance matrix w.r.t. positions
+      real(wp), allocatable :: d2cdr2(:, :)
+
       !> Logical flag for gradient calculation
       logical :: grad
-   contains
-
-      !> Position derivatives of the charge of one atom from the compressed storage
-      procedure :: get_dqdr_row
-
    end type mchrg_cache
-
-
-contains
-
-
-!> Position derivatives of the charge of one atom w.r.t. all atomic positions,
-!> expanded from the compressed storage dqdrlist and the charge constraint term
-subroutine get_dqdr_row(self, jat, dqdr)
-
-   !> Cache with the compressed position derivatives
-   class(mchrg_cache), intent(in) :: self
-
-   !> Atom of the charge
-   integer, intent(in) :: jat
-
-   !> Derivatives dq_j/dR_i for all atoms i, dimension (3, nat)
-   real(wp), intent(out) :: dqdr(:, :)
-
-   integer :: iat
-   integer(i8) :: kat
-
-   do iat = 1, size(dqdr, 2)
-      dqdr(:, iat) = -self%dqdrscal(:, iat) * self%uvec(jat)
-   end do
-   do kat = self%dqdrpat%inl(jat), self%dqdrpat%inl(jat + 1) - 1
-      iat = self%dqdrpat%nlat(kat)
-      dqdr(:, iat) = dqdr(:, iat) + self%dqdrlist(:, kat)
-   end do
-
-end subroutine get_dqdr_row
 
 end module multicharge_model_cache

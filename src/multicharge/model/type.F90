@@ -39,7 +39,7 @@ module multicharge_model_type
    implicit none
    private
 
-   public :: mchrg_model_type, get_dir_trans, get_rec_trans, hess_index
+   public :: mchrg_model_type, get_dir_trans, get_rec_trans, hess_index, get_dqdr_row
 
    !> Abstract multicharge model type
    type, abstract :: mchrg_model_type
@@ -607,10 +607,6 @@ subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit)
    real(wp) :: scale, uvecsum
    integer :: jat
 
-   ! Compressed position derivatives of an earlier call are outdated
-   if (allocated(cache%dqdrlist)) deallocate(cache%dqdrlist)
-   if (allocated(cache%dqdrscal)) deallocate(cache%dqdrscal)
-
    ! Without a neighborlist the position derivatives are only formed densely
    if (.not. (present(list) .or. present(dqdr))) then
       call fatal_error(error, "Charge derivatives without a neighborlist require dqdr")
@@ -641,7 +637,7 @@ subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit)
             !$omp parallel do default(none) schedule(runtime) &
             !$omp shared(mol, cache, dqdr) private(jat)
             do jat = 1, mol%nat
-               call cache%get_dqdr_row(jat, dqdr(:, :, jat))
+               call get_dqdr_row(cache,jat, dqdr(:, :, jat))
             end do
          end if
          return
@@ -717,39 +713,9 @@ subroutine get_q_derivs_list(mol, solver, cache, list, dqdL, error, unit)
    integer(i8) :: kat, lat, nkeep, nnzq
    real(wp) :: thr, uvecsum, scale
    real(wp) :: wlat(3, 3)
-   ! Inverse on its pattern without the elements below the threshold
-   integer(i8), allocatable :: sinl(:)
-   integer, allocatable :: snlat(:)
-   real(wp), allocatable :: sval(:)
    ! Placeholders for the product values not referenced by the pattern stage
    integer :: jdum(0)
    real(wp) :: cdum(0)
-
-   ! Elements of the inverse below the threshold are dropped
-   thr = 0.0_wp
-   do iat = 1, mol%nat
-      thr = max(thr, cache%ainvlist(list%inl(iat)))
-   end do
-   thr = solver%ainvthr * thr
-   allocate(sinl(mol%nat + 1))
-   sinl(1) = 1
-   do iat = 1, mol%nat
-      sinl(iat + 1) = sinl(iat)
-      do kat = list%inl(iat), list%inl(iat + 1) - 1
-         if (abs(cache%ainvlist(kat)) > thr) sinl(iat + 1) = sinl(iat + 1) + 1
-      end do
-   end do
-   nkeep = sinl(mol%nat + 1) - 1
-   allocate(snlat(nkeep), sval(nkeep))
-   lat = 1
-   do iat = 1, mol%nat
-      do kat = list%inl(iat), list%inl(iat + 1) - 1
-         if (abs(cache%ainvlist(kat)) <= thr) cycle
-         snlat(lat) = list%nlat(kat)
-         sval(lat) = cache%ainvlist(kat)
-         lat = lat + 1
-      end do
-   end do
 
    ! Sparse product S B, B holds dB_k/dR_i in row k, the pattern is formed once
    ! and the values for each Cartesian component
@@ -757,13 +723,13 @@ subroutine get_q_derivs_list(mol, solver, cache, list, dqdL, error, unit)
    if (allocated(cache%dqdrpat%nlat)) deallocate(cache%dqdrpat%nlat)
    cache%dqdrpat%complete = .true.
    allocate(cache%dqdrpat%inl(mol%nat + 1))
-   call spmm_csr("N", 1, 0, mol%nat, mol%nat, mol%nat, sval, snlat, sinl, &
+   call spmm_csr("N", 1, 0, mol%nat, mol%nat, mol%nat, cache%ainvlist, list%nlat, list%inl, &
       & cache%dabdrlist(1, :), list%nlat, list%inl, cdum, jdum, &
       & cache%dqdrpat%inl, 0_i8, info)
    nnzq = cache%dqdrpat%inl(mol%nat + 1) - 1
    allocate(cache%dqdrpat%nlat(nnzq), cache%dqdrlist(3, nnzq))
    do ic = 1, 3
-      call spmm_csr("N", 2, 0, mol%nat, mol%nat, mol%nat, sval, snlat, sinl, &
+      call spmm_csr("N", 2, 0, mol%nat, mol%nat, mol%nat, cache%ainvlist, list%nlat, list%inl, &
          & cache%dabdrlist(ic, :), list%nlat, list%inl, cache%dqdrlist(ic, :), &
          & cache%dqdrpat%nlat, cache%dqdrpat%inl, nnzq, info)
       if (info /= 0) then
@@ -771,14 +737,6 @@ subroutine get_q_derivs_list(mol, solver, cache, list, dqdL, error, unit)
          return
       end if
    end do
-
-   if (present(unit) .and. solver%verbosity > 0) then
-      write(unit, '(a, 1x, i0, a, i0)') "Inverse elements on neighborlist :", &
-         & nkeep, " of ", size(list%nlat, kind=i8)
-      write(unit, '(a, 1x, i0, a, i0)') "Charge derivative elements       :", &
-         & nnzq, " of ", int(mol%nat, i8)**2
-      write(unit, '(a)') ''
-   end if
 
    ! Contractions with the constraint response, w = B^T u
    uvecsum = sum(cache%uvec)
@@ -796,18 +754,45 @@ subroutine get_q_derivs_list(mol, solver, cache, list, dqdL, error, unit)
 
    ! Lattice derivatives B_L^T S and their charge constraint term
    !$omp parallel do default(none) schedule(runtime) &
-   !$omp shared(mol, cache, sinl, snlat, sval, uvecsum, wlat, dqdL) &
+   !$omp shared(mol, cache, list, uvecsum, wlat, dqdL) &
    !$omp private(iat, jat, kat, scale)
    do jat = 1, mol%nat
       scale = cache%uvec(jat) / (uvecsum + eps)
       dqdL(:, :, jat) = -scale * wlat
-      do kat = sinl(jat), sinl(jat + 1) - 1
-         iat = snlat(kat)
-         dqdL(:, :, jat) = dqdL(:, :, jat) + sval(kat) * cache%dabdL(:, :, iat)
+      do kat = list%inl(jat), list%inl(jat + 1) - 1
+         iat = list%nlat(kat)
+         dqdL(:, :, jat) = dqdL(:, :, jat) + &
+            & cache%ainvlist(kat) * cache%dabdL(:, :, iat)
       end do
    end do
 
 end subroutine get_q_derivs_list
+
+!> Position derivatives of the charge of one atom w.r.t. all atomic positions,
+!> expanded from the compressed storage dqdrlist and the charge constraint term
+subroutine get_dqdr_row(cache, jat, dqdr)
+
+   !> Cache with the compressed position derivatives
+   type(mchrg_cache), intent(in) :: cache
+
+   !> Atom of the charge
+   integer, intent(in) :: jat
+
+   !> Derivatives dq_j/dR_i for all atoms i, dimension (3, nat)
+   real(wp), intent(out) :: dqdr(:, :)
+
+   integer :: iat
+   integer(i8) :: kat
+
+   do iat = 1, size(dqdr, 2)
+      dqdr(:, iat) = -cache%dqdrscal(:, iat) * cache%uvec(jat)
+   end do
+   do kat = cache%dqdrpat%inl(jat), cache%dqdrpat%inl(jat + 1) - 1
+      iat = cache%dqdrpat%nlat(kat)
+      dqdr(:, iat) = dqdr(:, iat) + cache%dqdrlist(:, kat)
+   end do
+
+end subroutine get_dqdr_row
 
 
 !> External gradient calculation using the adjoint state method
@@ -970,7 +955,7 @@ subroutine get_numhess_packed(self, mol, solver, cache, error, qvec, energy, gra
    !> Hessian matrix d2E/dR2 in packed lower-triangle storage
    real(wp), intent(out) :: hess(:)
 
-   !> Virial derivatives w.r.t. positions (3, 3, 3, nat) or strain (3, 3, 3, 3)
+   !> Virial derivatives w.r.t. strain (3, 3, 3, 3)
    real(wp), intent(out) :: press(:, :, :, :)
 
    !> neighborlist optional type
