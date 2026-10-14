@@ -84,7 +84,10 @@ subroutine collect_csrlist(testsuite)
    & new_unittest("pair-derivs-ice", test_pair_derivs_ice), &
    & new_unittest("partial-derivs-mb01", test_partial_derivs_mb01), &
    & new_unittest("partial-derivs-co2", test_partial_derivs_co2), &
-   & new_unittest("partial-derivs-ice", test_partial_derivs_ice) &
+   & new_unittest("partial-derivs-ice", test_partial_derivs_ice), &
+   & new_unittest("d2cdr2-mb01", test_d2cdr2_mb01), &
+   & new_unittest("d2cdr2-mb05", test_d2cdr2_mb05), &
+   & new_unittest("d2cdr2-complete-mb01", test_d2cdr2_complete_mb01) &
    & ]
 
 end subroutine collect_csrlist
@@ -1381,6 +1384,143 @@ subroutine test_partial_derivs_ice(error)
    call test_partial_derivs(error, mol, model)
 
 end subroutine test_partial_derivs_ice
+
+
+!> Check the diagonal blocks of the second derivative of the capacitance matrix
+!> from the neighbour list against finite differences of the diagonal of its
+!> first derivative
+subroutine test_d2cdr2(error, mol, model, complete)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular structure data
+   type(structure_type), intent(inout) :: mol
+
+   !> Electronegativity equilibration model
+   class(mchrg_model_type), intent(in) :: model
+
+   !> Use the complete instead of the half neighbour list
+   logical, intent(in) :: complete
+
+   type(mchrg_cache), allocatable :: cache
+   type(csr_list), allocatable :: list
+   integer :: iat, ic, ndim
+   real(wp), parameter :: trans(3, 1) = 0.0_wp
+   real(wp), parameter :: step = 1.0e-6_wp
+   real(wp) :: dcdrr1(3), dcdrr2(3), dcdrl1(3), dcdrl2(3)
+   real(wp), allocatable :: numd2cdr2(:, :, :)
+
+   allocate(cache, list)
+   allocate(numd2cdr2(3, 3, mol%nat), source=0.0_wp)
+   ndim = mol%nat
+
+   call new_csr_list(list, mol, error, cutoff=cutoff, complete=complete)
+   if (allocated(error)) return
+
+   ! The capacitance matrix depends on the positions only
+   call model%update(mol, cache, trans, grad=.true., list=list)
+
+   do iat = 1, mol%nat
+      do ic = 1, 3
+         ! First right-hand side (x+h)
+         mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
+         call model%get_capacitance_matrix(mol, ndim, cache, list=list)
+         dcdrr1 = cache%dcdrdiag(:, iat)
+
+         ! Second right-hand side (x+2h)
+         mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
+         call model%get_capacitance_matrix(mol, ndim, cache, list=list)
+         dcdrr2 = cache%dcdrdiag(:, iat)
+
+         ! First left-hand side (x-h)
+         mol%xyz(ic, iat) = mol%xyz(ic, iat) - 3*step
+         call model%get_capacitance_matrix(mol, ndim, cache, list=list)
+         dcdrl1 = cache%dcdrdiag(:, iat)
+
+         ! Second left-hand side (x-2h)
+         mol%xyz(ic, iat) = mol%xyz(ic, iat) - step
+         call model%get_capacitance_matrix(mol, ndim, cache, list=list)
+         dcdrl2 = cache%dcdrdiag(:, iat)
+
+         ! Return to original position
+         mol%xyz(ic, iat) = mol%xyz(ic, iat) + 2*step
+
+         ! f'(x) ≈ [f(x-2h) - 8f(x-h) + 8f(x+h) - f(x+2h)]/(12h)
+         numd2cdr2(:, ic, iat) = (dcdrl2 - 8.0_wp*dcdrl1 + 8.0_wp*dcdrr1 &
+            & - dcdrr2)/(12.0_wp*step)
+      end do
+   end do
+
+   ! Analytical second derivative
+   allocate(cache%d2cdr2diag(3, 3, mol%nat))
+   select type (model)
+   type is (eeqbc_model)
+      call model%get_d2cmat_0d_list(mol, list, cache)
+   class default
+      call test_failed(error, "Capacitance matrix requires the EEQBC model")
+      return
+   end select
+
+   if (any(abs(cache%d2cdr2diag - numd2cdr2) > thr2)) then
+      call test_failed(error, "Second derivative of the C matrix does not match")
+      print'(a)', "d2cdr2diag:"
+      print'(3es21.12)', cache%d2cdr2diag
+      print'(a)', "numd2cdr2:"
+      print'(3es21.12)', numd2cdr2
+      print'(a)', "diff:"
+      print'(3es21.12)', cache%d2cdr2diag - numd2cdr2
+   end if
+
+end subroutine test_d2cdr2
+
+
+subroutine test_d2cdr2_mb01(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "MB16-43", "01")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_d2cdr2(error, mol, model, complete=.false.)
+
+end subroutine test_d2cdr2_mb01
+
+
+subroutine test_d2cdr2_mb05(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "MB16-43", "05")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_d2cdr2(error, mol, model, complete=.false.)
+
+end subroutine test_d2cdr2_mb05
+
+
+subroutine test_d2cdr2_complete_mb01(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "MB16-43", "01")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_d2cdr2(error, mol, model, complete=.true.)
+
+end subroutine test_d2cdr2_complete_mb01
 
 
 end module test_csrlist

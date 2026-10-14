@@ -109,8 +109,9 @@ module multicharge_model_cache
       !> dq_j/dR_i = dqdrlist(:, (j, i)) - dqdrscal(:, i) * uvec(j)
       real(wp), allocatable :: dqdrscal(:, :)
 
-      !> Second derivative of the Maxwell capacitance matrix w.r.t. positions
-      real(wp), allocatable :: d2cdr2(:, :)
+      !> Diagonal part of the second derivative of the Maxwell capacitance
+      !> matrix w.r.t. positions of (3, 3, mol%nat) size.
+      real(wp), allocatable :: d2cdr2diag(:, :, :)
 
       !> Logical flag for gradient calculation
       logical :: grad

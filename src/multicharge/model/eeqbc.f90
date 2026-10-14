@@ -84,6 +84,12 @@ module multicharge_model_eeqbc
       procedure :: get_dcmat_0d_list
       !> Calculate constraint matrix derivatives (periodic)
       procedure :: get_dcmat_3d
+      !> Calculate diagonal blocks of the constraint matrix second derivatives
+      !> (molecular)
+      procedure :: get_d2cmat_0d
+      !> Calculate diagonal blocks of the constraint matrix second derivatives
+      !> (molecular) using neighborlist
+      procedure :: get_d2cmat_0d_list
       !> Calculate gradient
       procedure :: get_grad
    end type eeqbc_model
@@ -3154,6 +3160,8 @@ subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
    deallocate(gradient_local, sigma_local, qlocacc, cnacc, dtrans, v, ptmp)
 end subroutine get_grad_3d
 
+!> Compute the second derivative of the bond capacitance with respect to the
+!> distance vector between the atoms.
 subroutine get_d2cpair(kbc, vec, rvdw, capi, capj, d2cpair)
    !> Bond capacitance exponent
    real(wp), intent(in) :: kbc
@@ -3165,9 +3173,8 @@ subroutine get_d2cpair(kbc, vec, rvdw, capi, capj, d2cpair)
    real(wp), intent(in) :: capi
    !> Bond capacitance of atom j
    real(wp), intent(in) :: capj
-   !> Derivative w.r.t. atomic position (3)
+   !> Second derivative w.r.t. the distance vector (3 × 3)
    real(wp), intent(out) :: d2cpair(3, 3)
-
 
    real(wp) :: r1, arg, dtmp, dtmp1, r2
    integer :: ic, jc
@@ -3190,6 +3197,8 @@ subroutine get_d2cpair(kbc, vec, rvdw, capi, capj, d2cpair)
 
 end subroutine get_d2cpair
 
+!> Build the diagonal blocks d2C_ii/dR_i dR_i of the second derivative of the
+!> bond capacitance matrix for a non‑periodic system.
 subroutine get_d2cmat_0d(self, mol, cache)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
@@ -3198,73 +3207,103 @@ subroutine get_d2cmat_0d(self, mol, cache)
    !> EEQBC cache
    type(mchrg_cache), intent(inout) :: cache
 
-   integer :: iat, jat, izp, jzp
-   real(wp) :: vec(3), rvdw, dG(3), dS(3, 3), capi, capj
+   integer :: iat, jat, izp, jzp, npair, ipair
+   real(wp) :: vec(3), rvdw, d2cpair(3, 3), capi, capj
+   real(wp), allocatable :: diagonal_local(:, :, :)
 
-   real(wp), allocatable :: dcdL_acc(:, :, :)
-
-   cache%d2cdr2(:, :) = 0.0_wp
-
-         !$omp parallel default(none) &
-      !$omp shared(self, mol, trans, cn, cutoff2, dEdcn, hessian, npair) &
-      !$omp private(ipair, iat, jat, izp, jzp, itr, ic, jc, ii, jj, r2, r1, rij, &
-      !$omp& den, dEdcnij, countd, countd2, box, pair_box, diagonal_local, &
-      !$omp& idamp, jdamp)
-      allocate(diagonal_local(3, 3, mol%nat), source=0.0_wp)
-
-      !$omp do schedule(runtime)
-      do ipair = 1, npair
-         iat = int(0.5_wp*(1.0_wp + sqrt(8.0_wp*real(ipair, wp) + 1.0_wp)))
-         if (iat*(iat - 1)/2 < ipair) iat = iat + 1
-         jat = ipair - (iat - 1)*(iat - 2)/2
-
-         izp = mol%id(iat)
-         jzp = mol%id(jat)
+   cache%d2cdr2diag(:, :, :) = 0.0_wp
+   npair = mol%nat*(mol%nat - 1)/2
 
    !$omp parallel default(none) &
-   !$omp shared(dcdr, mol, self) &
-   !$omp private(iat, izp, jat, jzp, vec, rvdw, dG, dS, capi, capj) &
-   !$omp reduction(+:dcdL_acc)
+   !$omp shared(self, mol, cache, npair) &
+   !$omp private(ipair, iat, jat, izp, jzp, vec) &
+   !$omp private(rvdw, d2cpair, capi, capj, diagonal_local)
+   allocate(diagonal_local(3, 3, mol%nat), source=0.0_wp)
+   !$omp do schedule(runtime)
+   do ipair = 1, npair
+      iat = int(0.5_wp*(1.0_wp + sqrt(8.0_wp*real(ipair, wp) + 1.0_wp)))
+      if (iat*(iat - 1)/2 < ipair) iat = iat + 1
+      jat = ipair - (iat - 1)*(iat - 2)/2
+      izp = mol%id(iat)
+      jzp = mol%id(jat)
+      capi = self%cap(izp)
+      capj = self%cap(jzp)
+      rvdw = self%rvdw(izp, jzp)
+      vec = mol%xyz(:, jat) - mol%xyz(:, iat)
 
+      call get_d2cpair(self%kbc, vec, rvdw, capi, capj, d2cpair)
+      diagonal_local(:, :, iat) = diagonal_local(:, :, iat) + d2cpair
+      diagonal_local(:, :, jat) = diagonal_local(:, :, jat) + d2cpair
+
+   end do
+   !$omp end do
+
+   !$omp critical
+   cache%d2cdr2diag(:, :, :) = cache%d2cdr2diag(:, :, :) + &
+      & diagonal_local(:, :, :)
+   !$omp end critical
+   deallocate(diagonal_local)
+   !$omp end parallel
+
+end subroutine get_d2cmat_0d
+
+!> Build the diagonal blocks d2C_ii/dR_i dR_i of the second derivative of the
+!> bond capacitance matrix for a non‑periodic system using CSR adjacency list.
+subroutine get_d2cmat_0d_list(self, mol, list, cache)
+   !> EEQBC model type
+   class(eeqbc_model), intent(in) :: self
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+   !> CSR neighbor list
+   type(csr_list), intent(in) :: list
+   !> EEQBC cache
+   type(mchrg_cache), intent(inout) :: cache
+
+   integer :: iat, jat, izp, jzp
+   integer(i8) :: kat
+   real(wp) :: vec(3), rvdw, d2cpair(3, 3), capi, capj
+   real(wp), allocatable :: diagonal_local(:, :, :)
+   logical :: halflist
+
+   cache%d2cdr2diag(:, :, :) = 0.0_wp
+   halflist = .not. list%complete
+
+   !$omp parallel default(none) &
+   !$omp shared(self, mol, cache, halflist, list) &
+   !$omp private(iat, jat, kat, izp, jzp, vec) &
+   !$omp private(rvdw, d2cpair, capi, capj, diagonal_local)
+   allocate(diagonal_local(3, 3, mol%nat), source=0.0_wp)
    !$omp do schedule(runtime)
    do iat = 1, mol%nat
       izp = mol%id(iat)
       capi = self%cap(izp)
-      do jat = 1, iat - 1
+      do kat = list%inl(iat) + 1, list%inl(iat + 1) - 1
+         jat = list%nlat(kat)
          jzp = mol%id(jat)
          capj = self%cap(jzp)
          rvdw = self%rvdw(izp, jzp)
          vec = mol%xyz(:, jat) - mol%xyz(:, iat)
 
-         call get_dcpair(self%kbc, vec, rvdw, capi, capj, dG, dS)
-
-         dcdr(:, iat, jat) = +dG
-         dcdr(:, jat, iat) = -dG
-
-         dcdL_acc(:, :, iat) = dcdL_acc(:, :, iat) + dS
-         dcdL_acc(:, :, jat) = dcdL_acc(:, :, jat) + dS
+         call get_d2cpair(self%kbc, vec, rvdw, capi, capj, d2cpair)
+         diagonal_local(:, :, iat) = diagonal_local(:, :, iat) + d2cpair
+         if (halflist) then
+            diagonal_local(:, :, jat) = diagonal_local(:, :, jat) + d2cpair
+         end if
       end do
    end do
    !$omp end do
 
-   !$omp do schedule(static)
-   do iat = 1, mol%nat
-      dcdr(:, iat, iat) = sum(dcdr(:, 1:iat-1, iat), dim=2) &
-         + sum(dcdr(:, iat+1:mol%nat, iat), dim=2)
-   end do
-   !$omp end do
-
+   !$omp critical
+   cache%d2cdr2diag(:, :, :) = cache%d2cdr2diag(:, :, :) + &
+      & diagonal_local(:, :, :)
+   !$omp end critical
+   deallocate(diagonal_local)
    !$omp end parallel
 
-   dcdL(:, :, 1:mol%nat) = dcdL_acc
-   deallocate(dcdL_acc)
-
-end subroutine get_d2cmat_0d
-
-subroutine get_d2cmat_0d()
+end subroutine get_d2cmat_0d_list
 
 !> Compute the molecular nuclear Hessian
-subroutine get_hessian_0d(self, mol, cache, p, hessian, alphain, betain)
+subroutine get_explicit_hessian_0d(self, mol, cache, p, hessian, alphain, betain)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
 
@@ -3272,7 +3311,7 @@ subroutine get_hessian_0d(self, mol, cache, p, hessian, alphain, betain)
    type(structure_type), intent(in) :: mol
 
    !> Cache for intermediate quantities
-   type(cache_type), intent(in) :: cache
+   type(mchrg_cache), intent(in) :: cache
 
    !> Atomic charges
    real(wp), intent(in) :: p(:)
@@ -3287,13 +3326,169 @@ subroutine get_hessian_0d(self, mol, cache, p, hessian, alphain, betain)
    real(wp), intent(in) :: betain
 
    real(wp) :: alpha, beta
+   integer :: iat, jat, izp, jzp
+   real(wp) :: vec(3), r2, gam, arg, dtmp, norm_cn
+   real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3)
+   real(wp) :: W_ii, W_jj, W_ij, dcndr(3, 2), dcndL(3, 3, 2)
+   real(wp) :: d2radi, d2radj, d2cpair(3, 3)
+   real(wp), allocatable :: hessian_local(:, :)
+   real(wp), allocatable :: v(:), ptmp(:), qlocacc(:), cnacc(:)
+   real(wp), allocatable :: dtrans(:, :)
 
-   alpha = alphain
-   beta = betain
+   alpha = 1.0_wp
+   if (present(alphain)) alpha = alphain
+   beta = 1.0_wp
+   if (present(betain)) beta = betain
 
+   allocate(dtrans, source=cache%trans)
+   allocate(qlocacc(mol%nat), cnacc(mol%nat))
+   qlocacc = 0.0_wp
+   cnacc = 0.0_wp
 
+   ! Zero-pad p to the full cmat instead of copying its atomic block, the
+   ! constraint row and column of cmat vanish apart from the diagonal
+   allocate(ptmp(size(cache%cmat, 1)), source=0.0_wp)
+   ptmp(:mol%nat) = p
+   allocate(v(size(cache%cmat, 1)))
+   call symv(cache%cmat, ptmp, v, alpha=1.0_wp, beta=0.0_wp, uplo='l')
 
+   allocate(hessian_local(3 * mol%nat, 3 * mol%nat), source=0.0_wp)
 
-end subroutine get_hessian_0d
+   !$omp parallel do default(none) schedule(runtime) &
+   !$omp shared(cache, mol, self, p, v, alpha, beta) &
+   !$omp private(iat, jat, izp, jzp, gam, vec, r2, dtmp, norm_cn, arg) &
+   !$omp private(radi, radj, dradi, dradj, dG, dS, W_ii, W_jj, W_ij) &
+   !$omp reduction(+:cnacc, qlocacc, hessian_local)
+
+   do iat = 1, mol%nat
+      izp = mol%id(iat)
+      norm_cn = 1.0_wp / self%avg_cn(izp)
+      radi = self%rad(izp) * exp(-self%kcnrad(izp) * cache%cn(iat) * norm_cn)
+      dradi = -self%kcnrad(izp) * norm_cn * radi
+      d2radi = -self%kcnrad(izp) * norm_cn * dradi
+      cni = cache%cn(iat)
+      capi = self%cap(izp)
+
+      W_ii = p(iat) * cache%vrhs(iat)
+
+      do jat = 1, iat - 1
+         jzp = mol%id(jat)
+         vec = mol%xyz(:, jat) - mol%xyz(:, iat)
+         cnj = cache%cn(jat)
+         capj = self%cap(jzp)
+         rvdw = self%rvdw(izp, jzp)
+         r2 = dot_product(vec, vec)
+         r1 = sqrt(r2)
+         pchi_ij = p(iat) * cache%xtmp(jat) - p(jat) * (cache%xtmp(jat) - cache%xtmp(iat))
+         pchi_ji = p(jat) * cache%xtmp(iat) - p(iat) * (cache%xtmp(iat) - cache%xtmp(jat))
+         call get_pair_derivs(self%ncoord, mol, iat, jat, vec, cni, cnj, dcndr, dcndL)
+
+         W_jj = p(jat) * cache%vrhs(jat)
+         W_ij = p(iat) * cache%vrhs(jat) + p(jat) * cache%vrhs(iat)
+
+         norm_cn = 1.0_wp / self%avg_cn(jzp)
+         radj = self%rad(jzp) * exp(-self%kcnrad(jzp) * cache%cn(jat) * norm_cn)
+         dradj = -self%kcnrad(jzp) * norm_cn * radj
+         d2radj = -self%kcnrad(jzp) * norm_cn * dradj
+
+         gam = 1.0_wp / sqrt(radi**2 + radj**2)
+         call get_d2cpair(self%kbc, vec, rvdw, capi, capj, d2cpair)
+         dtmp = erf(r1 * gam) / r1
+         do ic = 1, 3
+            ii = 3*(iat - 1) + ic
+            do jc = 1, 3
+               jj = 3*(jat - 1) + jc
+               hessian_local(ii, jj) = hessian_local(ii, jj) - &
+                  & alpha * dtmp * W_ij * d2cpair(ic, jc) + &
+                  & beta * d2cpair(ic, jc) * pchi_ij
+               hessian_local(jj, ii) = hessian_local(jj, ii) - &
+                  & alpha * dtmp * W_ij * d2cpair(jc, ic) - &
+                  & beta * d2cpair(jc, ic) * pchi_ji
+            end do
+         end do
+         arg = gam * gam * r2
+         dtmp = 2.0_wp * exp(-arg) / (sqrtpi)
+
+         ! Accumulate scalar weights for CN derivatives
+         cnacc(iat) = cnacc(iat) - (dtmp * radi * dradi * gam**3.0_wp) &
+         & * cache%cmat(iat, jat) * W_ij * alpha
+         cnacc(jat) = cnacc(jat) - (dtmp * radj * dradj * gam**3.0_wp) &
+         & * cache%cmat(iat, jat) * W_ij * alpha
+
+         ! 1. Explicit Geometry Derivative
+         dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) - erf(sqrt(arg)) &
+         & / (r2 * sqrt(r2))
+         dG = dtmp * vec
+         dS = spread(dG, 1, 3) * spread(vec, 2, 3)
+
+         gradient_local(:, iat) = gradient_local(:, iat) - dG * cache%cmat(iat, &
+         & jat) * W_ij * alpha
+         gradient_local(:, jat) = gradient_local(:, jat) + dG * cache%cmat(iat, &
+         & jat) * W_ij * alpha
+         sigma_local(:, :)   = sigma_local(:, :)   + dS * cache%cmat(iat, &
+         & jat) * W_ij * alpha
+
+         ! 3 & 4. Capacitance derivatives
+         call get_dcpair(self%kbc, vec, self%rvdw(izp, jzp), self%cap(izp), &
+         & self%cap(jzp), dG, dS)
+         dtmp = erf(sqrt(r2) * gam) / sqrt(r2)
+         gradient_local(:, iat) = gradient_local(:, iat) + dtmp * dG * W_ij * alpha &
+            & + p(iat) * cache%xtmp(jat) * dG * beta &
+            & - p(jat) * (cache%xtmp(jat) - cache%xtmp(iat)) * dG * beta
+
+         gradient_local(:, jat) = gradient_local(:, jat) - dtmp * dG * W_ij * alpha &
+            & - p(jat) * cache%xtmp(iat) * dG * beta &
+            & + p(iat) * (cache%xtmp(iat) - cache%xtmp(jat)) * dG * beta
+
+         sigma_local(:, :)   = sigma_local(:, :)   - dtmp * W_ij * dS * alpha &
+            & - p(iat) * cache%xtmp(jat) * dS * beta &
+            & - p(jat) * cache%xtmp(iat) * dS * beta
+
+         dtmp = (self%eta(jzp) + self%kqeta_pre &
+         & * tanh(self%kqeta(jzp) * cache%qloc(jat)) + sqrt2pi / radj)
+         gradient_local(:, iat) = gradient_local(:, iat) - dtmp * dG * W_jj * alpha
+         dtmp = (self%eta(izp) + self%kqeta_pre &
+         & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi)
+         gradient_local(:, jat) = gradient_local(:, jat) + dtmp * dG * W_ii * alpha
+      end do
+
+      ! 5. Diagonal weight accumulation
+      qlocacc(iat) = qlocacc(iat) + self%kqeta_pre * self%kqeta(izp) &
+         & / cosh(self%kqeta(izp) * cache%qloc(iat))**2 &
+         & * W_ii * cache%cmat(iat, iat) * alpha &
+         & + v(iat) * self%kqchi(mol%id(iat)) * beta
+      cnacc(iat) = cnacc(iat) - sqrt2pi * dradi / (radi**2) * W_ii * cache%cmat(iat, &
+      & iat) * alpha &
+         & + v(iat) * self%kcnchi(mol%id(iat)) * beta
+
+      ! 6. Intrinsic capacitance
+      dtmp = (self%eta(izp) + self%kqeta_pre &
+      & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi) * W_ii
+      gradient_local(:, iat) = gradient_local(:, iat) + dtmp * cache%dcdr(:, iat, &
+      & iat) * alpha &
+         & + p(iat) * cache%xtmp(iat) * cache%dcdr(:, iat, iat) * beta
+
+      sigma_local(:, :)   = sigma_local(:, :)   + dtmp * cache%dcdL(:, :, iat) * alpha &
+         & + p(iat) * cache%xtmp(iat) * cache%dcdL(:, :, iat) * beta
+   end do
+   !$omp end parallel do
+
+   gradient = gradient + gradient_local
+   sigma = sigma + sigma_local
+
+   gradient_local = 0.0_wp
+   sigma_local = 0.0_wp
+
+   call self%ncoord%add_coordination_number_derivs(mol, dtrans, cnacc, gradient_local, &
+   & sigma_local)
+   call self%ncoord_en%add_coordination_number_derivs(mol, dtrans, qlocacc, &
+   & gradient_local, sigma_local)
+
+   gradient = gradient + gradient_local
+   sigma = sigma + sigma_local
+
+   deallocate(gradient_local, sigma_local, qlocacc, cnacc, dtrans, v, ptmp)
+
+end subroutine get_explicit_hessian_0d
 
 end module multicharge_model_eeqbc
