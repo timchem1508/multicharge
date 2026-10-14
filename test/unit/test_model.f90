@@ -83,6 +83,11 @@ subroutine collect_model(testsuite)
    & new_unittest("eeqbc-dbdr-mb05", test_eeqbc_dbdr_mb05), &
    & new_unittest("eeqbc-d2cdr2-mb01", test_eeqbc_d2cdr2_mb01), &
    & new_unittest("eeqbc-d2cdr2-mb05", test_eeqbc_d2cdr2_mb05), &
+   & new_unittest("eeqbc-d2adr2-mb01", test_eeqbc_d2adr2_mb01), &
+   & new_unittest("eeqbc-d2bdr2-mb01", test_eeqbc_d2bdr2_mb01), &
+   & new_unittest("eeqbc-hess-expl-mb05", test_eeqbc_hexpl_mb05), &
+   & new_unittest("eeqbc-hess-expl-dfdq-mb06", test_eeqbc_hexpl_dfdq_mb06), &
+   & new_unittest("eeqbc-hess-expl-znooh", test_eeqbc_hexpl_znooh), &
    & new_unittest("eeqbc-charges-mb01", test_eeqbc_q_mb01), &
    & new_unittest("eeqbc-charges-mb02", test_eeqbc_q_mb02), &
    & new_unittest("eeqbc-charges-efield-mb03", test_eeqbc_q_efield_mb03), &
@@ -1330,6 +1335,175 @@ subroutine test_d2cdr2(error, mol, model)
 end subroutine test_d2cdr2
 
 
+!> Check the explicit Hessian, the second derivative of alpha * p^T A q
+!> + beta * p^T X at fixed p and charges q, against central differences of the
+!> analytical gradient of the same expression, and its symmetry and
+!> translational invariance
+subroutine test_explicit_hessian(error, mol, model, alpha, beta, pvec)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular structure data
+   type(structure_type), intent(inout) :: mol
+
+   !> Electronegativity equilibration model
+   class(mchrg_model_type), intent(in) :: model
+
+   !> Prefactor of the Coulomb matrix term
+   real(wp), intent(in) :: alpha
+
+   !> Prefactor of the electronegativity term
+   real(wp), intent(in) :: beta
+
+   !> Contraction vector, the charges are used if absent
+   real(wp), intent(in), optional :: pvec(:)
+
+   ! Solver variables
+   class(mchrg_solver_type), allocatable :: solver
+   class(mchrg_solver_input), allocatable :: solver_input
+   real(wp) :: tol = 1.0e-15_wp
+   integer :: maxiter = 1000
+   integer :: verbosity = 0
+
+   integer :: iat, ic, ndim
+   real(wp), parameter :: trans(3, 1) = 0.0_wp
+   real(wp), parameter :: step = 1.0e-4_wp
+   real(wp) :: xorig
+   real(wp), allocatable :: qvec(:), p(:), hessian(:, :), numhess(:, :)
+   real(wp), allocatable :: gr1(:, :), gr2(:, :), gl1(:, :), gl2(:, :)
+   type(mchrg_cache), allocatable :: cache
+
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+    type is (cg_input)
+      solver_input%cgtol = tol
+      solver_input%cgmiter = maxiter
+      solver_input%verbosity = verbosity
+   end select
+   call solver_maker(solver, solver_input, error)
+   if (allocated(error)) return
+
+   ndim = 3*mol%nat
+   allocate(qvec(mol%nat), hessian(ndim, ndim), numhess(ndim, ndim))
+   allocate(gr1(3, mol%nat), gr2(3, mol%nat), gl1(3, mol%nat), gl2(3, mol%nat))
+
+   ! Charges and cache of the reference structure
+   allocate(cache)
+   call model%update(mol, cache, trans, grad=.true.)
+   call model%solve(mol, solver, cache, error, qvec=qvec, unit=output_unit)
+   if (allocated(error)) return
+   if (present(pvec)) then
+      p = pvec
+   else
+      p = qvec
+   end if
+
+   hessian(:, :) = 0.0_wp
+   select type (model)
+    type is (eeqbc_model)
+      allocate(cache%d2cdr2diag(3, 3, mol%nat))
+      call model%get_d2cmat_0d(mol, cache)
+      call model%get_explicit_hessian_0d(mol, cache, p, hessian, alphain=alpha, &
+         & betain=beta)
+    class default
+      call test_failed(error, "Explicit Hessian requires the EEQBC model")
+      return
+   end select
+
+   ! Central differences of the analytical gradient at fixed charges
+   do iat = 1, mol%nat
+      do ic = 1, 3
+         xorig = mol%xyz(ic, iat)
+         mol%xyz(ic, iat) = xorig + step
+         call fixed_charge_gradient(mol, model, qvec, p, alpha, beta, gr1)
+         mol%xyz(ic, iat) = xorig + 2*step
+         call fixed_charge_gradient(mol, model, qvec, p, alpha, beta, gr2)
+         mol%xyz(ic, iat) = xorig - step
+         call fixed_charge_gradient(mol, model, qvec, p, alpha, beta, gl1)
+         mol%xyz(ic, iat) = xorig - 2*step
+         call fixed_charge_gradient(mol, model, qvec, p, alpha, beta, gl2)
+         mol%xyz(ic, iat) = xorig
+
+         ! f'(x) ≈ [f(x-2h) - 8f(x-h) + 8f(x+h) - f(x+2h)]/(12h)
+         numhess(:, 3*(iat - 1) + ic) = reshape((gl2 - 8.0_wp*gl1 + 8.0_wp*gr1 &
+            & - gr2)/(12.0_wp*step), [ndim])
+      end do
+   end do
+
+   if (any(abs(hessian - numhess) > thr2)) then
+      call test_failed(error, "Explicit Hessian does not match")
+      print'(a)', "hessian:"
+      print'(3es21.12)', hessian
+      print'(a)', "numhess:"
+      print'(3es21.12)', numhess
+      print'(a)', "diff:"
+      print'(3es21.12)', hessian - numhess
+      return
+   end if
+
+   if (any(abs(hessian - transpose(hessian)) > thr1)) then
+      call test_failed(error, "Explicit Hessian is not symmetric")
+      print'(a)', "asymmetry:"
+      print'(3es21.12)', hessian - transpose(hessian)
+      return
+   end if
+
+   ! A rigid translation of all atoms leaves the expression unchanged
+   do ic = 1, 3
+      if (any(abs(sum(hessian(ic::3, :), dim=1)) > thr1)) then
+         call test_failed(error, "Explicit Hessian is not translationally invariant")
+         print'(a)', "sum over atoms:"
+         print'(3es21.12)', sum(hessian(ic::3, :), dim=1)
+         return
+      end if
+   end do
+
+end subroutine test_explicit_hessian
+
+
+!> Analytical gradient of alpha * p^T A q + beta * p^T X at fixed p and charges
+!> q for a displaced structure using a fresh cache
+subroutine fixed_charge_gradient(mol, model, qvec, p, alpha, beta, gradient)
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Electronegativity equilibration model
+   class(mchrg_model_type), intent(in) :: model
+
+   !> Fixed atomic partial charges
+   real(wp), intent(in) :: qvec(:)
+
+   !> Contraction vector
+   real(wp), intent(in) :: p(:)
+
+   !> Prefactor of the Coulomb matrix term
+   real(wp), intent(in) :: alpha
+
+   !> Prefactor of the electronegativity term
+   real(wp), intent(in) :: beta
+
+   !> Gradient of the expression
+   real(wp), intent(out) :: gradient(:, :)
+
+   type(mchrg_cache), allocatable :: cache
+   real(wp), parameter :: trans(3, 1) = 0.0_wp
+   real(wp) :: sigma(3, 3)
+
+   allocate(cache)
+   call model%update(mol, cache, trans, grad=.true.)
+   call model%get_capacitance_matrix(mol, mol%nat, cache)
+   call model%get_xvec(mol, mol%nat, cache)
+   cache%vrhs = qvec
+
+   gradient(:, :) = 0.0_wp
+   sigma(:, :) = 0.0_wp
+   call model%get_grad(mol, cache, p, gradient, sigma, alpha=alpha, beta=beta)
+
+end subroutine fixed_charge_gradient
+
+
 subroutine test_eeq_dadr_mb01(error)
 
    !> Error handling
@@ -2005,6 +2179,105 @@ subroutine test_eeqbc_d2cdr2_mb05(error)
    call test_d2cdr2(error, mol, model)
 
 end subroutine test_eeqbc_d2cdr2_mb05
+
+
+subroutine test_eeqbc_d2adr2_mb01(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "MB16-43", "01")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_explicit_hessian(error, mol, model, alpha=1.0_wp, beta=0.0_wp)
+
+end subroutine test_eeqbc_d2adr2_mb01
+
+
+subroutine test_eeqbc_d2bdr2_mb01(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "MB16-43", "01")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_explicit_hessian(error, mol, model, alpha=0.0_wp, beta=1.0_wp)
+
+end subroutine test_eeqbc_d2bdr2_mb01
+
+
+subroutine test_eeqbc_hexpl_mb05(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "MB16-43", "05")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   ! Prefactors of the electrostatic energy
+   call test_explicit_hessian(error, mol, model, alpha=0.5_wp, beta=-1.0_wp)
+
+end subroutine test_eeqbc_hexpl_mb05
+
+
+subroutine test_eeqbc_hexpl_dfdq_mb06(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   real(wp), allocatable :: pvec(:)
+
+   integer :: iat
+
+   call get_structure(mol, "MB16-43", "06")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   allocate(pvec(mol%nat))
+   do iat = 1, mol%nat
+      pvec(iat) = 0.1_wp * sum(mol%xyz(:, iat))
+   end do
+   ! Prefactors of an external function with the adjoint vector pvec
+   call test_explicit_hessian(error, mol, model, alpha=-1.0_wp, beta=1.0_wp, &
+      & pvec=pvec)
+
+end subroutine test_eeqbc_hexpl_dfdq_mb06
+
+
+subroutine test_eeqbc_hexpl_znooh(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   integer, parameter :: nat = 4
+   real(wp), parameter :: charge = -1.0_wp
+   integer, parameter :: num(nat) = [30, 8, 8, 1]
+   real(wp), parameter :: xyz(3, nat) = reshape([ &
+   & -0.30631629283878_wp, -1.11507514203552_wp, +0.00000000000000_wp, &
+   & -0.06543072660074_wp, -4.32862093666082_wp, +0.00000000000000_wp, &
+   & -0.64012239724097_wp, +2.34966763895920_wp, +0.00000000000000_wp, &
+   & +1.01186941668051_wp, +3.09402843973713_wp, +0.00000000000000_wp],&
+   & [3, nat])
+
+   call new(mol, num, xyz, charge)
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_explicit_hessian(error, mol, model, alpha=0.5_wp, beta=-1.0_wp)
+
+end subroutine test_eeqbc_hexpl_znooh
 
 
 subroutine test_eeqbc_q_mb01(error)
