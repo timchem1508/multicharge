@@ -92,7 +92,7 @@ module multicharge_model_eeqbc
       procedure :: get_d2cmat_0d_list
       !> Calculate the explicit Hessian alpha * p^T d2A/dR2 q + beta * p^T d2X/dR2
       !> at fixed p and q (molecular)
-      procedure :: get_explicit_hessian_0d
+      procedure :: get_explicit_hessian
       !> Calculate gradient
       procedure :: get_grad
    end type eeqbc_model
@@ -3306,6 +3306,57 @@ subroutine get_d2cmat_0d_list(self, mol, list, cache)
 end subroutine get_d2cmat_0d_list
 
 !> Compute the explicit part of the molecular nuclear Hessian,
+!> alpha * p^T d2A/dR2 q + beta * p^T d2X/dR2 at fixed p and charges q. The
+!> position derivatives of the CN and the local charges are stored in the cache,
+!> on the pattern of the neighborlist if present. The diagonal blocks of the
+!> second derivative of the capacitance matrix have to be present in the cache.
+subroutine get_explicit_hessian(self, mol, cache, p, hessian, alpha, beta, list)
+   !> EEQBC model type
+   class(eeqbc_model), intent(in) :: self
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+   !> Multicharge cache, receives the CN and local charge derivatives
+   type(mchrg_cache), intent(inout) :: cache
+   !> Charge-like contraction vector
+   real(wp), intent(in) :: p(:)
+   !> Molecular nuclear Hessian
+   real(wp), intent(inout) :: hessian(:, :)
+   !> Optional Coulomb matrix prefactor
+   real(wp), intent(in), optional :: alpha
+   !> Optional electronegativity prefactor
+   real(wp), intent(in), optional :: beta
+   !> Multicharge neighborlist type (complete)
+   type(csr_list), intent(in), optional :: list
+
+   if (.not. allocated(cache%dcndL)) allocate(cache%dcndL(3, 3, mol%nat))
+   if (.not. allocated(cache%dqlocdL)) allocate(cache%dqlocdL(3, 3, mol%nat))
+
+   if (present(list)) then
+      ! The pattern of the derivatives follows the neighborlist
+      if (allocated(cache%dcndrlist)) deallocate(cache%dcndrlist)
+      if (allocated(cache%dqlocdrlist)) deallocate(cache%dqlocdrlist)
+      allocate(cache%dcndrlist(3, size(list%nlat, kind=i8)))
+      allocate(cache%dqlocdrlist(3, size(list%nlat, kind=i8)))
+      call self%ncoord%get_coordination_number(mol, cache%trans, cache%cn, &
+         & dcndL=cache%dcndL, list=list, dcndrlist=cache%dcndrlist)
+      call self%local_charge(mol, cache%trans, cache%qloc, dqlocdL=cache%dqlocdL, &
+         & list=list, dqlocdrlist=cache%dqlocdrlist)
+      call get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
+         & alphain=alpha, betain=beta)
+   else
+      if (.not. allocated(cache%dcndr)) allocate(cache%dcndr(3, mol%nat, mol%nat))
+      if (.not. allocated(cache%dqlocdr)) allocate(cache%dqlocdr(3, mol%nat, mol%nat))
+      call self%ncoord%get_coordination_number(mol, cache%trans, cache%cn, &
+         & dcndr=cache%dcndr, dcndL=cache%dcndL)
+      call self%local_charge(mol, cache%trans, cache%qloc, dqlocdr=cache%dqlocdr, &
+         & dqlocdL=cache%dqlocdL)
+      call get_explicit_hessian_0d(self, mol, cache, p, hessian, alphain=alpha, &
+         & betain=beta)
+   end if
+
+end subroutine get_explicit_hessian
+
+!> Compute the explicit part of the molecular nuclear Hessian,
 !> alpha * p^T d2A/dR2 q + beta * p^T d2X/dR2 at fixed p and charges q
 subroutine get_explicit_hessian_0d(self, mol, cache, p, hessian, alphain, betain)
    !> EEQBC model type
@@ -3342,8 +3393,6 @@ subroutine get_explicit_hessian_0d(self, mol, cache, p, hessian, alphain, betain
    real(wp), allocatable :: hessian_local(:, :)
    real(wp), allocatable :: v(:), ptmp(:), qlocacc(:), cnacc(:)
    real(wp), allocatable :: dcnacc(:, :, :), dqlocacc(:, :, :)
-   real(wp), allocatable :: cn(:), qloc(:), dcndr(:, :, :), dcndL(:, :, :)
-   real(wp), allocatable :: dqlocdr(:, :, :), dqlocdL(:, :, :)
    real(wp), allocatable :: dtrans(:, :)
 
    alpha = 1.0_wp
@@ -3355,12 +3404,6 @@ subroutine get_explicit_hessian_0d(self, mol, cache, p, hessian, alphain, betain
    allocate(qlocacc(mol%nat), cnacc(mol%nat))
    qlocacc = 0.0_wp
    cnacc = 0.0_wp
-
-   ! CN and local charge derivatives w.r.t. the positions
-   allocate(cn(mol%nat), qloc(mol%nat), dcndr(3, mol%nat, mol%nat), &
-      & dcndL(3, 3, mol%nat), dqlocdr(3, mol%nat, mol%nat), dqlocdL(3, 3, mol%nat))
-   call self%ncoord%get_coordination_number(mol, dtrans, cn, dcndr, dcndL)
-   call self%local_charge(mol, dtrans, qloc, dqlocdr, dqlocdL)
 
    ! Zero-pad p to the full cmat instead of copying its atomic block, the
    ! constraint row and column of cmat vanish apart from the diagonal
@@ -3377,7 +3420,7 @@ subroutine get_explicit_hessian_0d(self, mol, cache, p, hessian, alphain, betain
       & source=0.0_wp)
 
    !$omp parallel do default(none) schedule(runtime) &
-   !$omp shared(cache, mol, self, p, v, alpha, beta, dcndr, dqlocdr) &
+   !$omp shared(cache, mol, self, p, v, alpha, beta) &
    !$omp private(iat, jat, izp, jzp, ic, ii, jj, vec, evec, r1, r2, gam, arg) &
    !$omp private(dtmp, norm_cn_i, norm_cn_j, radi, radj, dradi, dradj, d2radi) &
    !$omp private(d2radj, capi, capj, rvdw, tqeta, hardi, hardj, dhdcni, dhdcnj) &
@@ -3523,10 +3566,10 @@ subroutine get_explicit_hessian_0d(self, mol, cache, p, hessian, alphain, betain
             & * (d2gdgam2 * dgamdcni * dgamdcnj + dgdgam * d2gamdcnij)
          kjj = 0.5_wp * alpha * W_ij * cij &
             & * (d2gdgam2 * dgamdcnj**2 + dgdgam * d2gamdcnj2)
-         dcnacc(:, :, iat) = dcnacc(:, :, iat) + kii * dcndr(:, :, iat) &
-            & + kij * dcndr(:, :, jat)
-         dcnacc(:, :, jat) = dcnacc(:, :, jat) + kij * dcndr(:, :, iat) &
-            & + kjj * dcndr(:, :, jat)
+         dcnacc(:, :, iat) = dcnacc(:, :, iat) + kii * cache%dcndr(:, :, iat) &
+            & + kij * cache%dcndr(:, :, jat)
+         dcnacc(:, :, jat) = dcnacc(:, :, jat) + kij * cache%dcndr(:, :, iat) &
+            & + kjj * cache%dcndr(:, :, jat)
       end do
 
       ! Own diagonal block of the diagonal capacitance C_ii
@@ -3542,16 +3585,16 @@ subroutine get_explicit_hessian_0d(self, mol, cache, p, hessian, alphain, betain
 
       ! Products of the CN and local charge derivatives from the hardness
       dcnacc(:, :, iat) = dcnacc(:, :, iat) + 0.5_wp * alpha * W_ii &
-         & * cache%cmat(iat, iat) * d2hdcni2 * dcndr(:, :, iat)
+         & * cache%cmat(iat, iat) * d2hdcni2 * cache%dcndr(:, :, iat)
       dqlocacc(:, :, iat) = dqlocacc(:, :, iat) + 0.5_wp * alpha * W_ii &
-         & * cache%cmat(iat, iat) * d2etai * dqlocdr(:, :, iat)
+         & * cache%cmat(iat, iat) * d2etai * cache%dqlocdr(:, :, iat)
    end do
    !$omp end parallel do
 
    ! Products of the CN and local charge derivatives with their vector weights,
    ! each iteration only updates the columns of atom jat
    !$omp parallel do default(none) schedule(runtime) &
-   !$omp shared(mol, dcndr, dqlocdr, dcnacc, dqlocacc, hessian_local) &
+   !$omp shared(mol, cache, dcnacc, dqlocacc, hessian_local) &
    !$omp private(iat, jat, kat, jc, ii, jj)
    do jat = 1, mol%nat
       jj = 3 * (jat - 1)
@@ -3560,10 +3603,10 @@ subroutine get_explicit_hessian_0d(self, mol, cache, p, hessian, alphain, betain
             do iat = 1, mol%nat
                ii = 3 * (iat - 1)
                hessian_local(ii+1:ii+3, jj+jc) = hessian_local(ii+1:ii+3, jj+jc) &
-                  & + dcndr(:, iat, kat) * dcnacc(jc, jat, kat) &
-                  & + dcnacc(:, iat, kat) * dcndr(jc, jat, kat) &
-                  & + dqlocdr(:, iat, kat) * dqlocacc(jc, jat, kat) &
-                  & + dqlocacc(:, iat, kat) * dqlocdr(jc, jat, kat)
+                  & + cache%dcndr(:, iat, kat) * dcnacc(jc, jat, kat) &
+                  & + dcnacc(:, iat, kat) * cache%dcndr(jc, jat, kat) &
+                  & + cache%dqlocdr(:, iat, kat) * dqlocacc(jc, jat, kat) &
+                  & + dqlocacc(:, iat, kat) * cache%dqlocdr(jc, jat, kat)
             end do
          end do
       end do
@@ -3580,8 +3623,364 @@ subroutine get_explicit_hessian_0d(self, mol, cache, p, hessian, alphain, betain
    hessian = hessian + hessian_local
 
    deallocate(hessian_local, qlocacc, cnacc, dcnacc, dqlocacc, dtrans, v, ptmp)
-   deallocate(cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
 
 end subroutine get_explicit_hessian_0d
+
+!> Compute the explicit part of the molecular nuclear Hessian,
+!> alpha * p^T d2A/dR2 q + beta * p^T d2X/dR2 at fixed p and charges q, using a
+!> complete neighborlist. Apart from the Hessian all intermediates are kept on
+!> the pattern of the list. With D the position derivatives of the CNs, A the
+!> mixed derivatives w.r.t. the CNs and the positions, and K the second
+!> derivatives w.r.t. the CNs, the products D^T A + A^T D + D^T K D (and their
+!> local charge counterparts with a diagonal K) are assembled for each column
+!> block of the Hessian separately.
+subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
+   & alphain, betain)
+   !> EEQBC model type
+   class(eeqbc_model), intent(in) :: self
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+   !> Multicharge neighborlist type (complete)
+   type(csr_list), intent(in) :: list
+   !> Multicharge cache with the CN and local charge derivatives on the list
+   type(mchrg_cache), intent(in) :: cache
+   !> Charge-like contraction vector
+   real(wp), intent(in) :: p(:)
+   !> Molecular nuclear Hessian
+   real(wp), intent(inout) :: hessian(:, :)
+   !> Optional Coulomb matrix prefactor
+   real(wp), intent(in), optional :: alphain
+   !> Optional electronegativity prefactor
+   real(wp), intent(in), optional :: betain
+
+   real(wp) :: alpha, beta
+   integer :: iat, jat, xat, izp, jzp, ic, ii, jj, xx, it, ntouch
+   integer(i8) :: kat, lat, ist, nnz
+   real(wp) :: vec(3), evec(3), r1, r2, gam, arg, dtmp, norm_cn
+   real(wp) :: radi, radj, dradi, dradj, d2radi, capi, capj, rvdw
+   real(wp) :: tqeta, hardi, hardj, dhdcni, d2hdcni2, detai, d2etai
+   real(wp) :: W_ii, W_ij, wcapi, wcapj, pchi, cii, cij
+   real(wp) :: gtmp, dgdgam, dgdr, d2gdr2, d2gdrdgam, d2gdgam2
+   real(wp) :: dgamdcni, dgamdcnj, d2gamdcni2, d2gamdcnij
+   real(wp) :: dvec(3), dcpair(3), dS(3, 3), d2cpair(3, 3), d2J(3, 3)
+   real(wp) :: d2pair(3, 3), d2ii(3, 3), dky(3), qky(3), gq(3), gk(3)
+   integer(i8), allocatable :: tidx(:)
+   integer, allocatable :: touch(:)
+   logical, allocatable :: mark(:)
+   real(wp), allocatable :: v(:), cnacc(:), qlocacc(:), kcn(:), kql(:)
+   real(wp), allocatable :: acn(:, :), aql(:, :), dcn(:, :), dql(:, :), gcn(:, :)
+   real(wp), allocatable :: hblk(:, :, :)
+
+   alpha = 1.0_wp
+   if (present(alphain)) alpha = alphain
+   beta = 1.0_wp
+   if (present(betain)) beta = betain
+
+   nnz = size(list%nlat, kind=i8)
+
+   allocate(v(mol%nat))
+   call spgemv_csr(mol%nat, cache%clist, list%inl, list%nlat, p, v)
+
+   ! The row of atom i holds the mixed derivatives w.r.t. CN_i (local charge i)
+   ! and the positions of its neighbors in acn (aql), and the second derivatives
+   ! w.r.t. CN_i and the CNs of its neighbors in kcn, the local charges are only
+   ! coupled to themselves in kql
+   allocate(cnacc(mol%nat), qlocacc(mol%nat), kql(mol%nat), kcn(nnz))
+   allocate(acn(3, nnz), aql(3, nnz))
+
+   ! Each iteration only updates row iat of the list and column block iat of the
+   ! Hessian, every pair is visited from both of its rows
+   !$omp parallel do default(none) schedule(runtime) &
+   !$omp shared(cache, mol, self, list, p, v, alpha, beta, hessian) &
+   !$omp shared(cnacc, qlocacc, kcn, kql, acn, aql) &
+   !$omp private(iat, jat, izp, jzp, ic, ii, jj, kat, ist, vec, evec, r1, r2) &
+   !$omp private(gam, arg, dtmp, norm_cn, radi, radj, dradi, dradj, d2radi) &
+   !$omp private(capi, capj, rvdw, tqeta, hardi, hardj, dhdcni, d2hdcni2, detai) &
+   !$omp private(d2etai, W_ii, W_ij, wcapi, wcapj, pchi, cii, cij, gtmp, dgdgam) &
+   !$omp private(dgdr, d2gdr2, d2gdrdgam, d2gdgam2, dgamdcni, dgamdcnj) &
+   !$omp private(d2gamdcni2, d2gamdcnij, dvec, dcpair, dS, d2cpair, d2J, d2pair) &
+   !$omp private(d2ii)
+   do iat = 1, mol%nat
+      izp = mol%id(iat)
+      ii = 3 * (iat - 1)
+      ist = list%inl(iat)
+      norm_cn = 1.0_wp / self%avg_cn(izp)
+      radi = self%rad(izp) * exp(-self%kcnrad(izp) * cache%cn(iat) * norm_cn)
+      dradi = -self%kcnrad(izp) * norm_cn * radi
+      d2radi = -self%kcnrad(izp) * norm_cn * dradi
+      capi = self%cap(izp)
+
+      ! Effective hardness of i and its derivatives w.r.t. CN and local charge
+      tqeta = tanh(self%kqeta(izp) * cache%qloc(iat))
+      hardi = self%eta(izp) + self%kqeta_pre * tqeta + sqrt2pi / radi
+      dhdcni = -sqrt2pi * dradi / radi**2
+      d2hdcni2 = sqrt2pi * (2.0_wp * dradi**2 / radi**3 - d2radi / radi**2)
+      detai = self%kqeta_pre * self%kqeta(izp) * (1.0_wp - tqeta**2)
+      d2etai = -2.0_wp * self%kqeta(izp) * tqeta * detai
+
+      W_ii = p(iat) * cache%vrhs(iat)
+      cii = cache%clist(ist)
+
+      ! Weight of the diagonal capacitance C_ii
+      wcapi = alpha * W_ii * hardi + beta * p(iat) * cache%xtmp(iat)
+
+      ! Own diagonal block of the diagonal capacitance C_ii
+      d2ii(:, :) = wcapi * cache%d2cdr2diag(:, :, iat)
+
+      ! Scalar weights for the CN and local charge second derivatives and second
+      ! derivatives w.r.t. CN and local charge from the hardness and the
+      ! electronegativity
+      cnacc(iat) = alpha * W_ii * cii * dhdcni + beta * self%kcnchi(izp) * v(iat)
+      qlocacc(iat) = alpha * W_ii * cii * detai + beta * self%kqchi(izp) * v(iat)
+      kcn(ist) = alpha * W_ii * cii * d2hdcni2
+      kql(iat) = alpha * W_ii * cii * d2etai
+
+      ! The diagonal entries collect the derivatives w.r.t. the position of i
+      acn(:, ist) = 0.0_wp
+      aql(:, ist) = 0.0_wp
+
+      do kat = ist + 1, list%inl(iat + 1) - 1
+         jat = list%nlat(kat)
+         jzp = mol%id(jat)
+         jj = 3 * (jat - 1)
+         vec = mol%xyz(:, jat) - mol%xyz(:, iat)
+         r2 = dot_product(vec, vec)
+         r1 = sqrt(r2)
+         evec = vec / r1
+         norm_cn = 1.0_wp / self%avg_cn(jzp)
+         radj = self%rad(jzp) * exp(-self%kcnrad(jzp) * cache%cn(jat) * norm_cn)
+         dradj = -self%kcnrad(jzp) * norm_cn * radj
+         capj = self%cap(jzp)
+         rvdw = self%rvdw(izp, jzp)
+
+         ! Effective hardness of j
+         hardj = self%eta(jzp) + self%kqeta_pre &
+            & * tanh(self%kqeta(jzp) * cache%qloc(jat)) + sqrt2pi / radj
+
+         W_ij = p(iat) * cache%vrhs(jat) + p(jat) * cache%vrhs(iat)
+
+         ! Weights of the diagonal capacitance C_jj and of the off-diagonal
+         ! capacitance C_ij in the electronegativity term
+         wcapj = alpha * p(jat) * cache%vrhs(jat) * hardj &
+            & + beta * p(jat) * cache%xtmp(jat)
+         pchi = beta * (p(iat) * cache%xtmp(jat) + p(jat) * cache%xtmp(iat))
+         cij = cache%clist(kat)
+
+         ! Coulomb interaction of Gaussian charges g = erf(gam*r)/r and its
+         ! derivatives w.r.t. the distance and gam
+         gam = 1.0_wp / sqrt(radi**2 + radj**2)
+         arg = gam * gam * r2
+         gtmp = erf(gam * r1) / r1
+         dgdgam = 2.0_wp * exp(-arg) / sqrtpi
+         dgdr = (gam * dgdgam - gtmp) / r1
+         d2gdr2 = -2.0_wp * (dgdr / r1 + gam**3 * dgdgam)
+         d2gdrdgam = -2.0_wp * gam**2 * r1 * dgdgam
+         d2gdgam2 = -2.0_wp * gam * r2 * dgdgam
+
+         ! Derivatives of gam w.r.t. the CNs of i and j
+         dgamdcni = -radi * dradi * gam**3
+         dgamdcnj = -radj * dradj * gam**3
+         d2gamdcni2 = 3.0_wp * (radi * dradi)**2 * gam**5 &
+            & - (dradi**2 + radi * d2radi) * gam**3
+         d2gamdcnij = 3.0_wp * radi * dradi * radj * dradj * gam**5
+
+         ! Bond capacitance derivatives w.r.t. R_j, dC_ij/dR_j = -dcpair
+         call get_dcpair(self%kbc, vec, rvdw, capi, capj, dcpair, dS)
+         call get_d2cpair(self%kbc, vec, rvdw, capi, capj, d2cpair)
+
+         ! Second derivative of g w.r.t. R_j at fixed CNs
+         do ic = 1, 3
+            d2J(:, ic) = (d2gdr2 - dgdr / r1) * evec * evec(ic)
+            d2J(ic, ic) = d2J(ic, ic) + dgdr / r1
+         end do
+
+         ! Second derivative of the pair w.r.t. R_j at fixed CNs and local charges
+         ! without the diagonal capacitances,
+         ! d2(C_ij g) = d2C_ij g + dC_ij dg^T + dg dC_ij^T + C_ij d2g
+         do ic = 1, 3
+            d2pair(:, ic) = alpha * W_ij * (-gtmp * d2cpair(:, ic) &
+               & - dgdr * (dcpair * evec(ic) + evec * dcpair(ic)) &
+               & + cij * d2J(:, ic)) - pchi * d2cpair(:, ic)
+         end do
+
+         ! Blocks of the pair in column block i, the diagonal capacitances
+         ! contribute to all blocks of the pair apart from their own diagonal
+         ! block, which is added from d2cdr2diag
+         d2ii(:, :) = d2ii + d2pair + wcapj * d2cpair
+         hessian(jj+1:jj+3, ii+1:ii+3) = hessian(jj+1:jj+3, ii+1:ii+3) &
+            & - d2pair - (wcapi + wcapj) * d2cpair
+
+         ! Scalar weight for the CN second derivatives of i
+         cnacc(iat) = cnacc(iat) + alpha * W_ij * cij * dgdgam * dgamdcni
+
+         ! Mixed derivatives w.r.t. CN_i (local charge i) and R_j from the Coulomb
+         ! interaction and the capacitance weights, dc_ij/dR_j = dcpair, the
+         ! derivative w.r.t. R_i is the negative
+         dvec = alpha * W_ij * (cij * d2gdrdgam * evec - dgdgam * dcpair)
+         dtmp = alpha * W_ii * dhdcni + beta * (p(iat) - p(jat)) * self%kcnchi(izp)
+         acn(:, kat) = dgamdcni * dvec + dtmp * dcpair
+         acn(:, ist) = acn(:, ist) - acn(:, kat)
+         dtmp = alpha * W_ii * detai + beta * (p(iat) - p(jat)) * self%kqchi(izp)
+         aql(:, kat) = dtmp * dcpair
+         aql(:, ist) = aql(:, ist) - aql(:, kat)
+
+         ! Second derivatives w.r.t. CN_i and CN_i or CN_j from the Coulomb
+         ! interaction
+         kcn(ist) = kcn(ist) + alpha * W_ij * cij &
+            & * (d2gdgam2 * dgamdcni**2 + dgdgam * d2gamdcni2)
+         kcn(kat) = alpha * W_ij * cij &
+            & * (d2gdgam2 * dgamdcni * dgamdcnj + dgdgam * d2gamdcnij)
+      end do
+
+      hessian(ii+1:ii+3, ii+1:ii+3) = hessian(ii+1:ii+3, ii+1:ii+3) + d2ii
+   end do
+   !$omp end parallel do
+
+   ! The CN and local charge derivatives are stored in the rows of the
+   ! positions, with the mirrored entries of the list they are rearranged into
+   ! the rows of the CNs, dcn(:, kat) = dCN_i/dR_j for the entry kat of atom j
+   ! in the row of atom i
+   allocate(tidx(nnz))
+   call get_list_transpose(list, tidx)
+   allocate(dcn(3, nnz), dql(3, nnz))
+   !$omp parallel do default(none) schedule(runtime) &
+   !$omp shared(mol, list, cache, tidx, dcn, dql) private(iat, kat)
+   do iat = 1, mol%nat
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         dcn(:, kat) = cache%dcndrlist(:, tidx(kat))
+         dql(:, kat) = cache%dqlocdrlist(:, tidx(kat))
+      end do
+   end do
+   !$omp end parallel do
+
+   ! Products of the CN and local charge derivatives, for the column block of
+   ! atom y H(x, y) += sum_k D(k, x) (A(k, y) + (K D)(k, y))^T + A(k, x) D(k, y)^T
+   ! with (K D)(:, y) scattered onto the second neighbors of y, each iteration
+   ! only updates the column block of atom jat
+   !$omp parallel default(none) &
+   !$omp shared(mol, list, cache, tidx, kcn, kql, acn, aql, dcn, dql, hessian) &
+   !$omp private(iat, jat, xat, ic, jj, xx, it, ntouch, kat, lat, dky, qky, gq) &
+   !$omp private(gk, gcn, hblk, mark, touch)
+   allocate(gcn(3, mol%nat), hblk(3, 3, mol%nat), source=0.0_wp)
+   allocate(mark(mol%nat), source=.false.)
+   allocate(touch(mol%nat))
+   !$omp do schedule(runtime)
+   do jat = 1, mol%nat
+      jj = 3 * (jat - 1)
+
+      ! Weights gcn(:, k) = A(k, y) + sum_l K(k, l) D(l, y), the diagonal entry
+      ! of K marks every k with D(k, y) /= 0
+      ntouch = 0
+      do kat = list%inl(jat), list%inl(jat + 1) - 1
+         iat = list%nlat(kat)
+         dky = cache%dcndrlist(:, kat)
+         do lat = list%inl(iat), list%inl(iat + 1) - 1
+            xat = list%nlat(lat)
+            if (.not. mark(xat)) then
+               mark(xat) = .true.
+               ntouch = ntouch + 1
+               touch(ntouch) = xat
+            end if
+            gcn(:, xat) = gcn(:, xat) + kcn(lat) * dky
+         end do
+         gcn(:, iat) = gcn(:, iat) + acn(:, tidx(kat))
+      end do
+
+      ! The 3x3 blocks of the column block are collected contiguously in hblk
+      do it = 1, ntouch
+         iat = touch(it)
+         gk = gcn(:, iat)
+         do lat = list%inl(iat), list%inl(iat + 1) - 1
+            xat = list%nlat(lat)
+            do ic = 1, 3
+               hblk(:, ic, xat) = hblk(:, ic, xat) + dcn(:, lat) * gk(ic)
+            end do
+         end do
+         gcn(:, iat) = 0.0_wp
+         mark(iat) = .false.
+      end do
+
+      ! Remaining mixed CN terms and all local charge terms, with
+      ! gq = Aq(k, y) + Kq(k) Q(k, y)
+      do kat = list%inl(jat), list%inl(jat + 1) - 1
+         iat = list%nlat(kat)
+         dky = cache%dcndrlist(:, kat)
+         qky = cache%dqlocdrlist(:, kat)
+         gq = aql(:, tidx(kat)) + kql(iat) * qky
+         do lat = list%inl(iat), list%inl(iat + 1) - 1
+            xat = list%nlat(lat)
+            do ic = 1, 3
+               hblk(:, ic, xat) = hblk(:, ic, xat) + acn(:, lat) * dky(ic) &
+                  & + dql(:, lat) * gq(ic) + aql(:, lat) * qky(ic)
+            end do
+         end do
+      end do
+
+      do xat = 1, mol%nat
+         xx = 3 * (xat - 1)
+         hessian(xx+1:xx+3, jj+1:jj+3) = hessian(xx+1:xx+3, jj+1:jj+3) &
+            & + hblk(:, :, xat)
+         hblk(:, :, xat) = 0.0_wp
+      end do
+   end do
+   !$omp end do
+   deallocate(gcn, hblk, mark, touch)
+   !$omp end parallel
+
+   ! Second derivatives of the CNs and local charges with their scalar weights
+   call self%ncoord%add_coordination_number_hessian_list(mol, cache%trans, cnacc, &
+      & hessian, list)
+   call self%ncoord_en%add_coordination_number_hessian_list(mol, cache%trans, &
+      & qlocacc, hessian, list)
+
+end subroutine get_explicit_hessian_0d_list
+
+!> Position of the mirrored entry of each entry of a complete neighborlist, for
+!> the entry of atom j in the row of atom i the entry of atom i in the row of j
+subroutine get_list_transpose(list, tidx)
+   !> Multicharge neighborlist type (complete)
+   type(csr_list), intent(in) :: list
+   !> Positions of the mirrored entries
+   integer(i8), intent(out) :: tidx(:)
+
+   integer :: iat, jat, nat
+   integer(i8) :: kat
+   integer, allocatable :: tcol(:)
+   integer(i8), allocatable :: pos(:), tsrc(:), loc(:)
+
+   nat = size(list%inl) - 1
+
+   ! Transposed rows by counting, the transposed row of atom j receives the
+   ! entries of atom j in the rows of all atoms i in ascending order of i
+   allocate(tsrc(size(list%nlat, kind=i8)), tcol(size(list%nlat, kind=i8)))
+   allocate(pos, source=list%inl(:nat))
+   do iat = 1, nat
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         jat = list%nlat(kat)
+         tsrc(pos(jat)) = kat
+         tcol(pos(jat)) = iat
+         pos(jat) = pos(jat) + 1
+      end do
+   end do
+
+   ! The pattern is symmetric, each transposed row holds the atoms of the row of
+   ! the list in a different order
+   !$omp parallel default(none) shared(nat, list, tidx, tsrc, tcol) &
+   !$omp private(jat, kat, loc)
+   allocate(loc(nat))
+   !$omp do schedule(runtime)
+   do jat = 1, nat
+      do kat = list%inl(jat), list%inl(jat + 1) - 1
+         loc(list%nlat(kat)) = kat
+      end do
+      do kat = list%inl(jat), list%inl(jat + 1) - 1
+         tidx(tsrc(kat)) = loc(tcol(kat))
+      end do
+   end do
+   !$omp end do
+   deallocate(loc)
+   !$omp end parallel
+
+end subroutine get_list_transpose
 
 end module multicharge_model_eeqbc

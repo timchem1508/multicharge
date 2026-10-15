@@ -34,6 +34,16 @@ module multicharge_model_cache
       !> Coordination number array
       real(wp), allocatable :: cn(:)
 
+      !> Coordination number derivatives w.r.t. positions
+      real(wp), allocatable :: dcndr(:, :, :)
+
+      !> Coordination number derivatives w.r.t. lattice vectors
+      real(wp), allocatable :: dcndL(:, :, :)
+
+      !> Coordination number derivatives w.r.t. positions on the pattern of the
+      !> neighborlist, the entry of atom j in the row of atom i holds dCN_j/dR_i
+      real(wp), allocatable :: dcndrlist(:, :)
+
       !> Ewald separation parameter
       real(wp) :: alpha
 
@@ -45,6 +55,16 @@ module multicharge_model_cache
 
       !> Local charges
       real(wp), allocatable :: qloc(:)
+
+      !> Local charge derivatives w.r.t. positions
+      real(wp), allocatable :: dqlocdr(:, :, :)
+
+      !> Local charge derivatives w.r.t. lattice vectors
+      real(wp), allocatable :: dqlocdL(:, :, :)
+
+      !> Local charge derivatives w.r.t. positions on the pattern of the
+      !> neighborlist, the entry of atom j in the row of atom i holds dqloc_j/dR_i
+      real(wp), allocatable :: dqlocdrlist(:, :)
 
       !> Full Maxwell capacitance matrix
       real(wp), allocatable :: cmat(:, :)

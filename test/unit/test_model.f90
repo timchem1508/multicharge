@@ -1404,8 +1404,8 @@ subroutine test_explicit_hessian(error, mol, model, alpha, beta, pvec)
     type is (eeqbc_model)
       allocate(cache%d2cdr2diag(3, 3, mol%nat))
       call model%get_d2cmat_0d(mol, cache)
-      call model%get_explicit_hessian_0d(mol, cache, p, hessian, alphain=alpha, &
-         & betain=beta)
+      call model%get_explicit_hessian(mol, cache, p, hessian, alpha=alpha, &
+         & beta=beta)
     class default
       call test_failed(error, "Explicit Hessian requires the EEQBC model")
       return
