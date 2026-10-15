@@ -88,6 +88,7 @@ subroutine collect_model(testsuite)
    & new_unittest("eeqbc-hess-expl-mb05", test_eeqbc_hexpl_mb05), &
    & new_unittest("eeqbc-hess-expl-dfdq-mb06", test_eeqbc_hexpl_dfdq_mb06), &
    & new_unittest("eeqbc-hess-expl-znooh", test_eeqbc_hexpl_znooh), &
+   & new_unittest("eeqbc-dqdr-no-update", test_eeqbc_dqdr_no_update), &
    & new_unittest("eeqbc-charges-mb01", test_eeqbc_q_mb01), &
    & new_unittest("eeqbc-charges-mb02", test_eeqbc_q_mb02), &
    & new_unittest("eeqbc-charges-efield-mb03", test_eeqbc_q_efield_mb03), &
@@ -258,7 +259,7 @@ subroutine test_dadr(error, mol, model)
    end do lp
 
    ! Analytical gradient
-   call model%update(mol, cache, trans, grad)
+   call model%update(mol, cache, trans, grad, dqdr=.true.)
    call model%get_capacitance_matrix(mol, ndim, cache)
    call model%get_partial_derivs(mol, ndim, cache, alpha=1.0_wp, beta=0.0_wp)
 
@@ -356,7 +357,7 @@ subroutine test_dadL(error, mol, model)
    end do lp
    if (allocated(error)) return
 
-   call model%update(mol, cache, trans, grad)
+   call model%update(mol, cache, trans, grad, dqdr=.true.)
    call model%get_capacitance_matrix(mol, ndim, cache)
    call model%get_partial_derivs(mol, ndim, cache, alpha=1.0_wp, beta=0.0_wp)
    if (allocated(error)) return
@@ -437,7 +438,7 @@ subroutine test_dbdr(error, mol, model)
    end do lp
 
    ! Analytical gradient
-   call model%update(mol, cache, trans, grad)
+   call model%update(mol, cache, trans, grad, dqdr=.true.)
    ! Solve for the charges to set up the capacitance matrix and xtmp (eeqbc)
    call model%solve(mol, solver, cache, error, unit=output_unit)
    if (allocated(error)) return
@@ -533,7 +534,7 @@ subroutine test_dbdL(error, mol, model)
    end do lp
 
    ! Analytical gradient
-   call model%update(mol, cache, trans, grad)
+   call model%update(mol, cache, trans, grad, dqdr=.true.)
    ! Solve for the charges to set up the capacitance matrix and xtmp (eeqbc)
    call model%solve(mol, solver, cache, error, unit=output_unit)
    if (allocated(error)) return
@@ -1034,7 +1035,7 @@ subroutine test_numdqdr(error, mol, model, cg)
       allocate(cache)
    end if
 
-   call model%update(mol, cache, trans, grad)
+   call model%update(mol, cache, trans, grad, dqdr=.true.)
    call model%solve(mol, solver, cache, error, &
    & dqdr=dqdr, dqdL=dqdL, unit=output_unit)
    if (allocated(error)) return
@@ -1140,7 +1141,7 @@ subroutine test_numdqdL(error, mol, model, cg)
       allocate(cache)
    end if
 
-   call model%update(mol, cache, trans, grad)
+   call model%update(mol, cache, trans, grad, dqdr=.true.)
    call model%solve(mol, solver, cache, error, &
    &  dqdr=dqdr, dqdL=dqdL, unit=output_unit)
    if (allocated(error)) return
@@ -1220,7 +1221,7 @@ subroutine test_dfdr(error, mol, dfdq, model)
    end if
 
    ! Solve with direct solver to get dqdr
-   call model%update(mol, cache, trans, grad)
+   call model%update(mol, cache, trans, grad, dqdr=.true.)
    call model%solve(mol, solver_dqdr, cache, error, &
    & dqdr=dqdr, dqdL=dqdL, unit=output_unit)
    if (allocated(error)) return
@@ -1390,7 +1391,7 @@ subroutine test_explicit_hessian(error, mol, model, alpha, beta, pvec)
 
    ! Charges and cache of the reference structure
    allocate(cache)
-   call model%update(mol, cache, trans, grad=.true.)
+   call model%update(mol, cache, trans, grad=.true., hess=.true.)
    call model%solve(mol, solver, cache, error, qvec=qvec, unit=output_unit)
    if (allocated(error)) return
    if (present(pvec)) then
@@ -2711,5 +2712,40 @@ subroutine test_eeqbc_dqdL_cg_mb11(error)
    call test_numdqdL(error, mol, model, cg=.true.)
 
 end subroutine test_eeqbc_dqdL_cg_mb11
+
+
+!> The charge derivatives need the CN derivatives requested in the update
+subroutine test_eeqbc_dqdr_no_update(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   class(mchrg_solver_type), allocatable :: solver
+   class(mchrg_solver_input), allocatable :: solver_input
+   type(mchrg_cache), allocatable :: cache
+   type(error_type), allocatable :: solve_error
+   real(wp), parameter :: trans(3, 1) = 0.0_wp
+   real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
+
+   call get_structure(mol, "MB16-43", "01")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+
+   allocate(cg_input :: solver_input)
+   call solver_maker(solver, solver_input, error)
+   if (allocated(error)) return
+
+   allocate(dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat))
+   allocate(cache)
+   call model%update(mol, cache, trans, grad=.true.)
+   call model%solve(mol, solver, cache, solve_error, dqdr=dqdr, dqdL=dqdL, &
+      & unit=output_unit)
+   if (.not. allocated(solve_error)) then
+      call test_failed(error, "Charge derivatives without CN derivatives did not fail")
+   end if
+
+end subroutine test_eeqbc_dqdr_no_update
 
 end module test_model

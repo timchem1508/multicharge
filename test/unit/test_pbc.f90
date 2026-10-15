@@ -439,7 +439,7 @@ subroutine test_dbdr(error, mol, model)
    end do lp
 
    ! Analytical gradient
-   call model%update(mol, cache, trans, grad)
+   call model%update(mol, cache, trans, grad, dqdr=.true.)
    ! Solve for the charges to set up the capacitance matrix and xtmp (eeqbc)
    call model%solve(mol, solver, cache, error, unit=output_unit)
    if (allocated(error)) return
@@ -547,7 +547,7 @@ subroutine test_dbdL(error, mol, model)
    end do lp
 
    ! Analytical gradient
-   call model%update(mol, cache, trans, grad)
+   call model%update(mol, cache, trans, grad, dqdr=.true.)
    ! Solve for the charges to set up the capacitance matrix and xtmp (eeqbc)
    call model%solve(mol, solver, cache, error, unit=output_unit)
    if (allocated(error)) return
@@ -683,7 +683,7 @@ subroutine test_dadr(error, mol, model)
    end do lp
 
    ! Analytical gradient
-   call model%update(mol, cache, trans, grad)
+   call model%update(mol, cache, trans, grad, dqdr=.true.)
    call model%get_capacitance_matrix(mol, ndim, cache)
    call model%get_partial_derivs(mol, ndim, cache, alpha=1.0_wp, beta=0.0_wp)
 
@@ -792,7 +792,7 @@ subroutine test_dadL(error, mol, model)
    end do lp
    if (allocated(error)) return
 
-   call model%update(mol, cache, trans, grad)
+   call model%update(mol, cache, trans, grad, dqdr=.true.)
    call model%get_capacitance_matrix(mol, ndim, cache)
    call model%get_partial_derivs(mol, ndim, cache, alpha=1.0_wp, beta=0.0_wp)
    if (allocated(error)) return
@@ -868,7 +868,7 @@ subroutine test_numdqdr(error, mol, model)
    end do lp
    if (allocated(error)) return
 
-   call model%update(mol, cache, trans, grad)
+   call model%update(mol, cache, trans, grad, dqdr=.true.)
    call model%solve(mol, solver, cache, error, &
    & dqdr=dqdr, dqdL=dqdL, unit=output_unit)
    if (allocated(error)) return
@@ -961,7 +961,7 @@ subroutine test_numdqdL(error, mol, model)
    end do lp
    if (allocated(error)) return
 
-   call model%update(mol, cache, trans, grad)
+   call model%update(mol, cache, trans, grad, dqdr=.true.)
    call model%solve(mol, solver, cache, error, &
    & dqdr=dqdr, dqdL=dqdL, unit=output_unit)
    if (allocated(error)) return
@@ -1044,7 +1044,7 @@ subroutine test_dfdr(error, mol, dfdq, model)
    end if
 
    ! Solve with direct solver to get dqdr
-   call model%update(mol, cache, trans, grad)
+   call model%update(mol, cache, trans, grad, dqdr=.true.)
    call model%solve(mol, solver_dqdr, cache, error, &
    & dqdr=dqdr, dqdL=dqdL, unit=output_unit)
    if (allocated(error)) return

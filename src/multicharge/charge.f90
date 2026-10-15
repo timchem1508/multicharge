@@ -78,11 +78,12 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, list, efield)
    allocate(solver)
    call new_cg_solver(solver, solver_input)
 
-   grad = present(dqdr) .and. present(dqdL)
+   ! With a neighborlist the position derivatives can stay in the cache
+   grad = present(dqdL) .and. (present(dqdr) .or. present(list))
 
    allocate(cache)
    call get_lattice_points(mol%periodic, mol%lattice, mchrg_model%ncoord%cutoff, trans)
-   call mchrg_model%update(mol, cache, trans, grad, list=list)
+   call mchrg_model%update(mol, cache, trans, grad, list=list, dqdr=grad)
    call mchrg_model%solve(mol, solver, cache, error, &
       & qvec=qvec, dqdr=dqdr, dqdL=dqdL, list=list, &
       & efield=efield, unit=output_unit)

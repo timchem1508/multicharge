@@ -1261,14 +1261,14 @@ subroutine test_partial_derivs(error, mol, model)
 
    ! Dense reference with the block CG solver
    allocate(cache1)
-   call model%update(mol, cache1, trans, grad=.true.)
+   call model%update(mol, cache1, trans, grad=.true., dqdr=.true.)
    call model%solve(mol, solver, cache1, error, dqdr=dqdr1, dqdL=dqdL1, &
       & unit=output_unit)
    if (allocated(error)) return
 
    ! Dense reference with the direct solver
    allocate(cache3)
-   call model%update(mol, cache3, trans, grad=.true.)
+   call model%update(mol, cache3, trans, grad=.true., dqdr=.true.)
    call model%solve(mol, direct, cache3, error, dqdr=dqdr3, dqdL=dqdL3, &
       & unit=output_unit)
    if (allocated(error)) return
@@ -1281,7 +1281,7 @@ subroutine test_partial_derivs(error, mol, model)
       call new_csr_list(list, mol, error, cutoff=cutoff, complete=.true.)
    end if
    if (allocated(error)) return
-   call model%update(mol, cache2, trans, grad=.true., list=list)
+   call model%update(mol, cache2, trans, grad=.true., list=list, dqdr=.true.)
    call model%solve(mol, solver, cache2, error, dqdr=dqdr2, dqdL=dqdL2, list=list, &
       & unit=output_unit)
    if (allocated(error)) return
@@ -1302,7 +1302,7 @@ subroutine test_partial_derivs(error, mol, model)
    allocate(cache4)
    cache4%wsc = cache2%wsc
    call move_alloc(cache4, cache2)
-   call model%update(mol, cache2, trans, grad=.true., list=list)
+   call model%update(mol, cache2, trans, grad=.true., list=list, dqdr=.true.)
    call model%solve(mol, solver, cache2, error, dqdL=dqdL4, list=list, &
       & unit=output_unit)
    if (allocated(error)) return
@@ -1586,7 +1586,7 @@ subroutine test_explicit_hessian(error, mol, model, alpha, beta, nlcutoff, pvec)
 
    ! Charges of the reference structure without a neighbour list
    allocate(cache)
-   call model%update(mol, cache, trans, grad=.true.)
+   call model%update(mol, cache, trans, grad=.true., hess=.true.)
    call model%solve(mol, solver, cache, error, qvec=qvec, unit=output_unit)
    if (allocated(error)) return
    if (present(pvec)) then
@@ -1681,7 +1681,8 @@ subroutine test_explicit_hessian(error, mol, model, alpha, beta, nlcutoff, pvec)
 end subroutine test_explicit_hessian
 
 
-!> Cache for the neighbour list evaluation at fixed charges
+!> Cache for the neighbour list evaluation at fixed charges, including the CN
+!> and local charge derivatives of the Hessian
 subroutine fixed_charge_cache(mol, model, list, qvec, cache)
 
    !> Molecular structure data
@@ -1701,7 +1702,7 @@ subroutine fixed_charge_cache(mol, model, list, qvec, cache)
 
    real(wp), parameter :: trans(3, 1) = 0.0_wp
 
-   call model%update(mol, cache, trans, grad=.true., list=list)
+   call model%update(mol, cache, trans, grad=.true., list=list, hess=.true.)
    call model%get_capacitance_matrix(mol, mol%nat, cache, list=list)
    call model%get_xvec(mol, mol%nat, cache, list=list)
    cache%vrhs = qvec

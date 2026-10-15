@@ -116,7 +116,7 @@ module multicharge_model_type
 
    abstract interface
       !> Update model-dependent quantities and cache
-      subroutine update(self, mol, cache, trans, grad, list)
+      subroutine update(self, mol, cache, trans, grad, list, dqdr, hess)
          import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
 
          !> Multicharge model type
@@ -136,6 +136,14 @@ module multicharge_model_type
 
          !> Flag to compute derivatives
          logical, intent(in) :: grad
+
+         !> Flag for the charge derivatives w.r.t. positions and strain, stores
+         !> the CN (and local charge) derivatives in the cache
+         logical, intent(in), optional :: dqdr
+
+         !> Flag for the Hessian, stores the CN (and local charge) derivatives in
+         !> the cache
+         logical, intent(in), optional :: hess
       end subroutine update
 
       !> Construct a capacitance matrix using cached CN and charge data
@@ -400,6 +408,21 @@ subroutine solve(self, mol, solver, cache, error, &
    if (cpq .and. present(list)) then
       if (.not. list%complete) then
          call fatal_error(error, "Charge derivatives require a complete neighborlist")
+         return
+      end if
+   end if
+
+   ! The CN derivatives of the charge derivatives are stored by the update
+   if (cpq) then
+      if (present(list)) then
+         if (.not. allocated(cache%dcndrlist)) then
+            call fatal_error(error, "Charge derivatives require the CN derivatives "// &
+               & "on the neighborlist, update the cache with dqdr")
+            return
+         end if
+      else if (.not. allocated(cache%dcndr)) then
+         call fatal_error(error, "Charge derivatives require the CN derivatives, "// &
+            & "update the cache with dqdr")
          return
       end if
    end if

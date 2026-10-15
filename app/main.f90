@@ -154,7 +154,7 @@ program main
    grad = egrad .or. qgrad
 
    call timer%push("update")
-   call model%update(mol, cache, trans, grad, list)
+   call model%update(mol, cache, trans, grad, list, dqdr=qgrad)
    call timer%pop
    if (verbosity > 1) then
       write(output_unit, '(a, 1x, a)') "Get coordination number time : ", &

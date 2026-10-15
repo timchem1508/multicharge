@@ -34,7 +34,6 @@ module multicharge_model_eeq
    use multicharge_ewald, only : get_alpha
    use multicharge_model_type, only : mchrg_model_type, get_dir_trans, get_rec_trans
    use multicharge_model_cache, only : mchrg_cache
-   use multicharge_ncoord, only : get_pair_derivs
    implicit none
    private
 
@@ -116,8 +115,9 @@ subroutine new_eeq_model(self, mol, error, chi, rad, eta, kcnchi, &
 end subroutine new_eeq_model
 
 
-!> Update coordination numbers and, if needed, the Wigner–Seitz cell and Ewald alpha.
-subroutine update(self, mol, cache, trans, grad, list)
+!> Update coordination numbers, their derivatives if the charge derivatives or
+!> the Hessian are requested, and, if needed, the Wigner–Seitz cell and Ewald alpha.
+subroutine update(self, mol, cache, trans, grad, list, dqdr, hess)
    !> EEQ model type
    class(eeq_model), intent(in) :: self
    !> Structure type
@@ -130,6 +130,18 @@ subroutine update(self, mol, cache, trans, grad, list)
    real(wp), intent(in) :: trans(:, :)
    !> Flag to compute derivatives
    logical, intent(in) :: grad
+   !> Flag for the charge derivatives w.r.t. positions and strain
+   logical, intent(in), optional :: dqdr
+   !> Flag for the Hessian
+   logical, intent(in), optional :: hess
+
+   logical :: deriv
+
+   ! The charge derivatives and the Hessian need the position and strain
+   ! derivatives of the CN
+   deriv = .false.
+   if (present(dqdr)) deriv = dqdr
+   if (present(hess)) deriv = deriv .or. hess
 
    if (.not. allocated(cache%cn)) then
       allocate(cache%cn(mol%nat))
@@ -137,8 +149,14 @@ subroutine update(self, mol, cache, trans, grad, list)
 
    cache%trans = trans
 
-   ! CN derivatives are evaluated on-the-fly from the pairs
-   call self%ncoord%get_coordination_number(mol, trans, cache%cn)
+   if (deriv) then
+      if (.not. allocated(cache%dcndr)) allocate(cache%dcndr(3, mol%nat, mol%nat))
+      if (.not. allocated(cache%dcndL)) allocate(cache%dcndL(3, 3, mol%nat))
+      call self%ncoord%get_coordination_number(mol, trans, cache%cn, &
+         & dcndr=cache%dcndr, dcndL=cache%dcndL)
+   else
+      call self%ncoord%get_coordination_number(mol, trans, cache%cn)
+   end if
 
    if (any(mol%periodic)) then
       ! Create WSC
@@ -474,9 +492,8 @@ subroutine get_partial_derivs_0d(self, mol, cache, alpha, beta)
 
    real(wp), parameter :: reg = 1.0e-14_wp
 
-   integer :: iat, jat, izp, jzp, itr
+   integer :: iat, jat, izp, jzp
    real(wp) :: vec(3), r2, gam, arg, dtmp, dG(3), dS(3, 3)
-   real(wp) :: dpair(3, 2), spair(3, 3, 2)
    real(wp), allocatable :: dxdcn(:)
 
    ! Thread-private arrays for reduction
@@ -490,8 +507,8 @@ subroutine get_partial_derivs_0d(self, mol, cache, alpha, beta)
 
    !$omp parallel default(none) &
    !$omp shared(cache, mol, self, alpha, dxdcn) &
-   !$omp private(iat, izp, jat, jzp, itr, gam, r2, vec, dG, dS, dtmp, arg) &
-   !$omp private(dpair, spair, dabdr_local, dabdL_local)
+   !$omp private(iat, izp, jat, jzp, gam, r2, vec, dG, dS, dtmp, arg) &
+   !$omp private(dabdr_local, dabdL_local)
    allocate(dabdr_local(3, mol%nat, size(cache%dabdr, 3)), source=0.0_wp)
    allocate(dabdL_local(3, 3, size(cache%dabdL, 3)), source=0.0_wp)
    !$omp do schedule(runtime)
@@ -516,19 +533,10 @@ subroutine get_partial_derivs_0d(self, mol, cache, alpha, beta)
       end do
 
       ! EN derivative through the CN
-      do jat = 1, iat
-         do itr = 1, size(cache%trans, 2)
-            vec = mol%xyz(:, iat) - (mol%xyz(:, jat) + cache%trans(:, itr))
-            call get_pair_derivs(self%ncoord, mol, iat, jat, vec, cache%cn(iat), &
-               & cache%cn(jat), dpair, spair)
-            dabdr_local(:, iat, iat) = dabdr_local(:, iat, iat) + dxdcn(iat) * dpair(:, 1)
-            dabdr_local(:, jat, iat) = dabdr_local(:, jat, iat) - dxdcn(iat) * dpair(:, 1)
-            dabdr_local(:, iat, jat) = dabdr_local(:, iat, jat) + dxdcn(jat) * dpair(:, 2)
-            dabdr_local(:, jat, jat) = dabdr_local(:, jat, jat) - dxdcn(jat) * dpair(:, 2)
-            dabdL_local(:, :, iat) = dabdL_local(:, :, iat) + dxdcn(iat) * spair(:, :, 1)
-            dabdL_local(:, :, jat) = dabdL_local(:, :, jat) + dxdcn(jat) * spair(:, :, 2)
-         end do
-      end do
+      dabdr_local(:, :, iat) = dabdr_local(:, :, iat) &
+         & + dxdcn(iat) * cache%dcndr(:, :, iat)
+      dabdL_local(:, :, iat) = dabdL_local(:, :, iat) &
+         & + dxdcn(iat) * cache%dcndL(:, :, iat)
    end do
    !$omp end do
    !$omp critical (get_partial_derivs_0d_)
@@ -556,9 +564,9 @@ subroutine get_partial_derivs_3d(self, mol, cache, alpha, beta)
 
    real(wp), parameter :: reg = 1.0e-14_wp
 
-   integer :: iat, jat, izp, jzp, img, itr
+   integer :: iat, jat, izp, jzp, img
    real(wp) :: vol, gam, wsw, vec(3), dG(3), dS(3, 3)
-   real(wp) :: dGd(3), dSd(3, 3), dGr(3), dSr(3, 3), dpair(3, 2), spair(3, 3, 2)
+   real(wp) :: dGd(3), dSd(3, 3), dGr(3), dSr(3, 3)
    real(wp), allocatable :: dtrans(:, :), rtrans(:, :), dxdcn(:)
 
    ! Thread-private arrays for reduction
@@ -576,8 +584,8 @@ subroutine get_partial_derivs_3d(self, mol, cache, alpha, beta)
 
    !$omp parallel default(none) &
    !$omp shared(mol, self, cache, alpha, vol, dtrans, rtrans, dxdcn) &
-   !$omp private(iat, izp, jat, jzp, img, itr, gam, wsw, vec, dG, dS) &
-   !$omp private(dGr, dSr, dGd, dSd, dpair, spair, dabdr_local, dabdL_local)
+   !$omp private(iat, izp, jat, jzp, img, gam, wsw, vec, dG, dS) &
+   !$omp private(dGr, dSr, dGd, dSd, dabdr_local, dabdL_local)
    allocate(dabdr_local(3, mol%nat, size(cache%dabdr, 3)), source=0.0_wp)
    allocate(dabdL_local(3, 3, size(cache%dabdL, 3)), source=0.0_wp)
    !$omp do schedule(runtime)
@@ -619,19 +627,10 @@ subroutine get_partial_derivs_3d(self, mol, cache, alpha, beta)
       dabdL_local(:, :, iat) = dabdL_local(:, :, iat) + alpha * dS * cache%vrhs(iat)
 
       ! EN derivative through the CN
-      do jat = 1, iat
-         do itr = 1, size(cache%trans, 2)
-            vec = mol%xyz(:, iat) - (mol%xyz(:, jat) + cache%trans(:, itr))
-            call get_pair_derivs(self%ncoord, mol, iat, jat, vec, cache%cn(iat), &
-               & cache%cn(jat), dpair, spair)
-            dabdr_local(:, iat, iat) = dabdr_local(:, iat, iat) + dxdcn(iat) * dpair(:, 1)
-            dabdr_local(:, jat, iat) = dabdr_local(:, jat, iat) - dxdcn(iat) * dpair(:, 1)
-            dabdr_local(:, iat, jat) = dabdr_local(:, iat, jat) + dxdcn(jat) * dpair(:, 2)
-            dabdr_local(:, jat, jat) = dabdr_local(:, jat, jat) - dxdcn(jat) * dpair(:, 2)
-            dabdL_local(:, :, iat) = dabdL_local(:, :, iat) + dxdcn(iat) * spair(:, :, 1)
-            dabdL_local(:, :, jat) = dabdL_local(:, :, jat) + dxdcn(jat) * spair(:, :, 2)
-         end do
-      end do
+      dabdr_local(:, :, iat) = dabdr_local(:, :, iat) &
+         & + dxdcn(iat) * cache%dcndr(:, :, iat)
+      dabdL_local(:, :, iat) = dabdL_local(:, :, iat) &
+         & + dxdcn(iat) * cache%dcndL(:, :, iat)
    end do
    !$omp end do
    !$omp critical (get_partial_derivs_3d_)
