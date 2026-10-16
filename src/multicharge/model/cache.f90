@@ -133,8 +133,14 @@ module multicharge_model_cache
       !> matrix w.r.t. positions of (3, 3, mol%nat) size.
       real(wp), allocatable :: d2cdr2diag(:, :, :)
 
+      !> Sparse CSR storage of the hessian
+      real(wp), allocatable :: hesslist(:, :, :)
+
       !> Logical flag for gradient calculation
       logical :: grad
+
+      !> Logical flag for Hessian calculation
+      logical :: hess
    end type mchrg_cache
 
 end module multicharge_model_cache

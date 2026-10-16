@@ -23,6 +23,8 @@ program main
    use multicharge, only: mchrg_model_type, mchrg_model, mchrg_cache, new_eeq2019_model, &
    & new_eeqbc2025_model, get_multicharge_version, &
    & write_ascii_model, write_ascii_properties, write_ascii_results
+   use multicharge_model, only: eeqbc_model
+   use multicharge_model_type, only: hess_index
    use multicharge_output, only: json_results
    use multicharge_solver, only: new_mchrg_solver, mchrg_solver_type, direct_solver, &
    & cg_solver, mchrg_solver_input, cg_input, direct_input
@@ -34,7 +36,7 @@ program main
 
    character(len=:), allocatable :: input, chargeinput
    integer, allocatable :: input_format
-   integer :: stat, unit, model_id
+   integer :: stat, unit, model_id, idx, jdx
    type(error_type), allocatable :: error
    type(structure_type) :: mol
    type(csr_list), allocatable :: list
@@ -44,9 +46,10 @@ program main
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
    logical :: grad, egrad, qgrad, json, exist, use_nlist, numeric_hessian
+   logical :: analytic_hessian
    real(wp), allocatable :: trans(:, :)
    real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
-   real(wp), allocatable :: hess(:), press(:, :, :, :)
+   real(wp), allocatable :: hess(:), press(:, :, :, :), hessian(:, :)
    real(wp), allocatable :: qvec(:)
    real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: charge
@@ -58,7 +61,8 @@ program main
    call timer%push("total")
 
    call get_arguments(input, model_id, use_nlist, cutoff, input_format, egrad, qgrad, &
-   & numeric_hessian, charge, efield, json, solver_input, verbosity, error)
+   & numeric_hessian, analytic_hessian, charge, efield, json, solver_input, verbosity, &
+   & error)
    if (allocated(error)) then
       write(error_unit, '(a)') error%message
       error stop
@@ -75,6 +79,21 @@ program main
    if (allocated(error)) then
       write(error_unit, '(a)') error%message
       error stop
+   end if
+
+   ! The analytical Hessian is only implemented for the EEQBC model of molecules
+   if (analytic_hessian) then
+      if (model_id /= mchrg_model%eeqbc2025) then
+         call fatal_error(error, &
+         & "Analytical Hessian is only available for the EEQBC model")
+      else if (any(mol%periodic)) then
+         call fatal_error(error, &
+         & "Analytical Hessian is not available for periodic systems")
+      end if
+      if (allocated(error)) then
+         write(error_unit, '(a)') error%message
+         error stop
+      end if
    end if
 
    if (allocated(charge)) then
@@ -100,14 +119,16 @@ program main
 
    allocate(cache)
 
-   ! Create neighborlist if requested, charge derivatives need a complete list
+   ! Create neighborlist if requested, charge derivatives and the analytical
+   ! Hessian need a complete list
    if (use_nlist) then
       call timer%push("nlist")
       allocate(list)
       if (any(mol%periodic)) then
          call new_csr_list(list, mol, error, cache%wsc, cutoff, complete=qgrad)
       else
-         call new_csr_list(list, mol, error, cutoff=cutoff, complete=qgrad)
+         call new_csr_list(list, mol, error, cutoff=cutoff, &
+         & complete=qgrad .or. analytic_hessian)
       end if
       call timer%pop
       write(output_unit, '(a, 1x, a)') "Neighborlist generation time :", &
@@ -173,6 +194,29 @@ program main
          write(output_unit, '(a, 1x, a)') "Get numerical Hessian time : ", &
          & format_time(timer%get("numhess"))
       end if
+   else if (analytic_hessian) then
+      allocate(hessian(3 * mol%nat, 3 * mol%nat))
+      call timer%push("hess")
+      ! The model was checked to be EEQBC above
+      select type(model)
+         type is (eeqbc_model)
+         call model%get_hessian(mol, solver, cache, error, hessian, qvec, energy, &
+         & gradient, sigma, list=list, unit=output_unit, verbosity=verbosity)
+      end select
+      call timer%pop
+      if (verbosity > 1) then
+         write(output_unit, '(a, 1x, a)') "Get analytical Hessian time : ", &
+         & format_time(timer%get("hess"))
+      end if
+
+      ! Symmetric part in packed lower-triangle storage for the output
+      allocate(hess(3 * mol%nat * (3 * mol%nat + 1) / 2))
+      do idx = 1, 3 * mol%nat
+         do jdx = 1, idx
+            hess(hess_index(idx, jdx)) = 0.5_wp &
+            & * (hessian(idx, jdx) + hessian(jdx, idx))
+         end do
+      end do
    else
       call model%solve(mol, solver, cache, error, &
       & energy, gradient, sigma, qvec, dqdr, dqdL, list, efield=efield, &
@@ -232,7 +276,9 @@ subroutine help(unit)
       "-g, -eg, -grad, --grad, -egrad, --egrad", &
       & "Evaluate molecular energy gradient and virial.", &
       "-qg, -qgrad, --qgrad", "Evaluate molecular charge gradient and virial.", &
-      "-hess, -numhess, --numhess", &
+      "-hess, --hess", &
+      & "Evaluate analytical Hessian (eeqbc model, molecules only).", &
+      "-numhess, --numhess", &
       & "Evaluate semi-numerical Hessian and pressure tensor.", &
       "-list, -nlist, --nlist", &
       & "Use neighborlist for solver (complete list with charge gradient)", &
@@ -264,8 +310,8 @@ subroutine version(unit)
 end subroutine version
 
 subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
-& input_format, egrad, qgrad, numeric_hessian, charge, efield, json, solver_input, &
-& verbosity, error)
+& input_format, egrad, qgrad, numeric_hessian, analytic_hessian, charge, efield, json, &
+& solver_input, verbosity, error)
 
    !> Input file name
    character(len=:), allocatable :: input
@@ -290,6 +336,9 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
 
    !> Evaluate semi-numerical Hessian and pressure tensor
    logical, intent(out) :: numeric_hessian
+
+   !> Evaluate analytical Hessian
+   logical, intent(out) :: analytic_hessian
 
    !> Charge
    real(wp), allocatable, intent(out) :: charge
@@ -321,6 +370,7 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
    egrad = .false.
    qgrad = .false.
    numeric_hessian = .false.
+   analytic_hessian = .false.
    json = .false.
    cutoff = 29.0_wp
    iarg = 0
@@ -401,7 +451,9 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
          egrad = .true.
          case("-qg", "-qgrad", "--qgrad")
          qgrad = .true.
-         case("-hess", "-numhess", "--numhess")
+         case("-hess", "--hess")
+         analytic_hessian = .true.
+         case("-numhess", "--numhess")
          numeric_hessian = .true.
          case("-j", "-json", "--json")
          json = .true.
@@ -466,6 +518,10 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
          end if
       end select
    end do
+
+   if (numeric_hessian .and. analytic_hessian .and. .not. allocated(error)) then
+      call fatal_error(error, "Numerical and analytical Hessian cannot be combined.")
+   end if
 
    ! Default solver is direct, only the cg solver supports a neighborlist
    if (.not. allocated(solver_input)) then

@@ -88,6 +88,10 @@ subroutine collect_model(testsuite)
    & new_unittest("eeqbc-hess-expl-mb05", test_eeqbc_hexpl_mb05), &
    & new_unittest("eeqbc-hess-expl-dfdq-mb06", test_eeqbc_hexpl_dfdq_mb06), &
    & new_unittest("eeqbc-hess-expl-znooh", test_eeqbc_hexpl_znooh), &
+   & new_unittest("eeqbc-hess-impl-mb05", test_eeqbc_himpl_mb05), &
+   & new_unittest("eeqbc-hess-impl-znooh", test_eeqbc_himpl_znooh), &
+   & new_unittest("eeqbc-hess-mb05", test_eeqbc_hess_mb05), &
+   & new_unittest("eeqbc-hess-cg-znooh", test_eeqbc_hess_cg_znooh), &
    & new_unittest("eeqbc-dqdr-no-update", test_eeqbc_dqdr_no_update), &
    & new_unittest("eeqbc-charges-mb01", test_eeqbc_q_mb01), &
    & new_unittest("eeqbc-charges-mb02", test_eeqbc_q_mb02), &
@@ -1505,6 +1509,220 @@ subroutine fixed_charge_gradient(mol, model, qvec, p, alpha, beta, gradient)
 end subroutine fixed_charge_gradient
 
 
+!> Check the implicit Hessian, the response of the charges contracted with the
+!> partial derivatives, against central differences of the gradient of the
+!> reference structure with the charges of the displaced structures, and its
+!> symmetry and translational invariance
+subroutine test_implicit_hessian(error, mol, model)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular structure data
+   type(structure_type), intent(inout) :: mol
+
+   !> Electronegativity equilibration model
+   class(mchrg_model_type), intent(in) :: model
+
+   class(mchrg_solver_type), allocatable :: solver
+   class(mchrg_solver_input), allocatable :: solver_input
+   type(mchrg_cache), allocatable :: cache
+   integer :: iat, ic, ndim
+   real(wp), parameter :: trans(3, 1) = 0.0_wp
+   real(wp), parameter :: step = 1.0e-6_wp
+   real(wp) :: xorig
+   real(wp), allocatable :: qr(:), ql(:), gr(:, :), gl(:, :)
+   real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :), hessian(:, :), numhess(:, :)
+
+   allocate(direct_input :: solver_input)
+   select type (solver_input)
+    type is (direct_input)
+      solver_input%verbosity = 0
+   end select
+   call solver_maker(solver, solver_input, error)
+   if (allocated(error)) return
+
+   ndim = 3*mol%nat
+   allocate(qr(mol%nat), ql(mol%nat), gr(3, mol%nat), gl(3, mol%nat))
+   allocate(dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat), hessian(ndim, ndim), &
+      & numhess(ndim, ndim))
+
+   ! The implicit part is the derivative of the gradient at fixed structure
+   ! along the response of the charges
+   allocate(cache)
+   do iat = 1, mol%nat
+      do ic = 1, 3
+         xorig = mol%xyz(ic, iat)
+         mol%xyz(ic, iat) = xorig + step
+         call model%update(mol, cache, trans, grad=.false.)
+         call model%solve(mol, solver, cache, error, qvec=qr, unit=output_unit)
+         if (allocated(error)) return
+         mol%xyz(ic, iat) = xorig - step
+         call model%update(mol, cache, trans, grad=.false.)
+         call model%solve(mol, solver, cache, error, qvec=ql, unit=output_unit)
+         if (allocated(error)) return
+         mol%xyz(ic, iat) = xorig
+
+         call fixed_charge_gradient(mol, model, qr, qr, 0.5_wp, -1.0_wp, gr)
+         call fixed_charge_gradient(mol, model, ql, ql, 0.5_wp, -1.0_wp, gl)
+         numhess(:, 3*(iat - 1) + ic) = reshape(0.5_wp*(gr - gl)/step, [ndim])
+      end do
+   end do
+
+   call model%update(mol, cache, trans, grad=.false., dqdr=.true.)
+   call model%solve(mol, solver, cache, error, dqdr=dqdr, dqdL=dqdL, &
+      & unit=output_unit)
+   if (allocated(error)) return
+
+   hessian(:, :) = 0.0_wp
+   select type (model)
+    type is (eeqbc_model)
+      call model%get_implicit_hessian(mol, cache, hessian, dqdr=dqdr)
+    class default
+      call test_failed(error, "Implicit Hessian requires the EEQBC model")
+      return
+   end select
+
+   if (any(abs(hessian - numhess) > thr2)) then
+      call test_failed(error, "Implicit Hessian does not match")
+      print'(a)', "hessian:"
+      print'(3es21.12)', hessian
+      print'(a)', "numhess:"
+      print'(3es21.12)', numhess
+      print'(a)', "diff:"
+      print'(3es21.12)', hessian - numhess
+      return
+   end if
+
+   if (any(abs(hessian - transpose(hessian)) > thr1)) then
+      call test_failed(error, "Implicit Hessian is not symmetric")
+      print'(a)', "asymmetry:"
+      print'(3es21.12)', hessian - transpose(hessian)
+      return
+   end if
+
+   ! A rigid translation of all atoms leaves the charges unchanged
+   do ic = 1, 3
+      if (any(abs(sum(hessian(ic::3, :), dim=1)) > thr1)) then
+         call test_failed(error, "Implicit Hessian is not translationally invariant")
+         print'(a)', "sum over atoms:"
+         print'(3es21.12)', sum(hessian(ic::3, :), dim=1)
+         return
+      end if
+   end do
+
+end subroutine test_implicit_hessian
+
+
+!> Check the analytical Hessian of the electrostatic energy against central
+!> differences of the analytical gradient, and its symmetry and translational
+!> invariance
+subroutine test_hessian(error, mol, model, cg)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular structure data
+   type(structure_type), intent(inout) :: mol
+
+   !> Electronegativity equilibration model
+   class(mchrg_model_type), intent(in) :: model
+
+   !> Use the conjugate-gradient solver instead of the direct solver
+   logical, intent(in), optional :: cg
+
+   class(mchrg_solver_type), allocatable :: solver
+   class(mchrg_solver_input), allocatable :: solver_input
+   type(mchrg_cache), allocatable :: cache
+   integer :: iat, ic, ndim
+   real(wp), parameter :: step = 1.0e-6_wp
+   real(wp) :: xorig, sr(3, 3), sl(3, 3)
+   real(wp), allocatable :: gr(:, :), gl(:, :), hessian(:, :), numhess(:, :)
+   logical :: use_cg
+
+   allocate(direct_input :: solver_input)
+   select type (solver_input)
+    type is (direct_input)
+      solver_input%verbosity = 0
+   end select
+   call solver_maker(solver, solver_input, error)
+   if (allocated(error)) return
+
+   ndim = 3*mol%nat
+   allocate(gr(3, mol%nat), gl(3, mol%nat), hessian(ndim, ndim), numhess(ndim, ndim))
+
+   do iat = 1, mol%nat
+      do ic = 1, 3
+         xorig = mol%xyz(ic, iat)
+         mol%xyz(ic, iat) = xorig + step
+         call displaced_gradient(mol, model, solver, error, gr, sr)
+         if (allocated(error)) return
+         mol%xyz(ic, iat) = xorig - step
+         call displaced_gradient(mol, model, solver, error, gl, sl)
+         if (allocated(error)) return
+         mol%xyz(ic, iat) = xorig
+         numhess(:, 3*(iat - 1) + ic) = reshape(0.5_wp*(gr - gl)/step, [ndim])
+      end do
+   end do
+
+   ! Analytic Hessian from the CG solver, while the finite-difference
+   ! reference above keeps the direct solver to avoid iterative noise
+   use_cg = .false.
+   if (present(cg)) use_cg = cg
+   if (use_cg) then
+      deallocate(solver, solver_input)
+      allocate(cg_input :: solver_input)
+      select type (solver_input)
+       type is (cg_input)
+         solver_input%cgtol = 1.0e-15_wp
+         solver_input%cgmiter = 1000
+         solver_input%verbosity = 0
+      end select
+      call solver_maker(solver, solver_input, error)
+      if (allocated(error)) return
+   end if
+
+   allocate(cache)
+   select type (model)
+    type is (eeqbc_model)
+      call model%get_hessian(mol, solver, cache, error, hessian)
+      if (allocated(error)) return
+    class default
+      call test_failed(error, "Analytical Hessian requires the EEQBC model")
+      return
+   end select
+
+   if (any(abs(hessian - numhess) > thr2)) then
+      call test_failed(error, "Hessian does not match")
+      print'(a)', "hessian:"
+      print'(3es21.12)', hessian
+      print'(a)', "numhess:"
+      print'(3es21.12)', numhess
+      print'(a)', "diff:"
+      print'(3es21.12)', hessian - numhess
+      return
+   end if
+
+   if (any(abs(hessian - transpose(hessian)) > thr1)) then
+      call test_failed(error, "Hessian is not symmetric")
+      print'(a)', "asymmetry:"
+      print'(3es21.12)', hessian - transpose(hessian)
+      return
+   end if
+
+   ! A rigid translation of all atoms leaves the energy unchanged
+   do ic = 1, 3
+      if (any(abs(sum(hessian(ic::3, :), dim=1)) > thr1)) then
+         call test_failed(error, "Hessian is not translationally invariant")
+         print'(a)', "sum over atoms:"
+         print'(3es21.12)', sum(hessian(ic::3, :), dim=1)
+         return
+      end if
+   end do
+
+end subroutine test_hessian
+
+
 subroutine test_eeq_dadr_mb01(error)
 
    !> Error handling
@@ -2279,6 +2497,88 @@ subroutine test_eeqbc_hexpl_znooh(error)
    call test_explicit_hessian(error, mol, model, alpha=0.5_wp, beta=-1.0_wp)
 
 end subroutine test_eeqbc_hexpl_znooh
+
+
+subroutine test_eeqbc_himpl_mb05(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "MB16-43", "05")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_implicit_hessian(error, mol, model)
+
+end subroutine test_eeqbc_himpl_mb05
+
+
+subroutine test_eeqbc_himpl_znooh(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   integer, parameter :: nat = 4
+   real(wp), parameter :: charge = -1.0_wp
+   integer, parameter :: num(nat) = [30, 8, 8, 1]
+   real(wp), parameter :: xyz(3, nat) = reshape([ &
+   & -0.30631629283878_wp, -1.11507514203552_wp, +0.00000000000000_wp, &
+   & -0.06543072660074_wp, -4.32862093666082_wp, +0.00000000000000_wp, &
+   & -0.64012239724097_wp, +2.34966763895920_wp, +0.00000000000000_wp, &
+   & +1.01186941668051_wp, +3.09402843973713_wp, +0.00000000000000_wp],&
+   & [3, nat])
+
+   call new(mol, num, xyz, charge)
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_implicit_hessian(error, mol, model)
+
+end subroutine test_eeqbc_himpl_znooh
+
+
+subroutine test_eeqbc_hess_mb05(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "MB16-43", "05")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_hessian(error, mol, model)
+
+end subroutine test_eeqbc_hess_mb05
+
+
+subroutine test_eeqbc_hess_cg_znooh(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   integer, parameter :: nat = 4
+   real(wp), parameter :: charge = -1.0_wp
+   integer, parameter :: num(nat) = [30, 8, 8, 1]
+   real(wp), parameter :: xyz(3, nat) = reshape([ &
+   & -0.30631629283878_wp, -1.11507514203552_wp, +0.00000000000000_wp, &
+   & -0.06543072660074_wp, -4.32862093666082_wp, +0.00000000000000_wp, &
+   & -0.64012239724097_wp, +2.34966763895920_wp, +0.00000000000000_wp, &
+   & +1.01186941668051_wp, +3.09402843973713_wp, +0.00000000000000_wp],&
+   & [3, nat])
+
+   call new(mol, num, xyz, charge)
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_hessian(error, mol, model, cg=.true.)
+
+end subroutine test_eeqbc_hess_cg_znooh
 
 
 subroutine test_eeqbc_q_mb01(error)
