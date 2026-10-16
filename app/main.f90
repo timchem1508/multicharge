@@ -23,7 +23,6 @@ program main
    use multicharge, only: mchrg_model_type, mchrg_model, mchrg_cache, new_eeq2019_model, &
    & new_eeqbc2025_model, get_multicharge_version, &
    & write_ascii_model, write_ascii_properties, write_ascii_results
-   use multicharge_model, only: eeqbc_model
    use multicharge_model_type, only: hess_index
    use multicharge_output, only: json_results
    use multicharge_solver, only: new_mchrg_solver, mchrg_solver_type, direct_solver, &
@@ -197,12 +196,8 @@ program main
    else if (analytic_hessian) then
       allocate(hessian(3 * mol%nat, 3 * mol%nat))
       call timer%push("hess")
-      ! The model was checked to be EEQBC above
-      select type(model)
-         type is (eeqbc_model)
-         call model%get_hessian(mol, solver, cache, error, hessian, qvec, energy, &
-         & gradient, sigma, list=list, unit=output_unit, verbosity=verbosity)
-      end select
+      call model%get_hessian(mol, solver, cache, error, hessian, qvec, energy, &
+      & gradient, sigma, list=list, unit=output_unit, verbosity=verbosity)
       call timer%pop
       if (verbosity > 1) then
          write(output_unit, '(a, 1x, a)') "Get analytical Hessian time : ", &

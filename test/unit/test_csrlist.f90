@@ -1608,17 +1608,15 @@ subroutine test_explicit_hessian(error, mol, model, alpha, beta, nlcutoff, pvec)
    select type (model)
    type is (eeqbc_model)
       ! Dense evaluation from the cache of the charges
-      allocate(cache%d2cdr2diag(3, 3, mol%nat))
-      call model%get_d2cmat_0d(mol, cache)
-      call model%get_explicit_hessian(mol, cache, p, refhess, alpha=alpha, &
-         & beta=beta)
+      call model%get_explicit_hessian(mol, cache, p, refhess, error, &
+         & alpha=alpha, beta=beta)
+      if (allocated(error)) return
 
       ! Neighbour list evaluation at the same charges
       call fixed_charge_cache(mol, model, list, qvec, cache)
-      allocate(cache%d2cdr2diag(3, 3, mol%nat))
-      call model%get_d2cmat_0d_list(mol, list, cache)
-      call model%get_explicit_hessian(mol, cache, p, hessian, alpha=alpha, &
-         & beta=beta, list=list)
+      call model%get_explicit_hessian(mol, cache, p, hessian, error, &
+         & alpha=alpha, beta=beta, list=list)
+      if (allocated(error)) return
    class default
       call test_failed(error, "Explicit Hessian requires the EEQBC model")
       return

@@ -195,7 +195,7 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, h
    if (qgrad) then
       ! The compressed derivatives are expanded one charge at a time
       if (sparse) then
-         dqsum = sum(cache%dqdrlist) - sum(cache%uvec) * sum(cache%dqdrscal)
+         dqsum = sum(cache%dqdrlist) - sum(cache%uvec) * sum(cache%dlambdadr)
       else
          dqsum = sum(dqdr)
       end if
@@ -436,7 +436,7 @@ subroutine write_json_dqdr(unit, cache, indent)
    integer :: nat, iat, jat, ic
    real(wp), allocatable :: dqrow(:, :)
 
-   nat = size(cache%dqdrscal, 2)
+   nat = size(cache%dlambdadr, 2)
    allocate(dqrow(3, nat))
    write(unit, '("[")', advance='no')
    do jat = 1, nat

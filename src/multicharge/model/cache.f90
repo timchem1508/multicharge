@@ -126,8 +126,8 @@ module multicharge_model_cache
       real(wp), allocatable :: dqdrlist(:, :)
 
       !> Factors of the charge constraint term of the position derivatives,
-      !> dq_j/dR_i = dqdrlist(:, (j, i)) - dqdrscal(:, i) * uvec(j)
-      real(wp), allocatable :: dqdrscal(:, :)
+      !> dq_j/dR_i = dqdrlist(:, (j, i)) - dlambdadr(:, i) * uvec(j)
+      real(wp), allocatable :: dlambdadr(:, :)
 
       !> Diagonal part of the second derivative of the Maxwell capacitance
       !> matrix w.r.t. positions of (3, 3, mol%nat) size.
