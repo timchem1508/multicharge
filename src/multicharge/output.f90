@@ -15,13 +15,13 @@
 
 !> Formatted output routines for the charge model, properties, and results
 module multicharge_output
-   use mctc_env, only : wp, timer_type, format_time
+   use mctc_env, only : wp, i8, timer_type, format_time
    use mctc_io, only : structure_type
    use mctc_io_convert, only : autoaa
    use mctc_io_constants, only : pi
    use multicharge_model, only : mchrg_model_type
    use multicharge_model_cache, only : mchrg_cache
-   use multicharge_model_type, only : hess_index, get_dqdr_row
+   use multicharge_model_type, only : mchrg_hessian, hess_index, get_dqdr_row
    use multicharge_version, only : get_multicharge_version
    implicit none
    private
@@ -116,7 +116,7 @@ end subroutine write_ascii_properties
 
 !> Write the electrostatic energy, gradient, charge derivatives, and Hessian
 subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, hess, &
-   & press, cache)
+   & press, cache, hessian)
 
    !> Unit for output
    integer, intent(in) :: unit
@@ -149,6 +149,11 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, h
    !> Cache with the derivatives of the partial charges w.r.t. the Cartesian
    !> coordinates in compressed storage, used if dqdr is absent
    type(mchrg_cache), intent(in), optional :: cache
+
+   !> Second derivative of the energy w.r.t. the Cartesian coordinates in
+   !> compressed storage with the factored charge constraint term, used if hess
+   !> is absent
+   type(mchrg_hessian), intent(in), optional :: hessian
 
    integer :: iat, jat, isp, jsp, ic, jc
    real(wp) :: hrow(3), hnorm, dqsum
@@ -266,6 +271,8 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, h
       end do
       write(unit, '(78("-"))')
       write(unit, '(a)')
+   else if (present(hessian)) then
+      call write_ascii_hessian_list(unit, mol, hessian)
    end if
 
    if (present(press)) then
@@ -303,6 +310,248 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, h
    end if
 
 end subroutine write_ascii_results
+
+
+!> Write the Hessian in compressed storage, the blocks on the pattern of its list
+!> including the charge constraint term and the factors of this term, which
+!> give the blocks outside of the pattern. The rows follow the order of the
+!> list. The lines of each row are formatted in parallel, as the format of the
+!> dense Hessian, and the rows are written in order.
+subroutine write_ascii_hessian_list(unit, mol, hessian)
+
+   !> Unit for output
+   integer, intent(in) :: unit
+
+   !> Molecular structure data
+   class(structure_type), intent(in) :: mol
+
+   !> Second derivative of the energy w.r.t. the Cartesian coordinates in
+   !> compressed storage with the factored charge constraint term
+   type(mchrg_hessian), intent(in) :: hessian
+
+   integer :: iat, jat, isp, jsp, ic, pos
+   integer(i8) :: hat
+   real(wp) :: hblk(3, 3), wnorm2, dnorm2, hnorm
+   real(wp) :: hrow(3)
+   character(len=:), allocatable :: buffer
+   character(len=1), parameter :: comp(3) = ["x", "y", "z"]
+   ! Length of a line of the block table
+   integer, parameter :: hlen = 81
+
+   ! Frobenius norm from the blocks on the pattern, the charge constraint term
+   ! of all other blocks is |w|^2 |dlambda|^2 without its blocks on the pattern
+   wnorm2 = sum(hessian%w**2)
+   dnorm2 = sum(hessian%dlambda**2)
+   hnorm = wnorm2 * dnorm2
+   !$omp parallel do default(none) schedule(runtime) reduction(+:hnorm) &
+   !$omp shared(mol, hessian) private(iat, jat, ic, hat, hblk)
+   do iat = 1, mol%nat
+      do hat = hessian%list%inl(iat), hessian%list%inl(iat + 1) - 1
+         jat = hessian%list%nlat(hat)
+         do ic = 1, 3
+            hblk(:, ic) = hessian%hesslist(:, ic, hat) &
+               & + hessian%w(ic, iat) * hessian%dlambda(:, jat)
+         end do
+         hnorm = hnorm + sum(hblk**2) &
+            & - sum(hessian%w(:, iat)**2) * sum(hessian%dlambda(:, jat)**2)
+      end do
+   end do
+
+   write(unit, '(a,":", t25, es20.13, 1x, a)') &
+   & "Hessian matrix norm", sqrt(max(hnorm, 0.0_wp)), "Eh/a0^2"
+   write(unit, '(a, 1x, i0, a, f0.1, a)') "Hessian blocks on the pattern:", &
+   & size(hessian%list%nlat, kind=i8), " (", &
+   & real(size(hessian%list%nlat, kind=i8), wp) / mol%nat, " per atom)"
+   write(unit, '(78("-"))')
+   write(unit, '(a10,1x,a4,3x,a6,1x,a4,3x,a9,1x,*(1x,a12))') &
+   & "#", "Z", "#", "A", "component", "d2E/dxdR", "d2E/dydR", "d2E/dzdR"
+   write(unit, '(78("-"))')
+   !$omp parallel do default(none) ordered schedule(dynamic) &
+   !$omp shared(unit, mol, hessian) &
+   !$omp private(iat, jat, isp, jsp, ic, hat, pos, hrow, buffer)
+   do iat = 1, mol%nat
+      isp = mol%id(iat)
+      allocate(character(len=3 * (hlen + 1) &
+         & * (hessian%list%inl(iat + 1) - hessian%list%inl(iat))) :: buffer)
+      pos = 0
+      do hat = hessian%list%inl(iat), hessian%list%inl(iat + 1) - 1
+         jat = hessian%list%nlat(hat)
+         jsp = mol%id(jat)
+         do ic = 1, 3
+            hrow(:) = hessian%hesslist(:, ic, hat) &
+               & + hessian%w(ic, iat) * hessian%dlambda(:, jat)
+            ! (i10,1x,i3,1x,a2,1x,i6,1x,i3,1x,a2,2x,a4,5x,3(2x,es11.3))
+            buffer(pos+1:pos+hlen+1) = format_int(iat, 10) // " " &
+               & // format_int(mol%num(isp), 3) // " " // mol%sym(isp)(1:2) // " " &
+               & // format_int(jat, 6) // " " // format_int(mol%num(jsp), 3) // " " &
+               & // mol%sym(jsp)(1:2) // "     " // comp(ic) // "     " &
+               & // "  " // format_es(hrow(1)) // "  " // format_es(hrow(2)) &
+               & // "  " // format_es(hrow(3)) // new_line('a')
+            pos = pos + hlen + 1
+         end do
+      end do
+      ! The record ends with the last line of the row
+      !$omp ordered
+      write(unit, '(a)') buffer(:pos-1)
+      !$omp end ordered
+      deallocate(buffer)
+   end do
+   write(unit, '(78("-"))')
+   write(unit, '(a)')
+
+   write(unit, '(a,":")') &
+   & "Charge constraint term, outside of the pattern d2E/dR(#)dR(A) = w(#) dlambda(A)^T"
+   write(unit, '(62("-"))')
+   write(unit, '(a10,1x,a4,3x,a9,1x,*(1x,a12))') "#", "Z", "component", "w", &
+   & "dlambda"
+   write(unit, '(62("-"))')
+   do iat = 1, mol%nat
+      isp = mol%id(iat)
+      do ic = 1, 3
+         write(unit, '(i10,1x,i3,1x,a2,2x,a4,5x,*(2x,es11.3))') &
+         & iat, mol%num(isp), mol%sym(isp), comp(ic), hessian%w(ic, iat), &
+         & hessian%dlambda(ic, iat)
+      end do
+   end do
+   write(unit, '(62("-"))')
+   write(unit, '(a)')
+
+end subroutine write_ascii_hessian_list
+
+
+!> Format a real number as the ES11.3 edit descriptor, without the overhead of
+!> formatted I/O. Values at an exact decimal tie of the last digit may round to
+!> the other side.
+function format_es(val) result(str)
+
+   !> Value to format
+   real(wp), intent(in) :: val
+
+   !> Formatted value
+   character(len=11) :: str
+
+   real(wp) :: aval, mant
+   integer :: expo, digits, eabs
+
+   aval = abs(val)
+   if (.not. (aval <= huge(1.0_wp))) then
+      write(str, '(es11.3)') val
+      return
+   end if
+   if (aval > 0.0_wp) then
+      ! Mantissa in [1, 10) rounded to four digits
+      expo = floor(log10(aval))
+      mant = scale_decimal(aval, expo)
+      if (mant < 1.0_wp) then
+         expo = expo - 1
+         mant = scale_decimal(aval, expo)
+      else if (mant >= 10.0_wp) then
+         expo = expo + 1
+         mant = scale_decimal(aval, expo)
+      end if
+      digits = nint(mant * 1000.0_wp)
+      if (digits >= 10000) then
+         digits = digits / 10
+         expo = expo + 1
+      end if
+   else
+      expo = 0
+      digits = 0
+   end if
+
+   str = "  0.000E+00"
+   if (sign(1.0_wp, val) < 0.0_wp) str(2:2) = "-"
+   str(3:3) = digit(digits / 1000)
+   str(5:5) = digit(mod(digits / 100, 10))
+   str(6:6) = digit(mod(digits / 10, 10))
+   str(7:7) = digit(mod(digits, 10))
+   eabs = abs(expo)
+   if (eabs < 100) then
+      if (expo < 0) str(9:9) = "-"
+      str(10:10) = digit(eabs / 10)
+      str(11:11) = digit(mod(eabs, 10))
+   else
+      ! Three-digit exponents drop the exponent letter
+      str(8:8) = merge("-", "+", expo < 0)
+      str(9:9) = digit(eabs / 100)
+      str(10:10) = digit(mod(eabs / 10, 10))
+      str(11:11) = digit(mod(eabs, 10))
+   end if
+
+end function format_es
+
+
+!> Divide a positive number by a power of ten without overflow of the power
+pure function scale_decimal(aval, expo) result(mant)
+
+   !> Positive number
+   real(wp), intent(in) :: aval
+
+   !> Decimal exponent
+   integer, intent(in) :: expo
+
+   !> Number divided by 10**expo
+   real(wp) :: mant
+
+   if (expo < -300) then
+      mant = (aval * 1.0e30_wp) * 10.0_wp**(-expo - 30)
+   else
+      mant = aval / 10.0_wp**expo
+   end if
+
+end function scale_decimal
+
+
+!> Format an integer as the Iw edit descriptor, asterisks if it does not fit
+pure function format_int(val, width) result(str)
+
+   !> Value to format
+   integer, intent(in) :: val
+
+   !> Field width
+   integer, intent(in) :: width
+
+   !> Formatted value
+   character(len=width) :: str
+
+   integer :: rest, pos
+
+   str = repeat(" ", width)
+   rest = abs(val)
+   pos = width
+   do
+      if (pos < 1) then
+         str = repeat("*", width)
+         return
+      end if
+      str(pos:pos) = digit(mod(rest, 10))
+      rest = rest / 10
+      pos = pos - 1
+      if (rest == 0) exit
+   end do
+   if (val < 0) then
+      if (pos < 1) then
+         str = repeat("*", width)
+         return
+      end if
+      str(pos:pos) = "-"
+   end if
+
+end function format_int
+
+
+!> Character of a decimal digit
+pure function digit(ival) result(chr)
+
+   !> Digit from 0 to 9
+   integer, intent(in) :: ival
+
+   !> Character of the digit
+   character(len=1) :: chr
+
+   chr = achar(iachar("0") + ival)
+
+end function digit
 
 
 !> Write computed properties as a JSON object

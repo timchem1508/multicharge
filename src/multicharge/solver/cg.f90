@@ -48,11 +48,6 @@ module multicharge_solver_cg
       !> derivatives on a neighborlist, relative to its largest diagonal
       !> element, which makes the compressed derivatives sparser
       real(wp), allocatable :: ainvthr
-
-      !> Buffer distance in Bohr of the subsystems for the inverse on the
-      !> neighborlist beyond the rows of the block atoms, at most the cutoff of
-      !> the list is effective
-      real(wp), allocatable :: ainvbuf
    end type cg_input
 
    !> Conjugate-gradient solver with a Jacobi preconditioner
@@ -73,11 +68,6 @@ module multicharge_solver_cg
       !> derivatives on a neighborlist, relative to its largest diagonal
       !> element, which makes the compressed derivatives sparser
       real(wp), allocatable :: ainvthr
-
-      !> Buffer distance in Bohr of the subsystems for the inverse on the
-      !> neighborlist beyond the rows of the block atoms, at most the cutoff of
-      !> the list is effective
-      real(wp), allocatable :: ainvbuf
    contains
       !> Solve the linear system iteratively
       procedure :: solve
@@ -109,9 +99,6 @@ module multicharge_solver_cg
 
    !> Default threshold for skipping elements of the inverse
    real(wp), parameter :: ainvthr_def = 0.0_wp
-
-   !> Default buffer distance around the subsystems of the inverse
-   real(wp), parameter :: ainvbuf_def = 0.0_wp
 
    !> Default number of columns per block of right-hand sides
    integer, parameter :: block_size_def = 16
@@ -158,11 +145,6 @@ subroutine new_cg_solver(self, input)
       self%ainvthr = input%ainvthr
    else
       self%ainvthr = ainvthr_def
-   end if
-   if (allocated(input%ainvbuf)) then
-      self%ainvbuf = input%ainvbuf
-   else
-      self%ainvbuf = ainvbuf_def
    end if
 
 end subroutine new_cg_solver
@@ -794,11 +776,9 @@ end subroutine invert
 !> storage with the block CG solver and keep only the elements on the pattern
 !> of the matrix. The columns are solved in blocks of spatially close atoms,
 !> each from A_SS X_S = I_S on the subsystem S of the atoms in the rows of the
-!> block atoms, extended by the atoms within the buffer distance beyond the
-!> radius of these rows. The inverse decays fast with the distance, without a
-!> buffer the error of the subsystem is of the order of the elements outside
-!> of the pattern, which are dropped. The blocks are independent and solved in
-!> parallel.
+!> block atoms. The inverse decays fast with the distance, the error of the
+!> subsystem is of the order of the elements outside of the pattern, which are
+!> dropped. The blocks are independent and solved in parallel.
 subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    !> Conjugate-gradient solver instance
    class(cg_solver), intent(in) :: self
@@ -812,8 +792,8 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    !> Inverse of the coefficient matrix on the pattern of the list
    real(wp), intent(out) :: ainvlist(:)
 
-   !> Cartesian coordinates for spatially compact blocks and the buffer of the
-   !> subsystems, the blocks follow the atom order if absent
+   !> Cartesian coordinates for spatially compact blocks, the blocks follow the
+   !> atom order if absent
    real(wp), intent(in), optional :: xyz(:, :)
 
    !> Output unit
@@ -834,9 +814,8 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    ! Time of the subsystem selection, the block CG and the storage of the
    ! columns, summed over the blocks
    real(wp) :: tblk(3), sumtime(3)
-   ! Coordinates and buffer distance of the subsystems
+   ! Coordinates for the spatial order of the blocks
    real(wp), allocatable :: pos(:, :)
-   real(wp) :: buffer
    ! Solver for the blocks without output
    type(cg_solver) :: blksolver
    integer :: unit
@@ -869,12 +848,6 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
          return
       end if
    end if
-   buffer = self%ainvbuf
-   if (buffer > 0.0_wp .and. .not. present(xyz)) then
-      call fatal_error(error, &
-         & "Buffer of the inversion subsystems requires coordinates.")
-      return
-   end if
    if (ndim <= 0) return
 
    if (present(new_unit)) then
@@ -891,8 +864,6 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    if (present(xyz)) then
       pos = xyz(:, :ndim)
       call get_spatial_order(pos, order, block_size_def)
-   else
-      allocate(pos(3, 0))
    end if
    nblk = (ndim + block_size_def - 1) / block_size_def
 
@@ -906,8 +877,7 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    maxsub = 0
    maxiter = 0
    !$omp parallel default(none) &
-   !$omp shared(ndim, nblk, order, alist, list, ainvlist, pos, buffer, &
-   !$omp& blksolver, error, failed) &
+   !$omp shared(ndim, nblk, order, alist, list, ainvlist, blksolver, error, failed) &
    !$omp private(iblk, loc, nsub, niter, skip, tblk) &
    !$omp reduction(+:sumsub, sumiter, sumtime) reduction(max:maxsub, maxiter)
    allocate(loc(ndim), source=0)
@@ -918,7 +888,7 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
       if (skip) cycle
       call invert_block(blksolver, alist, list, &
          & order((iblk - 1) * block_size_def + 1:min(iblk * block_size_def, ndim)), &
-         & pos, buffer, loc, ainvlist, nsub, niter, tblk, error, failed)
+         & loc, ainvlist, nsub, niter, tblk, error, failed)
       sumsub = sumsub + nsub
       sumtime(:) = sumtime + tblk
       sumiter = sumiter + niter
@@ -946,12 +916,11 @@ end subroutine invert_list
 
 
 !> Solve a block of columns of the inverse on its subsystem of the atoms in
-!> the rows of the block atoms and the neighbors of these atoms within the
-!> buffer distance beyond the row radius of a block atom. The subsystem matrix
-!> is applied on the rows of the list, skipping the elements outside of the
-!> subsystem. The columns are stored in the rows of the block atoms.
-subroutine invert_block(solver, alist, list, cols, xyz, buffer, loc, ainvlist, &
-   & nsub, niter, times, error, failed)
+!> the rows of the block atoms. The subsystem matrix is applied on the rows of
+!> the list, skipping the elements outside of the subsystem. The columns are
+!> stored in the rows of the block atoms.
+subroutine invert_block(solver, alist, list, cols, loc, ainvlist, nsub, niter, &
+   & times, error, failed)
    !> Conjugate-gradient solver for the block
    type(cg_solver), intent(in) :: solver
 
@@ -963,12 +932,6 @@ subroutine invert_block(solver, alist, list, cols, xyz, buffer, loc, ainvlist, &
 
    !> Atoms of the block columns
    integer, intent(in) :: cols(:)
-
-   !> Cartesian coordinates, only used with a buffer
-   real(wp), intent(in) :: xyz(:, :)
-
-   !> Buffer distance beyond the radius of the rows of the block atoms
-   real(wp), intent(in) :: buffer
 
    !> Local index of the atoms in the subsystem, zero on entry and exit
    integer, intent(inout) :: loc(:)
@@ -992,14 +955,10 @@ subroutine invert_block(solver, alist, list, cols, xyz, buffer, loc, ainvlist, &
    !> Whether any block failed, shared by all blocks
    logical, intent(inout) :: failed
 
-   integer :: ncol, ncore, nrej, isub, iat, jat, ivec
+   integer :: ncol, isub, iat, jat, ivec
    integer(i8) :: kat, tick(4), rate
-   real(wp) :: dist2
-   logical :: inbuf
-   ! Atoms of the subsystem and neighbors rejected for the buffer
-   integer, allocatable :: sidx(:), rej(:)
-   ! Squared radius of the rows of the block atoms extended by the buffer
-   real(wp), allocatable :: rad2(:)
+   ! Atoms of the subsystem
+   integer, allocatable :: sidx(:)
    ! Right-hand sides and solutions of the subsystem
    real(wp), allocatable :: bsub(:, :), xsub(:, :)
    type(error_type), allocatable :: blkerror
@@ -1021,46 +980,6 @@ subroutine invert_block(solver, alist, list, cols, xyz, buffer, loc, ainvlist, &
       end do
    end do
 
-   ! Neighbors of these atoms within the buffer distance beyond the radius of
-   ! the row of any block atom, rejected neighbors are marked as visited
-   if (buffer > 0.0_wp) then
-      allocate(rad2(ncol), rej(size(loc)))
-      do ivec = 1, ncol
-         iat = cols(ivec)
-         dist2 = 0.0_wp
-         do kat = list%inl(iat), list%inl(iat + 1) - 1
-            dist2 = max(dist2, sum((xyz(:, list%nlat(kat)) - xyz(:, iat))**2))
-         end do
-         rad2(ivec) = (sqrt(dist2) + buffer)**2
-      end do
-      ncore = nsub
-      nrej = 0
-      do isub = 1, ncore
-         iat = sidx(isub)
-         do kat = list%inl(iat), list%inl(iat + 1) - 1
-            jat = list%nlat(kat)
-            if (loc(jat) /= 0) cycle
-            inbuf = .false.
-            do ivec = 1, ncol
-               dist2 = sum((xyz(:, jat) - xyz(:, cols(ivec)))**2)
-               if (dist2 <= rad2(ivec)) then
-                  inbuf = .true.
-                  exit
-               end if
-            end do
-            if (inbuf) then
-               nsub = nsub + 1
-               loc(jat) = nsub
-               sidx(nsub) = jat
-            else
-               nrej = nrej + 1
-               loc(jat) = -1
-               rej(nrej) = jat
-            end if
-         end do
-      end do
-      loc(rej(:nrej)) = 0
-   end if
    call system_clock(tick(2))
 
    ! Unit vectors of the block columns, initial guess from the diagonal

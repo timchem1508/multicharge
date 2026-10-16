@@ -30,7 +30,7 @@ module multicharge_model_type
    use mctc_io_math, only : matinv_3x3
    use mctc_cutoff, only : get_lattice_points
    use mctc_ncoord, only : ncoord_type
-   use mctc_csrlist, only : csr_list, spgemv_csr, spsymv_csr, spmm_csr, new_csr_list
+   use mctc_csrlist, only : csr_list, spgemv_csr, spsymv_csr, new_csr_list
    use multicharge_blas, only : gemv, symv, gemm
    use multicharge_model_cache, only : mchrg_cache
    use multicharge_solver_type, only : mchrg_solver_type
@@ -39,7 +39,35 @@ module multicharge_model_type
    implicit none
    private
 
-   public :: mchrg_model_type, get_dir_trans, get_rec_trans, hess_index, get_dqdr_row
+   public :: mchrg_model_type, mchrg_hessian, get_dir_trans, get_rec_trans, &
+      & hess_index, get_dqdr_row
+
+
+   !> Molecular nuclear Hessian in compressed-row storage on a complete
+   !> neighborlist of its own. The charge constraint couples all atoms by the
+   !> dense rank-1 term w dlambda^T, which is kept in its factors, the block of
+   !> the atoms x and y is hesslist(:, :, (x, y)) + w(:, x) dlambda(:, y)^T.
+   type :: mchrg_hessian
+
+      !> Complete neighborlist of the atom pairs with a stored block, the first
+      !> entry of each row is the atom itself
+      type(csr_list) :: list
+
+      !> Blocks without the charge constraint term on the pattern of the list,
+      !> the entry of atom y in the row of atom x holds d2E/dR_y,jc dR_x,ic in
+      !> (jc, ic)
+      real(wp), allocatable :: hesslist(:, :, :)
+
+      !> Factors of the charge constraint term, the position derivatives of the
+      !> Lagrange multiplier dlambdadr of the cache
+      real(wp), allocatable :: dlambda(:, :)
+
+      !> Contraction of the partial derivatives dX/dR - dA/dR*q with the
+      !> constraint response u, w = sum(u) * dlambda
+      real(wp), allocatable :: w(:, :)
+
+   end type mchrg_hessian
+
 
    !> Abstract multicharge model type
    type, abstract :: mchrg_model_type
@@ -82,11 +110,26 @@ module multicharge_model_type
       procedure :: get_external_gradient
 
       !> Calculate the analytical Hessian of the electrostatic energy (molecular)
-      procedure :: get_hessian
+      procedure :: get_hessian_dense
+
+      !> Calculate the analytical Hessian of the electrostatic energy on a
+      !> complete neighborlist in compressed storage (molecular)
+      procedure :: get_hessian_list
+
+      !> Calculate the analytical Hessian of the electrostatic energy
+      generic :: get_hessian => get_hessian_dense, get_hessian_list
 
       !> Calculate the implicit Hessian -(dX/dR - dA/dR*q)^T dq/dR from the
       !> response of the charges (molecular)
-      procedure :: get_implicit_hessian
+      procedure :: get_implicit_hessian_dense
+
+      !> Calculate the implicit Hessian from the compressed charge derivatives
+      !> on a complete neighborlist (molecular)
+      procedure :: get_implicit_hessian_list
+
+      !> Calculate the implicit Hessian from the response of the charges
+      generic :: get_implicit_hessian => get_implicit_hessian_dense, &
+         & get_implicit_hessian_list
 
       !> Calculate local charges from electronegativity weighted CN
       procedure :: local_charge
@@ -121,7 +164,15 @@ module multicharge_model_type
 
       !> Calculate the explicit Hessian alpha * p^T d2A/dR2 q + beta * p^T d2X/dR2
       !> at fixed p and q (molecular)
-      procedure(get_explicit_hessian), deferred :: get_explicit_hessian
+      procedure(get_explicit_hessian_dense), deferred :: get_explicit_hessian_dense
+
+      !> Calculate the explicit Hessian at fixed p and q on a complete
+      !> neighborlist in compressed storage (molecular)
+      procedure(get_explicit_hessian_list), deferred :: get_explicit_hessian_list
+
+      !> Calculate the explicit Hessian at fixed p and q
+      generic :: get_explicit_hessian => get_explicit_hessian_dense, &
+         & get_explicit_hessian_list
 
    end type mchrg_model_type
 
@@ -282,10 +333,9 @@ module multicharge_model_type
 
       !> Explicit part of the molecular nuclear Hessian at fixed p and charges q,
       !> alpha * p^T d2A/dR2 q + beta * p^T d2X/dR2, added to the Hessian
-      subroutine get_explicit_hessian(self, mol, cache, p, hessian, error, &
-         & alpha, beta, list)
-         import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, &
-            & error_type, wp
+      subroutine get_explicit_hessian_dense(self, mol, cache, p, hessian, error, &
+         & alpha, beta)
+         import :: mchrg_model_type, structure_type, mchrg_cache, error_type, wp
 
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
@@ -311,10 +361,45 @@ module multicharge_model_type
 
          !> Optional electronegativity prefactor
          real(wp), intent(in), optional :: beta
+      end subroutine get_explicit_hessian_dense
+
+      !> Explicit part of the molecular nuclear Hessian at fixed p and charges q
+      !> on a complete neighborlist, added to the blocks of the compressed
+      !> Hessian on the pattern of its own list
+      subroutine get_explicit_hessian_list(self, mol, cache, p, hessian, error, &
+         & list, alpha, beta)
+         import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, &
+            & mchrg_hessian, error_type, wp
+
+         !> Multicharge model type
+         class(mchrg_model_type), intent(in) :: self
+
+         !> Structure type
+         type(structure_type), intent(in) :: mol
+
+         !> Multicharge cache with the position derivatives of the CN and the
+         !> local charges on the neighborlist from the update for the Hessian
+         type(mchrg_cache), intent(inout) :: cache
+
+         !> Charge-like contraction vector
+         real(wp), intent(in) :: p(:)
+
+         !> Molecular nuclear Hessian in compressed storage with its list and
+         !> allocated blocks
+         type(mchrg_hessian), intent(inout) :: hessian
+
+         !> Error handling
+         type(error_type), allocatable, intent(out) :: error
 
          !> Multicharge neighborlist type (complete)
-         type(csr_list), intent(in), optional :: list
-      end subroutine get_explicit_hessian
+         type(csr_list), intent(in) :: list
+
+         !> Optional Coulomb matrix prefactor
+         real(wp), intent(in), optional :: alpha
+
+         !> Optional electronegativity prefactor
+         real(wp), intent(in), optional :: beta
+      end subroutine get_explicit_hessian_list
 
    end interface
 
@@ -753,8 +838,10 @@ end subroutine get_q_derivs
 !> Charge derivatives from the inverse S = J^-1 on the pattern of the complete
 !> neighborlist. The position derivatives dq_j/dR_i = (S B)_ji - u_j w_i / sum(u)
 !> with B = dB/dR - dA/dR*q and w = B^T u are kept in compressed-row storage:
-!> the sparse product S B in cache%dqdrlist on the pattern cache%dqdrpat and
-!> the factors w / sum(u) of the charge constraint term in cache%dlambdadr.
+!> the sparse product S B in cache%dqdrlist on the pattern cache%dqdrpat, which
+!> is the pattern of the list, and the factors w / sum(u) of the charge
+!> constraint term in cache%dlambdadr. The elements of S B outside of the
+!> pattern are of the order of the inverse at the cutoff and are dropped.
 subroutine get_q_derivs_list(mol, solver, cache, list, dqdL, error, unit)
 
    !> Molecular structure data
@@ -779,37 +866,48 @@ subroutine get_q_derivs_list(mol, solver, cache, list, dqdL, error, unit)
    !> Output unit
    integer, intent(in), optional :: unit
 
-   integer :: iat, jat, ic, info
-   integer(i8) :: kat, lat, nkeep, nnzq
-   real(wp) :: thr, uvecsum, scale
+   integer :: iat, jat, kkat
+   integer(i8) :: kat, lat, qat
+   real(wp) :: uvecsum, scale, sjk
    real(wp) :: wlat(3, 3)
-   ! Placeholders for the product values not referenced by the pattern stage
-   integer :: jdum(0)
-   real(wp) :: cdum(0)
+   integer(i8), allocatable :: pos(:)
 
-   ! Sparse product S B, B holds dB_k/dR_i in row k, the pattern is formed once
-   ! and the values for each Cartesian component
-   if (allocated(cache%dqdrpat%inl)) deallocate(cache%dqdrpat%inl)
-   if (allocated(cache%dqdrpat%nlat)) deallocate(cache%dqdrpat%nlat)
-   cache%dqdrpat%complete = .true.
-   allocate(cache%dqdrpat%inl(mol%nat + 1))
-   call spmm_csr("N", 1, 0, mol%nat, mol%nat, mol%nat, cache%ainvlist, list%nlat, list%inl, &
-      & cache%dabdrlist(1, :), list%nlat, list%inl, cdum, jdum, &
-      & cache%dqdrpat%inl, 0_i8, info)
-   nnzq = cache%dqdrpat%inl(mol%nat + 1) - 1
-   allocate(cache%dqdrpat%nlat(nnzq), cache%dqdrlist(3, nnzq))
-   do ic = 1, 3
-      call spmm_csr("N", 2, 0, mol%nat, mol%nat, mol%nat, cache%ainvlist, list%nlat, list%inl, &
-         & cache%dabdrlist(ic, :), list%nlat, list%inl, cache%dqdrlist(ic, :), &
-         & cache%dqdrpat%nlat, cache%dqdrpat%inl, nnzq, info)
-      if (info /= 0) then
-         call fatal_error(error, "Sparse product of the charge derivatives failed")
-         return
-      end if
+   ! Sparse product S B on the pattern of the list, B holds dB_k/dR_i in row k.
+   ! Each iteration only updates row jat, pos holds the position of each atom
+   ! in this row.
+   cache%dqdrpat = list
+   if (allocated(cache%dqdrlist)) deallocate(cache%dqdrlist)
+   allocate(cache%dqdrlist(3, size(list%nlat, kind=i8)), source=0.0_wp)
+   !$omp parallel default(none) &
+   !$omp shared(mol, cache, list) &
+   !$omp private(iat, jat, kkat, kat, lat, qat, sjk, pos)
+   allocate(pos(mol%nat), source=0_i8)
+   !$omp do schedule(runtime)
+   do jat = 1, mol%nat
+      do kat = list%inl(jat), list%inl(jat + 1) - 1
+         pos(list%nlat(kat)) = kat
+      end do
+      do kat = list%inl(jat), list%inl(jat + 1) - 1
+         kkat = list%nlat(kat)
+         sjk = cache%ainvlist(kat)
+         do lat = list%inl(kkat), list%inl(kkat + 1) - 1
+            qat = pos(list%nlat(lat))
+            if (qat == 0) cycle
+            cache%dqdrlist(:, qat) = cache%dqdrlist(:, qat) &
+               & + sjk * cache%dabdrlist(:, lat)
+         end do
+      end do
+      do kat = list%inl(jat), list%inl(jat + 1) - 1
+         pos(list%nlat(kat)) = 0
+      end do
    end do
+   !$omp end do
+   deallocate(pos)
+   !$omp end parallel
 
    ! Contractions with the constraint response, w = B^T u
    uvecsum = sum(cache%uvec)
+   if (allocated(cache%dlambdadr)) deallocate(cache%dlambdadr)
    allocate(cache%dlambdadr(3, mol%nat), source=0.0_wp)
    wlat(:, :) = 0.0_wp
    do iat = 1, mol%nat
@@ -992,12 +1090,10 @@ end subroutine get_external_gradient
 
 !> Compute the molecular nuclear Hessian of the electrostatic energy, the
 !> explicit part at fixed charges and the implicit part from the response of
-!> the charges. With a complete neighborlist the charge derivatives are kept
-!> in compressed storage, which requires a solver with neighborlist support.
-!> The charges, energy, gradient and virial of the same solve are optional.
-!> The dense rank-1 charge constraint term can be returned as its factor.
-subroutine get_hessian(self, mol, solver, cache, error, hessian, qvec, energy, &
-   & gradient, sigma, list, unit, verbosity, hvec)
+!> the charges. The charges, energy, gradient and virial of the same solve are
+!> optional.
+subroutine get_hessian_dense(self, mol, solver, cache, error, hessian, qvec, &
+   & energy, gradient, sigma, unit, verbosity)
 
    !> Electronegativity-equilibration model
    class(mchrg_model_type), intent(in) :: self
@@ -1029,19 +1125,11 @@ subroutine get_hessian(self, mol, solver, cache, error, hessian, qvec, energy, &
    !> Optional virial
    real(wp), intent(inout), contiguous, optional :: sigma(:, :)
 
-   !> Multicharge neighborlist type (complete)
-   type(csr_list), intent(in), optional :: list
-
    !> Output unit
    integer, intent(in), optional :: unit
 
    !> Verbosity level
    integer, intent(in), optional :: verbosity
-
-   !> Optional factor of the charge constraint term, which is then not added,
-   !> the Hessian is hessian + vec(hvec) vec(hvec)^T. Without a neighborlist
-   !> the term is part of the Hessian and the factor is zero.
-   real(wp), intent(out), optional :: hvec(:, :)
 
    real(wp), parameter :: trans(3, 1) = 0.0_wp
    real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
@@ -1052,35 +1140,136 @@ subroutine get_hessian(self, mol, solver, cache, error, hessian, qvec, energy, &
       return
    end if
 
-   ! Charges and their derivatives, dqdr stays unallocated with a neighborlist
-   call self%update(mol, cache, trans, grad=.false., list=list, hess=.true.)
-   allocate(dqdL(3, 3, mol%nat))
-   if (.not. present(list)) allocate(dqdr(3, mol%nat, mol%nat))
+   ! Charges and their derivatives
+   call self%update(mol, cache, trans, grad=.false., hess=.true.)
+   allocate(dqdL(3, 3, mol%nat), dqdr(3, mol%nat, mol%nat))
    call self%solve(mol, solver, cache, error, energy=energy, gradient=gradient, &
-      & sigma=sigma, qvec=qvec, dqdr=dqdr, dqdL=dqdL, list=list, &
-      & verbosity=verbosity, unit=unit)
+      & sigma=sigma, qvec=qvec, dqdr=dqdr, dqdL=dqdL, verbosity=verbosity, &
+      & unit=unit)
    if (allocated(error)) return
 
    ! Second derivatives of 0.5 * q^T A q - q^T X at fixed charges
    hessian(:, :) = 0.0_wp
    call self%get_explicit_hessian(mol, cache, cache%vrhs(:mol%nat), hessian, &
-      & error, alpha=0.5_wp, beta=-1.0_wp, list=list)
+      & error, alpha=0.5_wp, beta=-1.0_wp)
    if (allocated(error)) return
-   call self%get_implicit_hessian(mol, cache, hessian, dqdr=dqdr, list=list, &
-      & hvec=hvec)
+   call self%get_implicit_hessian(mol, cache, hessian, dqdr=dqdr)
 
-end subroutine get_hessian
+end subroutine get_hessian_dense
+
+
+!> Compute the molecular nuclear Hessian of the electrostatic energy on a
+!> complete neighborlist, which requires a solver with neighborlist support.
+!> The Hessian is kept in compressed storage on the pattern of its own list,
+!> which is a copy of the neighborlist unless it is set up on entry, and the
+!> dense charge constraint term in its factors. The charges, energy, gradient
+!> and virial of the same solve are optional.
+subroutine get_hessian_list(self, mol, solver, cache, error, hessian, list, qvec, &
+   & energy, gradient, sigma, unit, verbosity)
+
+   !> Electronegativity-equilibration model
+   class(mchrg_model_type), intent(in) :: self
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Solver instance
+   class(mchrg_solver_type), intent(in) :: solver
+
+   !> Cache handling
+   type(mchrg_cache), intent(inout) :: cache
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular nuclear Hessian in compressed storage, the pattern of an
+   !> allocated list is kept
+   type(mchrg_hessian), intent(inout) :: hessian
+
+   !> Multicharge neighborlist type (complete)
+   type(csr_list), intent(in) :: list
+
+   !> Optional atomic partial charges
+   real(wp), intent(out), contiguous, optional :: qvec(:)
+
+   !> Optional electrostatic energy
+   real(wp), intent(inout), contiguous, optional :: energy(:)
+
+   !> Optional energy gradient
+   real(wp), intent(inout), contiguous, optional :: gradient(:, :)
+
+   !> Optional virial
+   real(wp), intent(inout), contiguous, optional :: sigma(:, :)
+
+   !> Output unit
+   integer, intent(in), optional :: unit
+
+   !> Verbosity level
+   integer, intent(in), optional :: verbosity
+
+   real(wp), parameter :: trans(3, 1) = 0.0_wp
+   real(wp), allocatable :: dqdL(:, :, :)
+   type(timer_type) :: timer
+   integer :: print_unit
+
+   print_unit = output_unit
+   if (present(unit)) print_unit = unit
+
+   if (any(mol%periodic)) then
+      call fatal_error(error, &
+         & "Analytical Hessian is not available for periodic systems")
+      return
+   end if
+   if (.not. list%complete) then
+      call fatal_error(error, "Analytical Hessian requires a complete neighborlist")
+      return
+   end if
+
+   ! Charges and their derivatives in compressed storage
+   call self%update(mol, cache, trans, grad=.false., list=list, hess=.true.)
+   allocate(dqdL(3, 3, mol%nat))
+   call self%solve(mol, solver, cache, error, energy=energy, gradient=gradient, &
+      & sigma=sigma, qvec=qvec, dqdL=dqdL, list=list, verbosity=verbosity, &
+      & unit=unit)
+   if (allocated(error)) return
+
+   if (.not. allocated(hessian%list%inl)) hessian%list = list
+   if (.not. hessian%list%complete) then
+      call fatal_error(error, "The list of the Hessian has to be complete")
+      return
+   end if
+   if (allocated(hessian%hesslist)) deallocate(hessian%hesslist)
+   allocate(hessian%hesslist(3, 3, size(hessian%list%nlat, kind=i8)), &
+      & source=0.0_wp)
+
+   ! Second derivatives of 0.5 * q^T A q - q^T X at fixed charges
+   call timer%push("explicit")
+   call self%get_explicit_hessian(mol, cache, cache%vrhs(:mol%nat), hessian, &
+      & error, list, alpha=0.5_wp, beta=-1.0_wp)
+   call timer%pop
+   if (allocated(error)) return
+   call timer%push("implicit")
+   call self%get_implicit_hessian(mol, cache, hessian, list)
+   call timer%pop
+
+   if (present(verbosity)) then
+      if (verbosity > 1) then
+         write(print_unit, '(a, 1x, a)') "Explicit Hessian time : ", &
+            & format_time(timer%get("explicit"))
+         write(print_unit, '(a, 1x, a)') "Implicit Hessian time : ", &
+            & format_time(timer%get("implicit"))
+         write(print_unit, '(a)') ''
+      end if
+   end if
+
+end subroutine get_hessian_list
 
 
 !> Compute the implicit part of the molecular nuclear Hessian of the
 !> electrostatic energy from the response of the charges,
 !> -(dX/dR - dA/dR*q)^T dq/dR. The cache has to hold the partial derivatives
-!> dX/dR - dA/dR*q of the charge derivatives. Without a neighborlist the dense
-!> charge derivatives are required, with a complete neighborlist the
-!> compressed charge derivatives of the cache are used. The charge constraint
-!> gives the dense rank-1 term sum(u) * vec(dlambdadr) vec(dlambdadr)^T, which
-!> can be returned as its factor instead of being added to the Hessian.
-subroutine get_implicit_hessian(self, mol, cache, hessian, dqdr, list, hvec)
+!> dX/dR - dA/dR*q of the dense charge derivatives.
+subroutine get_implicit_hessian_dense(self, mol, cache, hessian, dqdr)
 
    !> Electronegativity-equilibration model
    class(mchrg_model_type), intent(in) :: self
@@ -1095,30 +1284,45 @@ subroutine get_implicit_hessian(self, mol, cache, hessian, dqdr, list, hvec)
    real(wp), intent(inout) :: hessian(:, :)
 
    !> Derivatives of the charges w.r.t. positions, dqdr(:, x, b) = dq_b/dR_x
-   real(wp), intent(in), optional :: dqdr(:, :, :)
+   real(wp), intent(in) :: dqdr(:, :, :)
+
+   call gemm(reshape(cache%dabdr(:, :, :mol%nat), [3 * mol%nat, mol%nat]), &
+      & reshape(dqdr, [3 * mol%nat, mol%nat]), hessian, transb='t', &
+      & alpha=-1.0_wp, beta=1.0_wp)
+
+end subroutine get_implicit_hessian_dense
+
+
+!> Compute the implicit part of the molecular nuclear Hessian of the
+!> electrostatic energy from the compressed charge derivatives of the cache on
+!> a complete neighborlist. The product with the charge derivatives without the
+!> constraint term is added to the blocks on the pattern of the list of the
+!> Hessian. The charge constraint gives the dense rank-1 term
+!> sum(u) * vec(dlambdadr) vec(dlambdadr)^T, which is kept in its factors.
+subroutine get_implicit_hessian_list(self, mol, cache, hessian, list)
+
+   !> Electronegativity-equilibration model
+   class(mchrg_model_type), intent(in) :: self
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Cache handling
+   type(mchrg_cache), intent(in) :: cache
+
+   !> Molecular nuclear Hessian in compressed storage with its list and
+   !> allocated blocks
+   type(mchrg_hessian), intent(inout) :: hessian
 
    !> Multicharge neighborlist type (complete)
-   type(csr_list), intent(in), optional :: list
+   type(csr_list), intent(in) :: list
 
-   !> Optional factor of the charge constraint term, which is then not added,
-   !> the Hessian is hessian + vec(hvec) vec(hvec)^T. Without a neighborlist
-   !> the term is part of the Hessian and the factor is zero.
-   real(wp), intent(out), optional :: hvec(:, :)
-
-   integer :: xat, yat, bat, ic, ii, jj
-   integer(i8) :: kat, lat
+   integer :: xat, bat, ic
+   integer(i8) :: kat, lat, hat
    real(wp) :: dx(3), uvecsum
    integer, allocatable :: jt(:)
-   integer(i8), allocatable :: pos(:)
+   integer(i8), allocatable :: pos(:), hpos(:)
    real(wp), allocatable :: dt(:, :)
-
-   if (.not. present(list)) then
-      call gemm(reshape(cache%dabdr(:, :, :mol%nat), [3 * mol%nat, mol%nat]), &
-         & reshape(dqdr, [3 * mol%nat, mol%nat]), hessian, transb='t', &
-         & alpha=-1.0_wp, beta=1.0_wp)
-      if (present(hvec)) hvec(:, :) = 0.0_wp
-      return
-   end if
 
    ! Transpose of the partial derivatives, row x holds the derivatives of the
    ! components b w.r.t. atom x. The pattern of the complete neighborlist is
@@ -1135,51 +1339,44 @@ subroutine get_implicit_hessian(self, mol, cache, hessian, dqdr, list, hvec)
    end do
 
    ! The charge derivatives are dq_b/dR_y = dqdrlist(:, (b, y))
-   ! - dlambdadr(:, y) * uvec(b). The Hessian is symmetric, each iteration
-   ! stores the rows of atom xat in the columns of atom xat.
-   !$omp parallel do default(none) schedule(runtime) &
+   ! - dlambdadr(:, y) * uvec(b). Each iteration only updates the row of atom
+   ! xat of the Hessian, hpos holds the position of each atom in this row.
+   !$omp parallel default(none) &
    !$omp shared(mol, list, cache, hessian, dt, jt) &
-   !$omp private(xat, bat, ic, ii, jj, kat, lat, dx)
+   !$omp private(xat, bat, ic, kat, lat, hat, dx, hpos)
+   allocate(hpos(mol%nat), source=0_i8)
+   !$omp do schedule(runtime)
    do xat = 1, mol%nat
-      ii = 3 * (xat - 1)
+      do hat = hessian%list%inl(xat), hessian%list%inl(xat + 1) - 1
+         hpos(hessian%list%nlat(hat)) = hat
+      end do
       do lat = list%inl(xat), list%inl(xat + 1) - 1
          bat = jt(lat)
          dx = dt(:, lat)
          do kat = cache%dqdrpat%inl(bat), cache%dqdrpat%inl(bat + 1) - 1
-            jj = 3 * (cache%dqdrpat%nlat(kat) - 1)
+            hat = hpos(cache%dqdrpat%nlat(kat))
+            if (hat == 0) cycle
             do ic = 1, 3
-               hessian(jj+1:jj+3, ii+ic) = hessian(jj+1:jj+3, ii+ic) &
+               hessian%hesslist(:, ic, hat) = hessian%hesslist(:, ic, hat) &
                   & - dx(ic) * cache%dqdrlist(:, kat)
             end do
          end do
       end do
+      do hat = hessian%list%inl(xat), hessian%list%inl(xat + 1) - 1
+         hpos(hessian%list%nlat(hat)) = 0
+      end do
    end do
-   !$omp end parallel do
+   !$omp end do
+   deallocate(hpos)
+   !$omp end parallel
 
    ! Charge constraint term, sum_b (dX_b/dR_x - (dA/dR_x*q)_b) * uvec(b) is
    ! sum(u) * dlambdadr(:, x), where sum(u) = 1^T A^-1 1 is positive
    uvecsum = sum(cache%uvec)
-   if (present(hvec)) then
-      hvec(:, :) = sqrt(uvecsum) * cache%dlambdadr
-      return
-   end if
+   hessian%dlambda = cache%dlambdadr
+   hessian%w = uvecsum * cache%dlambdadr
 
-   !$omp parallel do default(none) schedule(runtime) &
-   !$omp shared(mol, cache, hessian, uvecsum) &
-   !$omp private(xat, yat, ic, ii, jj)
-   do xat = 1, mol%nat
-      ii = 3 * (xat - 1)
-      do yat = 1, mol%nat
-         jj = 3 * (yat - 1)
-         do ic = 1, 3
-            hessian(jj+1:jj+3, ii+ic) = hessian(jj+1:jj+3, ii+ic) &
-               & + uvecsum * cache%dlambdadr(ic, xat) * cache%dlambdadr(:, yat)
-         end do
-      end do
-   end do
-   !$omp end parallel do
-
-end subroutine get_implicit_hessian
+end subroutine get_implicit_hessian_list
 
 
 !> Semi-numerical Hessian and pressure tensor from central differences of

@@ -23,7 +23,7 @@ module test_csrlist
    use mctc_csrlist, only : csr_list, new_csr_list
    use mstore, only : get_structure
    use multicharge_blas, only : gemv
-   use multicharge_model_type, only : mchrg_model_type, get_dqdr_row
+   use multicharge_model_type, only : mchrg_model_type, mchrg_hessian, get_dqdr_row
    use multicharge_model_eeqbc, only : eeqbc_model
    use multicharge_param, only : new_eeq2019_model, new_eeqbc2025_model
    use multicharge_model_cache, only : mchrg_cache
@@ -49,6 +49,9 @@ module test_csrlist
 
    !> neighborlist cutoff used by shared test helpers
    real(wp), parameter :: cutoff = 29.0_wp
+
+   !> Cutoff of a Hessian list holding all pairs of the test structures
+   real(wp), parameter :: allpairs = 200.0_wp
 
 
 contains
@@ -98,7 +101,8 @@ subroutine collect_csrlist(testsuite)
    & new_unittest("implicit-hessian-mb05", test_himpl_mb05), &
    & new_unittest("implicit-hessian-sparse-upu23", test_himpl_sparse_upu23), &
    & new_unittest("hessian-mb05", test_hess_mb05), &
-   & new_unittest("hessian-znooh", test_hess_znooh) &
+   & new_unittest("hessian-znooh", test_hess_znooh), &
+   & new_unittest("hessian-pattern-upu23", test_hess_pattern_upu23) &
    & ]
 
 end subroutine collect_csrlist
@@ -1566,6 +1570,7 @@ subroutine test_explicit_hessian(error, mol, model, alpha, beta, nlcutoff, pvec)
    class(mchrg_solver_input), allocatable :: solver_input
    type(mchrg_cache), allocatable :: cache
    type(csr_list), allocatable :: list
+   type(mchrg_hessian), allocatable :: sphess
    integer :: iat, ic, ndim
    real(wp), parameter :: trans(3, 1) = 0.0_wp
    real(wp), parameter :: step = 1.0e-4_wp
@@ -1612,11 +1617,16 @@ subroutine test_explicit_hessian(error, mol, model, alpha, beta, nlcutoff, pvec)
          & alpha=alpha, beta=beta)
       if (allocated(error)) return
 
-      ! Neighbour list evaluation at the same charges
+      ! Neighbour list evaluation at the same charges, the list of the Hessian
+      ! holds all pairs to keep the products of the CN derivatives with the
+      ! second neighbours
       call fixed_charge_cache(mol, model, list, qvec, cache)
-      call model%get_explicit_hessian(mol, cache, p, hessian, error, &
+      call new_allpairs_hessian(mol, sphess, error)
+      if (allocated(error)) return
+      call model%get_explicit_hessian(mol, cache, p, sphess, error, &
          & alpha=alpha, beta=beta, list=list)
       if (allocated(error)) return
+      call expand_hessian(mol, sphess, hessian)
    class default
       call test_failed(error, "Explicit Hessian requires the EEQBC model")
       return
@@ -1775,6 +1785,7 @@ subroutine test_implicit_hessian(error, mol, model, nlcutoff)
    class(mchrg_solver_input), allocatable :: solver_input
    type(mchrg_cache), allocatable :: cache
    type(csr_list), allocatable :: list
+   type(mchrg_hessian), allocatable :: sphess
    integer :: jat, ndim
    real(wp), parameter :: trans(3, 1) = 0.0_wp
    real(wp), allocatable :: dabdr(:, :, :), dqdr(:, :, :), dqdL(:, :, :)
@@ -1803,14 +1814,16 @@ subroutine test_implicit_hessian(error, mol, model, nlcutoff)
       & unit=output_unit)
    if (allocated(error)) return
 
-   hessian(:, :) = 0.0_wp
+   call new_allpairs_hessian(mol, sphess, error)
+   if (allocated(error)) return
    select type (model)
    type is (eeqbc_model)
-      call model%get_implicit_hessian(mol, cache, hessian, list=list)
+      call model%get_implicit_hessian(mol, cache, sphess, list=list)
    class default
       call test_failed(error, "Implicit Hessian requires the EEQBC model")
       return
    end select
+   call expand_hessian(mol, sphess, hessian)
 
    ! The list stores the rows of each atom in its columns, so the reference is
    ! formed in the same order, -(dq/dR)^T (dX/dR - dA/dR*q)
@@ -1870,6 +1883,7 @@ subroutine test_hessian(error, mol, model)
    class(mchrg_solver_input), allocatable :: solver_input
    type(mchrg_cache), allocatable :: cache
    type(csr_list), allocatable :: list
+   type(mchrg_hessian), allocatable :: sphess
    integer :: ndim
    real(wp), allocatable :: hessian(:, :), refhess(:, :)
 
@@ -1901,14 +1915,16 @@ subroutine test_hessian(error, mol, model)
       call model%get_hessian(mol, solver, cache, error, refhess)
       if (allocated(error)) return
 
+      ! The list of the Hessian is a copy of the neighbour list
       deallocate(cache)
-      allocate(cache)
-      call model%get_hessian(mol, solver, cache, error, hessian, list=list)
+      allocate(cache, sphess)
+      call model%get_hessian(mol, solver, cache, error, sphess, list=list)
       if (allocated(error)) return
    class default
       call test_failed(error, "Analytical Hessian requires the EEQBC model")
       return
    end select
+   call expand_hessian(mol, sphess, hessian)
 
    if (any(abs(hessian - refhess) > thr2)) then
       call test_failed(error, "Hessian does not match the dense one")
@@ -1925,6 +1941,170 @@ subroutine test_hessian(error, mol, model)
    end if
 
 end subroutine test_hessian
+
+
+!> Check that the compressed Hessian on a short list of its own holds the
+!> blocks of the Hessian on a list with all pairs, and the same factors of the
+!> charge constraint term
+subroutine test_hessian_pattern(error, mol, model, nlcutoff, hcutoff)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular structure data
+   type(structure_type), intent(inout) :: mol
+
+   !> Electronegativity equilibration model
+   class(mchrg_model_type), intent(in) :: model
+
+   !> Cutoff of the neighbour list
+   real(wp), intent(in) :: nlcutoff
+
+   !> Cutoff of the short list of the Hessian
+   real(wp), intent(in) :: hcutoff
+
+   class(mchrg_solver_type), allocatable :: solver
+   class(mchrg_solver_input), allocatable :: solver_input
+   type(mchrg_cache), allocatable :: cache
+   type(csr_list), allocatable :: list
+   type(mchrg_hessian), allocatable :: refhess, sphess
+   integer :: xat
+   integer(i8) :: hat, kat
+   logical :: found
+
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      solver_input%cgtol = 1.0e-15_wp
+      solver_input%cgmiter = 1000
+      solver_input%verbosity = 0
+      solver_input%use_nlist = .true.
+   end select
+   call solver_maker(solver, solver_input, error)
+   if (allocated(error)) return
+
+   allocate(list)
+   call new_csr_list(list, mol, error, cutoff=nlcutoff, complete=.true.)
+   if (allocated(error)) return
+
+   allocate(sphess)
+   call new_csr_list(sphess%list, mol, error, cutoff=hcutoff, complete=.true.)
+   if (allocated(error)) return
+   if (size(sphess%list%nlat) >= mol%nat**2) then
+      call test_failed(error, "Short list of the Hessian holds all pairs")
+      return
+   end if
+
+   select type (model)
+   type is (eeqbc_model)
+      allocate(cache)
+      call new_allpairs_hessian(mol, refhess, error)
+      if (allocated(error)) return
+      call model%get_hessian(mol, solver, cache, error, refhess, list)
+      if (allocated(error)) return
+
+      deallocate(cache)
+      allocate(cache)
+      call model%get_hessian(mol, solver, cache, error, sphess, list)
+      if (allocated(error)) return
+   class default
+      call test_failed(error, "Analytical Hessian requires the EEQBC model")
+      return
+   end select
+
+   if (any(abs(sphess%w - refhess%w) > thr1) &
+      & .or. any(abs(sphess%dlambda - refhess%dlambda) > thr1)) then
+      call test_failed(error, "Charge constraint term depends on the list of the Hessian")
+      return
+   end if
+
+   do xat = 1, mol%nat
+      do hat = sphess%list%inl(xat), sphess%list%inl(xat + 1) - 1
+         found = .false.
+         do kat = refhess%list%inl(xat), refhess%list%inl(xat + 1) - 1
+            if (refhess%list%nlat(kat) /= sphess%list%nlat(hat)) cycle
+            found = .true.
+            if (any(abs(sphess%hesslist(:, :, hat) - refhess%hesslist(:, :, kat)) &
+               & > thr1)) then
+               call test_failed(error, "Hessian block does not match the full list")
+               print'(a, 2i6)', "block", xat, sphess%list%nlat(hat)
+               print'(3es21.12)', sphess%hesslist(:, :, hat) - refhess%hesslist(:, :, kat)
+               return
+            end if
+         end do
+         if (.not. found) then
+            call test_failed(error, "Pair of the short list missing in the full list")
+            return
+         end if
+      end do
+   end do
+
+end subroutine test_hessian_pattern
+
+
+!> Compressed Hessian with zero blocks on a list holding all pairs
+subroutine new_allpairs_hessian(mol, hessian, error)
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Compressed Hessian
+   type(mchrg_hessian), allocatable, intent(out) :: hessian
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   allocate(hessian)
+   call new_csr_list(hessian%list, mol, error, cutoff=allpairs, complete=.true.)
+   if (allocated(error)) return
+   if (size(hessian%list%nlat) /= mol%nat**2) then
+      call test_failed(error, "List of the Hessian does not hold all pairs")
+      return
+   end if
+   allocate(hessian%hesslist(3, 3, size(hessian%list%nlat, kind=i8)), &
+      & source=0.0_wp)
+
+end subroutine new_allpairs_hessian
+
+
+!> Expand the compressed Hessian and its factored charge constraint term, if
+!> present, into dense storage
+subroutine expand_hessian(mol, hessian, dense)
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Compressed Hessian
+   type(mchrg_hessian), intent(in) :: hessian
+
+   !> Dense Hessian
+   real(wp), intent(out) :: dense(:, :)
+
+   integer :: xat, yat, ic, ii, jj
+   integer(i8) :: hat
+
+   dense(:, :) = 0.0_wp
+   if (allocated(hessian%w)) then
+      do xat = 1, mol%nat
+         ii = 3 * (xat - 1)
+         do yat = 1, mol%nat
+            jj = 3 * (yat - 1)
+            do ic = 1, 3
+               dense(jj+1:jj+3, ii+ic) = hessian%w(ic, xat) * hessian%dlambda(:, yat)
+            end do
+         end do
+      end do
+   end if
+   do xat = 1, mol%nat
+      ii = 3 * (xat - 1)
+      do hat = hessian%list%inl(xat), hessian%list%inl(xat + 1) - 1
+         jj = 3 * (hessian%list%nlat(hat) - 1)
+         dense(jj+1:jj+3, ii+1:ii+3) = dense(jj+1:jj+3, ii+1:ii+3) &
+            & + hessian%hesslist(:, :, hat)
+      end do
+   end do
+
+end subroutine expand_hessian
 
 
 subroutine test_hexpl_coulomb_mb01(error)
@@ -2145,6 +2325,23 @@ subroutine test_hess_znooh(error)
    call test_hessian(error, mol, model)
 
 end subroutine test_hess_znooh
+
+
+subroutine test_hess_pattern_upu23(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "UPU23", "0a")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   ! The Hessian list is shorter than the neighbour list
+   call test_hessian_pattern(error, mol, model, nlcutoff=12.0_wp, hcutoff=8.0_wp)
+
+end subroutine test_hess_pattern_upu23
 
 
 end module test_csrlist

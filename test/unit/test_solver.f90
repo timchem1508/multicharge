@@ -59,8 +59,7 @@ subroutine collect_solver(testsuite)
    & new_unittest("cg-invert-dense", test_cg_invert_dense), &
    & new_unittest("cg-invert-list", test_cg_invert_list), &
    & new_unittest("cg-invert-list-upper", test_cg_invert_list_upper), &
-   & new_unittest("cg-invert-list-local", test_cg_invert_list_local), &
-   & new_unittest("cg-invert-list-buffer", test_cg_invert_list_buffer) &
+   & new_unittest("cg-invert-list-local", test_cg_invert_list_local) &
    & ]
 
 end subroutine collect_solver
@@ -838,7 +837,7 @@ end subroutine test_cg_invert_list_upper
 
 
 !> Test: Block-CG inversion on the subsystems of spatial blocks for a chain
-!> whose atom order is shuffled, the buffer reduces the subsystem error
+!> whose atom order is shuffled
 subroutine test_cg_invert_list_local(error)
 
    !> Error handling
@@ -846,14 +845,14 @@ subroutine test_cg_invert_list_local(error)
 
    integer, parameter :: n = 300
    real(wp), parameter :: cutoff = 3.0_wp
-   ! Deviation of the subsystems without buffer, the elements of the inverse
-   ! decay to 1e-5 within the cutoff
+   ! Deviation of the subsystems, the elements of the inverse decay to 1e-5
+   ! within the cutoff
    real(wp), parameter :: thr_sub = 1.0e-4_wp
    real(wp), allocatable :: xyz(:, :), amat(:, :), alist(:), adense(:, :), &
       & ainvlist(:)
    type(csr_list) :: list
    type(cg_solver) :: solver
-   real(wp) :: dev0, devb
+   real(wp) :: dev0
 
    call chain_spd(n, cutoff, xyz, amat)
    call dense_to_csr(amat, .true., alist, list)
@@ -871,52 +870,12 @@ subroutine test_cg_invert_list_local(error)
    if (allocated(error)) return
    dev0 = list_deviation(list, ainvlist, adense)
 
-   ! Subsystems extended by a buffer of the cutoff
-   call new_cg_solver(solver, cg_input(cgtol=1.0e-14_wp, cgmiter=1000, &
-      & verbosity=0, use_nlist=.true., ainvbuf=cutoff))
-   call solver%invert_list(alist, list, ainvlist, xyz=xyz, error=error)
-   if (allocated(error)) return
-   devb = list_deviation(list, ainvlist, adense)
-
    if (dev0 > thr_sub) then
       call test_failed(error, "Inverse on the subsystems differs from the dense inverse")
       print '(a, es12.4)', "Max deviation: ", dev0
-      return
-   end if
-   if (devb > thr2 .or. devb > 1.0e-2_wp * dev0) then
-      call test_failed(error, "Buffer of the subsystems does not reduce the deviation")
-      print '(a, 2es12.4)', "Max deviation: ", dev0, devb
    end if
 
 end subroutine test_cg_invert_list_local
-
-
-!> Test: Block-CG inversion with a buffer of the subsystems reports missing
-!> coordinates
-subroutine test_cg_invert_list_buffer(error)
-
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
-
-   integer, parameter :: n = 30
-   real(wp), allocatable :: xyz(:, :), amat(:, :), alist(:), ainvlist(:)
-   type(csr_list) :: list
-   type(cg_solver) :: solver
-
-   call chain_spd(n, 3.0_wp, xyz, amat)
-   call dense_to_csr(amat, .true., alist, list)
-   allocate(ainvlist(size(list%nlat)))
-
-   call new_cg_solver(solver, cg_input(cgtol=1.0e-14_wp, cgmiter=1000, &
-      & verbosity=0, use_nlist=.true., ainvbuf=3.0_wp))
-   call solver%invert_list(alist, list, ainvlist, error=error)
-   if (.not. allocated(error)) then
-      call test_failed(error, "Buffer without coordinates was not reported")
-      return
-   end if
-   deallocate(error)
-
-end subroutine test_cg_invert_list_buffer
 
 
 !> Largest deviation of the inverse on the pattern of a list from the dense

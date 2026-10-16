@@ -32,7 +32,8 @@ module multicharge_model_eeq
    use multicharge_wignerseitz, only : new_wignerseitz_cell
    use mctc_csrlist, only : csr_list
    use multicharge_ewald, only : get_alpha
-   use multicharge_model_type, only : mchrg_model_type, get_dir_trans, get_rec_trans
+   use multicharge_model_type, only : mchrg_model_type, mchrg_hessian, get_dir_trans, &
+      & get_rec_trans
    use multicharge_model_cache, only : mchrg_cache
    implicit none
    private
@@ -55,7 +56,9 @@ module multicharge_model_eeq
       !> Calculate gradient
       procedure :: get_grad
       !> Explicit Hessian, not available for the EEQ model
-      procedure :: get_explicit_hessian
+      procedure :: get_explicit_hessian_dense
+      !> Explicit Hessian on a neighborlist, not available for the EEQ model
+      procedure :: get_explicit_hessian_list
    end type eeq_model
 
    real(wp), parameter :: sqrtpi = sqrt(pi)
@@ -755,8 +758,8 @@ end subroutine get_grad
 
 
 !> The explicit part of the Hessian is not implemented for the EEQ model
-subroutine get_explicit_hessian(self, mol, cache, p, hessian, error, alpha, beta, &
-   & list)
+subroutine get_explicit_hessian_dense(self, mol, cache, p, hessian, error, alpha, &
+   & beta)
    !> EEQ model type
    class(eeq_model), intent(in) :: self
    !> Structure type
@@ -773,12 +776,37 @@ subroutine get_explicit_hessian(self, mol, cache, p, hessian, error, alpha, beta
    real(wp), intent(in), optional :: alpha
    !> Optional electronegativity prefactor
    real(wp), intent(in), optional :: beta
-   !> Multicharge neighborlist type (complete)
-   type(csr_list), intent(in), optional :: list
 
    call fatal_error(error, "Analytical Hessian is not available for the EEQ model")
 
-end subroutine get_explicit_hessian
+end subroutine get_explicit_hessian_dense
+
+
+!> The explicit part of the Hessian is not implemented for the EEQ model
+subroutine get_explicit_hessian_list(self, mol, cache, p, hessian, error, list, &
+   & alpha, beta)
+   !> EEQ model type
+   class(eeq_model), intent(in) :: self
+   !> Structure type
+   type(structure_type), intent(in) :: mol
+   !> Multicharge cache
+   type(mchrg_cache), intent(inout) :: cache
+   !> Charge-like contraction vector
+   real(wp), intent(in) :: p(:)
+   !> Molecular nuclear Hessian in compressed storage
+   type(mchrg_hessian), intent(inout) :: hessian
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+   !> Multicharge neighborlist type (complete)
+   type(csr_list), intent(in) :: list
+   !> Optional Coulomb matrix prefactor
+   real(wp), intent(in), optional :: alpha
+   !> Optional electronegativity prefactor
+   real(wp), intent(in), optional :: beta
+
+   call fatal_error(error, "Analytical Hessian is not available for the EEQ model")
+
+end subroutine get_explicit_hessian_list
 
 
 !> Accumulate gradient and stress contributions for a non-periodic system

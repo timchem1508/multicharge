@@ -23,7 +23,7 @@ program main
    use multicharge, only: mchrg_model_type, mchrg_model, mchrg_cache, new_eeq2019_model, &
    & new_eeqbc2025_model, get_multicharge_version, &
    & write_ascii_model, write_ascii_properties, write_ascii_results
-   use multicharge_model_type, only: hess_index
+   use multicharge_model_type, only: hess_index, mchrg_hessian
    use multicharge_output, only: json_results
    use multicharge_solver, only: new_mchrg_solver, mchrg_solver_type, direct_solver, &
    & cg_solver, mchrg_solver_input, cg_input, direct_input
@@ -49,6 +49,7 @@ program main
    real(wp), allocatable :: trans(:, :)
    real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
    real(wp), allocatable :: hess(:), press(:, :, :, :), hessian(:, :)
+   type(mchrg_hessian), allocatable :: hesslist
    real(wp), allocatable :: qvec(:)
    real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: charge
@@ -193,11 +194,23 @@ program main
          write(output_unit, '(a, 1x, a)') "Get numerical Hessian time : ", &
          & format_time(timer%get("numhess"))
       end if
+   else if (analytic_hessian .and. use_nlist) then
+      ! Compressed Hessian on the pattern of the neighborlist with the factored
+      ! charge constraint term, only expanded for the output
+      allocate(hesslist)
+      call timer%push("hess")
+      call model%get_hessian(mol, solver, cache, error, hesslist, list, qvec, &
+      & energy, gradient, sigma, unit=output_unit, verbosity=verbosity)
+      call timer%pop
+      if (verbosity > 1) then
+         write(output_unit, '(a, 1x, a)') "Get analytical Hessian time : ", &
+         & format_time(timer%get("hess"))
+      end if
    else if (analytic_hessian) then
       allocate(hessian(3 * mol%nat, 3 * mol%nat))
       call timer%push("hess")
       call model%get_hessian(mol, solver, cache, error, hessian, qvec, energy, &
-      & gradient, sigma, list=list, unit=output_unit, verbosity=verbosity)
+      & gradient, sigma, unit=output_unit, verbosity=verbosity)
       call timer%pop
       if (verbosity > 1) then
          write(output_unit, '(a, 1x, a)') "Get analytical Hessian time : ", &
@@ -224,8 +237,14 @@ program main
    end if
 
    call write_ascii_properties(output_unit, mol, model, cache%cn, qvec)
+   call timer%push("output")
    call write_ascii_results(output_unit, mol, energy, gradient, sigma, dqdr, dqdL, hess, &
-   & press, cache)
+   & press, cache, hesslist)
+   call timer%pop
+   if (verbosity > 1) then
+      write(output_unit, '(a, 1x, a)') "Output time : ", &
+      & format_time(timer%get("output"))
+   end if
 
    call timer%pop
    if (verbosity > 1) then
@@ -278,11 +297,10 @@ subroutine help(unit)
       "-list, -nlist, --nlist", &
       & "Use neighborlist for solver (complete list with charge gradient)", &
       "-cut, -cutoff, --cutoff <real>", &
-      & "Cutoff for neighborlist generation in Bohrs (default: 29.0 Bohr)", &
+      & "Cutoff for neighborlist generation in Bohrs (default: 29.0 Bohr,", &
+      "", "33.0 Bohr with charge gradient or Hessian)", &
       "-ainvthr, --ainvthr <real>", &
       & "Relative threshold for the inverse in charge gradients (cg, list)", &
-      "-ainvbuf, --ainvbuf <real>", &
-      & "Buffer in Bohr of the subsystems for the inverse (cg, list, default: 0)", &
       "-v, -verbose, --verbose", "Show more", &
       "-s, -silent, --silent", "Show less", &
       "-j, -json, --json", &
@@ -355,10 +373,11 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
 
    integer :: iarg, narg, iostat
    character(len=:), allocatable :: arg
+   logical :: cutoff_set
 
    character(len=:), allocatable :: solver_name
    integer, allocatable :: maxiter
-   real(wp), allocatable :: tol, ainvthr, ainvbuf
+   real(wp), allocatable :: tol, ainvthr
 
    model_id = mchrg_model%eeq2019
    use_nlist = .false.
@@ -368,6 +387,7 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
    analytic_hessian = .false.
    json = .false.
    cutoff = 29.0_wp
+   cutoff_set = .false.
    iarg = 0
    verbosity = 1
    narg = command_argument_count()
@@ -494,15 +514,6 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
             call fatal_error(error, "Invalid threshold for the inverse")
             exit
          end if
-         case("-ainvbuf", "--ainvbuf")
-         allocate(ainvbuf)
-         iarg = iarg + 1
-         call get_argument(iarg, arg)
-         read(arg, *, iostat=iostat) ainvbuf
-         if (iostat /= 0) then
-            call fatal_error(error, "Invalid buffer for the inverse")
-            exit
-         end if
          case("-cut", "-cutoff", "--cutoff")
          iarg = iarg + 1
          call get_argument(iarg, arg)
@@ -511,11 +522,18 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
             call fatal_error(error, "Invalid neighborlist cutoff")
             exit
          end if
+         cutoff_set = .true.
       end select
    end do
 
    if (numeric_hessian .and. analytic_hessian .and. .not. allocated(error)) then
       call fatal_error(error, "Numerical and analytical Hessian cannot be combined.")
+   end if
+
+   ! The inverse in the charge derivatives is kept on the pattern of the list,
+   ! the larger default cutoff keeps its error near 1e-14
+   if (use_nlist .and. (qgrad .or. analytic_hessian) .and. .not. cutoff_set) then
+      cutoff = 33.0_wp
    end if
 
    ! Default solver is direct, only the cg solver supports a neighborlist
@@ -542,9 +560,6 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
       if (allocated(ainvthr)) then
          solver_input%ainvthr = ainvthr
       end if
-      if (allocated(ainvbuf)) then
-         solver_input%ainvbuf = ainvbuf
-      end if
       type is (direct_input)
       if (allocated(verbosity)) then
          solver_input%verbosity = verbosity
@@ -555,9 +570,9 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
             & "Maximal number of iterations and tolerance require the cg solver.")
          return
       end if
-      if (allocated(ainvthr) .or. allocated(ainvbuf)) then
+      if (allocated(ainvthr)) then
          call fatal_error(error, &
-            & "Inverse threshold and inverse buffer require the cg solver.")
+            & "Inverse threshold requires the cg solver.")
          return
       end if
       if (use_nlist) then
