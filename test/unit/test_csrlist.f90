@@ -1786,8 +1786,9 @@ subroutine test_implicit_hessian(error, mol, model, nlcutoff)
    type(mchrg_cache), allocatable :: cache
    type(csr_list), allocatable :: list
    type(mchrg_hessian), allocatable :: sphess
-   integer :: jat, ndim
+   integer :: jat, ndim, xat, yat, ii, jj
    real(wp), parameter :: trans(3, 1) = 0.0_wp
+   real(wp) :: blk(3, 3)
    real(wp), allocatable :: dabdr(:, :, :), dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: hessian(:, :), refhess(:, :)
 
@@ -1833,6 +1834,19 @@ subroutine test_implicit_hessian(error, mol, model, nlcutoff)
    end do
    refhess(:, :) = -matmul(reshape(dqdr, [ndim, mol%nat]), &
       & transpose(reshape(dabdr, [ndim, mol%nat])))
+
+   ! With the cutoff the product is not symmetric. The Hessian holds its blocks
+   ! in the rows of atom x and the columns of the atoms y > x, their transposes
+   ! below the diagonal and the symmetrized diagonal blocks.
+   do xat = 1, mol%nat
+      ii = 3 * (xat - 1)
+      blk(:, :) = refhess(ii+1:ii+3, ii+1:ii+3)
+      refhess(ii+1:ii+3, ii+1:ii+3) = 0.5_wp * (blk + transpose(blk))
+      do yat = xat + 1, mol%nat
+         jj = 3 * (yat - 1)
+         refhess(jj+1:jj+3, ii+1:ii+3) = transpose(refhess(ii+1:ii+3, jj+1:jj+3))
+      end do
+   end do
 
    if (any(abs(hessian - refhess) > thr1)) then
       call test_failed(error, "Implicit Hessian does not match the expanded product")

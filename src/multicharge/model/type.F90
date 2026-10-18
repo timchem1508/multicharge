@@ -35,6 +35,7 @@ module multicharge_model_type
    use multicharge_model_cache, only : mchrg_cache
    use multicharge_solver_type, only : mchrg_solver_type
    use multicharge_solver_cg, only : cg_solver
+   !$ use omp_lib, only : omp_get_num_threads, omp_get_thread_num
 
    implicit none
    private
@@ -1295,10 +1296,14 @@ end subroutine get_implicit_hessian_dense
 
 !> Compute the implicit part of the molecular nuclear Hessian of the
 !> electrostatic energy from the compressed charge derivatives of the cache on
-!> a complete neighborlist. The product with the charge derivatives without the
-!> constraint term is added to the blocks on the pattern of the list of the
-!> Hessian. The charge constraint gives the dense rank-1 term
-!> sum(u) * vec(dlambdadr) vec(dlambdadr)^T, which is kept in its factors.
+!> a complete neighborlist, whose pattern has to be a copy of the list. The
+!> block of the atoms x <= y is -sum_b (dX_b/dR_y - (dA/dR_y*q)_b) (dq_b/dR_x)^T
+!> over the atoms b in the lists of x and y, without the constraint term of the
+!> charge derivatives. The block of y and x is its transpose and the diagonal
+!> blocks are symmetrized, so this part is symmetric. The blocks are added on
+!> the pattern of the list of the Hessian. The charge constraint gives the
+!> dense rank-1 term sum(u) * vec(dlambdadr) vec(dlambdadr)^T, which is kept in
+!> its factors.
 subroutine get_implicit_hessian_list(self, mol, cache, hessian, list)
 
    !> Electronegativity-equilibration model
@@ -1317,58 +1322,50 @@ subroutine get_implicit_hessian_list(self, mol, cache, hessian, list)
    !> Multicharge neighborlist type (complete)
    type(csr_list), intent(in) :: list
 
-   integer :: xat, bat, ic
-   integer(i8) :: kat, lat, hat
-   real(wp) :: dx(3), uvecsum
-   integer, allocatable :: jt(:)
-   integer(i8), allocatable :: pos(:), hpos(:)
+   !> Largest number of atoms in a group
+   integer, parameter :: max_group = 8
+
+   !> Largest distance of an atom of a group to its first atom, relative to the
+   !> cutoff of the list
+   real(wp), parameter :: group_scale = 0.2_wp
+
+   logical :: same
+   integer :: xat
+   integer(i8) :: lat
+   real(wp) :: radius, uvecsum
+   integer, allocatable :: jt(:), tq(:), hjt(:), htq(:), gstart(:)
    real(wp), allocatable :: dt(:, :)
 
    ! Transpose of the partial derivatives, row x holds the derivatives of the
-   ! components b w.r.t. atom x. The pattern of the complete neighborlist is
-   ! symmetric, so row x of the transpose starts at the offset of row x.
-   allocate(dt(3, size(list%nlat, kind=i8)), jt(size(list%nlat, kind=i8)))
-   allocate(pos(mol%nat), source=list%inl(:mol%nat))
-   do bat = 1, mol%nat
-      do kat = list%inl(bat), list%inl(bat + 1) - 1
-         xat = list%nlat(kat)
-         dt(:, pos(xat)) = cache%dabdrlist(:, kat)
-         jt(pos(xat)) = bat
-         pos(xat) = pos(xat) + 1
+   ! components b w.r.t. atom x
+   call transpose_list(mol%nat, list, jt, tq)
+   allocate(dt(3, size(list%nlat, kind=i8)))
+   !$omp parallel do default(none) schedule(runtime) &
+   !$omp shared(mol, list, cache, dt, jt, tq) private(xat, lat)
+   do xat = 1, mol%nat
+      do lat = list%inl(xat), list%inl(xat + 1) - 1
+         dt(:, lat) = cache%dabdrlist(:, list%inl(jt(lat)) + tq(lat))
       end do
    end do
 
-   ! The charge derivatives are dq_b/dR_y = dqdrlist(:, (b, y))
-   ! - dlambdadr(:, y) * uvec(b). Each iteration only updates the row of atom
-   ! xat of the Hessian, hpos holds the position of each atom in this row.
-   !$omp parallel default(none) &
-   !$omp shared(mol, list, cache, hessian, dt, jt) &
-   !$omp private(xat, bat, ic, kat, lat, hat, dx, hpos)
-   allocate(hpos(mol%nat), source=0_i8)
-   !$omp do schedule(runtime)
-   do xat = 1, mol%nat
-      do hat = hessian%list%inl(xat), hessian%list%inl(xat + 1) - 1
-         hpos(hessian%list%nlat(hat)) = hat
-      end do
-      do lat = list%inl(xat), list%inl(xat + 1) - 1
-         bat = jt(lat)
-         dx = dt(:, lat)
-         do kat = cache%dqdrpat%inl(bat), cache%dqdrpat%inl(bat + 1) - 1
-            hat = hpos(cache%dqdrpat%nlat(kat))
-            if (hat == 0) cycle
-            do ic = 1, 3
-               hessian%hesslist(:, ic, hat) = hessian%hesslist(:, ic, hat) &
-                  & - dx(ic) * cache%dqdrlist(:, kat)
-            end do
-         end do
-      end do
-      do hat = hessian%list%inl(xat), hessian%list%inl(xat + 1) - 1
-         hpos(hessian%list%nlat(hat)) = 0
-      end do
-   end do
-   !$omp end do
-   deallocate(hpos)
-   !$omp end parallel
+   ! Consecutive atoms close to each other share most of their neighbours
+   radius = 0.0_wp
+   if (allocated(list%cutoff)) radius = group_scale * list%cutoff
+   call get_atom_groups(mol, radius, max_group, gstart)
+
+   ! The transpose of the list gives the blocks (y, x) of a Hessian on the
+   ! same pattern
+   same = size(hessian%list%nlat, kind=i8) == size(list%nlat, kind=i8)
+   if (same) same = all(hessian%list%inl(:mol%nat + 1) == list%inl(:mol%nat + 1))
+   if (same) same = all(hessian%list%nlat == list%nlat)
+   if (same) then
+      call add_implicit_blocks(mol, cache, hessian, list, dt, jt, tq, jt, tq, &
+         & gstart)
+   else
+      call transpose_list(mol%nat, hessian%list, hjt, htq)
+      call add_implicit_blocks(mol, cache, hessian, list, dt, jt, tq, hjt, htq, &
+         & gstart)
+   end if
 
    ! Charge constraint term, sum_b (dX_b/dR_x - (dA/dR_x*q)_b) * uvec(b) is
    ! sum(u) * dlambdadr(:, x), where sum(u) = 1^T A^-1 1 is positive
@@ -1377,6 +1374,268 @@ subroutine get_implicit_hessian_list(self, mol, cache, hessian, list)
    hessian%w = uvecsum * cache%dlambdadr
 
 end subroutine get_implicit_hessian_list
+
+
+!> Add the implicit blocks of the atoms x <= y and their transposes for groups
+!> of consecutive atoms. The blocks of all atoms of a group are accumulated over
+!> the column y of the partial derivatives at once, so each column is read once
+!> per group. Only the group of atom x writes the blocks (x, y) and (y, x) of
+!> y >= x, so the groups are independent.
+subroutine add_implicit_blocks(mol, cache, hessian, list, dt, jt, tq, hjt, htq, &
+   & gstart)
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Cache with the charge derivatives on a copy of the list
+   type(mchrg_cache), intent(in) :: cache
+
+   !> Molecular nuclear Hessian in compressed storage with its list and
+   !> allocated blocks
+   type(mchrg_hessian), intent(inout) :: hessian
+
+   !> Complete neighborlist
+   type(csr_list), intent(in) :: list
+
+   !> Partial derivatives on the transpose of the list, dX_b/dR_y - (dA/dR_y*q)_b
+   !> in row y
+   real(wp), intent(in), contiguous :: dt(:, :)
+
+   !> Row of the list of each entry of the transpose of the list
+   integer, intent(in), contiguous :: jt(:)
+
+   !> Offset in its row of the list of each entry of the transpose of the list
+   integer, intent(in), contiguous :: tq(:)
+
+   !> Row of the list of the Hessian of each entry of its transpose
+   integer, intent(in), contiguous :: hjt(:)
+
+   !> Offset in its row of the list of the Hessian of each entry of its transpose
+   integer, intent(in), contiguous :: htq(:)
+
+   !> First atom of each group, the last entry is the number of atoms plus one
+   integer, intent(in) :: gstart(:)
+
+   integer :: igrp, ngrp, gmax, nbmax, numax, x0, ng, i, xat, bat, yat, nb, nu, n, u
+   integer(i8) :: lat, hat
+   real(wp) :: dy(3)
+   integer, allocatable :: bloc(:), hloc(:), blist(:), ulist(:)
+   integer(i8), allocatable :: jmap(:, :), tmap(:, :)
+   real(wp), allocatable :: qcol(:, :, :), acc(:, :, :)
+
+   ngrp = size(gstart) - 1
+   if (ngrp < 1) return
+   gmax = maxval(gstart(2:) - gstart(:ngrp))
+   nbmax = min(mol%nat, gmax * int(maxval(list%inl(2:mol%nat + 1) &
+      & - list%inl(:mol%nat))))
+   numax = min(mol%nat, gmax * int(maxval(hessian%list%inl(2:mol%nat + 1) &
+      & - hessian%list%inl(:mol%nat))))
+
+   ! bloc and hloc hold the position of each atom in the unions of the group
+   !$omp parallel default(none) &
+   !$omp shared(mol, cache, hessian, list, dt, jt, tq, hjt, htq, gstart) &
+   !$omp shared(ngrp, gmax, nbmax, numax) &
+   !$omp private(igrp, x0, ng, i, xat, bat, yat, nb, nu, n, u, lat, hat, dy) &
+   !$omp private(bloc, hloc, blist, ulist, jmap, tmap, qcol, acc)
+   allocate(bloc(mol%nat), hloc(mol%nat), source=0)
+   allocate(blist(nbmax), ulist(numax), jmap(gmax, numax), tmap(gmax, numax), &
+      & qcol(3, gmax, nbmax), acc(3, 3, gmax))
+   !$omp do schedule(runtime)
+   do igrp = 1, ngrp
+      x0 = gstart(igrp)
+      ng = gstart(igrp + 1) - x0
+
+      ! Union of the lists of the group with the charge derivatives dq_b/dR_x
+      ! of its atoms x from the rows b, zero if x is not in the row
+      nb = 0
+      do i = 1, ng
+         xat = x0 + i - 1
+         do lat = list%inl(xat), list%inl(xat + 1) - 1
+            bat = jt(lat)
+            if (bloc(bat) == 0) then
+               nb = nb + 1
+               bloc(bat) = nb
+               blist(nb) = bat
+               qcol(:, :ng, nb) = 0.0_wp
+            end if
+            qcol(:, i, bloc(bat)) = &
+               & cache%dqdrlist(:, cache%dqdrpat%inl(bat) + tq(lat))
+         end do
+      end do
+
+      ! Union of the atoms y >= x in the rows of the Hessian of the group with
+      ! the positions of the blocks (y, x) and (x, y), zero if not present.
+      ! The transpose holds the atoms y in ascending order, so the columns of
+      ! the partial derivatives are read in the order of their storage.
+      nu = 0
+      do i = 1, ng
+         xat = x0 + i - 1
+         do hat = hessian%list%inl(xat), hessian%list%inl(xat + 1) - 1
+            yat = hjt(hat)
+            if (yat < xat) cycle
+            if (hloc(yat) == 0) then
+               nu = nu + 1
+               hloc(yat) = nu
+               ulist(nu) = yat
+               jmap(:ng, nu) = 0
+               tmap(:ng, nu) = 0
+            end if
+            tmap(i, hloc(yat)) = hessian%list%inl(yat) + htq(hat)
+         end do
+         do hat = hessian%list%inl(xat), hessian%list%inl(xat + 1) - 1
+            yat = hessian%list%nlat(hat)
+            if (yat < xat) cycle
+            jmap(i, hloc(yat)) = hat
+         end do
+      end do
+
+      ! acc(jc, ic, i) = sum_b (dX_b/dR_y,jc - (dA/dR_y,jc*q)_b) dq_b/dR_x,ic
+      ! for the atoms x of the group, the block (x, y) is -acc
+      do u = 1, nu
+         yat = ulist(u)
+         hloc(yat) = 0
+         acc(:, :, :ng) = 0.0_wp
+         do lat = list%inl(yat), list%inl(yat + 1) - 1
+            n = bloc(jt(lat))
+            if (n == 0) cycle
+            dy = dt(:, lat)
+            do i = 1, ng
+               acc(:, 1, i) = acc(:, 1, i) + dy * qcol(1, i, n)
+               acc(:, 2, i) = acc(:, 2, i) + dy * qcol(2, i, n)
+               acc(:, 3, i) = acc(:, 3, i) + dy * qcol(3, i, n)
+            end do
+         end do
+         do i = 1, ng
+            hat = jmap(i, u)
+            if (hat == 0) cycle
+            if (yat == x0 + i - 1) then
+               hessian%hesslist(:, :, hat) = hessian%hesslist(:, :, hat) &
+                  & - 0.5_wp * (acc(:, :, i) + transpose(acc(:, :, i)))
+            else
+               hessian%hesslist(:, :, hat) = hessian%hesslist(:, :, hat) &
+                  & - acc(:, :, i)
+               hat = tmap(i, u)
+               hessian%hesslist(:, :, hat) = hessian%hesslist(:, :, hat) &
+                  & - transpose(acc(:, :, i))
+            end if
+         end do
+      end do
+      do n = 1, nb
+         bloc(blist(n)) = 0
+      end do
+   end do
+   !$omp end do
+   deallocate(bloc, hloc, blist, ulist, jmap, tmap, qcol, acc)
+   !$omp end parallel
+
+end subroutine add_implicit_blocks
+
+
+!> Transpose of the pattern of a complete neighborlist. The pattern is
+!> symmetric, so row x of the transpose has the offset and the length of row x
+!> of the list. Its entries are in the order of the rows b of the list, entry
+!> lat refers to the entry list%inl(jt(lat)) + tq(lat) of the list.
+subroutine transpose_list(nat, list, jt, tq)
+
+   !> Number of atoms
+   integer, intent(in) :: nat
+
+   !> Complete neighborlist
+   type(csr_list), intent(in) :: list
+
+   !> Row of the list of each entry of the transpose
+   integer, allocatable, intent(out) :: jt(:)
+
+   !> Offset in its row of the list of each entry of the transpose
+   integer, allocatable, intent(out) :: tq(:)
+
+   integer :: bat, xat, ith, jth, nth, off, num
+   integer(i8) :: kat, lat
+   integer, allocatable :: cnt(:, :)
+
+   allocate(jt(size(list%nlat, kind=i8)), tq(size(list%nlat, kind=i8)))
+
+   ! Each thread counts the entries of its rows in each column, the entries of
+   ! a thread follow the ones of the threads with lower rows
+   !$omp parallel default(none) &
+   !$omp shared(nat, list, jt, tq, cnt, nth) &
+   !$omp private(bat, xat, ith, jth, off, num, kat, lat)
+   !$omp single
+   nth = 1
+   !$ nth = omp_get_num_threads()
+   allocate(cnt(nat, nth), source=0)
+   !$omp end single
+   ith = 1
+   !$ ith = omp_get_thread_num() + 1
+   !$omp do schedule(static)
+   do bat = 1, nat
+      do kat = list%inl(bat), list%inl(bat + 1) - 1
+         xat = list%nlat(kat)
+         cnt(xat, ith) = cnt(xat, ith) + 1
+      end do
+   end do
+   !$omp end do
+   !$omp do schedule(static)
+   do xat = 1, nat
+      off = 0
+      do jth = 1, nth
+         num = cnt(xat, jth)
+         cnt(xat, jth) = off
+         off = off + num
+      end do
+   end do
+   !$omp end do
+   !$omp do schedule(static)
+   do bat = 1, nat
+      do kat = list%inl(bat), list%inl(bat + 1) - 1
+         xat = list%nlat(kat)
+         lat = list%inl(xat) + cnt(xat, ith)
+         cnt(xat, ith) = cnt(xat, ith) + 1
+         jt(lat) = bat
+         tq(lat) = int(kat - list%inl(bat))
+      end do
+   end do
+   !$omp end do
+   !$omp end parallel
+
+end subroutine transpose_list
+
+
+!> Groups of consecutive atoms within a distance of the first atom of the group
+subroutine get_atom_groups(mol, radius, max_group, gstart)
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Largest distance of an atom of a group to its first atom
+   real(wp), intent(in) :: radius
+
+   !> Largest number of atoms in a group
+   integer, intent(in) :: max_group
+
+   !> First atom of each group, the last entry is the number of atoms plus one
+   integer, allocatable, intent(out) :: gstart(:)
+
+   integer :: ngrp, iat, ng
+   integer, allocatable :: tmp(:)
+
+   allocate(tmp(mol%nat + 1))
+   ngrp = 0
+   iat = 1
+   do while (iat <= mol%nat)
+      ngrp = ngrp + 1
+      tmp(ngrp) = iat
+      ng = 1
+      do while (iat + ng <= mol%nat .and. ng < max_group)
+         if (norm2(mol%xyz(:, iat + ng) - mol%xyz(:, iat)) > radius) exit
+         ng = ng + 1
+      end do
+      iat = iat + ng
+   end do
+   tmp(ngrp + 1) = mol%nat + 1
+   gstart = tmp(:ngrp + 1)
+
+end subroutine get_atom_groups
 
 
 !> Semi-numerical Hessian and pressure tensor from central differences of
