@@ -25,6 +25,7 @@ list(
   "${dir}/charge.f90"
   "${dir}/ewald.f90"
   "${dir}/lapack.F90"
+  "${dir}/lowerlist.f90"
   "${dir}/model.f90"
   "${dir}/ncoord.f90"
   "${dir}/output.f90"

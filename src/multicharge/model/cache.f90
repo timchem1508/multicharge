@@ -23,6 +23,7 @@ module multicharge_model_cache
    use mctc_csrlist, only : csr_list
    use mctc_io, only : structure_type
    use mctc_wignerseitz, only : wignerseitz_cell
+   use multicharge_lowerlist, only : lower_list
    implicit none
    private
 
@@ -41,7 +42,9 @@ module multicharge_model_cache
       real(wp), allocatable :: dcndL(:, :, :)
 
       !> Coordination number derivatives w.r.t. positions on the pattern of the
-      !> neighborlist, the entry of atom j in the row of atom i holds dCN_j/dR_i
+      !> neighborlist, the entry of atom j in the row of atom i holds dCN_j/dR_i.
+      !> Without a maximum CN cutoff dCN_i/dR_j = -dCN_j/dR_i, so a half list
+      !> only stores the upper triangle.
       real(wp), allocatable :: dcndrlist(:, :)
 
       !> Ewald separation parameter
@@ -63,7 +66,9 @@ module multicharge_model_cache
       real(wp), allocatable :: dqlocdL(:, :, :)
 
       !> Local charge derivatives w.r.t. positions on the pattern of the
-      !> neighborlist, the entry of atom j in the row of atom i holds dqloc_j/dR_i
+      !> neighborlist, the entry of atom j in the row of atom i holds dqloc_j/dR_i.
+      !> Without a maximum CN cutoff dqloc_i/dR_j = dqloc_j/dR_i, so a half list
+      !> only stores the upper triangle.
       real(wp), allocatable :: dqlocdrlist(:, :)
 
       !> Full Maxwell capacitance matrix
@@ -87,8 +92,9 @@ module multicharge_model_cache
       !> Inversed amat
       real(wp), allocatable :: ainv(:, :)
 
-      !> Inverse of amat on the pattern of the complete neighborlist, the
-      !> charge constraint part -uvec*uvec^T/sum(uvec) is not stored
+      !> Inverse of amat on the pattern of the neighborlist, the charge
+      !> constraint part -uvec*uvec^T/sum(uvec) is not stored. A half list only
+      !> stores the upper triangle of the symmetric inverse.
       real(wp), allocatable :: ainvlist(:)
 
       !> Solution of the ES equation
@@ -117,13 +123,37 @@ module multicharge_model_cache
       !> row of atom i holds the derivative of component i w.r.t. that neighbor
       real(wp), allocatable :: dabdrlist(:, :)
 
+      !> Diagonal and upper triangle of dabdr on a half neighborlist, the entry
+      !> of atom x in the row of atom i holds the derivative of component i
+      !> w.r.t. atom x
+      real(wp), allocatable :: dabdrlist_ut(:, :)
+
+      !> Lower triangle of dabdr on a half neighborlist, the entry of atom x in
+      !> the row of atom i holds the derivative of component x w.r.t. atom i,
+      !> the diagonal entries are not used
+      real(wp), allocatable :: dabdrlist_lt(:, :)
+
+      !> Lower triangle of the half neighborlist of the charge derivatives, row x
+      !> holds the atoms b < x with the position of the entry of x in row b
+      type(lower_list) :: lowlist
+
       !> Compressed-row pattern of the position derivatives of the charges, row j
       !> holds the atoms whose displacement changes the charge of atom j
       type(csr_list) :: dqdrpat
 
-      !> Position derivatives of the charges on dqdrpat without the charge
-      !> constraint term, the entry of atom i in row j holds dq_j/dR_i
+      !> Position derivatives of the charges on a complete dqdrpat without the
+      !> charge constraint term, the entry of atom i in row j holds dq_j/dR_i
       real(wp), allocatable :: dqdrlist(:, :)
+
+      !> Diagonal and upper triangle of the position derivatives of the charges
+      !> on a half dqdrpat without the charge constraint term, the entry of atom
+      !> i in row j holds dq_j/dR_i
+      real(wp), allocatable :: dqdrlist_ut(:, :)
+
+      !> Lower triangle of the position derivatives of the charges on a half
+      !> dqdrpat without the charge constraint term, the entry of atom i in row j
+      !> holds dq_i/dR_j, the diagonal entries are not used
+      real(wp), allocatable :: dqdrlist_lt(:, :)
 
       !> Factors of the charge constraint term of the position derivatives,
       !> dq_j/dR_i = dqdrlist(:, (j, i)) - dlambdadr(:, i) * uvec(j)

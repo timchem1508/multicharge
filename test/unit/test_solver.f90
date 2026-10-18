@@ -809,29 +809,45 @@ subroutine test_cg_invert_list(error)
 end subroutine test_cg_invert_list
 
 
-!> Test: Block-CG inversion on an upper-triangular list reports an error
+!> Test: Block-CG inversion on an upper-triangular list keeps the upper
+!> triangle of the inverse
 subroutine test_cg_invert_list_upper(error)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
-   integer, parameter :: n = 20, band = 3
-   real(wp), allocatable :: amat(:, :), alist(:), ainvlist(:)
+   integer, parameter :: n = 90, ngroup = 7
+   real(wp), allocatable :: amat(:, :), alist(:), adense(:, :), ainvlist(:)
    type(csr_list) :: list
    type(cg_solver) :: solver
+   integer :: iat
+   integer(i8) :: kat
+   real(wp) :: dev
 
-   call banded_spd(n, band, amat)
+   call grouped_spd(n, ngroup, amat)
    call dense_to_csr(amat, .false., alist, list)
-   allocate(ainvlist(size(list%nlat)))
+   allocate(adense(n, n), ainvlist(size(list%nlat)))
+
+   call new_cg_solver(solver, cg_input(cgtol=1.0e-14_wp, cgmiter=1000, &
+      & verbosity=0, use_nlist=.false.))
+   call solver%invert(amat=amat, ainv=adense, error=error)
+   if (allocated(error)) return
 
    call new_cg_solver(solver, cg_input(cgtol=1.0e-14_wp, cgmiter=1000, &
       & verbosity=0, use_nlist=.true.))
    call solver%invert_list(alist, list, ainvlist, error=error)
-   if (.not. allocated(error)) then
-      call test_failed(error, "Upper-triangular list was not reported")
-      return
+   if (allocated(error)) return
+
+   dev = 0.0_wp
+   do iat = 1, n
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         dev = max(dev, abs(ainvlist(kat) - adense(list%nlat(kat), iat)))
+      end do
+   end do
+   if (dev > thr1) then
+      call test_failed(error, "Inverse on the upper list differs from the dense inverse")
+      print '(a, es12.4)', "Max deviation: ", dev
    end if
-   deallocate(error)
 
 end subroutine test_cg_invert_list_upper
 
@@ -941,31 +957,6 @@ subroutine check_inverse(error, amat, ainv)
 
 end subroutine check_inverse
 
-
-!> Generate a banded, diagonally dominant SPD matrix
-subroutine banded_spd(n, band, amat)
-
-   !> Dimension of the matrix
-   integer, intent(in) :: n
-
-   !> Number of off-diagonals on each side
-   integer, intent(in) :: band
-
-   !> Banded SPD matrix
-   real(wp), allocatable, intent(out) :: amat(:, :)
-
-   integer :: iat, jat
-
-   allocate(amat(n, n), source=0.0_wp)
-   do iat = 1, n
-      amat(iat, iat) = 2.0_wp * band + 1.0_wp + real(iat, wp) / n
-      do jat = iat + 1, min(n, iat + band)
-         amat(iat, jat) = -1.0_wp / real(jat - iat, wp)
-         amat(jat, iat) = amat(iat, jat)
-      end do
-   end do
-
-end subroutine banded_spd
 
 
 !> Generate an SPD matrix for a chain of atoms with unit spacing, coupling

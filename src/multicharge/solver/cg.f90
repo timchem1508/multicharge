@@ -25,6 +25,7 @@ module multicharge_solver_cg
    use multicharge_blas, only : axpy, dot, gemm, scal, symv
    use multicharge_lapack, only : potrf, potrs, syevd
    use multicharge_solver_type, only : mchrg_solver_input, mchrg_solver_type
+   use multicharge_lowerlist, only : lower_list, new_lower_list
    implicit none
    private
 
@@ -390,7 +391,7 @@ end subroutine solve
 !> preconditioner (Ji, Sosonkina, Li, Co-HPC 2014). New search directions are
 !> orthonormalized by an eigendecomposition of their Gram matrix. With a
 !> subsystem, the system is restricted to the rows and columns of its atoms in
-!> a complete neighborlist, the vectors hold the subsystem atoms only.
+!> the neighborlist, the vectors hold the subsystem atoms only.
 subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
    & niter, sidx, loc)
    !> Conjugate-gradient solver instance
@@ -493,10 +494,6 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
       if (.not. (nlist .and. present(sidx) .and. present(loc))) then
          call fatal_error(error, &
             & "Subsystem requires a neighborlist, sidx and loc.")
-         return
-      end if
-      if (.not. list%complete) then
-         call fatal_error(error, "Subsystem requires a complete list.")
          return
       end if
       if (size(sidx) /= ndim .or. size(loc) < size(list%inl) - 1) then
@@ -772,13 +769,15 @@ subroutine invert(self, amat, ainv, new_unit, error)
 end subroutine invert
 
 
-!> Invert a symmetric positive definite matrix in complete compressed-row
-!> storage with the block CG solver and keep only the elements on the pattern
-!> of the matrix. The columns are solved in blocks of spatially close atoms,
-!> each from A_SS X_S = I_S on the subsystem S of the atoms in the rows of the
-!> block atoms. The inverse decays fast with the distance, the error of the
+!> Invert a symmetric positive definite matrix in complete or upper triangular
+!> compressed-row storage with the block CG solver and keep only the elements
+!> on the pattern of the matrix. The columns are solved in blocks of spatially
+!> close atoms, each from A_SS X_S = I_S on the subsystem S of the neighbors of
+!> the block atoms. The inverse decays fast with the distance, the error of the
 !> subsystem is of the order of the elements outside of the pattern, which are
-!> dropped. The blocks are independent and solved in parallel.
+!> dropped. The column of an atom is stored in its row, so an upper triangular
+!> list keeps the elements of the atoms of higher index. The blocks are
+!> independent and solved in parallel.
 subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    !> Conjugate-gradient solver instance
    class(cg_solver), intent(in) :: self
@@ -786,7 +785,7 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    !> Coefficient matrix values in compressed-row storage
    real(wp), intent(in) :: alist(:)
 
-   !> Complete neighborlist representation of the matrix
+   !> Complete or upper triangular neighborlist representation of the matrix
    type(csr_list), intent(in) :: list
 
    !> Inverse of the coefficient matrix on the pattern of the list
@@ -818,16 +817,13 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    real(wp), allocatable :: pos(:, :)
    ! Solver for the blocks without output
    type(cg_solver) :: blksolver
+   ! Lower triangle of an upper triangular list
+   type(lower_list) :: low
    integer :: unit
    logical :: failed, skip
 
    if (.not. self%use_nlist) then
       call fatal_error(error, "Inversion on a neighborlist requires use_nlist.")
-      return
-   end if
-   if (.not. list%complete) then
-      call fatal_error(error, &
-         & "Inversion on a neighborlist requires a complete list.")
       return
    end if
    ! Periodic lists with translation indices hold an atom pair once per image
@@ -870,6 +866,9 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    call new_cg_solver(blksolver, cg_input(cgmiter=self%cgmiter, &
       & cgtol=self%cgtol, verbosity=0, use_nlist=.true.))
 
+   ! The neighbors of lower index of an upper triangular list
+   if (.not. list%complete) call new_lower_list(low, ndim, list)
+
    failed = .false.
    sumsub = 0_i8
    sumiter = 0_i8
@@ -877,7 +876,8 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    maxsub = 0
    maxiter = 0
    !$omp parallel default(none) &
-   !$omp shared(ndim, nblk, order, alist, list, ainvlist, blksolver, error, failed) &
+   !$omp shared(ndim, nblk, order, alist, list, low, ainvlist, blksolver, error) &
+   !$omp shared(failed) &
    !$omp private(iblk, loc, nsub, niter, skip, tblk) &
    !$omp reduction(+:sumsub, sumiter, sumtime) reduction(max:maxsub, maxiter)
    allocate(loc(ndim), source=0)
@@ -886,7 +886,7 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
       !$omp atomic read
       skip = failed
       if (skip) cycle
-      call invert_block(blksolver, alist, list, &
+      call invert_block(blksolver, alist, list, low, &
          & order((iblk - 1) * block_size_def + 1:min(iblk * block_size_def, ndim)), &
          & loc, ainvlist, nsub, niter, tblk, error, failed)
       sumsub = sumsub + nsub
@@ -915,20 +915,23 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
 end subroutine invert_list
 
 
-!> Solve a block of columns of the inverse on its subsystem of the atoms in
-!> the rows of the block atoms. The subsystem matrix is applied on the rows of
-!> the list, skipping the elements outside of the subsystem. The columns are
-!> stored in the rows of the block atoms.
-subroutine invert_block(solver, alist, list, cols, loc, ainvlist, nsub, niter, &
-   & times, error, failed)
+!> Solve a block of columns of the inverse on its subsystem of the neighbors
+!> of the block atoms. The subsystem matrix is applied on the rows of the list,
+!> skipping the elements outside of the subsystem. The columns are stored in
+!> the rows of the block atoms.
+subroutine invert_block(solver, alist, list, low, cols, loc, ainvlist, nsub, &
+   & niter, times, error, failed)
    !> Conjugate-gradient solver for the block
    type(cg_solver), intent(in) :: solver
 
    !> Coefficient matrix values in compressed-row storage
    real(wp), intent(in) :: alist(:)
 
-   !> Complete neighborlist representation of the matrix
+   !> Complete or upper triangular neighborlist representation of the matrix
    type(csr_list), intent(in) :: list
+
+   !> Lower triangle of an upper triangular list
+   type(lower_list), intent(in) :: low
 
    !> Atoms of the block columns
    integer, intent(in) :: cols(:)
@@ -967,12 +970,20 @@ subroutine invert_block(solver, alist, list, cols, loc, ainvlist, nsub, niter, &
    ncol = size(cols)
    allocate(sidx(size(loc)))
 
-   ! Atoms in the rows of the block atoms, the block atoms come first
+   ! Neighbors of the block atoms, the block atoms come first
    nsub = 0
    do ivec = 1, ncol
       iat = cols(ivec)
       do kat = list%inl(iat), list%inl(iat + 1) - 1
          jat = list%nlat(kat)
+         if (loc(jat) /= 0) cycle
+         nsub = nsub + 1
+         loc(jat) = nsub
+         sidx(nsub) = jat
+      end do
+      if (list%complete) cycle
+      do kat = low%inl(iat), low%inl(iat + 1) - 1
+         jat = low%nlat(kat)
          if (loc(jat) /= 0) cycle
          nsub = nsub + 1
          loc(jat) = nsub
@@ -1194,14 +1205,15 @@ subroutine csr_block_matmul(alist, list, vec, avec)
 end subroutine csr_block_matmul
 
 
-!> Multiply the subsystem block A_SS of a matrix in complete compressed-row
-!> storage with a block of vectors on the subsystem, avec = A_SS vec. The
-!> elements of the rows outside of the subsystem are skipped.
+!> Multiply the subsystem block A_SS of a matrix in complete or upper
+!> triangular compressed-row storage with a block of vectors on the subsystem,
+!> avec = A_SS vec. The elements of the rows outside of the subsystem are
+!> skipped.
 subroutine csr_sub_block_matmul(alist, list, sidx, loc, vec, avec)
-   !> Matrix values in complete compressed-row storage
+   !> Matrix values in complete or upper triangular compressed-row storage
    real(wp), intent(in) :: alist(:)
 
-   !> Complete neighborlist representation of the matrix
+   !> Complete or upper triangular neighborlist representation of the matrix
    type(csr_list), intent(in) :: list
 
    !> Atoms of the subsystem in the neighborlist, in the order of the vectors
@@ -1218,11 +1230,31 @@ subroutine csr_sub_block_matmul(alist, list, sidx, loc, vec, avec)
 
    integer :: ndim, nvec, isub, iat, jsub
    integer(i8) :: kat
-   real(wp), allocatable :: vect(:, :), acc(:)
+   real(wp), allocatable :: vect(:, :), acc(:), avect(:, :)
 
    ndim = size(vec, 1)
    nvec = size(vec, 2)
    allocate(vect(nvec, ndim))
+
+   ! An upper triangular list holds each pair once, the subsystems of
+   ! invert_list are solved by one thread each, so the product is formed
+   ! serially with the contributions to both atoms of a pair
+   if (.not. list%complete) then
+      allocate(avect(nvec, ndim), source=0.0_wp)
+      vect(:, :) = transpose(vec)
+      do isub = 1, ndim
+         iat = sidx(isub)
+         do kat = list%inl(iat), list%inl(iat + 1) - 1
+            jsub = loc(list%nlat(kat))
+            if (jsub == 0) cycle
+            avect(:, isub) = avect(:, isub) + alist(kat) * vect(:, jsub)
+            if (jsub /= isub) avect(:, jsub) = avect(:, jsub) &
+               & + alist(kat) * vect(:, isub)
+         end do
+      end do
+      avec(:, :) = transpose(avect)
+      return
+   end if
 
    !$omp parallel default(none) &
    !$omp shared(ndim, nvec, alist, list, sidx, loc, vec, avec, vect) &

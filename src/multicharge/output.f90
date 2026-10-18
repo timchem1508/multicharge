@@ -163,7 +163,8 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, h
 
    grad = present(gradient) .and. present(sigma)
    sparse = .false.
-   if (.not. present(dqdr) .and. present(cache)) sparse = allocated(cache%dqdrlist)
+   if (.not. present(dqdr) .and. present(cache)) sparse = allocated(cache%dqdrlist) &
+      & .or. allocated(cache%dqdrlist_ut)
    qgrad = present(dqdL) .and. (present(dqdr) .or. sparse)
 
    write(unit, '(a,":", t25, es20.13, 1x, a)') &
@@ -200,7 +201,12 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, h
    if (qgrad) then
       ! The compressed derivatives are expanded one charge at a time
       if (sparse) then
-         dqsum = sum(cache%dqdrlist) - sum(cache%uvec) * sum(cache%dlambdadr)
+         if (cache%dqdrpat%complete) then
+            dqsum = sum(cache%dqdrlist)
+         else
+            dqsum = sum(cache%dqdrlist_ut) + sum(cache%dqdrlist_lt)
+         end if
+         dqsum = dqsum - sum(cache%uvec) * sum(cache%dlambdadr)
       else
          dqsum = sum(dqdr)
       end if
@@ -315,8 +321,9 @@ end subroutine write_ascii_results
 !> Write the Hessian in compressed storage, the blocks on the pattern of its list
 !> including the charge constraint term and the factors of this term, which
 !> give the blocks outside of the pattern. The rows follow the order of the
-!> list. The lines of each row are formatted in parallel, as the format of the
-!> dense Hessian, and the rows are written in order.
+!> list, a half list only holds the blocks of the atoms y >= x of each row x.
+!> The lines of each row are formatted in parallel, as the format of the dense
+!> Hessian, and the rows are written in order.
 subroutine write_ascii_hessian_list(unit, mol, hessian)
 
    !> Unit for output
@@ -339,7 +346,9 @@ subroutine write_ascii_hessian_list(unit, mol, hessian)
    integer, parameter :: hlen = 81
 
    ! Frobenius norm from the blocks on the pattern, the charge constraint term
-   ! of all other blocks is |w|^2 |dlambda|^2 without its blocks on the pattern
+   ! of all other blocks is |w|^2 |dlambda|^2 without its blocks on the pattern.
+   ! A half list holds the block of y and x as the transpose of the block of x
+   ! and y.
    wnorm2 = sum(hessian%w**2)
    dnorm2 = sum(hessian%dlambda**2)
    hnorm = wnorm2 * dnorm2
@@ -354,6 +363,13 @@ subroutine write_ascii_hessian_list(unit, mol, hessian)
          end do
          hnorm = hnorm + sum(hblk**2) &
             & - sum(hessian%w(:, iat)**2) * sum(hessian%dlambda(:, jat)**2)
+         if (hessian%list%complete .or. jat == iat) cycle
+         do ic = 1, 3
+            hblk(:, ic) = hessian%hesslist(ic, :, hat) &
+               & + hessian%w(ic, jat) * hessian%dlambda(:, iat)
+         end do
+         hnorm = hnorm + sum(hblk**2) &
+            & - sum(hessian%w(:, jat)**2) * sum(hessian%dlambda(:, iat)**2)
       end do
    end do
 
@@ -362,6 +378,8 @@ subroutine write_ascii_hessian_list(unit, mol, hessian)
    write(unit, '(a, 1x, i0, a, f0.1, a)') "Hessian blocks on the pattern:", &
    & size(hessian%list%nlat, kind=i8), " (", &
    & real(size(hessian%list%nlat, kind=i8), wp) / mol%nat, " per atom)"
+   if (.not. hessian%list%complete) write(unit, '(a)') &
+   & "Upper triangle, the block of A and # is the transpose of the block of # and A"
    write(unit, '(78("-"))')
    write(unit, '(a10,1x,a4,3x,a6,1x,a4,3x,a9,1x,*(1x,a12))') &
    & "#", "Z", "#", "A", "component", "d2E/dxdR", "d2E/dydR", "d2E/dzdR"
@@ -613,7 +631,8 @@ subroutine json_results(unit, indentation, energy, gradient, dqdr, charges, cn, 
       call write_json_array(unit, array, indent)
    end if
    sparse = .false.
-   if (.not. present(dqdr) .and. present(cache)) sparse = allocated(cache%dqdrlist)
+   if (.not. present(dqdr) .and. present(cache)) sparse = allocated(cache%dqdrlist) &
+      & .or. allocated(cache%dqdrlist_ut)
    if (present(dqdr) .or. sparse) then
       write(unit, '(",")', advance='no')
       if (allocated(indent)) write(unit, '(/,a)', advance='no') repeat(indent, 1)
