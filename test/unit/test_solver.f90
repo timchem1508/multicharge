@@ -790,8 +790,8 @@ subroutine test_cg_invert_list(error)
    call solver%invert(amat=amat, ainv=adense, error=error)
    if (allocated(error)) return
 
-   call new_cg_solver(solver, cg_input(cgtol=1.0e-14_wp, cgmiter=1000, &
-      & verbosity=0, use_nlist=.true.))
+   call new_cg_solver(solver, cg_input(cgtol=1.0e-14_wp, invtol=1.0e-14_wp, &
+      & cgmiter=1000, verbosity=0, use_nlist=.true.))
    call solver%invert_list(alist, list, ainvlist, error=error)
    if (allocated(error)) return
 
@@ -833,8 +833,8 @@ subroutine test_cg_invert_list_upper(error)
    call solver%invert(amat=amat, ainv=adense, error=error)
    if (allocated(error)) return
 
-   call new_cg_solver(solver, cg_input(cgtol=1.0e-14_wp, cgmiter=1000, &
-      & verbosity=0, use_nlist=.true.))
+   call new_cg_solver(solver, cg_input(cgtol=1.0e-14_wp, invtol=1.0e-14_wp, &
+      & cgmiter=1000, verbosity=0, use_nlist=.true.))
    call solver%invert_list(alist, list, ainvlist, error=error)
    if (allocated(error)) return
 

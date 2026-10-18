@@ -195,11 +195,15 @@ program main
       end if
    else if (analytic_hessian .and. use_nlist) then
       ! Compressed Hessian on the pattern of the neighborlist with the factored
-      ! charge constraint term, only expanded for the output
+      ! charge constraint term, only expanded for the output. The neighborlist
+      ! moves into the Hessian, which then serves as the only list.
       allocate(hesslist)
+      hesslist%list = list
+      deallocate(list)
       call timer%push("hess")
-      call model%get_hessian(mol, solver, cache, error, hesslist, list, qvec, &
-      & energy, gradient, sigma, unit=output_unit, verbosity=verbosity)
+      call model%get_hessian(mol, solver, cache, error, hesslist, qvec=qvec, &
+      & energy=energy, gradient=gradient, sigma=sigma, unit=output_unit, &
+      & verbosity=verbosity)
       call timer%pop
       if (verbosity > 1) then
          write(output_unit, '(a, 1x, a)') "Get analytical Hessian time : ", &
@@ -238,7 +242,7 @@ program main
    call write_ascii_properties(output_unit, mol, model, cache%cn, qvec)
    call timer%push("output")
    call write_ascii_results(output_unit, mol, energy, gradient, sigma, dqdr, dqdL, hess, &
-   & press, cache, hesslist)
+   & press, cache, hesslist, list)
    call timer%pop
    if (verbosity > 1) then
       write(output_unit, '(a, 1x, a)') "Output time : ", &
@@ -254,7 +258,7 @@ program main
    if (json) then
       open(file=json_output, newunit=unit)
       call json_results(unit, "  ", energy=sum(energy), gradient=gradient, dqdr=dqdr, &
-      & charges=qvec, cn=cache%cn, cache=cache)
+      & charges=qvec, cn=cache%cn, cache=cache, list=list)
       close(unit)
       write(output_unit, '(a)') &
          "[Info] JSON dump of results written to '"//json_output//"'"
@@ -286,6 +290,8 @@ subroutine help(unit)
       & "Provide the partial charge solver: 'cg' or 'direct' (default, cg with nlist)", &
       "-it, -maxiter, --maxiter <int>", "Provide the maximal number of CG iterations", &
       "-tol, -tolerance, --tolerance <real>", "Provide the tolerance of the solver", &
+      "-invtol, --invtol <real>", &
+      & "Tolerance of the inverse on the neighborlist (cg, default: 1e-11)", &
       "-g, -eg, -grad, --grad, -egrad, --egrad", &
       & "Evaluate molecular energy gradient and virial.", &
       "-qg, -qgrad, --qgrad", "Evaluate molecular charge gradient and virial.", &
@@ -298,8 +304,6 @@ subroutine help(unit)
       "-cut, -cutoff, --cutoff <real>", &
       & "Cutoff for neighborlist generation in Bohrs (default: 29.0 Bohr,", &
       "", "33.0 Bohr with charge gradient or Hessian)", &
-      "-ainvthr, --ainvthr <real>", &
-      & "Relative threshold for the inverse in charge gradients (cg, list)", &
       "-v, -verbose, --verbose", "Show more", &
       "-s, -silent, --silent", "Show less", &
       "-j, -json, --json", &
@@ -376,7 +380,7 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
 
    character(len=:), allocatable :: solver_name
    integer, allocatable :: maxiter
-   real(wp), allocatable :: tol, ainvthr
+   real(wp), allocatable :: tol, invtol
 
    model_id = mchrg_model%eeq2019
    use_nlist = .false.
@@ -502,17 +506,17 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
             call fatal_error(error, "Invalid tolerance")
             exit
          end if
-         case("-nlist", "-list", "--nlist")
-         use_nlist = .true.
-         case("-ainvthr", "--ainvthr")
-         allocate(ainvthr)
+         case("-invtol", "--invtol")
+         allocate(invtol)
          iarg = iarg + 1
          call get_argument(iarg, arg)
-         read(arg, *, iostat=iostat) ainvthr
+         read(arg, *, iostat=iostat) invtol
          if (iostat /= 0) then
-            call fatal_error(error, "Invalid threshold for the inverse")
+            call fatal_error(error, "Invalid tolerance of the inverse")
             exit
          end if
+         case("-nlist", "-list", "--nlist")
+         use_nlist = .true.
          case("-cut", "-cutoff", "--cutoff")
          iarg = iarg + 1
          call get_argument(iarg, arg)
@@ -552,26 +556,21 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
       if (allocated(tol)) then
          solver_input%cgtol = tol
       end if
+      if (allocated(invtol)) then
+         solver_input%invtol = invtol
+      end if
       if (allocated(verbosity)) then
          solver_input%verbosity = verbosity
       end if
       solver_input%use_nlist = use_nlist
-      if (allocated(ainvthr)) then
-         solver_input%ainvthr = ainvthr
-      end if
       type is (direct_input)
       if (allocated(verbosity)) then
          solver_input%verbosity = verbosity
       end if
       if (allocated(error)) return
-      if (allocated(maxiter) .or. allocated(tol)) then
+      if (allocated(maxiter) .or. allocated(tol) .or. allocated(invtol)) then
          call fatal_error(error, &
             & "Maximal number of iterations and tolerance require the cg solver.")
-         return
-      end if
-      if (allocated(ainvthr)) then
-         call fatal_error(error, &
-            & "Inverse threshold requires the cg solver.")
          return
       end if
       if (use_nlist) then

@@ -39,16 +39,16 @@ module multicharge_solver_cg
       !> Convergence tolerance
       real(wp), allocatable :: cgtol
 
+      !> Convergence tolerance of the block CG for the inverse on a
+      !> neighborlist, whose truncation to the pattern of the list is a much
+      !> larger error than the default tolerance of the CG solver
+      real(wp), allocatable :: invtol
+
       !> Output verbosity
       integer, allocatable :: verbosity
 
       !> Whether to use a neighborlist representation
       logical, allocatable :: use_nlist
-
-      !> Threshold for dropping elements of the inverse in the charge
-      !> derivatives on a neighborlist, relative to its largest diagonal
-      !> element, which makes the compressed derivatives sparser
-      real(wp), allocatable :: ainvthr
    end type cg_input
 
    !> Conjugate-gradient solver with a Jacobi preconditioner
@@ -59,16 +59,16 @@ module multicharge_solver_cg
       !> Convergence tolerance
       real(wp), allocatable :: cgtol
 
+      !> Convergence tolerance of the block CG for the inverse on a
+      !> neighborlist, whose truncation to the pattern of the list is a much
+      !> larger error than the default tolerance of the CG solver
+      real(wp), allocatable :: invtol
+
       !> Output verbosity
       integer, allocatable :: verbosity
 
       !> Whether to use a neighborlist representation
       logical, allocatable :: use_nlist
-
-      !> Threshold for dropping elements of the inverse in the charge
-      !> derivatives on a neighborlist, relative to its largest diagonal
-      !> element, which makes the compressed derivatives sparser
-      real(wp), allocatable :: ainvthr
    contains
       !> Solve the linear system iteratively
       procedure :: solve
@@ -92,14 +92,14 @@ module multicharge_solver_cg
    !> Default convergence tolerance
    real(wp), parameter :: cgtol_def = 1.0e-15_wp
 
+   !> Default convergence tolerance of the inverse on a neighborlist
+   real(wp), parameter :: invtol_def = 1.0e-11_wp
+
    !> Default output verbosity
    integer, parameter :: verbosity_def = 0
 
    !> Default neighborlist usage
    logical, parameter :: use_nlist_def = .false.
-
-   !> Default threshold for skipping elements of the inverse
-   real(wp), parameter :: ainvthr_def = 0.0_wp
 
    !> Default number of columns per block of right-hand sides
    integer, parameter :: block_size_def = 16
@@ -132,6 +132,11 @@ subroutine new_cg_solver(self, input)
    else
       self%cgtol = cgtol_def
    end if
+   if (allocated(input%invtol)) then
+      self%invtol = input%invtol
+   else
+      self%invtol = invtol_def
+   end if
    if (allocated(input%verbosity)) then
       self%verbosity = input%verbosity
    else
@@ -141,11 +146,6 @@ subroutine new_cg_solver(self, input)
       self%use_nlist = input%use_nlist
    else
       self%use_nlist = use_nlist_def
-   end if
-   if (allocated(input%ainvthr)) then
-      self%ainvthr = input%ainvthr
-   else
-      self%ainvthr = ainvthr_def
    end if
 
 end subroutine new_cg_solver
@@ -778,7 +778,7 @@ end subroutine invert
 !> dropped. The column of an atom is stored in its row, so an upper triangular
 !> list keeps the elements of the atoms of higher index. The blocks are
 !> independent and solved in parallel.
-subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
+subroutine invert_list(self, alist, list, ainvlist, xyz, low, new_unit, error)
    !> Conjugate-gradient solver instance
    class(cg_solver), intent(in) :: self
 
@@ -794,6 +794,9 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    !> Cartesian coordinates for spatially compact blocks, the blocks follow the
    !> atom order if absent
    real(wp), intent(in), optional :: xyz(:, :)
+
+   !> Lower triangle of an upper triangular list, built here if absent
+   type(lower_list), intent(in), target, optional :: low
 
    !> Output unit
    integer, intent(in), optional :: new_unit
@@ -817,8 +820,9 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    real(wp), allocatable :: pos(:, :)
    ! Solver for the blocks without output
    type(cg_solver) :: blksolver
-   ! Lower triangle of an upper triangular list
-   type(lower_list) :: low
+   ! Lower triangle of an upper triangular list, given or built here
+   type(lower_list), target :: lowbuf
+   type(lower_list), pointer :: lowptr
    integer :: unit
    logical :: failed, skip
 
@@ -844,6 +848,13 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
          return
       end if
    end if
+   if (present(low) .and. .not. list%complete) then
+      if (size(low%inl, kind=i8) /= size(list%inl, kind=i8)) then
+         call fatal_error(error, &
+            & "Dimension mismatch between list and its lower triangle.")
+         return
+      end if
+   end if
    if (ndim <= 0) return
 
    if (present(new_unit)) then
@@ -864,10 +875,15 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    nblk = (ndim + block_size_def - 1) / block_size_def
 
    call new_cg_solver(blksolver, cg_input(cgmiter=self%cgmiter, &
-      & cgtol=self%cgtol, verbosity=0, use_nlist=.true.))
+      & cgtol=self%invtol, verbosity=0, use_nlist=.true.))
 
    ! The neighbors of lower index of an upper triangular list
-   if (.not. list%complete) call new_lower_list(low, ndim, list)
+   if (present(low)) then
+      lowptr => low
+   else
+      if (.not. list%complete) call new_lower_list(lowbuf, ndim, list)
+      lowptr => lowbuf
+   end if
 
    failed = .false.
    sumsub = 0_i8
@@ -876,7 +892,7 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    maxsub = 0
    maxiter = 0
    !$omp parallel default(none) &
-   !$omp shared(ndim, nblk, order, alist, list, low, ainvlist, blksolver, error) &
+   !$omp shared(ndim, nblk, order, alist, list, lowptr, ainvlist, blksolver, error) &
    !$omp shared(failed) &
    !$omp private(iblk, loc, nsub, niter, skip, tblk) &
    !$omp reduction(+:sumsub, sumiter, sumtime) reduction(max:maxsub, maxiter)
@@ -886,7 +902,7 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
       !$omp atomic read
       skip = failed
       if (skip) cycle
-      call invert_block(blksolver, alist, list, low, &
+      call invert_block(blksolver, alist, list, lowptr, &
          & order((iblk - 1) * block_size_def + 1:min(iblk * block_size_def, ndim)), &
          & loc, ainvlist, nsub, niter, tblk, error, failed)
       sumsub = sumsub + nsub
@@ -907,6 +923,8 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
          & real(sumsub, wp) / nblk, ", max ", maxsub
       write(unit, '(a, 1x, f0.1, a, i0)') "Block CG iterations per block    :", &
          & real(sumiter, wp) / nblk, ", max ", maxiter
+      write(unit, '(a, 1x, es9.2)') "Block CG tolerance               :", &
+         & self%invtol
       write(unit, '(a, 3(1x, f0.3))') "Select/CG/store time (s)         :", &
          & sumtime
       write(unit, '(a)') ''

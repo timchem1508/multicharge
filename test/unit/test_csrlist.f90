@@ -1333,7 +1333,7 @@ subroutine test_partial_derivs(error, mol, model)
    if (allocated(error)) return
 
    do jat = 1, mol%nat
-      call get_dqdr_row(cache2, jat, dqrow)
+      call get_dqdr_row(cache2, list, jat, dqrow)
       if (any(abs(dqrow - dqdr2(:, :, jat)) > thr1)) then
          call test_failed(error, "Compressed charge derivatives do not match")
          print'(es21.14)', maxval(abs(dqrow - dqdr2(:, :, jat)))
@@ -1914,7 +1914,7 @@ subroutine test_implicit_hessian(error, mol, model, nlcutoff, complete)
    ! formed in the same order, -(dq/dR)^T (dX/dR - dA/dR*q)
    call expand_partial_derivs(mol, list, cache, dabdr)
    do jat = 1, mol%nat
-      call get_dqdr_row(cache, jat, dqdr(:, :, jat))
+      call get_dqdr_row(cache, list, jat, dqdr(:, :, jat))
    end do
    refhess(:, :) = -matmul(reshape(dqdr, [ndim, mol%nat]), &
       & transpose(reshape(dabdr, [ndim, mol%nat])))

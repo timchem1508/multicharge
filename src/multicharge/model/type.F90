@@ -35,7 +35,7 @@ module multicharge_model_type
    use multicharge_model_cache, only : mchrg_cache
    use multicharge_solver_type, only : mchrg_solver_type
    use multicharge_solver_cg, only : cg_solver
-   use multicharge_lowerlist, only : count_neighbors, get_neighbor
+   use multicharge_lowerlist, only : lower_list, count_neighbors, get_neighbor
    !$ use omp_lib, only : omp_get_num_threads, omp_get_thread_num
 
    implicit none
@@ -127,8 +127,8 @@ module multicharge_model_type
       !> response of the charges (molecular)
       procedure :: get_implicit_hessian_dense
 
-      !> Calculate the implicit Hessian from the compressed charge derivatives
-      !> on a complete neighborlist (molecular)
+      !> Calculate the implicit Hessian from the inverse and the partial
+      !> derivatives on a complete or half neighborlist (molecular)
       procedure :: get_implicit_hessian_list
 
       !> Calculate the implicit Hessian from the response of the charges
@@ -412,6 +412,14 @@ module multicharge_model_type
 
    !> Smallest positive working-precision number
    real(wp), parameter :: eps = tiny(1.0_wp)
+
+   !> Largest number of atoms in a group of the charge derivatives on a
+   !> neighborlist
+   integer, parameter :: max_group = 8
+
+   !> Largest distance of an atom of a group to its first atom, relative to the
+   !> cutoff of the list
+   real(wp), parameter :: group_scale = 0.2_wp
 
 
 contains
@@ -727,7 +735,7 @@ subroutine solve(self, mol, solver, cache, error, &
 
       call timer%push("cpq")
       call get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, &
-         & unit=print_unit)
+         & unit=print_unit, verbosity=verbosity_solve)
       ! pop cpq timer
       call timer%pop
       call print_gradient_time(print_unit, verbosity_solve, timer%get("cpq"))
@@ -741,7 +749,8 @@ end subroutine solve
 
 
 !> Derivatives of the partial charges w.r.t. atomic positions and lattice vectors
-subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit)
+subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit, &
+   & verbosity)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
@@ -771,9 +780,14 @@ subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit)
    !> Output unit
    integer, intent(in), optional :: unit
 
+   !> Verbosity level, the times of the inverse and the product on a
+   !> neighborlist are printed from 1
+   integer, intent(in), optional :: verbosity
+
    real(wp), allocatable :: daqxdr(:, :, :), daqxdL(:, :, :), ainv(:, :)
    real(wp) :: scale, uvecsum
-   integer :: jat
+   integer :: jat, print_unit
+   type(timer_type) :: timer
 
    ! Without a neighborlist the position derivatives are only formed densely
    if (.not. (present(list) .or. present(dqdr))) then
@@ -787,29 +801,34 @@ subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit)
          ! J^-1 decays fast with the distance and is kept on the pattern of the
          ! list, the dense part of (P J^-1)^T = J^-1 - u*u^T/sum(u) is the
          ! rank-1 term of the charge constraint, which is rebuilt from uvec
-         if (allocated(cache%ainvlist)) then
-            if (size(cache%ainvlist, kind=i8) /= size(list%nlat, kind=i8)) &
-               & deallocate(cache%ainvlist)
-         end if
-         if (.not. allocated(cache%ainvlist)) then
-            allocate(cache%ainvlist(size(list%nlat, kind=i8)))
-         end if
-         call solver%invert_list(cache%alist, list, cache%ainvlist, &
-            & xyz=mol%xyz, new_unit=unit, error=error)
+         call timer%push("inverse")
+         call get_inverse_list(mol, solver, cache, list, error, unit)
+         call timer%pop
          if (allocated(error)) return
 
-         if (list%complete) then
-            call get_q_derivs_list(mol, solver, cache, list, dqdL, error, unit)
-            if (allocated(error)) return
-         else
-            call get_q_derivs_half(mol, cache, list, dqdL)
+         call timer%push("product")
+         call get_dqdr_list(mol, cache, list)
+         call get_constraint_factors(mol, cache, list)
+         call get_dqdL_list(mol, cache, list, dqdL)
+         call timer%pop
+
+         if (present(verbosity)) then
+            if (verbosity > 0) then
+               print_unit = output_unit
+               if (present(unit)) print_unit = unit
+               call print_stage_time(print_unit, "Inverse on the neighborlist", &
+                  & timer%get("inverse"))
+               call print_stage_time(print_unit, "Charge derivatives S*dB/dR", &
+                  & timer%get("product"))
+               write(print_unit, '(a)') ''
+            end if
          end if
 
          if (present(dqdr)) then
             !$omp parallel do default(none) schedule(runtime) &
-            !$omp shared(mol, cache, dqdr) private(jat)
+            !$omp shared(mol, cache, list, dqdr) private(jat)
             do jat = 1, mol%nat
-               call get_dqdr_row(cache,jat, dqdr(:, :, jat))
+               call get_dqdr_row(cache, list, jat, dqdr(:, :, jat))
             end do
          end if
          return
@@ -852,30 +871,22 @@ subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit)
 end subroutine get_q_derivs
 
 
-!> Charge derivatives from the inverse S = J^-1 on the pattern of the complete
-!> neighborlist. The position derivatives dq_j/dR_i = (S B)_ji - u_j w_i / sum(u)
-!> with B = dB/dR - dA/dR*q and w = B^T u are kept in compressed-row storage:
-!> the sparse product S B in cache%dqdrlist on the pattern cache%dqdrpat, which
-!> is the pattern of the list, and the factors w / sum(u) of the charge
-!> constraint term in cache%dlambdadr. The elements of S B outside of the
-!> pattern are of the order of the inverse at the cutoff and are dropped.
-subroutine get_q_derivs_list(mol, solver, cache, list, dqdL, error, unit)
+!> Inverse S = J^-1 of the coefficient matrix on the pattern of a complete or
+!> half neighborlist in cache%ainvlist, a half list takes its lower triangle
+!> from the cache
+subroutine get_inverse_list(mol, solver, cache, list, error, unit)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
 
-   !> Conjugate-gradient solver with the threshold of the inverse
+   !> Conjugate-gradient solver with the tolerance of the inverse
    class(cg_solver), intent(in) :: solver
 
-   !> Cache with the inverse on the neighborlist, receives the compressed
-   !> position derivatives
+   !> Cache with the coefficient matrix on the list, receives the inverse
    type(mchrg_cache), intent(inout) :: cache
 
-   !> Complete neighborlist
+   !> Complete or half neighborlist
    type(csr_list), intent(in) :: list
-
-   !> Derivative of the atomic partial charges w.r.t. lattice vectors
-   real(wp), intent(out) :: dqdL(:, :, :)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -883,206 +894,601 @@ subroutine get_q_derivs_list(mol, solver, cache, list, dqdL, error, unit)
    !> Output unit
    integer, intent(in), optional :: unit
 
-   integer :: iat, jat, kkat
-   integer(i8) :: kat, lat, qat
-   real(wp) :: uvecsum, scale, sjk
-   real(wp) :: wlat(3, 3)
-   integer(i8), allocatable :: pos(:)
+   if (allocated(cache%ainvlist)) then
+      if (size(cache%ainvlist, kind=i8) /= size(list%nlat, kind=i8)) &
+         & deallocate(cache%ainvlist)
+   end if
+   if (.not. allocated(cache%ainvlist)) &
+      & allocate(cache%ainvlist(size(list%nlat, kind=i8)))
+   if (list%complete) then
+      call solver%invert_list(cache%alist, list, cache%ainvlist, xyz=mol%xyz, &
+         & new_unit=unit, error=error)
+   else
+      call solver%invert_list(cache%alist, list, cache%ainvlist, xyz=mol%xyz, &
+         & low=cache%lowlist, new_unit=unit, error=error)
+   end if
 
-   ! Sparse product S B on the pattern of the list, B holds dB_k/dR_i in row k.
-   ! Each iteration only updates row jat, pos holds the position of each atom
-   ! in this row.
-   cache%dqdrpat = list
-   if (allocated(cache%dqdrlist_ut)) deallocate(cache%dqdrlist_ut)
-   if (allocated(cache%dqdrlist_lt)) deallocate(cache%dqdrlist_lt)
-   if (allocated(cache%dqdrlist)) deallocate(cache%dqdrlist)
-   allocate(cache%dqdrlist(3, size(list%nlat, kind=i8)), source=0.0_wp)
-   !$omp parallel default(none) &
-   !$omp shared(mol, cache, list) &
-   !$omp private(iat, jat, kkat, kat, lat, qat, sjk, pos)
-   allocate(pos(mol%nat), source=0_i8)
-   !$omp do schedule(runtime)
-   do jat = 1, mol%nat
-      do kat = list%inl(jat), list%inl(jat + 1) - 1
-         pos(list%nlat(kat)) = kat
-      end do
-      do kat = list%inl(jat), list%inl(jat + 1) - 1
-         kkat = list%nlat(kat)
-         sjk = cache%ainvlist(kat)
-         do lat = list%inl(kkat), list%inl(kkat + 1) - 1
-            qat = pos(list%nlat(lat))
-            if (qat == 0) cycle
-            cache%dqdrlist(:, qat) = cache%dqdrlist(:, qat) &
-               & + sjk * cache%dabdrlist(:, lat)
-         end do
-      end do
-      do kat = list%inl(jat), list%inl(jat + 1) - 1
-         pos(list%nlat(kat)) = 0
-      end do
-   end do
-   !$omp end do
-   deallocate(pos)
-   !$omp end parallel
-
-   ! Contractions with the constraint response, w = B^T u
-   uvecsum = sum(cache%uvec)
-   if (allocated(cache%dlambdadr)) deallocate(cache%dlambdadr)
-   allocate(cache%dlambdadr(3, mol%nat), source=0.0_wp)
-   wlat(:, :) = 0.0_wp
-   do iat = 1, mol%nat
-      do kat = list%inl(iat), list%inl(iat + 1) - 1
-         jat = list%nlat(kat)
-         cache%dlambdadr(:, jat) = cache%dlambdadr(:, jat) &
-            & + cache%dabdrlist(:, kat) * cache%uvec(iat)
-      end do
-      wlat(:, :) = wlat + cache%dabdL(:, :, iat) * cache%uvec(iat)
-   end do
-   cache%dlambdadr(:, :) = cache%dlambdadr / (uvecsum + eps)
-
-   ! Lattice derivatives B_L^T S and their charge constraint term
-   !$omp parallel do default(none) schedule(runtime) &
-   !$omp shared(mol, cache, list, uvecsum, wlat, dqdL) &
-   !$omp private(iat, jat, kat, scale)
-   do jat = 1, mol%nat
-      scale = cache%uvec(jat) / (uvecsum + eps)
-      dqdL(:, :, jat) = -scale * wlat
-      do kat = list%inl(jat), list%inl(jat + 1) - 1
-         iat = list%nlat(kat)
-         dqdL(:, :, jat) = dqdL(:, :, jat) + &
-            & cache%ainvlist(kat) * cache%dabdL(:, :, iat)
-      end do
-   end do
-
-end subroutine get_q_derivs_list
+end subroutine get_inverse_list
 
 
-!> Charge derivatives from the inverse S = J^-1 on the upper triangle of a half
-!> neighborlist of a molecular system, as get_q_derivs_list. The neighbors of
-!> lower index of each atom come from the lower triangle of the list in the
-!> cache. The element dq_j/dR_i of the sparse product S B is kept at the entry
-!> of i in the row of j in cache%dqdrlist_ut for i >= j, and at the entry of j
-!> in the row of i in cache%dqdrlist_lt for i < j.
-subroutine get_q_derivs_half(mol, cache, list, dqdL)
+!> Position derivatives of the charges from the inverse S = J^-1 on the pattern
+!> of a complete or half neighborlist, dq_j/dR_i = (S B)_ji - u_j w_i / sum(u)
+!> with B = dB/dR - dA/dR*q and w = B^T u. The sparse product S B is kept in
+!> compressed storage on the pattern of the list, a complete list keeps
+!> dq_j/dR_i at the entry of i in the row of j in cache%dqdrlist, a half list
+!> in cache%dqdrlist_ut for i >= j and at the entry of j in the row of i in
+!> cache%dqdrlist_lt for i < j. The columns of S B are formed for groups of
+!> consecutive atoms, the elements outside of the pattern are of the order of
+!> the inverse at the cutoff and are dropped. The factors w / sum(u) of the
+!> charge constraint term follow from get_constraint_factors.
+subroutine get_dqdr_list(mol, cache, list)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
 
-   !> Cache with the inverse and the partial derivatives on the half list,
-   !> receives the compressed position derivatives
+   !> Cache with the inverse and the partial derivatives on the list, receives
+   !> the compressed position derivatives
    type(mchrg_cache), intent(inout) :: cache
 
-   !> Half neighborlist
+   !> Complete or half neighborlist
+   type(csr_list), intent(in) :: list
+
+   integer :: igrp, ngrp, nbmax, x0, ng, nb, n, i
+   integer(i8) :: kat
+   integer, allocatable :: gstart(:), jt(:), tq(:), bloc(:), blist(:)
+   integer(i8), allocatable :: qpos(:, :)
+   real(wp), allocatable :: pan(:, :), qcol(:, :)
+
+   call get_list_groups(mol, list, gstart)
+   ngrp = size(gstart) - 1
+   nbmax = min(mol%nat, max_group * get_max_neighbors(mol%nat, list, cache%lowlist))
+
+   if (allocated(cache%dqdrlist)) deallocate(cache%dqdrlist)
+   if (allocated(cache%dqdrlist_ut)) deallocate(cache%dqdrlist_ut)
+   if (allocated(cache%dqdrlist_lt)) deallocate(cache%dqdrlist_lt)
+   if (list%complete) then
+      ! Every entry of the list is a column element of one group
+      allocate(cache%dqdrlist(3, size(list%nlat, kind=i8)))
+      call transpose_list(mol%nat, list, jt, tq)
+   else
+      allocate(cache%dqdrlist_ut(3, size(list%nlat, kind=i8)), &
+         & cache%dqdrlist_lt(3, size(list%nlat, kind=i8)), source=0.0_wp)
+      allocate(jt(0), tq(0))
+   end if
+
+   ! Only the group of atom x writes the derivatives w.r.t. R_x
+   !$omp parallel default(none) &
+   !$omp shared(mol, cache, list, gstart, ngrp, nbmax, jt, tq) &
+   !$omp private(igrp, x0, ng, nb, n, i, kat, bloc, blist, qpos, pan, qcol)
+   allocate(bloc(mol%nat), source=0)
+   allocate(blist(nbmax), qpos(max_group, nbmax), pan(3 * max_group, nbmax), &
+      & qcol(3 * max_group, nbmax))
+   !$omp do schedule(runtime)
+   do igrp = 1, ngrp
+      x0 = gstart(igrp)
+      ng = gstart(igrp + 1) - x0
+      call get_group_dqdr(cache, list, jt, tq, x0, ng, nb, bloc, blist, qpos, &
+         & pan, qcol)
+      do n = 1, nb
+         do i = 1, ng
+            kat = qpos(i, n)
+            if (kat == 0) cycle
+            if (list%complete) then
+               cache%dqdrlist(:, kat) = qcol(3 * i - 2:3 * i, n)
+            else if (kat > 0) then
+               cache%dqdrlist_ut(:, kat) = qcol(3 * i - 2:3 * i, n)
+            else
+               cache%dqdrlist_lt(:, -kat) = qcol(3 * i - 2:3 * i, n)
+            end if
+         end do
+         bloc(blist(n)) = 0
+      end do
+   end do
+   !$omp end do
+   deallocate(bloc, blist, qpos, pan, qcol)
+   !$omp end parallel
+
+end subroutine get_dqdr_list
+
+
+!> Factors w / sum(u) of the charge constraint term of the position derivatives
+!> of the charges in cache%dlambdadr, w = B^T u with the partial derivatives
+!> B = dB/dR - dA/dR*q on a complete or half neighborlist and the constraint
+!> response u
+subroutine get_constraint_factors(mol, cache, list)
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Cache with the partial derivatives on the list and the constraint
+   !> response, receives the factors
+   type(mchrg_cache), intent(inout) :: cache
+
+   !> Complete or half neighborlist
+   type(csr_list), intent(in) :: list
+
+   integer :: iat, jat
+   integer(i8) :: kat
+   real(wp) :: uvecsum
+
+   uvecsum = sum(cache%uvec)
+   if (allocated(cache%dlambdadr)) deallocate(cache%dlambdadr)
+   allocate(cache%dlambdadr(3, mol%nat), source=0.0_wp)
+   if (list%complete) then
+      do iat = 1, mol%nat
+         do kat = list%inl(iat), list%inl(iat + 1) - 1
+            jat = list%nlat(kat)
+            cache%dlambdadr(:, jat) = cache%dlambdadr(:, jat) &
+               & + cache%dabdrlist(:, kat) * cache%uvec(iat)
+         end do
+      end do
+   else
+      do iat = 1, mol%nat
+         do kat = list%inl(iat), list%inl(iat + 1) - 1
+            jat = list%nlat(kat)
+            cache%dlambdadr(:, jat) = cache%dlambdadr(:, jat) &
+               & + cache%dabdrlist_ut(:, kat) * cache%uvec(iat)
+            if (jat /= iat) cache%dlambdadr(:, iat) = cache%dlambdadr(:, iat) &
+               & + cache%dabdrlist_lt(:, kat) * cache%uvec(jat)
+         end do
+      end do
+   end if
+   cache%dlambdadr(:, :) = cache%dlambdadr / (uvecsum + eps)
+
+end subroutine get_constraint_factors
+
+
+!> Derivatives of the charges w.r.t. the lattice vectors, B_L^T S with the
+!> inverse S on a complete or half neighborlist and the strain derivatives B_L
+!> of the partial derivatives, and their charge constraint term
+subroutine get_dqdL_list(mol, cache, list, dqdL)
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Cache with the inverse on the list, the strain derivatives of the partial
+   !> derivatives and a half list with its lower triangle
+   type(mchrg_cache), intent(in) :: cache
+
+   !> Complete or half neighborlist
    type(csr_list), intent(in) :: list
 
    !> Derivative of the atomic partial charges w.r.t. lattice vectors
    real(wp), intent(out) :: dqdL(:, :, :)
 
-   integer :: iat, jat, kkat, nup, nrow, ient, kent, kmax
-   integer(i8) :: kat, lat
-   real(wp) :: uvecsum, scale, sjk
+   integer :: iat, jat, ient
+   integer(i8) :: kat
+   real(wp) :: uvecsum, scale
    real(wp) :: wlat(3, 3)
-   integer, allocatable :: pos(:)
-   real(wp), allocatable :: qrow(:, :)
 
-   cache%dqdrpat = list
-   if (allocated(cache%dqdrlist)) deallocate(cache%dqdrlist)
-   if (allocated(cache%dqdrlist_ut)) deallocate(cache%dqdrlist_ut)
-   if (allocated(cache%dqdrlist_lt)) deallocate(cache%dqdrlist_lt)
-   allocate(cache%dqdrlist_ut(3, size(list%nlat, kind=i8)), &
-      & cache%dqdrlist_lt(3, size(list%nlat, kind=i8)), source=0.0_wp)
-
-   kmax = 0
-   do jat = 1, mol%nat
-      kmax = max(kmax, count_neighbors(list, cache%lowlist, jat))
-   end do
-
-   ! Sparse product S B, row k of B is the upper triangle in the row of k and
-   ! the lower triangle in the rows of its neighbors of lower index. Each
-   ! iteration only forms row jat in qrow, in the order of the neighbors of jat,
-   ! pos holds the index of each neighbor.
-   !$omp parallel default(none) &
-   !$omp shared(mol, cache, list, kmax) &
-   !$omp private(iat, jat, kkat, nup, nrow, ient, kent, kat, lat, sjk, pos, qrow)
-   allocate(pos(mol%nat), source=0)
-   allocate(qrow(3, kmax))
-   !$omp do schedule(runtime)
-   do jat = 1, mol%nat
-      nup = int(list%inl(jat + 1) - list%inl(jat))
-      nrow = count_neighbors(list, cache%lowlist, jat)
-      do ient = 1, nrow
-         call get_neighbor(list, cache%lowlist, jat, ient, iat, kat)
-         pos(iat) = ient
-      end do
-      qrow(:, :nrow) = 0.0_wp
-      do kent = 1, nrow
-         call get_neighbor(list, cache%lowlist, jat, kent, kkat, kat)
-         sjk = cache%ainvlist(kat)
-         do lat = list%inl(kkat), list%inl(kkat + 1) - 1
-            ient = pos(list%nlat(lat))
-            if (ient == 0) cycle
-            qrow(:, ient) = qrow(:, ient) + sjk * cache%dabdrlist_ut(:, lat)
-         end do
-         do lat = cache%lowlist%inl(kkat), cache%lowlist%inl(kkat + 1) - 1
-            ient = pos(cache%lowlist%nlat(lat))
-            if (ient == 0) cycle
-            qrow(:, ient) = qrow(:, ient) &
-               & + sjk * cache%dabdrlist_lt(:, cache%lowlist%pos(lat))
-         end do
-      end do
-      do ient = 1, nrow
-         call get_neighbor(list, cache%lowlist, jat, ient, iat, kat)
-         pos(iat) = 0
-         if (ient <= nup) then
-            cache%dqdrlist_ut(:, kat) = qrow(:, ient)
-         else
-            cache%dqdrlist_lt(:, kat) = qrow(:, ient)
-         end if
-      end do
-   end do
-   !$omp end do
-   deallocate(pos, qrow)
-   !$omp end parallel
-
-   ! Contractions with the constraint response, w = B^T u
    uvecsum = sum(cache%uvec)
-   if (allocated(cache%dlambdadr)) deallocate(cache%dlambdadr)
-   allocate(cache%dlambdadr(3, mol%nat), source=0.0_wp)
    wlat(:, :) = 0.0_wp
    do iat = 1, mol%nat
-      do kat = list%inl(iat), list%inl(iat + 1) - 1
-         jat = list%nlat(kat)
-         cache%dlambdadr(:, jat) = cache%dlambdadr(:, jat) &
-            & + cache%dabdrlist_ut(:, kat) * cache%uvec(iat)
-         if (jat /= iat) cache%dlambdadr(:, iat) = cache%dlambdadr(:, iat) &
-            & + cache%dabdrlist_lt(:, kat) * cache%uvec(jat)
-      end do
       wlat(:, :) = wlat + cache%dabdL(:, :, iat) * cache%uvec(iat)
    end do
-   cache%dlambdadr(:, :) = cache%dlambdadr / (uvecsum + eps)
 
-   ! Lattice derivatives B_L^T S and their charge constraint term
    !$omp parallel do default(none) schedule(runtime) &
    !$omp shared(mol, cache, list, uvecsum, wlat, dqdL) &
    !$omp private(iat, jat, ient, kat, scale)
    do jat = 1, mol%nat
       scale = cache%uvec(jat) / (uvecsum + eps)
       dqdL(:, :, jat) = -scale * wlat
-      do ient = 1, count_neighbors(list, cache%lowlist, jat)
-         call get_neighbor(list, cache%lowlist, jat, ient, iat, kat)
-         dqdL(:, :, jat) = dqdL(:, :, jat) + &
-            & cache%ainvlist(kat) * cache%dabdL(:, :, iat)
+      if (list%complete) then
+         do kat = list%inl(jat), list%inl(jat + 1) - 1
+            iat = list%nlat(kat)
+            dqdL(:, :, jat) = dqdL(:, :, jat) + &
+               & cache%ainvlist(kat) * cache%dabdL(:, :, iat)
+         end do
+      else
+         do ient = 1, count_neighbors(list, cache%lowlist, jat)
+            call get_neighbor(list, cache%lowlist, jat, ient, iat, kat)
+            dqdL(:, :, jat) = dqdL(:, :, jat) + &
+               & cache%ainvlist(kat) * cache%dabdL(:, :, iat)
+         end do
+      end if
+   end do
+
+end subroutine get_dqdL_list
+
+
+!> Charge derivatives dq_b/dR_x of a group of consecutive atoms x for the
+!> union of their neighbors b on a complete or half neighborlist, in
+!> qcol(3*(i-1)+1:3*i, n) for atom i of the group and atom n of the union.
+!> The product of the inverse S on the list with the columns x of the partial
+!> derivatives is only formed on the rows of the union, the elements of the
+!> atoms b outside of the list of x are dropped. The caller resets bloc for
+!> the atoms of the union.
+subroutine get_group_dqdr(cache, list, jt, tq, x0, ng, nb, bloc, blist, qpos, &
+   & pan, qcol)
+
+   !> Cache with the inverse and the partial derivatives on the list and the
+   !> lower triangle of a half list
+   type(mchrg_cache), intent(in) :: cache
+
+   !> Complete or half neighborlist
+   type(csr_list), intent(in) :: list
+
+   !> Row of the list of each entry of the transpose of a complete list
+   integer, intent(in), contiguous :: jt(:)
+
+   !> Offset in its row of the list of each entry of the transpose of a
+   !> complete list
+   integer, intent(in), contiguous :: tq(:)
+
+   !> First atom of the group
+   integer, intent(in) :: x0
+
+   !> Number of atoms of the group
+   integer, intent(in) :: ng
+
+   !> Number of atoms in the union of the neighbors of the group
+   integer, intent(out) :: nb
+
+   !> Index of each atom in the union, zero outside
+   integer, intent(inout), contiguous :: bloc(:)
+
+   !> Atoms of the union
+   integer, intent(inout), contiguous :: blist(:)
+
+   !> Position of dq_b/dR_x in the compressed storage on the list, zero if b is
+   !> not a neighbor of x, negative for the lower triangle of a half list
+   integer(i8), intent(inout), contiguous :: qpos(:, :)
+
+   !> Partial derivatives dB_c/dR_x of the union in the layout of qcol
+   real(wp), intent(inout), contiguous :: pan(:, :)
+
+   !> Charge derivatives dq_b/dR_x of the union
+   real(wp), intent(inout), contiguous :: qcol(:, :)
+
+   integer :: n, i
+
+   if (list%complete) then
+      call gather_group_complete(list, jt, tq, cache%dabdrlist, x0, ng, nb, &
+         & bloc, blist, qpos, pan)
+      call multiply_group_complete(list, cache%ainvlist, 3 * ng, nb, bloc, blist, &
+         & pan, qcol)
+   else
+      call gather_group_half(list, cache%lowlist, cache%dabdrlist_ut, &
+         & cache%dabdrlist_lt, x0, ng, nb, bloc, blist, qpos, pan)
+      call multiply_group_half(list, cache%ainvlist, 3 * ng, nb, bloc, blist, pan, &
+         & qcol)
+   end if
+   do n = 1, nb
+      do i = 1, ng
+         if (qpos(i, n) == 0) qcol(3 * i - 2:3 * i, n) = 0.0_wp
       end do
    end do
 
-end subroutine get_q_derivs_half
+end subroutine get_group_dqdr
+
+
+!> Union of the neighbors of a group of consecutive atoms on a complete list
+!> with the columns x of the partial derivatives of the group atoms, B(c, x) is
+!> the entry of x in the row of c, which is found from the transpose of the list
+subroutine gather_group_complete(list, jt, tq, dabdr, x0, ng, nb, bloc, blist, &
+   & qpos, pan)
+
+   !> Complete neighborlist
+   type(csr_list), intent(in) :: list
+
+   !> Row of the list of each entry of the transpose of the list
+   integer, intent(in), contiguous :: jt(:)
+
+   !> Offset in its row of the list of each entry of the transpose of the list
+   integer, intent(in), contiguous :: tq(:)
+
+   !> Partial derivatives on the list, the entry of x in the row of c holds
+   !> the derivative of component c w.r.t. atom x
+   real(wp), intent(in), contiguous :: dabdr(:, :)
+
+   !> First atom of the group
+   integer, intent(in) :: x0
+
+   !> Number of atoms of the group
+   integer, intent(in) :: ng
+
+   !> Number of atoms in the union of the neighbors of the group
+   integer, intent(out) :: nb
+
+   !> Index of each atom in the union, zero outside
+   integer, intent(inout), contiguous :: bloc(:)
+
+   !> Atoms of the union
+   integer, intent(inout), contiguous :: blist(:)
+
+   !> Position of the entry of x in the row of each atom of the union, zero if
+   !> the atom is not a neighbor of x
+   integer(i8), intent(inout), contiguous :: qpos(:, :)
+
+   !> Partial derivatives dB_c/dR_x of the union
+   real(wp), intent(inout), contiguous :: pan(:, :)
+
+   integer :: i, ic, xat, cat, n
+   integer(i8) :: kat, lat
+
+   nb = 0
+   do i = 1, ng
+      xat = x0 + i - 1
+      ic = 3 * (i - 1)
+      do lat = list%inl(xat), list%inl(xat + 1) - 1
+         cat = jt(lat)
+         kat = list%inl(cat) + tq(lat)
+         call add_union_atom(cat, nb, bloc, blist, qpos, pan, n)
+         pan(ic + 1:ic + 3, n) = dabdr(:, kat)
+         qpos(i, n) = kat
+      end do
+   end do
+
+end subroutine gather_group_complete
+
+
+!> Union of the neighbors of a group of consecutive atoms on a half list with
+!> the columns x of the partial derivatives of the group atoms. The row of x in
+!> the list holds the diagonal and B(c, x) of c > x in the lower triangle, the
+!> atoms c < x come from the lower triangle of the list and B(c, x) from the
+!> upper triangle in the row of c.
+subroutine gather_group_half(list, low, but, blt, x0, ng, nb, bloc, blist, qpos, &
+   & pan)
+
+   !> Half neighborlist
+   type(csr_list), intent(in) :: list
+
+   !> Lower triangle of the list
+   type(lower_list), intent(in) :: low
+
+   !> Diagonal and upper triangle of the partial derivatives on the list
+   real(wp), intent(in), contiguous :: but(:, :)
+
+   !> Lower triangle of the partial derivatives on the list
+   real(wp), intent(in), contiguous :: blt(:, :)
+
+   !> First atom of the group
+   integer, intent(in) :: x0
+
+   !> Number of atoms of the group
+   integer, intent(in) :: ng
+
+   !> Number of atoms in the union of the neighbors of the group
+   integer, intent(out) :: nb
+
+   !> Index of each atom in the union, zero outside
+   integer, intent(inout), contiguous :: bloc(:)
+
+   !> Atoms of the union
+   integer, intent(inout), contiguous :: blist(:)
+
+   !> Position of the pair of x and each atom of the union in the list, zero if
+   !> the atom is not a neighbor of x, negative for the lower triangle
+   integer(i8), intent(inout), contiguous :: qpos(:, :)
+
+   !> Partial derivatives dB_c/dR_x of the union
+   real(wp), intent(inout), contiguous :: pan(:, :)
+
+   integer :: i, ic, xat, n
+   integer(i8) :: kat, lat
+
+   nb = 0
+   do i = 1, ng
+      xat = x0 + i - 1
+      ic = 3 * (i - 1)
+      kat = list%inl(xat)
+      call add_union_atom(xat, nb, bloc, blist, qpos, pan, n)
+      pan(ic + 1:ic + 3, n) = but(:, kat)
+      qpos(i, n) = kat
+      do kat = list%inl(xat) + 1, list%inl(xat + 1) - 1
+         call add_union_atom(list%nlat(kat), nb, bloc, blist, qpos, pan, n)
+         pan(ic + 1:ic + 3, n) = blt(:, kat)
+         qpos(i, n) = -kat
+      end do
+      do lat = low%inl(xat), low%inl(xat + 1) - 1
+         kat = low%pos(lat)
+         call add_union_atom(low%nlat(lat), nb, bloc, blist, qpos, pan, n)
+         pan(ic + 1:ic + 3, n) = but(:, kat)
+         qpos(i, n) = kat
+      end do
+   end do
+
+end subroutine gather_group_half
+
+
+!> Index of an atom in the union of the neighbors of a group, a new atom is
+!> appended without derivatives
+pure subroutine add_union_atom(bat, nb, bloc, blist, qpos, pan, n)
+
+   !> Atom to add
+   integer, intent(in) :: bat
+
+   !> Number of atoms in the union
+   integer, intent(inout) :: nb
+
+   !> Index of each atom in the union, zero outside
+   integer, intent(inout), contiguous :: bloc(:)
+
+   !> Atoms of the union
+   integer, intent(inout), contiguous :: blist(:)
+
+   !> Positions of the derivatives of the union
+   integer(i8), intent(inout), contiguous :: qpos(:, :)
+
+   !> Partial derivatives of the union
+   real(wp), intent(inout), contiguous :: pan(:, :)
+
+   !> Index of the atom in the union
+   integer, intent(out) :: n
+
+   n = bloc(bat)
+   if (n > 0) return
+   nb = nb + 1
+   n = nb
+   bloc(bat) = n
+   blist(n) = bat
+   qpos(:, n) = 0_i8
+   pan(:, n) = 0.0_wp
+
+end subroutine add_union_atom
+
+
+!> Product of the inverse S on a complete list with the partial derivatives of
+!> the union U of a group, qcol = S_UU pan, from the rows of the union
+subroutine multiply_group_complete(list, ainv, nw, nb, bloc, blist, pan, qcol)
+
+   !> Complete neighborlist
+   type(csr_list), intent(in) :: list
+
+   !> Inverse on the pattern of the list
+   real(wp), intent(in), contiguous :: ainv(:)
+
+   !> Number of derivatives of each atom of the union, three per group atom
+   integer, intent(in) :: nw
+
+   !> Number of atoms in the union
+   integer, intent(in) :: nb
+
+   !> Index of each atom in the union, zero outside
+   integer, intent(in), contiguous :: bloc(:)
+
+   !> Atoms of the union
+   integer, intent(in), contiguous :: blist(:)
+
+   !> Partial derivatives of the union
+   real(wp), intent(in), contiguous :: pan(:, :)
+
+   !> Product with the inverse on the union
+   real(wp), intent(inout), contiguous :: qcol(:, :)
+
+   integer :: n, m, bat
+   integer(i8) :: kat
+   real(wp) :: acc(3 * max_group)
+
+   do n = 1, nb
+      bat = blist(n)
+      acc(:nw) = 0.0_wp
+      do kat = list%inl(bat), list%inl(bat + 1) - 1
+         m = bloc(list%nlat(kat))
+         if (m == 0) cycle
+         acc(:nw) = acc(:nw) + ainv(kat) * pan(:nw, m)
+      end do
+      qcol(:nw, n) = acc(:nw)
+   end do
+
+end subroutine multiply_group_complete
+
+
+!> Product of the inverse S on a half list with the partial derivatives of the
+!> union U of a group, qcol = S_UU pan. The rows of the union are read from the
+!> list, each pair of the upper triangle also adds the mirrored element of the
+!> symmetric inverse to the row of its other atom, so the lower triangle of the
+!> list is not needed.
+subroutine multiply_group_half(list, ainv, nw, nb, bloc, blist, pan, qcol)
+
+   !> Half neighborlist
+   type(csr_list), intent(in) :: list
+
+   !> Upper triangle of the inverse on the pattern of the list
+   real(wp), intent(in), contiguous :: ainv(:)
+
+   !> Number of derivatives of each atom of the union, three per group atom
+   integer, intent(in) :: nw
+
+   !> Number of atoms in the union
+   integer, intent(in) :: nb
+
+   !> Index of each atom in the union, zero outside
+   integer, intent(in), contiguous :: bloc(:)
+
+   !> Atoms of the union
+   integer, intent(in), contiguous :: blist(:)
+
+   !> Partial derivatives of the union
+   real(wp), intent(in), contiguous :: pan(:, :)
+
+   !> Product with the inverse on the union
+   real(wp), intent(inout), contiguous :: qcol(:, :)
+
+   integer :: n, m, bat
+   integer(i8) :: kat
+   real(wp) :: s, acc(3 * max_group)
+
+   qcol(:nw, :nb) = 0.0_wp
+   do n = 1, nb
+      bat = blist(n)
+      acc(:nw) = 0.0_wp
+      do kat = list%inl(bat), list%inl(bat + 1) - 1
+         m = bloc(list%nlat(kat))
+         if (m == 0) cycle
+         s = ainv(kat)
+         acc(:nw) = acc(:nw) + s * pan(:nw, m)
+         if (m /= n) qcol(:nw, m) = qcol(:nw, m) + s * pan(:nw, n)
+      end do
+      qcol(:nw, n) = qcol(:nw, n) + acc(:nw)
+   end do
+
+end subroutine multiply_group_half
+
+
+!> Groups of consecutive atoms close to each other for the charge derivatives
+!> on a neighborlist, which share most of their neighbors
+subroutine get_list_groups(mol, list, gstart)
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Complete or half neighborlist
+   type(csr_list), intent(in) :: list
+
+   !> First atom of each group, the last entry is the number of atoms plus one
+   integer, allocatable, intent(out) :: gstart(:)
+
+   real(wp) :: radius
+
+   radius = 0.0_wp
+   if (allocated(list%cutoff)) radius = group_scale * list%cutoff
+   call get_atom_groups(mol, radius, max_group, gstart)
+
+end subroutine get_list_groups
+
+
+!> Largest number of neighbors of an atom in a complete list or in a half list
+!> with its lower triangle, including the atom itself
+function get_max_neighbors(nat, list, low) result(kmax)
+
+   !> Number of atoms
+   integer, intent(in) :: nat
+
+   !> Complete or half neighborlist
+   type(csr_list), intent(in) :: list
+
+   !> Lower triangle of a half list
+   type(lower_list), intent(in) :: low
+
+   !> Largest number of neighbors
+   integer :: kmax
+
+   integer :: iat
+
+   kmax = 0
+   do iat = 1, nat
+      if (list%complete) then
+         kmax = max(kmax, int(list%inl(iat + 1) - list%inl(iat)))
+      else
+         kmax = max(kmax, count_neighbors(list, low, iat))
+      end if
+   end do
+
+end function get_max_neighbors
+
 
 !> Position derivatives of the charge of one atom w.r.t. all atomic positions,
-!> expanded from the compressed storage on a complete or half list and the
-!> charge constraint term
-subroutine get_dqdr_row(cache, jat, dqdr)
+!> expanded from the compressed storage on the pattern of the complete or half
+!> neighborlist of the solve and the charge constraint term
+subroutine get_dqdr_row(cache, list, jat, dqdr)
 
-   !> Cache with the compressed position derivatives
+   !> Cache with the compressed position derivatives and the lower triangle of
+   !> a half list
    type(mchrg_cache), intent(in) :: cache
+
+   !> Complete or half neighborlist of the charge derivatives
+   type(csr_list), intent(in) :: list
 
    !> Atom of the charge
    integer, intent(in) :: jat
@@ -1096,15 +1502,15 @@ subroutine get_dqdr_row(cache, jat, dqdr)
    do iat = 1, size(dqdr, 2)
       dqdr(:, iat) = -cache%dlambdadr(:, iat) * cache%uvec(jat)
    end do
-   if (cache%dqdrpat%complete) then
-      do kat = cache%dqdrpat%inl(jat), cache%dqdrpat%inl(jat + 1) - 1
-         iat = cache%dqdrpat%nlat(kat)
+   if (list%complete) then
+      do kat = list%inl(jat), list%inl(jat + 1) - 1
+         iat = list%nlat(kat)
          dqdr(:, iat) = dqdr(:, iat) + cache%dqdrlist(:, kat)
       end do
    else
       ! The atoms of lower index are in the lower triangle of the half list
-      do kat = cache%dqdrpat%inl(jat), cache%dqdrpat%inl(jat + 1) - 1
-         iat = cache%dqdrpat%nlat(kat)
+      do kat = list%inl(jat), list%inl(jat + 1) - 1
+         iat = list%nlat(kat)
          dqdr(:, iat) = dqdr(:, iat) + cache%dqdrlist_ut(:, kat)
       end do
       do kat = cache%lowlist%inl(jat), cache%lowlist%inl(jat + 1) - 1
@@ -1312,12 +1718,14 @@ end subroutine get_hessian_dense
 
 
 !> Compute the molecular nuclear Hessian of the electrostatic energy on a
-!> complete or half neighborlist, which requires a solver with neighborlist
-!> support. The Hessian is kept in compressed storage on the pattern of its own
-!> list, which is a copy of the neighborlist unless it is set up on entry, and
-!> the dense charge constraint term in its factors. A half neighborlist needs a
-!> half list of the Hessian, which keeps the blocks of the atoms y >= x. The
-!> charges, energy, gradient and virial of the same solve are optional.
+!> complete or half neighborlist, which requires the CG solver with
+!> neighborlist support. The Hessian is kept in compressed storage on the
+!> pattern of its own list and the dense charge constraint term in its factors.
+!> Without a neighborlist the list of the Hessian serves as neighborlist, with
+!> a neighborlist the list of the Hessian is a copy of it unless it is set up on
+!> entry. A half neighborlist needs a half list of the Hessian, which keeps the
+!> blocks of the atoms y >= x. The charges, energy, gradient and virial of the
+!> same solve are optional.
 subroutine get_hessian_list(self, mol, solver, cache, error, hessian, list, qvec, &
    & energy, gradient, sigma, unit, verbosity)
 
@@ -1338,6 +1746,77 @@ subroutine get_hessian_list(self, mol, solver, cache, error, hessian, list, qvec
 
    !> Molecular nuclear Hessian in compressed storage, the pattern of an
    !> allocated list is kept
+   type(mchrg_hessian), intent(inout) :: hessian
+
+   !> Multicharge neighborlist type, complete or half, the list of the Hessian
+   !> is used if absent
+   type(csr_list), intent(in), optional :: list
+
+   !> Optional atomic partial charges
+   real(wp), intent(out), contiguous, optional :: qvec(:)
+
+   !> Optional electrostatic energy
+   real(wp), intent(inout), contiguous, optional :: energy(:)
+
+   !> Optional energy gradient
+   real(wp), intent(inout), contiguous, optional :: gradient(:, :)
+
+   !> Optional virial
+   real(wp), intent(inout), contiguous, optional :: sigma(:, :)
+
+   !> Output unit
+   integer, intent(in), optional :: unit
+
+   !> Verbosity level
+   integer, intent(in), optional :: verbosity
+
+   if (any(mol%periodic)) then
+      call fatal_error(error, &
+         & "Analytical Hessian is not available for periodic systems")
+      return
+   end if
+
+   if (present(list)) then
+      if (.not. allocated(hessian%list%inl)) hessian%list = list
+      call get_hessian_csr(self, mol, solver, cache, error, hessian, list, &
+         & qvec, energy, gradient, sigma, unit, verbosity)
+   else
+      if (.not. allocated(hessian%list%inl)) then
+         call fatal_error(error, "The Hessian on a neighborlist requires a "// &
+            & "neighborlist or the list of the Hessian")
+         return
+      end if
+      ! The list of the Hessian is only read, its blocks are written
+      call get_hessian_csr(self, mol, solver, cache, error, hessian, &
+         & hessian%list, qvec, energy, gradient, sigma, unit, verbosity)
+   end if
+
+end subroutine get_hessian_list
+
+
+!> Compressed molecular nuclear Hessian on a complete or half neighborlist with
+!> the allocated list of the Hessian. The implicit part is formed first from
+!> the inverse and the partial derivatives, which are freed before the
+!> explicit part.
+subroutine get_hessian_csr(self, mol, solver, cache, error, hessian, list, qvec, &
+   & energy, gradient, sigma, unit, verbosity)
+
+   !> Electronegativity-equilibration model
+   class(mchrg_model_type), intent(in) :: self
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Solver instance
+   class(mchrg_solver_type), intent(in) :: solver
+
+   !> Cache handling
+   type(mchrg_cache), intent(inout) :: cache
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular nuclear Hessian in compressed storage with its list
    type(mchrg_hessian), intent(inout) :: hessian
 
    !> Multicharge neighborlist type, complete or half
@@ -1362,57 +1841,95 @@ subroutine get_hessian_list(self, mol, solver, cache, error, hessian, list, qvec
    integer, intent(in), optional :: verbosity
 
    real(wp), parameter :: trans(3, 1) = 0.0_wp
-   real(wp), allocatable :: dqdL(:, :, :)
+   real(wp) :: tgroup(2)
    type(timer_type) :: timer
-   integer :: print_unit
+   integer :: print_unit, verbosity_hess
 
    print_unit = output_unit
    if (present(unit)) print_unit = unit
+   verbosity_hess = 0
+   if (present(verbosity)) verbosity_hess = verbosity
 
-   if (any(mol%periodic)) then
-      call fatal_error(error, &
-         & "Analytical Hessian is not available for periodic systems")
-      return
-   end if
-   ! Charges and their derivatives in compressed storage
-   call self%update(mol, cache, trans, grad=.false., list=list, hess=.true.)
-   allocate(dqdL(3, 3, mol%nat))
-   call self%solve(mol, solver, cache, error, energy=energy, gradient=gradient, &
-      & sigma=sigma, qvec=qvec, dqdL=dqdL, list=list, verbosity=verbosity, &
-      & unit=unit)
-   if (allocated(error)) return
-
-   if (.not. allocated(hessian%list%inl)) hessian%list = list
    if (hessian%list%complete .neqv. list%complete) then
       call fatal_error(error, "The list of the Hessian has to be complete for a "// &
          & "complete and half for a half neighborlist")
       return
    end if
+   select type (solver)
+   class is (cg_solver)
+   class default
+      call fatal_error(error, "The Hessian on a neighborlist requires the CG solver")
+      return
+   end select
+
+   call timer%push("total")
+
+   ! CN and local charge derivatives, and the lower triangle of a half list
+   call timer%push("update")
+   call self%update(mol, cache, trans, grad=.false., list=list, hess=.true.)
+   call timer%pop
+
+   ! Charges, energy and gradient
+   call timer%push("charges")
+   call self%solve(mol, solver, cache, error, energy=energy, gradient=gradient, &
+      & sigma=sigma, qvec=qvec, list=list, verbosity=verbosity, unit=unit)
+   call timer%pop
+   if (allocated(error)) return
+
+   ! Partial derivatives dX/dR - dA/dR*q and the inverse on the list
+   call print_hessian_header(print_unit, verbosity_hess)
+   call timer%push("dabdr")
+   call self%get_partial_derivs(mol, mol%nat, cache, alpha=-1.0_wp, beta=1.0_wp, &
+      & list=list)
+   call timer%pop
+   call timer%push("inverse")
+   select type (solver)
+   class is (cg_solver)
+      call get_inverse_list(mol, solver, cache, list, error, unit)
+   end select
+   call timer%pop
+   if (allocated(error)) return
+   deallocate(cache%alist)
+
    if (allocated(hessian%hesslist)) deallocate(hessian%hesslist)
    allocate(hessian%hesslist(3, 3, size(hessian%list%nlat, kind=i8)), &
       & source=0.0_wp)
+
+   ! Response of the charges, -(dX/dR - dA/dR*q)^T dq/dR
+   call timer%push("implicit")
+   call get_constraint_factors(mol, cache, list)
+   call self%get_implicit_hessian(mol, cache, hessian, list, times=tgroup)
+   call timer%pop
+   deallocate(cache%ainvlist)
+   if (allocated(cache%dabdrlist)) deallocate(cache%dabdrlist)
+   if (allocated(cache%dabdrlist_ut)) deallocate(cache%dabdrlist_ut)
+   if (allocated(cache%dabdrlist_lt)) deallocate(cache%dabdrlist_lt)
 
    ! Second derivatives of 0.5 * q^T A q - q^T X at fixed charges
    call timer%push("explicit")
    call self%get_explicit_hessian(mol, cache, cache%vrhs(:mol%nat), hessian, &
       & error, list, alpha=0.5_wp, beta=-1.0_wp)
    call timer%pop
-   if (allocated(error)) return
-   call timer%push("implicit")
-   call self%get_implicit_hessian(mol, cache, hessian, list)
    call timer%pop
+   if (allocated(error)) return
 
-   if (present(verbosity)) then
-      if (verbosity > 1) then
-         write(print_unit, '(a, 1x, a)') "Explicit Hessian time : ", &
-            & format_time(timer%get("explicit"))
-         write(print_unit, '(a, 1x, a)') "Implicit Hessian time : ", &
-            & format_time(timer%get("implicit"))
-         write(print_unit, '(a)') ''
-      end if
+   if (verbosity_hess > 0) then
+      call print_stage_time(print_unit, "CN and local charge derivatives", &
+         & timer%get("update"))
+      call print_stage_time(print_unit, "Charges and energy", timer%get("charges"))
+      call print_stage_time(print_unit, "Partial derivatives dB/dR", &
+         & timer%get("dabdr"))
+      call print_stage_time(print_unit, "Inverse on the neighborlist", &
+         & timer%get("inverse"))
+      call print_stage_time(print_unit, "Implicit Hessian", timer%get("implicit"))
+      write(print_unit, '(a, t34, ":", 2(1x, f0.3))') &
+         & "  S*dB/dR/contraction (thread s)", tgroup
+      call print_stage_time(print_unit, "Explicit Hessian", timer%get("explicit"))
+      call print_stage_time(print_unit, "Total Hessian", timer%get("total"))
+      write(print_unit, '(a)') ''
    end if
 
-end subroutine get_hessian_list
+end subroutine get_hessian_csr
 
 
 !> Compute the implicit part of the molecular nuclear Hessian of the
@@ -1444,17 +1961,20 @@ end subroutine get_implicit_hessian_dense
 
 
 !> Compute the implicit part of the molecular nuclear Hessian of the
-!> electrostatic energy from the compressed charge derivatives of the cache on
-!> a complete or half neighborlist, whose pattern has to be a copy of the list.
-!> The block of the atoms x <= y is
+!> electrostatic energy on a complete or half neighborlist from the inverse
+!> S = J^-1 on the pattern of the list, the partial derivatives
+!> B = dX/dR - dA/dR*q and the factors of the charge constraint term in the
+!> cache. The block of the atoms x <= y is
 !> -sum_b (dX_b/dR_y - (dA/dR_y*q)_b) (dq_b/dR_x)^T over the atoms b in the
 !> lists of x and y, without the constraint term of the charge derivatives.
-!> The block of y and x is its transpose and the diagonal blocks are
+!> The charge derivatives dq_b/dR_x = (S B)_bx on the pattern of the list are
+!> formed for groups of consecutive atoms x and used at once, they are not
+!> stored. The block of y and x is the transpose and the diagonal blocks are
 !> symmetrized, so this part is symmetric. The blocks are added on the pattern
 !> of the list of the Hessian, a half list only keeps the blocks of y >= x. The
 !> charge constraint gives the dense rank-1 term
 !> sum(u) * vec(dlambdadr) vec(dlambdadr)^T, which is kept in its factors.
-subroutine get_implicit_hessian_list(self, mol, cache, hessian, list)
+subroutine get_implicit_hessian_list(self, mol, cache, hessian, list, times)
 
    !> Electronegativity-equilibration model
    class(mchrg_model_type), intent(in) :: self
@@ -1472,26 +1992,20 @@ subroutine get_implicit_hessian_list(self, mol, cache, hessian, list)
    !> Multicharge neighborlist type, complete or half
    type(csr_list), intent(in) :: list
 
-   !> Largest number of atoms in a group
-   integer, parameter :: max_group = 8
+   !> Time of the charge derivatives of the groups and of their contraction
+   !> in seconds, summed over the threads
+   real(wp), intent(out), optional :: times(2)
 
-   !> Largest distance of an atom of a group to its first atom, relative to the
-   !> cutoff of the list
-   real(wp), parameter :: group_scale = 0.2_wp
-
-   real(wp) :: radius, uvecsum
+   real(wp) :: uvecsum, tgroup(2)
    integer, allocatable :: gstart(:)
 
-   ! Consecutive atoms close to each other share most of their neighbours
-   radius = 0.0_wp
-   if (allocated(list%cutoff)) radius = group_scale * list%cutoff
-   call get_atom_groups(mol, radius, max_group, gstart)
-
+   call get_list_groups(mol, list, gstart)
    if (list%complete) then
-      call add_implicit_blocks_complete(mol, cache, hessian, list, gstart)
+      call add_implicit_blocks_complete(mol, cache, hessian, list, gstart, tgroup)
    else
-      call add_implicit_blocks_half(mol, cache, hessian, list, gstart)
+      call add_implicit_blocks_half(mol, cache, hessian, list, gstart, tgroup)
    end if
+   if (present(times)) times(:) = tgroup
 
    ! Charge constraint term, sum_b (dX_b/dR_x - (dA/dR_x*q)_b) * uvec(b) is
    ! sum(u) * dlambdadr(:, x), where sum(u) = 1^T A^-1 1 is positive
@@ -1503,14 +2017,14 @@ end subroutine get_implicit_hessian_list
 
 
 !> Add the implicit blocks of the atoms x <= y and their transposes on a
-!> complete neighborlist, whose pattern has to be the pattern of the charge
-!> derivatives in the cache
-subroutine add_implicit_blocks_complete(mol, cache, hessian, list, gstart)
+!> complete neighborlist, the columns of the partial derivatives and of the
+!> Hessian are found from the transposes of their lists
+subroutine add_implicit_blocks_complete(mol, cache, hessian, list, gstart, times)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
 
-   !> Cache with the charge derivatives on a copy of the list
+   !> Cache with the inverse and the partial derivatives on the list
    type(mchrg_cache), intent(in) :: cache
 
    !> Molecular nuclear Hessian in compressed storage with its list and
@@ -1523,23 +2037,15 @@ subroutine add_implicit_blocks_complete(mol, cache, hessian, list, gstart)
    !> First atom of each group, the last entry is the number of atoms plus one
    integer, intent(in) :: gstart(:)
 
-   logical :: same
-   integer :: xat
-   integer(i8) :: lat
-   integer, allocatable :: jt(:), tq(:), hjt(:), htq(:)
-   real(wp), allocatable :: dt(:, :)
+   !> Time of the charge derivatives of the groups and of their contraction
+   !> in seconds, summed over the threads
+   real(wp), intent(out) :: times(2)
 
-   ! Transpose of the partial derivatives, row x holds the derivatives of the
-   ! components b w.r.t. atom x
+   logical :: same
+   integer, allocatable :: jt(:), tq(:), hjt(:), htq(:)
+
+   ! Row x of the transpose holds the components b with a derivative w.r.t. x
    call transpose_list(mol%nat, list, jt, tq)
-   allocate(dt(3, size(list%nlat, kind=i8)))
-   !$omp parallel do default(none) schedule(runtime) &
-   !$omp shared(mol, list, cache, dt, jt, tq) private(xat, lat)
-   do xat = 1, mol%nat
-      do lat = list%inl(xat), list%inl(xat + 1) - 1
-         dt(:, lat) = cache%dabdrlist(:, list%inl(jt(lat)) + tq(lat))
-      end do
-   end do
 
    ! The transpose of the list gives the blocks (y, x) of a Hessian on the
    ! same pattern
@@ -1547,29 +2053,30 @@ subroutine add_implicit_blocks_complete(mol, cache, hessian, list, gstart)
    if (same) same = all(hessian%list%inl(:mol%nat + 1) == list%inl(:mol%nat + 1))
    if (same) same = all(hessian%list%nlat == list%nlat)
    if (same) then
-      call add_implicit_blocks(mol, cache, hessian, list, dt, jt, tq, jt, tq, &
-         & gstart)
+      call add_implicit_blocks(mol, cache, hessian, list, jt, tq, jt, tq, &
+         & gstart, times)
    else
       call transpose_list(mol%nat, hessian%list, hjt, htq)
-      call add_implicit_blocks(mol, cache, hessian, list, dt, jt, tq, hjt, htq, &
-         & gstart)
+      call add_implicit_blocks(mol, cache, hessian, list, jt, tq, hjt, htq, &
+         & gstart, times)
    end if
 
 end subroutine add_implicit_blocks_complete
 
 
-!> Add the implicit blocks of the atoms x <= y and their transposes for groups
-!> of consecutive atoms. The blocks of all atoms of a group are accumulated over
-!> the column y of the partial derivatives at once, so each column is read once
-!> per group. Only the group of atom x writes the blocks (x, y) and (y, x) of
-!> y >= x, so the groups are independent.
-subroutine add_implicit_blocks(mol, cache, hessian, list, dt, jt, tq, hjt, htq, &
-   & gstart)
+!> Add the implicit blocks of the atoms x <= y and their transposes on a
+!> complete neighborlist for groups of consecutive atoms. The charge
+!> derivatives of a group are contracted with the column y of the partial
+!> derivatives at once, so each column is read once per group. Only the group
+!> of atom x writes the blocks (x, y) and (y, x) of y >= x, so the groups are
+!> independent.
+subroutine add_implicit_blocks(mol, cache, hessian, list, jt, tq, hjt, htq, &
+   & gstart, times)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
 
-   !> Cache with the charge derivatives on a copy of the list
+   !> Cache with the inverse and the partial derivatives on the list
    type(mchrg_cache), intent(in) :: cache
 
    !> Molecular nuclear Hessian in compressed storage with its list and
@@ -1578,10 +2085,6 @@ subroutine add_implicit_blocks(mol, cache, hessian, list, dt, jt, tq, hjt, htq, 
 
    !> Complete neighborlist
    type(csr_list), intent(in) :: list
-
-   !> Partial derivatives on the transpose of the list, dX_b/dR_y - (dA/dR_y*q)_b
-   !> in row y
-   real(wp), intent(in), contiguous :: dt(:, :)
 
    !> Row of the list of each entry of the transpose of the list
    integer, intent(in), contiguous :: jt(:)
@@ -1598,52 +2101,49 @@ subroutine add_implicit_blocks(mol, cache, hessian, list, dt, jt, tq, hjt, htq, 
    !> First atom of each group, the last entry is the number of atoms plus one
    integer, intent(in) :: gstart(:)
 
-   integer :: igrp, ngrp, gmax, nbmax, numax, x0, ng, i, xat, bat, yat, nb, nu, n, u
-   integer(i8) :: lat, hat
-   real(wp) :: dy(3)
-   integer, allocatable :: bloc(:), hloc(:), blist(:), ulist(:)
-   integer(i8), allocatable :: jmap(:, :), tmap(:, :)
-   real(wp), allocatable :: qcol(:, :, :), acc(:, :, :)
+   !> Time of the charge derivatives of the groups and of their contraction
+   !> in seconds, summed over the threads
+   real(wp), intent(out) :: times(2)
 
+   integer :: igrp, ngrp, nbmax, numax, x0, ng, i, ic, xat, yat, nb, nu, n, u
+   integer(i8) :: lat, hat, tick(3), rate
+   real(wp) :: dy(3), tpan, tcon
+   integer, allocatable :: bloc(:), hloc(:), blist(:), ulist(:)
+   integer(i8), allocatable :: qpos(:, :), jmap(:, :), tmap(:, :)
+   real(wp), allocatable :: pan(:, :), qcol(:, :), acc(:, :, :)
+
+   times(:) = 0.0_wp
    ngrp = size(gstart) - 1
    if (ngrp < 1) return
-   gmax = maxval(gstart(2:) - gstart(:ngrp))
-   nbmax = min(mol%nat, gmax * int(maxval(list%inl(2:mol%nat + 1) &
-      & - list%inl(:mol%nat))))
-   numax = min(mol%nat, gmax * int(maxval(hessian%list%inl(2:mol%nat + 1) &
+   nbmax = min(mol%nat, max_group * get_max_neighbors(mol%nat, list, cache%lowlist))
+   numax = min(mol%nat, max_group * int(maxval(hessian%list%inl(2:mol%nat + 1) &
       & - hessian%list%inl(:mol%nat))))
 
    ! bloc and hloc hold the position of each atom in the unions of the group
+   tpan = 0.0_wp
+   tcon = 0.0_wp
    !$omp parallel default(none) &
-   !$omp shared(mol, cache, hessian, list, dt, jt, tq, hjt, htq, gstart) &
-   !$omp shared(ngrp, gmax, nbmax, numax) &
-   !$omp private(igrp, x0, ng, i, xat, bat, yat, nb, nu, n, u, lat, hat, dy) &
-   !$omp private(bloc, hloc, blist, ulist, jmap, tmap, qcol, acc)
+   !$omp shared(mol, cache, hessian, list, jt, tq, hjt, htq, gstart, ngrp, nbmax) &
+   !$omp shared(numax) &
+   !$omp private(igrp, x0, ng, i, ic, xat, yat, nb, nu, n, u, lat, hat, tick, rate) &
+   !$omp private(dy, bloc, hloc, blist, ulist, qpos, jmap, tmap, pan, qcol, acc) &
+   !$omp reduction(+:tpan, tcon)
    allocate(bloc(mol%nat), hloc(mol%nat), source=0)
-   allocate(blist(nbmax), ulist(numax), jmap(gmax, numax), tmap(gmax, numax), &
-      & qcol(3, gmax, nbmax), acc(3, 3, gmax))
+   allocate(blist(nbmax), ulist(numax), qpos(max_group, nbmax), &
+      & jmap(max_group, numax), tmap(max_group, numax), &
+      & pan(3 * max_group, nbmax), qcol(3 * max_group, nbmax), &
+      & acc(3, 3, max_group))
    !$omp do schedule(runtime)
    do igrp = 1, ngrp
+      call system_clock(tick(1), rate)
       x0 = gstart(igrp)
       ng = gstart(igrp + 1) - x0
 
-      ! Union of the lists of the group with the charge derivatives dq_b/dR_x
-      ! of its atoms x from the rows b, zero if x is not in the row
-      nb = 0
-      do i = 1, ng
-         xat = x0 + i - 1
-         do lat = list%inl(xat), list%inl(xat + 1) - 1
-            bat = jt(lat)
-            if (bloc(bat) == 0) then
-               nb = nb + 1
-               bloc(bat) = nb
-               blist(nb) = bat
-               qcol(:, :ng, nb) = 0.0_wp
-            end if
-            qcol(:, i, bloc(bat)) = &
-               & cache%dqdrlist(:, cache%dqdrpat%inl(bat) + tq(lat))
-         end do
-      end do
+      ! Charge derivatives dq_b/dR_x of the atoms x of the group for the union
+      ! of their neighbors b, zero if b is not in the list of x
+      call get_group_dqdr(cache, list, jt, tq, x0, ng, nb, bloc, blist, qpos, &
+         & pan, qcol)
+      call system_clock(tick(2))
 
       ! Union of the atoms y >= x in the rows of the Hessian of the group with
       ! the positions of the blocks (y, x) and (x, y), zero if not present.
@@ -1680,11 +2180,12 @@ subroutine add_implicit_blocks(mol, cache, hessian, list, dt, jt, tq, hjt, htq, 
          do lat = list%inl(yat), list%inl(yat + 1) - 1
             n = bloc(jt(lat))
             if (n == 0) cycle
-            dy = dt(:, lat)
+            dy = cache%dabdrlist(:, list%inl(jt(lat)) + tq(lat))
             do i = 1, ng
-               acc(:, 1, i) = acc(:, 1, i) + dy * qcol(1, i, n)
-               acc(:, 2, i) = acc(:, 2, i) + dy * qcol(2, i, n)
-               acc(:, 3, i) = acc(:, 3, i) + dy * qcol(3, i, n)
+               ic = 3 * (i - 1)
+               acc(:, 1, i) = acc(:, 1, i) + dy * qcol(ic + 1, n)
+               acc(:, 2, i) = acc(:, 2, i) + dy * qcol(ic + 2, n)
+               acc(:, 3, i) = acc(:, 3, i) + dy * qcol(ic + 3, n)
             end do
          end do
          do i = 1, ng
@@ -1705,28 +2206,32 @@ subroutine add_implicit_blocks(mol, cache, hessian, list, dt, jt, tq, hjt, htq, 
       do n = 1, nb
          bloc(blist(n)) = 0
       end do
+      call system_clock(tick(3))
+      tpan = tpan + real(tick(2) - tick(1), wp) / real(rate, wp)
+      tcon = tcon + real(tick(3) - tick(2), wp) / real(rate, wp)
    end do
    !$omp end do
-   deallocate(bloc, hloc, blist, ulist, jmap, tmap, qcol, acc)
+   deallocate(bloc, hloc, blist, ulist, qpos, jmap, tmap, pan, qcol, acc)
    !$omp end parallel
+   times(:) = [tpan, tcon]
 
 end subroutine add_implicit_blocks
 
 
-!> Add the implicit blocks of the atoms x <= y for groups of consecutive atoms
-!> on a half neighborlist with its lower triangle in the cache, as
+!> Add the implicit blocks of the atoms x <= y on a half neighborlist with its
+!> lower triangle in the cache for groups of consecutive atoms, as
 !> add_implicit_blocks. The column y of the partial derivatives holds the
 !> diagonal and the lower triangle in the row of y and the upper triangle in
 !> the rows of the neighbors of lower index, which is gathered once in the
 !> order of the lower triangle of the list. The Hessian keeps the blocks of
 !> y >= x on a half list, only the group of atom x writes the blocks (x, y).
-subroutine add_implicit_blocks_half(mol, cache, hessian, list, gstart)
+subroutine add_implicit_blocks_half(mol, cache, hessian, list, gstart, times)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
 
-   !> Cache with the partial and charge derivatives on a copy of the half list
-   !> and its lower triangle
+   !> Cache with the inverse and the partial derivatives on the half list and
+   !> its lower triangle
    type(mchrg_cache), intent(in) :: cache
 
    !> Molecular nuclear Hessian on a half list with allocated blocks
@@ -1738,24 +2243,24 @@ subroutine add_implicit_blocks_half(mol, cache, hessian, list, gstart)
    !> First atom of each group, the last entry is the number of atoms plus one
    integer, intent(in) :: gstart(:)
 
-   integer :: igrp, ngrp, gmax, nbmax, numax, kmax, x0, ng, i, xat, bat, yat
-   integer :: nb, nu, n, u, ient, nup
-   integer(i8) :: kat, lat, hat
-   real(wp) :: dy(3)
-   integer, allocatable :: bloc(:), hloc(:), blist(:), ulist(:)
-   integer(i8), allocatable :: jmap(:, :)
-   real(wp), allocatable :: dlow(:, :), qcol(:, :, :), acc(:, :, :)
+   !> Time of the charge derivatives of the groups and of their contraction
+   !> in seconds, summed over the threads
+   real(wp), intent(out) :: times(2)
 
+   integer :: igrp, ngrp, nbmax, numax, x0, ng, i, ic, xat, yat, nb, nu, n, u
+   integer(i8) :: kat, lat, hat, tick(3), rate
+   real(wp) :: dy(3), tpan, tcon
+   integer, allocatable :: bloc(:), hloc(:), blist(:), ulist(:), jt(:), tq(:)
+   integer(i8), allocatable :: qpos(:, :), jmap(:, :)
+   real(wp), allocatable :: dlow(:, :), pan(:, :), qcol(:, :), acc(:, :, :)
+
+   times(:) = 0.0_wp
    ngrp = size(gstart) - 1
    if (ngrp < 1) return
-   gmax = maxval(gstart(2:) - gstart(:ngrp))
-   kmax = 0
-   do xat = 1, mol%nat
-      kmax = max(kmax, count_neighbors(list, cache%lowlist, xat))
-   end do
-   nbmax = min(mol%nat, gmax * kmax)
-   numax = min(mol%nat, gmax * int(maxval(hessian%list%inl(2:mol%nat + 1) &
+   nbmax = min(mol%nat, max_group * get_max_neighbors(mol%nat, list, cache%lowlist))
+   numax = min(mol%nat, max_group * int(maxval(hessian%list%inl(2:mol%nat + 1) &
       & - hessian%list%inl(:mol%nat))))
+   allocate(jt(0), tq(0))
 
    ! Upper triangle of the columns of the partial derivatives in the order of
    ! the lower triangle of the list
@@ -1769,39 +2274,30 @@ subroutine add_implicit_blocks_half(mol, cache, hessian, list, gstart)
    end do
 
    ! bloc and hloc hold the position of each atom in the unions of the group
+   tpan = 0.0_wp
+   tcon = 0.0_wp
    !$omp parallel default(none) &
-   !$omp shared(mol, cache, hessian, list, dlow, gstart, ngrp, gmax, nbmax, numax) &
-   !$omp private(igrp, x0, ng, i, xat, bat, yat, nb, nu, n, u, ient, nup, kat) &
-   !$omp private(lat, hat, dy, bloc, hloc, blist, ulist, jmap, qcol, acc)
+   !$omp shared(mol, cache, hessian, list, dlow, jt, tq, gstart, ngrp, nbmax) &
+   !$omp shared(numax) &
+   !$omp private(igrp, x0, ng, i, ic, xat, yat, nb, nu, n, u, kat, lat, hat) &
+   !$omp private(tick, rate, dy, bloc, hloc, blist, ulist, qpos, jmap, pan, qcol) &
+   !$omp private(acc) &
+   !$omp reduction(+:tpan, tcon)
    allocate(bloc(mol%nat), hloc(mol%nat), source=0)
-   allocate(blist(nbmax), ulist(numax), jmap(gmax, numax), qcol(3, gmax, nbmax), &
-      & acc(3, 3, gmax))
+   allocate(blist(nbmax), ulist(numax), qpos(max_group, nbmax), &
+      & jmap(max_group, numax), pan(3 * max_group, nbmax), &
+      & qcol(3 * max_group, nbmax), acc(3, 3, max_group))
    !$omp do schedule(runtime)
    do igrp = 1, ngrp
+      call system_clock(tick(1), rate)
       x0 = gstart(igrp)
       ng = gstart(igrp + 1) - x0
 
-      ! Union of the neighbors b of the group with the charge derivatives
-      ! dq_b/dR_x of its atoms x, zero if b is not a neighbor of x
-      nb = 0
-      do i = 1, ng
-         xat = x0 + i - 1
-         nup = int(list%inl(xat + 1) - list%inl(xat))
-         do ient = 1, count_neighbors(list, cache%lowlist, xat)
-            call get_neighbor(list, cache%lowlist, xat, ient, bat, kat)
-            if (bloc(bat) == 0) then
-               nb = nb + 1
-               bloc(bat) = nb
-               blist(nb) = bat
-               qcol(:, :ng, nb) = 0.0_wp
-            end if
-            if (ient == 1 .or. ient > nup) then
-               qcol(:, i, bloc(bat)) = cache%dqdrlist_ut(:, kat)
-            else
-               qcol(:, i, bloc(bat)) = cache%dqdrlist_lt(:, kat)
-            end if
-         end do
-      end do
+      ! Charge derivatives dq_b/dR_x of the atoms x of the group for the union
+      ! of their neighbors b, zero if b is not a neighbor of x
+      call get_group_dqdr(cache, list, jt, tq, x0, ng, nb, bloc, blist, qpos, &
+         & pan, qcol)
+      call system_clock(tick(2))
 
       ! Union of the atoms y >= x in the rows of the Hessian of the group with
       ! the positions of the blocks (x, y), zero if not present
@@ -1831,9 +2327,10 @@ subroutine add_implicit_blocks_half(mol, cache, hessian, list, gstart)
          if (n > 0) then
             dy = cache%dabdrlist_ut(:, kat)
             do i = 1, ng
-               acc(:, 1, i) = acc(:, 1, i) + dy * qcol(1, i, n)
-               acc(:, 2, i) = acc(:, 2, i) + dy * qcol(2, i, n)
-               acc(:, 3, i) = acc(:, 3, i) + dy * qcol(3, i, n)
+               ic = 3 * (i - 1)
+               acc(:, 1, i) = acc(:, 1, i) + dy * qcol(ic + 1, n)
+               acc(:, 2, i) = acc(:, 2, i) + dy * qcol(ic + 2, n)
+               acc(:, 3, i) = acc(:, 3, i) + dy * qcol(ic + 3, n)
             end do
          end if
          do kat = list%inl(yat) + 1, list%inl(yat + 1) - 1
@@ -1841,9 +2338,10 @@ subroutine add_implicit_blocks_half(mol, cache, hessian, list, gstart)
             if (n == 0) cycle
             dy = cache%dabdrlist_lt(:, kat)
             do i = 1, ng
-               acc(:, 1, i) = acc(:, 1, i) + dy * qcol(1, i, n)
-               acc(:, 2, i) = acc(:, 2, i) + dy * qcol(2, i, n)
-               acc(:, 3, i) = acc(:, 3, i) + dy * qcol(3, i, n)
+               ic = 3 * (i - 1)
+               acc(:, 1, i) = acc(:, 1, i) + dy * qcol(ic + 1, n)
+               acc(:, 2, i) = acc(:, 2, i) + dy * qcol(ic + 2, n)
+               acc(:, 3, i) = acc(:, 3, i) + dy * qcol(ic + 3, n)
             end do
          end do
          do lat = cache%lowlist%inl(yat), cache%lowlist%inl(yat + 1) - 1
@@ -1851,9 +2349,10 @@ subroutine add_implicit_blocks_half(mol, cache, hessian, list, gstart)
             if (n == 0) cycle
             dy = dlow(:, lat)
             do i = 1, ng
-               acc(:, 1, i) = acc(:, 1, i) + dy * qcol(1, i, n)
-               acc(:, 2, i) = acc(:, 2, i) + dy * qcol(2, i, n)
-               acc(:, 3, i) = acc(:, 3, i) + dy * qcol(3, i, n)
+               ic = 3 * (i - 1)
+               acc(:, 1, i) = acc(:, 1, i) + dy * qcol(ic + 1, n)
+               acc(:, 2, i) = acc(:, 2, i) + dy * qcol(ic + 2, n)
+               acc(:, 3, i) = acc(:, 3, i) + dy * qcol(ic + 3, n)
             end do
          end do
          do i = 1, ng
@@ -1871,10 +2370,14 @@ subroutine add_implicit_blocks_half(mol, cache, hessian, list, gstart)
       do n = 1, nb
          bloc(blist(n)) = 0
       end do
+      call system_clock(tick(3))
+      tpan = tpan + real(tick(2) - tick(1), wp) / real(rate, wp)
+      tcon = tcon + real(tick(3) - tick(2), wp) / real(rate, wp)
    end do
    !$omp end do
-   deallocate(bloc, hloc, blist, ulist, jmap, qcol, acc)
+   deallocate(bloc, hloc, blist, ulist, qpos, jmap, pan, qcol, acc)
    !$omp end parallel
+   times(:) = [tpan, tcon]
 
 end subroutine add_implicit_blocks_half
 
@@ -2486,5 +2989,37 @@ subroutine print_total_time(unit, verbosity, timer)
       write(unit, '(a)') ''
    end if
 end subroutine print_total_time
+
+
+!> Print header for the analytical Hessian
+subroutine print_hessian_header(unit, verbosity)
+   !> Output unit
+   integer, intent(in) :: unit
+
+   !> Verbosity level
+   integer, intent(in) :: verbosity
+
+   if (verbosity > 0) then
+      write(unit, '(54("-"))')
+      write(unit, '(18x, a)') "Analytical Hessian"
+      write(unit, '(54("-"))')
+      write(unit, '(a)') ''
+   end if
+end subroutine print_hessian_header
+
+
+!> Print the elapsed time of a stage of a calculation
+subroutine print_stage_time(unit, label, time)
+   !> Output unit
+   integer, intent(in) :: unit
+
+   !> Name of the stage
+   character(len=*), intent(in) :: label
+
+   !> Elapsed time in seconds
+   real(wp), intent(in) :: time
+
+   write(unit, '(a, t34, ":", a)') label, format_time(time)
+end subroutine print_stage_time
 
 end module multicharge_model_type

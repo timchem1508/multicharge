@@ -20,7 +20,6 @@
 !> Cache for charge models
 module multicharge_model_cache
    use mctc_env, only : wp, i8
-   use mctc_csrlist, only : csr_list
    use mctc_io, only : structure_type
    use mctc_wignerseitz, only : wignerseitz_cell
    use multicharge_lowerlist, only : lower_list
@@ -133,26 +132,25 @@ module multicharge_model_cache
       !> the diagonal entries are not used
       real(wp), allocatable :: dabdrlist_lt(:, :)
 
-      !> Lower triangle of the half neighborlist of the charge derivatives, row x
-      !> holds the atoms b < x with the position of the entry of x in row b
+      !> Lower triangle of the half neighborlist of the charge derivatives and
+      !> the Hessian, row x holds the atoms b < x with the position of the entry
+      !> of x in row b
       type(lower_list) :: lowlist
 
-      !> Compressed-row pattern of the position derivatives of the charges, row j
-      !> holds the atoms whose displacement changes the charge of atom j
-      type(csr_list) :: dqdrpat
-
-      !> Position derivatives of the charges on a complete dqdrpat without the
-      !> charge constraint term, the entry of atom i in row j holds dq_j/dR_i
+      !> Position derivatives of the charges on the pattern of the complete
+      !> neighborlist of the solve without the charge constraint term, the entry
+      !> of atom i in row j holds dq_j/dR_i
       real(wp), allocatable :: dqdrlist(:, :)
 
       !> Diagonal and upper triangle of the position derivatives of the charges
-      !> on a half dqdrpat without the charge constraint term, the entry of atom
-      !> i in row j holds dq_j/dR_i
+      !> on the pattern of the half neighborlist of the solve without the charge
+      !> constraint term, the entry of atom i in row j holds dq_j/dR_i
       real(wp), allocatable :: dqdrlist_ut(:, :)
 
-      !> Lower triangle of the position derivatives of the charges on a half
-      !> dqdrpat without the charge constraint term, the entry of atom i in row j
-      !> holds dq_i/dR_j, the diagonal entries are not used
+      !> Lower triangle of the position derivatives of the charges on the
+      !> pattern of the half neighborlist of the solve without the charge
+      !> constraint term, the entry of atom i in row j holds dq_i/dR_j, the
+      !> diagonal entries are not used
       real(wp), allocatable :: dqdrlist_lt(:, :)
 
       !> Factors of the charge constraint term of the position derivatives,
