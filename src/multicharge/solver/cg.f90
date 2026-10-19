@@ -769,15 +769,15 @@ subroutine invert(self, amat, ainv, new_unit, error)
 end subroutine invert
 
 
-!> Invert a symmetric positive definite matrix in complete or upper triangular
+!> Invert a symmetric positive definite matrix in upper triangular
 !> compressed-row storage with the block CG solver and keep only the elements
 !> on the pattern of the matrix. The columns are solved in blocks of spatially
 !> close atoms, each from A_SS X_S = I_S on the subsystem S of the neighbors of
 !> the block atoms. The inverse decays fast with the distance, the error of the
 !> subsystem is of the order of the elements outside of the pattern, which are
-!> dropped. The column of an atom is stored in its row, so an upper triangular
-!> list keeps the elements of the atoms of higher index. The blocks are
-!> independent and solved in parallel.
+!> dropped. The column of an atom is stored in its row, so the list keeps the
+!> elements of the atoms of higher index. The blocks are independent and
+!> solved in parallel.
 subroutine invert_list(self, alist, list, ainvlist, xyz, low, new_unit, error)
    !> Conjugate-gradient solver instance
    class(cg_solver), intent(in) :: self
@@ -785,7 +785,7 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, low, new_unit, error)
    !> Coefficient matrix values in compressed-row storage
    real(wp), intent(in) :: alist(:)
 
-   !> Complete or upper triangular neighborlist representation of the matrix
+   !> Upper triangular neighborlist representation of the matrix
    type(csr_list), intent(in) :: list
 
    !> Inverse of the coefficient matrix on the pattern of the list
@@ -795,7 +795,7 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, low, new_unit, error)
    !> atom order if absent
    real(wp), intent(in), optional :: xyz(:, :)
 
-   !> Lower triangle of an upper triangular list, built here if absent
+   !> Lower triangle of the list, built here if absent
    type(lower_list), intent(in), target, optional :: low
 
    !> Output unit
@@ -820,7 +820,7 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, low, new_unit, error)
    real(wp), allocatable :: pos(:, :)
    ! Solver for the blocks without output
    type(cg_solver) :: blksolver
-   ! Lower triangle of an upper triangular list, given or built here
+   ! Lower triangle of the list, given or built here
    type(lower_list), target :: lowbuf
    type(lower_list), pointer :: lowptr
    integer :: unit
@@ -830,7 +830,12 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, low, new_unit, error)
       call fatal_error(error, "Inversion on a neighborlist requires use_nlist.")
       return
    end if
-   ! Periodic lists with translation indices hold an atom pair once per image
+   ! The columns of the inverse are stored in the rows of an upper triangular
+   ! list, periodic lists with translation indices hold a pair once per image
+   if (list%complete) then
+      call fatal_error(error, "Inversion on a neighborlist requires a half list.")
+      return
+   end if
    if (allocated(list%nltr)) then
       call fatal_error(error, &
          & "Inversion on a neighborlist requires one entry per atom pair.")
@@ -848,7 +853,7 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, low, new_unit, error)
          return
       end if
    end if
-   if (present(low) .and. .not. list%complete) then
+   if (present(low)) then
       if (size(low%inl, kind=i8) /= size(list%inl, kind=i8)) then
          call fatal_error(error, &
             & "Dimension mismatch between list and its lower triangle.")
@@ -877,11 +882,11 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, low, new_unit, error)
    call new_cg_solver(blksolver, cg_input(cgmiter=self%cgmiter, &
       & cgtol=self%invtol, verbosity=0, use_nlist=.true.))
 
-   ! The neighbors of lower index of an upper triangular list
+   ! The neighbors of lower index of the list
    if (present(low)) then
       lowptr => low
    else
-      if (.not. list%complete) call new_lower_list(lowbuf, ndim, list)
+      call new_lower_list(lowbuf, ndim, list)
       lowptr => lowbuf
    end if
 
@@ -945,10 +950,10 @@ subroutine invert_block(solver, alist, list, low, cols, loc, ainvlist, nsub, &
    !> Coefficient matrix values in compressed-row storage
    real(wp), intent(in) :: alist(:)
 
-   !> Complete or upper triangular neighborlist representation of the matrix
+   !> Upper triangular neighborlist representation of the matrix
    type(csr_list), intent(in) :: list
 
-   !> Lower triangle of an upper triangular list
+   !> Lower triangle of the list
    type(lower_list), intent(in) :: low
 
    !> Atoms of the block columns
@@ -999,7 +1004,6 @@ subroutine invert_block(solver, alist, list, low, cols, loc, ainvlist, nsub, &
          loc(jat) = nsub
          sidx(nsub) = jat
       end do
-      if (list%complete) cycle
       do kat = low%inl(iat), low%inl(iat + 1) - 1
          jat = low%nlat(kat)
          if (loc(jat) /= 0) cycle
@@ -1223,15 +1227,17 @@ subroutine csr_block_matmul(alist, list, vec, avec)
 end subroutine csr_block_matmul
 
 
-!> Multiply the subsystem block A_SS of a matrix in complete or upper
-!> triangular compressed-row storage with a block of vectors on the subsystem,
+!> Multiply the subsystem block A_SS of a matrix in upper triangular
+!> compressed-row storage with a block of vectors on the subsystem,
 !> avec = A_SS vec. The elements of the rows outside of the subsystem are
-!> skipped.
+!> skipped. The list holds each pair once, the subsystems of invert_list are
+!> solved by one thread each, so the product is formed serially with the
+!> contributions to both atoms of a pair.
 subroutine csr_sub_block_matmul(alist, list, sidx, loc, vec, avec)
-   !> Matrix values in complete or upper triangular compressed-row storage
+   !> Matrix values in upper triangular compressed-row storage
    real(wp), intent(in) :: alist(:)
 
-   !> Complete or upper triangular neighborlist representation of the matrix
+   !> Upper triangular neighborlist representation of the matrix
    type(csr_list), intent(in) :: list
 
    !> Atoms of the subsystem in the neighborlist, in the order of the vectors
@@ -1248,54 +1254,23 @@ subroutine csr_sub_block_matmul(alist, list, sidx, loc, vec, avec)
 
    integer :: ndim, nvec, isub, iat, jsub
    integer(i8) :: kat
-   real(wp), allocatable :: vect(:, :), acc(:), avect(:, :)
+   real(wp), allocatable :: vect(:, :), avect(:, :)
 
    ndim = size(vec, 1)
    nvec = size(vec, 2)
-   allocate(vect(nvec, ndim))
-
-   ! An upper triangular list holds each pair once, the subsystems of
-   ! invert_list are solved by one thread each, so the product is formed
-   ! serially with the contributions to both atoms of a pair
-   if (.not. list%complete) then
-      allocate(avect(nvec, ndim), source=0.0_wp)
-      vect(:, :) = transpose(vec)
-      do isub = 1, ndim
-         iat = sidx(isub)
-         do kat = list%inl(iat), list%inl(iat + 1) - 1
-            jsub = loc(list%nlat(kat))
-            if (jsub == 0) cycle
-            avect(:, isub) = avect(:, isub) + alist(kat) * vect(:, jsub)
-            if (jsub /= isub) avect(:, jsub) = avect(:, jsub) &
-               & + alist(kat) * vect(:, isub)
-         end do
-      end do
-      avec(:, :) = transpose(avect)
-      return
-   end if
-
-   !$omp parallel default(none) &
-   !$omp shared(ndim, nvec, alist, list, sidx, loc, vec, avec, vect) &
-   !$omp private(isub, iat, jsub, kat, acc)
-   allocate(acc(nvec))
-   !$omp do schedule(static)
-   do isub = 1, ndim
-      vect(:, isub) = vec(isub, :)
-   end do
-   !$omp end do
-   !$omp do schedule(guided)
+   allocate(avect(nvec, ndim), source=0.0_wp)
+   vect = transpose(vec)
    do isub = 1, ndim
       iat = sidx(isub)
-      acc(:) = 0.0_wp
       do kat = list%inl(iat), list%inl(iat + 1) - 1
          jsub = loc(list%nlat(kat))
-         if (jsub /= 0) acc(:) = acc + alist(kat) * vect(:, jsub)
+         if (jsub == 0) cycle
+         avect(:, isub) = avect(:, isub) + alist(kat) * vect(:, jsub)
+         if (jsub /= isub) avect(:, jsub) = avect(:, jsub) &
+            & + alist(kat) * vect(:, isub)
       end do
-      avec(isub, :) = acc
    end do
-   !$omp end do
-   deallocate(acc)
-   !$omp end parallel
+   avec(:, :) = transpose(avect)
 
 end subroutine csr_sub_block_matmul
 

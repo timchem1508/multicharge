@@ -119,13 +119,12 @@ program main
 
    allocate(cache)
 
-   ! Create neighborlist if requested, the charge derivatives of a periodic
-   ! system need a complete list, a molecular system keeps each pair once
+   ! Create a half neighborlist if requested, which keeps each pair once
    if (use_nlist) then
       call timer%push("nlist")
       allocate(list)
       if (any(mol%periodic)) then
-         call new_csr_list(list, mol, error, cache%wsc, cutoff, complete=qgrad)
+         call new_csr_list(list, mol, error, cache%wsc, cutoff, complete=.false.)
       else
          call new_csr_list(list, mol, error, cutoff=cutoff, complete=.false.)
       end if
@@ -300,7 +299,7 @@ subroutine help(unit)
       "-numhess, --numhess", &
       & "Evaluate semi-numerical Hessian and pressure tensor.", &
       "-list, -nlist, --nlist", &
-      & "Use neighborlist for solver (complete list for periodic charge gradients)", &
+      & "Use neighborlist for solver", &
       "-cut, -cutoff, --cutoff <real>", &
       & "Cutoff for neighborlist generation in Bohrs (default: 29.0 Bohr,", &
       "", "33.0 Bohr with charge gradient or Hessian)", &

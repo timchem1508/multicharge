@@ -90,7 +90,6 @@ subroutine collect_csrlist(testsuite)
    & new_unittest("partial-derivs-ice", test_partial_derivs_ice), &
    & new_unittest("d2cdr2-mb01", test_d2cdr2_mb01), &
    & new_unittest("d2cdr2-mb05", test_d2cdr2_mb05), &
-   & new_unittest("d2cdr2-complete-mb01", test_d2cdr2_complete_mb01), &
    & new_unittest("explicit-hessian-coulomb-mb01", test_hexpl_coulomb_mb01), &
    & new_unittest("explicit-hessian-en-mb01", test_hexpl_en_mb01), &
    & new_unittest("explicit-hessian-mb05", test_hexpl_mb05), &
@@ -98,15 +97,10 @@ subroutine collect_csrlist(testsuite)
    & new_unittest("explicit-hessian-znooh", test_hexpl_znooh), &
    & new_unittest("explicit-hessian-sparse-upu23", test_hexpl_sparse_upu23), &
    & new_unittest("explicit-hessian-sparse-dfdq-upu23", test_hexpl_sparse_dfdq_upu23), &
-   & new_unittest("implicit-hessian-mb05", test_himpl_mb05), &
-   & new_unittest("implicit-hessian-sparse-upu23", test_himpl_sparse_upu23), &
    & new_unittest("implicit-hessian-half-mb05", test_himpl_half_mb05), &
    & new_unittest("implicit-hessian-sparse-half-upu23", test_himpl_sparse_half_upu23), &
-   & new_unittest("hessian-mb05", test_hess_mb05), &
-   & new_unittest("hessian-znooh", test_hess_znooh), &
    & new_unittest("hessian-half-mb05", test_hess_half_mb05), &
    & new_unittest("hessian-half-znooh", test_hess_half_znooh), &
-   & new_unittest("hessian-pattern-upu23", test_hess_pattern_upu23), &
    & new_unittest("hessian-pattern-half-upu23", test_hess_pattern_half_upu23) &
    & ]
 
@@ -1190,13 +1184,13 @@ subroutine test_pair_derivs_ice(error)
 end subroutine test_pair_derivs_ice
 
 
-!> Expand the complete neighbour list storage of the partial derivatives
+!> Expand the half neighbour list storage of the partial derivatives
 subroutine expand_partial_derivs(mol, list, cache, dabdr)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
 
-   !> Complete or half CSR neighbour list
+   !> Half CSR neighbour list
    type(csr_list), intent(in) :: list
 
    !> Cache holding the partial derivatives in neighbour list storage
@@ -1208,30 +1202,22 @@ subroutine expand_partial_derivs(mol, list, cache, dabdr)
    integer :: iat
    integer(i8) :: kat
 
+   ! The entry of a pair holds both components in the two triangles
    dabdr(:, :, :) = 0.0_wp
-   if (list%complete) then
-      do iat = 1, mol%nat
-         do kat = list%inl(iat), list%inl(iat + 1) - 1
-            dabdr(:, list%nlat(kat), iat) = cache%dabdrlist(:, kat)
-         end do
+   do iat = 1, mol%nat
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         dabdr(:, list%nlat(kat), iat) = cache%dabdrlist_ut(:, kat)
+         if (list%nlat(kat) /= iat) &
+            & dabdr(:, iat, list%nlat(kat)) = cache%dabdrlist_lt(:, kat)
       end do
-   else
-      ! The entry of a pair holds both components in the two triangles
-      do iat = 1, mol%nat
-         do kat = list%inl(iat), list%inl(iat + 1) - 1
-            dabdr(:, list%nlat(kat), iat) = cache%dabdrlist_ut(:, kat)
-            if (list%nlat(kat) /= iat) &
-               & dabdr(:, iat, list%nlat(kat)) = cache%dabdrlist_lt(:, kat)
-         end do
-      end do
-   end if
+   end do
 
 end subroutine expand_partial_derivs
 
 
 !> Compare the partial derivatives and charge derivatives obtained with the
-!> complete neighbour list against the dense evaluation with the block CG and
-!> the direct solver
+!> half neighbour list against the dense evaluation with the block CG and the
+!> direct solver
 subroutine test_partial_derivs(error, mol, model)
 
    !> Error handling
@@ -1245,8 +1231,8 @@ subroutine test_partial_derivs(error, mol, model)
 
    class(mchrg_solver_type), allocatable :: solver, direct
    class(mchrg_solver_input), allocatable :: solver_input, direct_in
-   type(mchrg_cache), allocatable :: cache1, cache2, cache3, cache4, cache5
-   type(csr_list), allocatable :: list, half
+   type(mchrg_cache), allocatable :: cache1, cache2, cache3, cache4
+   type(csr_list), allocatable :: list
    integer :: ndim, iscale, jat
    real(wp), parameter :: scales(2, 2) = reshape([1.0_wp, 0.0_wp, 0.0_wp, 1.0_wp], &
       & [2, 2])
@@ -1254,8 +1240,7 @@ subroutine test_partial_derivs(error, mol, model)
    real(wp), allocatable :: dqdr1(:, :, :), dqdL1(:, :, :)
    real(wp), allocatable :: dqdr2(:, :, :), dqdL2(:, :, :)
    real(wp), allocatable :: dqdr3(:, :, :), dqdL3(:, :, :)
-   real(wp), allocatable :: dqrow(:, :), dqdL4(:, :, :), dqdr5(:, :, :), dqdL5(:, :, :)
-   real(wp), allocatable :: dabdr2(:, :, :)
+   real(wp), allocatable :: dqrow(:, :), dqdL4(:, :, :)
 
    allocate(cg_input :: solver_input)
    select type (solver_input)
@@ -1298,12 +1283,12 @@ subroutine test_partial_derivs(error, mol, model)
       & unit=output_unit)
    if (allocated(error)) return
 
-   ! Complete neighbour list, inverse on the pattern of the list
+   ! Half neighbour list, inverse on the pattern of the list
    allocate(cache2, list)
    if (any(mol%periodic)) then
-      call new_csr_list(list, mol, error, cache2%wsc, cutoff=cutoff, complete=.true.)
+      call new_csr_list(list, mol, error, cache2%wsc, cutoff=cutoff, complete=.false.)
    else
-      call new_csr_list(list, mol, error, cutoff=cutoff, complete=.true.)
+      call new_csr_list(list, mol, error, cutoff=cutoff, complete=.false.)
    end if
    if (allocated(error)) return
    call model%update(mol, cache2, trans, grad=.true., list=list, dqdr=.true.)
@@ -1366,50 +1351,6 @@ subroutine test_partial_derivs(error, mol, model)
          return
       end if
    end do
-   if (any(mol%periodic)) return
-
-   ! Half neighbour list of a molecular system, same pairs as the complete one
-   allocate(half, cache5)
-   call new_csr_list(half, mol, error, cutoff=cutoff, complete=.false.)
-   if (allocated(error)) return
-   allocate(dqdr5(3, mol%nat, mol%nat), dqdL5(3, 3, mol%nat))
-   call model%update(mol, cache5, trans, grad=.true., list=half, dqdr=.true.)
-   call model%solve(mol, solver, cache5, error, dqdr=dqdr5, dqdL=dqdL5, list=half, &
-      & unit=output_unit)
-   if (allocated(error)) return
-
-   if (any(abs(dqdr5 - dqdr2) > thr1) .or. any(abs(dqdr5 - dqdr1) > thr2)) then
-      call test_failed(error, "Charge derivatives on the half list do not match")
-      print'(2es21.14)', maxval(abs(dqdr5 - dqdr2)), maxval(abs(dqdr5 - dqdr1))
-      return
-   end if
-   if (any(abs(dqdL5 - dqdL2) > thr1)) then
-      call test_failed(error, "Strain derivatives on the half list do not match")
-      print'(es21.14)', maxval(abs(dqdL5 - dqdL2))
-      return
-   end if
-
-   allocate(dabdr2(3, mol%nat, ndim))
-   cache5%vrhs(:) = cache1%vrhs
-   do iscale = 1, 2
-      call model%get_partial_derivs(mol, ndim, cache2, scales(1, iscale), &
-         & scales(2, iscale), list=list)
-      call model%get_partial_derivs(mol, ndim, cache5, scales(1, iscale), &
-         & scales(2, iscale), list=half)
-      call expand_partial_derivs(mol, list, cache2, dabdr2)
-      call expand_partial_derivs(mol, half, cache5, dabdr)
-
-      if (any(abs(dabdr - dabdr2) > thr1)) then
-         call test_failed(error, "Partial derivatives on the half list do not match")
-         print'(es21.14)', maxval(abs(dabdr - dabdr2))
-         return
-      end if
-      if (any(abs(cache5%dabdL - cache2%dabdL) > thr1)) then
-         call test_failed(error, "Strain derivatives on the half list do not match")
-         print'(es21.14)', maxval(abs(cache5%dabdL - cache2%dabdL))
-         return
-      end if
-   end do
 
 end subroutine test_partial_derivs
 
@@ -1465,7 +1406,7 @@ end subroutine test_partial_derivs_ice
 !> Check the diagonal blocks of the second derivative of the capacitance matrix
 !> from the neighbour list against finite differences of the diagonal of its
 !> first derivative
-subroutine test_d2cdr2(error, mol, model, complete)
+subroutine test_d2cdr2(error, mol, model)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -1475,9 +1416,6 @@ subroutine test_d2cdr2(error, mol, model, complete)
 
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
-
-   !> Use the complete instead of the half neighbour list
-   logical, intent(in) :: complete
 
    type(mchrg_cache), allocatable :: cache
    type(csr_list), allocatable :: list
@@ -1491,7 +1429,7 @@ subroutine test_d2cdr2(error, mol, model, complete)
    allocate(numd2cdr2(3, 3, mol%nat), source=0.0_wp)
    ndim = mol%nat
 
-   call new_csr_list(list, mol, error, cutoff=cutoff, complete=complete)
+   call new_csr_list(list, mol, error, cutoff=cutoff, complete=.false.)
    if (allocated(error)) return
 
    ! The capacitance matrix depends on the positions only
@@ -1562,7 +1500,7 @@ subroutine test_d2cdr2_mb01(error)
    call get_structure(mol, "MB16-43", "01")
    call new_eeqbc2025_model(mol, model, error)
    if (allocated(error)) return
-   call test_d2cdr2(error, mol, model, complete=.false.)
+   call test_d2cdr2(error, mol, model)
 
 end subroutine test_d2cdr2_mb01
 
@@ -1578,32 +1516,16 @@ subroutine test_d2cdr2_mb05(error)
    call get_structure(mol, "MB16-43", "05")
    call new_eeqbc2025_model(mol, model, error)
    if (allocated(error)) return
-   call test_d2cdr2(error, mol, model, complete=.false.)
+   call test_d2cdr2(error, mol, model)
 
 end subroutine test_d2cdr2_mb05
 
 
-subroutine test_d2cdr2_complete_mb01(error)
-
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
-
-   type(structure_type) :: mol
-   class(mchrg_model_type), allocatable :: model
-
-   call get_structure(mol, "MB16-43", "01")
-   call new_eeqbc2025_model(mol, model, error)
-   if (allocated(error)) return
-   call test_d2cdr2(error, mol, model, complete=.true.)
-
-end subroutine test_d2cdr2_complete_mb01
-
-
 !> Check the explicit Hessian, the second derivative of alpha * p^T A q
-!> + beta * p^T X at fixed p and charges q, with a complete neighbour list
-!> against central differences of the gradient with the same list, against the
-!> dense evaluation if the list holds all pairs, and its symmetry and
-!> translational invariance
+!> + beta * p^T X at fixed p and charges q, with a half neighbour list against
+!> central differences of the gradient with the same list, against the dense
+!> evaluation if the list holds all pairs, and its symmetry and translational
+!> invariance
 subroutine test_explicit_hessian(error, mol, model, alpha, beta, nlcutoff, pvec)
 
    !> Error handling
@@ -1630,14 +1552,13 @@ subroutine test_explicit_hessian(error, mol, model, alpha, beta, nlcutoff, pvec)
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
    type(mchrg_cache), allocatable :: cache
-   type(csr_list), allocatable :: list, half
+   type(csr_list), allocatable :: list
    type(mchrg_hessian), allocatable :: sphess
    integer :: iat, ic, ndim
    real(wp), parameter :: trans(3, 1) = 0.0_wp
    real(wp), parameter :: step = 1.0e-4_wp
    real(wp) :: xorig
    real(wp), allocatable :: qvec(:), p(:), hessian(:, :), refhess(:, :), numhess(:, :)
-   real(wp), allocatable :: halfhess(:, :)
    real(wp), allocatable :: gr1(:, :), gr2(:, :), gl1(:, :), gl2(:, :)
 
    allocate(cg_input :: solver_input)
@@ -1652,7 +1573,7 @@ subroutine test_explicit_hessian(error, mol, model, alpha, beta, nlcutoff, pvec)
 
    ndim = 3*mol%nat
    allocate(qvec(mol%nat), hessian(ndim, ndim), refhess(ndim, ndim), &
-      & numhess(ndim, ndim), halfhess(ndim, ndim))
+      & numhess(ndim, ndim))
    allocate(gr1(3, mol%nat), gr2(3, mol%nat), gl1(3, mol%nat), gl2(3, mol%nat))
 
    ! Charges of the reference structure without a neighbour list
@@ -1667,7 +1588,7 @@ subroutine test_explicit_hessian(error, mol, model, alpha, beta, nlcutoff, pvec)
    end if
 
    allocate(list)
-   call new_csr_list(list, mol, error, cutoff=nlcutoff, complete=.true.)
+   call new_csr_list(list, mol, error, cutoff=nlcutoff, complete=.false.)
    if (allocated(error)) return
 
    refhess(:, :) = 0.0_wp
@@ -1683,38 +1604,19 @@ subroutine test_explicit_hessian(error, mol, model, alpha, beta, nlcutoff, pvec)
       ! holds all pairs to keep the products of the CN derivatives with the
       ! second neighbours
       call fixed_charge_cache(mol, model, list, qvec, cache)
-      call new_allpairs_hessian(mol, sphess, error, .true.)
+      call new_allpairs_hessian(mol, sphess, error)
       if (allocated(error)) return
       call model%get_explicit_hessian(mol, cache, p, sphess, error, &
          & alpha=alpha, beta=beta, list=list)
       if (allocated(error)) return
       call expand_hessian(mol, sphess, hessian)
-
-      ! Half neighbour list with the same pairs and a half list of the Hessian
-      allocate(half)
-      call new_csr_list(half, mol, error, cutoff=nlcutoff, complete=.false.)
-      if (allocated(error)) return
-      call fixed_charge_cache(mol, model, half, qvec, cache)
-      call new_allpairs_hessian(mol, sphess, error, .false.)
-      if (allocated(error)) return
-      call model%get_explicit_hessian(mol, cache, p, sphess, error, &
-         & alpha=alpha, beta=beta, list=half)
-      if (allocated(error)) return
-      call expand_hessian(mol, sphess, halfhess)
    class default
       call test_failed(error, "Explicit Hessian requires the EEQBC model")
       return
    end select
 
-   if (any(abs(halfhess - hessian) > thr1)) then
-      call test_failed(error, "Explicit Hessian on the half list does not match")
-      print'(a)', "diff:"
-      print'(3es21.12)', halfhess - hessian
-      return
-   end if
-
    ! Without all pairs in the list the dense evaluation is a different model
-   if (size(list%nlat) == mol%nat**2) then
+   if (size(list%nlat) == mol%nat * (mol%nat + 1) / 2) then
       if (any(abs(hessian - refhess) > thr1)) then
          call test_failed(error, "Explicit Hessian does not match the dense one")
          print'(a)', "diff:"
@@ -1784,7 +1686,7 @@ subroutine fixed_charge_cache(mol, model, list, qvec, cache)
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   !> Complete or half neighbour list
+   !> Half neighbour list
    type(csr_list), intent(in) :: list
 
    !> Fixed atomic partial charges
@@ -1813,7 +1715,7 @@ subroutine fixed_charge_gradient(mol, model, list, qvec, p, alpha, beta, gradien
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
 
-   !> Complete neighbour list
+   !> Half neighbour list
    type(csr_list), intent(in) :: list
 
    !> Fixed atomic partial charges
@@ -1845,10 +1747,10 @@ subroutine fixed_charge_gradient(mol, model, list, qvec, p, alpha, beta, gradien
 end subroutine fixed_charge_gradient
 
 
-!> Check the implicit Hessian with a complete neighbour list against the dense
+!> Check the implicit Hessian with a half neighbour list against the dense
 !> product of the expanded partial and charge derivatives of the same list,
 !> and against the dense evaluation if the list holds all pairs
-subroutine test_implicit_hessian(error, mol, model, nlcutoff, complete)
+subroutine test_implicit_hessian(error, mol, model, nlcutoff)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -1861,9 +1763,6 @@ subroutine test_implicit_hessian(error, mol, model, nlcutoff, complete)
 
    !> Cutoff of the neighbour list
    real(wp), intent(in) :: nlcutoff
-
-   !> Complete neighbour list instead of the upper triangle
-   logical, intent(in) :: complete
 
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
@@ -1892,14 +1791,14 @@ subroutine test_implicit_hessian(error, mol, model, nlcutoff, complete)
       & dqdL(3, 3, mol%nat), hessian(ndim, ndim), refhess(ndim, ndim))
 
    allocate(cache, list)
-   call new_csr_list(list, mol, error, cutoff=nlcutoff, complete=complete)
+   call new_csr_list(list, mol, error, cutoff=nlcutoff, complete=.false.)
    if (allocated(error)) return
    call model%update(mol, cache, trans, grad=.false., list=list, dqdr=.true.)
    call model%solve(mol, solver, cache, error, dqdL=dqdL, list=list, &
       & unit=output_unit)
    if (allocated(error)) return
 
-   call new_allpairs_hessian(mol, sphess, error, complete)
+   call new_allpairs_hessian(mol, sphess, error)
    if (allocated(error)) return
    select type (model)
    type is (eeqbc_model)
@@ -1940,8 +1839,7 @@ subroutine test_implicit_hessian(error, mol, model, nlcutoff, complete)
    end if
 
    ! Without all pairs in the list the dense evaluation is a different model
-   if (size(list%nlat) == merge(mol%nat**2, mol%nat * (mol%nat + 1) / 2, &
-      & complete)) then
+   if (size(list%nlat) == mol%nat * (mol%nat + 1) / 2) then
       deallocate(cache)
       allocate(cache)
       call model%update(mol, cache, trans, grad=.false., dqdr=.true.)
@@ -1965,9 +1863,9 @@ subroutine test_implicit_hessian(error, mol, model, nlcutoff, complete)
 end subroutine test_implicit_hessian
 
 
-!> Check the analytical Hessian with a complete or half neighbour list holding
-!> all pairs against the dense evaluation, and its symmetry
-subroutine test_hessian(error, mol, model, complete)
+!> Check the analytical Hessian with a half neighbour list holding all pairs
+!> against the dense evaluation, and its symmetry
+subroutine test_hessian(error, mol, model)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -1977,9 +1875,6 @@ subroutine test_hessian(error, mol, model, complete)
 
    !> Electronegativity equilibration model
    class(mchrg_model_type), intent(in) :: model
-
-   !> Complete neighbour list instead of the upper triangle
-   logical, intent(in) :: complete
 
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
@@ -2004,10 +1899,9 @@ subroutine test_hessian(error, mol, model, complete)
    allocate(hessian(ndim, ndim), refhess(ndim, ndim))
 
    allocate(list)
-   call new_csr_list(list, mol, error, cutoff=cutoff, complete=complete)
+   call new_csr_list(list, mol, error, cutoff=cutoff, complete=.false.)
    if (allocated(error)) return
-   if (size(list%nlat) /= merge(mol%nat**2, mol%nat * (mol%nat + 1) / 2, &
-      & complete)) then
+   if (size(list%nlat) /= mol%nat * (mol%nat + 1) / 2) then
       call test_failed(error, "Neighbour list does not hold all pairs")
       return
    end if
@@ -2049,7 +1943,7 @@ end subroutine test_hessian
 !> Check that the compressed Hessian on a short list of its own holds the
 !> blocks of the Hessian on a list with all pairs, and the same factors of the
 !> charge constraint term
-subroutine test_hessian_pattern(error, mol, model, nlcutoff, hcutoff, complete)
+subroutine test_hessian_pattern(error, mol, model, nlcutoff, hcutoff)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -2065,9 +1959,6 @@ subroutine test_hessian_pattern(error, mol, model, nlcutoff, hcutoff, complete)
 
    !> Cutoff of the short list of the Hessian
    real(wp), intent(in) :: hcutoff
-
-   !> Complete lists instead of the upper triangles
-   logical, intent(in) :: complete
 
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
@@ -2090,13 +1981,13 @@ subroutine test_hessian_pattern(error, mol, model, nlcutoff, hcutoff, complete)
    if (allocated(error)) return
 
    allocate(list)
-   call new_csr_list(list, mol, error, cutoff=nlcutoff, complete=complete)
+   call new_csr_list(list, mol, error, cutoff=nlcutoff, complete=.false.)
    if (allocated(error)) return
 
    allocate(sphess)
-   call new_csr_list(sphess%list, mol, error, cutoff=hcutoff, complete=complete)
+   call new_csr_list(sphess%list, mol, error, cutoff=hcutoff, complete=.false.)
    if (allocated(error)) return
-   if (size(sphess%list%nlat) >= mol%nat**2) then
+   if (size(sphess%list%nlat) >= mol%nat * (mol%nat + 1) / 2) then
       call test_failed(error, "Short list of the Hessian holds all pairs")
       return
    end if
@@ -2104,7 +1995,7 @@ subroutine test_hessian_pattern(error, mol, model, nlcutoff, hcutoff, complete)
    select type (model)
    type is (eeqbc_model)
       allocate(cache)
-      call new_allpairs_hessian(mol, refhess, error, complete)
+      call new_allpairs_hessian(mol, refhess, error)
       if (allocated(error)) return
       call model%get_hessian(mol, solver, cache, error, refhess, list)
       if (allocated(error)) return
@@ -2118,7 +2009,7 @@ subroutine test_hessian_pattern(error, mol, model, nlcutoff, hcutoff, complete)
       return
    end select
 
-   if (any(abs(sphess%w - refhess%w) > thr1) &
+   if (abs(sphess%uvecsum - refhess%uvecsum) > thr1 &
       & .or. any(abs(sphess%dlambda - refhess%dlambda) > thr1)) then
       call test_failed(error, "Charge constraint term depends on the list of the Hessian")
       return
@@ -2148,9 +2039,8 @@ subroutine test_hessian_pattern(error, mol, model, nlcutoff, hcutoff, complete)
 end subroutine test_hessian_pattern
 
 
-!> Compressed Hessian with zero blocks on a complete or half list holding all
-!> pairs
-subroutine new_allpairs_hessian(mol, hessian, error, complete)
+!> Compressed Hessian with zero blocks on a half list holding all pairs
+subroutine new_allpairs_hessian(mol, hessian, error)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
@@ -2161,14 +2051,10 @@ subroutine new_allpairs_hessian(mol, hessian, error, complete)
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
-   !> Complete list instead of the upper triangle
-   logical, intent(in) :: complete
-
    allocate(hessian)
-   call new_csr_list(hessian%list, mol, error, cutoff=allpairs, complete=complete)
+   call new_csr_list(hessian%list, mol, error, cutoff=allpairs, complete=.false.)
    if (allocated(error)) return
-   if (size(hessian%list%nlat) /= merge(mol%nat**2, mol%nat * (mol%nat + 1) / 2, &
-      & complete)) then
+   if (size(hessian%list%nlat) /= mol%nat * (mol%nat + 1) / 2) then
       call test_failed(error, "List of the Hessian does not hold all pairs")
       return
    end if
@@ -2195,13 +2081,14 @@ subroutine expand_hessian(mol, hessian, dense)
    integer(i8) :: hat
 
    dense(:, :) = 0.0_wp
-   if (allocated(hessian%w)) then
+   if (allocated(hessian%dlambda)) then
       do xat = 1, mol%nat
          ii = 3 * (xat - 1)
          do yat = 1, mol%nat
             jj = 3 * (yat - 1)
             do ic = 1, 3
-               dense(jj+1:jj+3, ii+ic) = hessian%w(ic, xat) * hessian%dlambda(:, yat)
+               dense(jj+1:jj+3, ii+ic) = hessian%uvecsum * hessian%dlambda(ic, xat) &
+                  & * hessian%dlambda(:, yat)
             end do
          end do
       end do
@@ -2212,8 +2099,8 @@ subroutine expand_hessian(mol, hessian, dense)
          jj = 3 * (hessian%list%nlat(hat) - 1)
          dense(jj+1:jj+3, ii+1:ii+3) = dense(jj+1:jj+3, ii+1:ii+3) &
             & + hessian%hesslist(:, :, hat)
-         ! A half list keeps one block of each pair
-         if (hessian%list%complete .or. jj == ii) cycle
+         ! The half list keeps one block of each pair
+         if (jj == ii) cycle
          dense(ii+1:ii+3, jj+1:jj+3) = dense(ii+1:ii+3, jj+1:jj+3) &
             & + transpose(hessian%hesslist(:, :, hat))
       end do
@@ -2368,39 +2255,6 @@ subroutine test_hexpl_sparse_dfdq_upu23(error)
 end subroutine test_hexpl_sparse_dfdq_upu23
 
 
-subroutine test_himpl_mb05(error)
-
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
-
-   type(structure_type) :: mol
-   class(mchrg_model_type), allocatable :: model
-
-   call get_structure(mol, "MB16-43", "05")
-   call new_eeqbc2025_model(mol, model, error)
-   if (allocated(error)) return
-   call test_implicit_hessian(error, mol, model, nlcutoff=cutoff, complete=.true.)
-
-end subroutine test_himpl_mb05
-
-
-subroutine test_himpl_sparse_upu23(error)
-
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
-
-   type(structure_type) :: mol
-   class(mchrg_model_type), allocatable :: model
-
-   call get_structure(mol, "UPU23", "0a")
-   call new_eeqbc2025_model(mol, model, error)
-   if (allocated(error)) return
-   ! Short cutoff, the list only holds part of the pairs
-   call test_implicit_hessian(error, mol, model, nlcutoff=12.0_wp, complete=.true.)
-
-end subroutine test_himpl_sparse_upu23
-
-
 subroutine test_himpl_half_mb05(error)
 
    !> Error handling
@@ -2412,7 +2266,7 @@ subroutine test_himpl_half_mb05(error)
    call get_structure(mol, "MB16-43", "05")
    call new_eeqbc2025_model(mol, model, error)
    if (allocated(error)) return
-   call test_implicit_hessian(error, mol, model, nlcutoff=cutoff, complete=.false.)
+   call test_implicit_hessian(error, mol, model, nlcutoff=cutoff)
 
 end subroutine test_himpl_half_mb05
 
@@ -2429,7 +2283,7 @@ subroutine test_himpl_sparse_half_upu23(error)
    call new_eeqbc2025_model(mol, model, error)
    if (allocated(error)) return
    ! Short cutoff, the half list only holds part of the pairs
-   call test_implicit_hessian(error, mol, model, nlcutoff=12.0_wp, complete=.false.)
+   call test_implicit_hessian(error, mol, model, nlcutoff=12.0_wp)
 
 end subroutine test_himpl_sparse_half_upu23
 
@@ -2445,7 +2299,7 @@ subroutine test_hess_half_mb05(error)
    call get_structure(mol, "MB16-43", "05")
    call new_eeqbc2025_model(mol, model, error)
    if (allocated(error)) return
-   call test_hessian(error, mol, model, complete=.false.)
+   call test_hessian(error, mol, model)
 
 end subroutine test_hess_half_mb05
 
@@ -2462,42 +2316,9 @@ subroutine test_hess_pattern_half_upu23(error)
    call new_eeqbc2025_model(mol, model, error)
    if (allocated(error)) return
    ! The half list of the Hessian is shorter than the half neighbour list
-   call test_hessian_pattern(error, mol, model, nlcutoff=12.0_wp, hcutoff=8.0_wp, &
-      & complete=.false.)
+   call test_hessian_pattern(error, mol, model, nlcutoff=12.0_wp, hcutoff=8.0_wp)
 
 end subroutine test_hess_pattern_half_upu23
-
-
-subroutine test_hess_mb05(error)
-
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
-
-   type(structure_type) :: mol
-   class(mchrg_model_type), allocatable :: model
-
-   call get_structure(mol, "MB16-43", "05")
-   call new_eeqbc2025_model(mol, model, error)
-   if (allocated(error)) return
-   call test_hessian(error, mol, model, complete=.true.)
-
-end subroutine test_hess_mb05
-
-
-subroutine test_hess_znooh(error)
-
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
-
-   type(structure_type) :: mol
-   class(mchrg_model_type), allocatable :: model
-
-   call get_znooh(mol)
-   call new_eeqbc2025_model(mol, model, error)
-   if (allocated(error)) return
-   call test_hessian(error, mol, model, complete=.true.)
-
-end subroutine test_hess_znooh
 
 
 subroutine test_hess_half_znooh(error)
@@ -2511,7 +2332,7 @@ subroutine test_hess_half_znooh(error)
    call get_znooh(mol)
    call new_eeqbc2025_model(mol, model, error)
    if (allocated(error)) return
-   call test_hessian(error, mol, model, complete=.false.)
+   call test_hessian(error, mol, model)
 
 end subroutine test_hess_half_znooh
 
@@ -2535,24 +2356,6 @@ subroutine get_znooh(mol)
    call new(mol, num, xyz, charge)
 
 end subroutine get_znooh
-
-
-subroutine test_hess_pattern_upu23(error)
-
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
-
-   type(structure_type) :: mol
-   class(mchrg_model_type), allocatable :: model
-
-   call get_structure(mol, "UPU23", "0a")
-   call new_eeqbc2025_model(mol, model, error)
-   if (allocated(error)) return
-   ! The Hessian list is shorter than the neighbour list
-   call test_hessian_pattern(error, mol, model, nlcutoff=12.0_wp, hcutoff=8.0_wp, &
-      & complete=.true.)
-
-end subroutine test_hess_pattern_upu23
 
 
 end module test_csrlist

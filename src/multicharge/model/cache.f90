@@ -118,10 +118,6 @@ module multicharge_model_cache
       !> Linear combination alpha * dA/dL*q + beta * dX/dL w.r.t. strain
       real(wp), allocatable :: dabdL(:, :, :)
 
-      !> Complete neighborlist storage of dabdr, the entry of a neighbor in the
-      !> row of atom i holds the derivative of component i w.r.t. that neighbor
-      real(wp), allocatable :: dabdrlist(:, :)
-
       !> Diagonal and upper triangle of dabdr on a half neighborlist, the entry
       !> of atom x in the row of atom i holds the derivative of component i
       !> w.r.t. atom x
@@ -137,11 +133,6 @@ module multicharge_model_cache
       !> of x in row b
       type(lower_list) :: lowlist
 
-      !> Position derivatives of the charges on the pattern of the complete
-      !> neighborlist of the solve without the charge constraint term, the entry
-      !> of atom i in row j holds dq_j/dR_i
-      real(wp), allocatable :: dqdrlist(:, :)
-
       !> Diagonal and upper triangle of the position derivatives of the charges
       !> on the pattern of the half neighborlist of the solve without the charge
       !> constraint term, the entry of atom i in row j holds dq_j/dR_i
@@ -154,7 +145,7 @@ module multicharge_model_cache
       real(wp), allocatable :: dqdrlist_lt(:, :)
 
       !> Factors of the charge constraint term of the position derivatives,
-      !> dq_j/dR_i = dqdrlist(:, (j, i)) - dlambdadr(:, i) * uvec(j)
+      !> dq_j/dR_i = dqdrlist_ut(:, (j, i)) - dlambdadr(:, i) * uvec(j) for i >= j
       real(wp), allocatable :: dlambdadr(:, :)
 
       !> Diagonal part of the second derivative of the Maxwell capacitance
