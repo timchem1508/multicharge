@@ -497,9 +497,9 @@ subroutine get_partial_derivs(self, mol, ndim, cache, alpha, beta, list)
       allocate(cache%dabdrlist_ut(3, size(list%nlat, kind=i8)), &
          & cache%dabdrlist_lt(3, size(list%nlat, kind=i8)), source=0.0_wp)
       if (any(mol%periodic)) then
-         call get_partial_derivs_3d_half(self, mol, list, cache, alpha, beta)
+         call get_partial_derivs_3d_list(self, mol, list, cache, alpha, beta)
       else
-         call get_partial_derivs_0d_half(self, mol, list, cache, alpha, beta)
+         call get_partial_derivs_0d_list(self, mol, list, cache, alpha, beta)
       end if
    else
       if (.not. allocated(cache%dabdr)) allocate(cache%dabdr(3, mol%nat, ndim))
@@ -875,7 +875,7 @@ end subroutine get_partial_derivs_3d
 !> dabdrlist_ut for x >= i, and at the entry of i in the row of x in
 !> dabdrlist_lt for x < i. The products with CN or local charge derivatives
 !> below cnthr are skipped.
-subroutine get_partial_derivs_0d_half(self, mol, list, cache, alpha, beta)
+subroutine get_partial_derivs_0d_list(self, mol, list, cache, alpha, beta)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Molecular structure data
@@ -900,7 +900,7 @@ subroutine get_partial_derivs_0d_half(self, mol, list, cache, alpha, beta)
 
    ! Entries with CN or local charge derivatives, the products with the
    ! derivatives of the second neighbors only run over these entries
-   call get_cn_entries_half(mol, list, cache, cninl, cnpos, cnat)
+   call get_cn_entries_list(mol, list, cache, cninl, cnpos, cnat)
 
    allocate(dtmpdL(3, 3, mol%nat))
    kmax = 0
@@ -1076,15 +1076,15 @@ subroutine get_partial_derivs_0d_half(self, mol, list, cache, alpha, beta)
    deallocate(pos, drow)
    !$omp end parallel
 
-end subroutine get_partial_derivs_0d_half
+end subroutine get_partial_derivs_0d_list
 
 !> Compute alpha * dA/dR*q + beta * dX/dR for a periodic system using a half
 !> neighborlist with Wigner-Seitz images and its lower triangle in the cache,
-!> stored as in get_partial_derivs_0d_half. The images of a pair are kept for
+!> stored as in get_partial_derivs_0d_list. The images of a pair are kept for
 !> the vector from the atom of lower index, the row of the atom of higher index
 !> takes them with the opposite sign. The products with CN or local charge
 !> derivatives below cnthr are skipped.
-subroutine get_partial_derivs_3d_half(self, mol, list, cache, alpha, beta)
+subroutine get_partial_derivs_3d_list(self, mol, list, cache, alpha, beta)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Molecular structure data
@@ -1111,7 +1111,7 @@ subroutine get_partial_derivs_3d_half(self, mol, list, cache, alpha, beta)
 
    ! Entries with CN or local charge derivatives, the products with the
    ! derivatives of the second neighbors only run over these entries
-   call get_cn_entries_half(mol, list, cache, cninl, cnpos, cnat)
+   call get_cn_entries_list(mol, list, cache, cninl, cnpos, cnat)
 
    allocate(dtmpdL(3, 3, mol%nat))
    kmax = 0
@@ -1348,7 +1348,7 @@ subroutine get_partial_derivs_3d_half(self, mol, list, cache, alpha, beta)
    deallocate(pos, drow)
    !$omp end parallel
 
-end subroutine get_partial_derivs_3d_half
+end subroutine get_partial_derivs_3d_list
 
 !> Assemble the Coulomb matrix, including bond-capacitance contributions
 subroutine get_coulomb_matrix(self, mol, ndim, cache, list)
@@ -3388,7 +3388,7 @@ subroutine get_explicit_hessian_list(self, mol, cache, p, hessian, error, list, 
    call self%get_d2cmat_0d_list(mol, list, cache)
    if (.not. allocated(cache%lowlist%inl)) &
       & call new_lower_list(cache%lowlist, mol%nat, list)
-   call get_explicit_hessian_0d_half(self, mol, list, cache, p, hessian, &
+   call get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
       & alphain=alpha, betain=beta)
 
 end subroutine get_explicit_hessian_list
@@ -3674,7 +3674,7 @@ end subroutine get_explicit_hessian_0d
 !> charge derivatives below cnthr are skipped. Without a maximum CN cutoff the
 !> entry of a pair holds the CN derivative of the atom of higher index,
 !> dCN_i/dR_j = -dCN_j/dR_i, and dqloc_i/dR_j = dqloc_j/dR_i.
-subroutine get_explicit_hessian_0d_half(self, mol, list, cache, p, hessian, &
+subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    & alphain, betain)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
@@ -3913,7 +3913,7 @@ subroutine get_explicit_hessian_0d_half(self, mol, list, cache, p, hessian, &
 
    ! Neighbors with CN or local charge derivatives, the products with the
    ! derivatives of the second neighbors only run over these entries
-   call get_cn_entries_half(mol, list, cache, cninl, cnpos, cnat)
+   call get_cn_entries_list(mol, list, cache, cninl, cnpos, cnat)
 
    ! Products of the CN and local charge derivatives with their weights, as in
    ! the dense variant the block of the atoms jat and xat collects
@@ -4046,13 +4046,13 @@ subroutine get_explicit_hessian_0d_half(self, mol, list, cache, p, hessian, &
    deallocate(gcn, gqloc, mark, touch, hpos)
    !$omp end parallel
 
-   call add_ncoord_hessian_half(self%ncoord, mol, list, cache, cnacc, hessian)
-   call add_ncoord_hessian_half(self%ncoord_en, mol, list, cache, qlocacc, hessian)
+   call add_ncoord_hessian_list(self%ncoord, mol, list, cache, cnacc, hessian)
+   call add_ncoord_hessian_list(self%ncoord_en, mol, list, cache, qlocacc, hessian)
 
    deallocate(v, cnacc, qlocacc, dcnacc, dqlocacc, kcnacc, kqlocacc, rdrad, wcn, &
       & wqloc, wpair, cninl, cnpos, cnat)
 
-end subroutine get_explicit_hessian_0d_half
+end subroutine get_explicit_hessian_0d_list
 
 !> Add dE/dCN contracted with the Cartesian Hessian of the coordination numbers
 !> to the compressed Hessian on a half list, as add_coordination_number_hessian
@@ -4060,7 +4060,7 @@ end subroutine get_explicit_hessian_0d_half
 !> triangle in the cache and without a maximum CN cutoff. Each iteration only
 !> updates the row of atom iat of the Hessian, the diagonal block from all
 !> pairs of iat and the blocks of the atoms of higher index.
-subroutine add_ncoord_hessian_half(ncoord, mol, list, cache, dEdcn, hessian)
+subroutine add_ncoord_hessian_list(ncoord, mol, list, cache, dEdcn, hessian)
    !> Coordination number container
    class(ncoord_type), intent(in) :: ncoord
 
@@ -4129,14 +4129,14 @@ subroutine add_ncoord_hessian_half(ncoord, mol, list, cache, dEdcn, hessian)
    deallocate(hpos)
    !$omp end parallel
 
-end subroutine add_ncoord_hessian_half
+end subroutine add_ncoord_hessian_list
 
 !> Neighbors of each atom with CN or local charge derivatives above cnthr in a
 !> half neighborlist with its lower triangle in the cache, the atom itself
 !> first. The rows cninl give the neighbor atoms in cnat and the positions of
 !> the pairs in the list in cnpos. Apart from the diagonal, the entry of a pair
 !> holds the derivatives of the CN of the atom with the higher index.
-subroutine get_cn_entries_half(mol, list, cache, cninl, cnpos, cnat)
+subroutine get_cn_entries_list(mol, list, cache, cninl, cnpos, cnat)
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
 
@@ -4195,6 +4195,6 @@ subroutine get_cn_entries_half(mol, list, cache, cninl, cnpos, cnat)
    end do
    !$omp end parallel do
 
-end subroutine get_cn_entries_half
+end subroutine get_cn_entries_list
 
 end module multicharge_model_eeqbc

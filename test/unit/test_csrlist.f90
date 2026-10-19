@@ -97,11 +97,11 @@ subroutine collect_csrlist(testsuite)
    & new_unittest("explicit-hessian-znooh", test_hexpl_znooh), &
    & new_unittest("explicit-hessian-sparse-upu23", test_hexpl_sparse_upu23), &
    & new_unittest("explicit-hessian-sparse-dfdq-upu23", test_hexpl_sparse_dfdq_upu23), &
-   & new_unittest("implicit-hessian-half-mb05", test_himpl_half_mb05), &
-   & new_unittest("implicit-hessian-sparse-half-upu23", test_himpl_sparse_half_upu23), &
-   & new_unittest("hessian-half-mb05", test_hess_half_mb05), &
-   & new_unittest("hessian-half-znooh", test_hess_half_znooh), &
-   & new_unittest("hessian-pattern-half-upu23", test_hess_pattern_half_upu23) &
+   & new_unittest("implicit-hessian-list-mb05", test_himpl_list_mb05), &
+   & new_unittest("implicit-hessian-sparse-list-upu23", test_himpl_sparse_list_upu23), &
+   & new_unittest("hessian-list-mb05", test_hess_list_mb05), &
+   & new_unittest("hessian-list-znooh", test_hess_list_znooh), &
+   & new_unittest("hessian-pattern-list-upu23", test_hess_pattern_list_upu23) &
    & ]
 
 end subroutine collect_csrlist
@@ -2255,7 +2255,7 @@ subroutine test_hexpl_sparse_dfdq_upu23(error)
 end subroutine test_hexpl_sparse_dfdq_upu23
 
 
-subroutine test_himpl_half_mb05(error)
+subroutine test_himpl_list_mb05(error)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -2268,10 +2268,10 @@ subroutine test_himpl_half_mb05(error)
    if (allocated(error)) return
    call test_implicit_hessian(error, mol, model, nlcutoff=cutoff)
 
-end subroutine test_himpl_half_mb05
+end subroutine test_himpl_list_mb05
 
 
-subroutine test_himpl_sparse_half_upu23(error)
+subroutine test_himpl_sparse_list_upu23(error)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -2285,10 +2285,10 @@ subroutine test_himpl_sparse_half_upu23(error)
    ! Short cutoff, the half list only holds part of the pairs
    call test_implicit_hessian(error, mol, model, nlcutoff=12.0_wp)
 
-end subroutine test_himpl_sparse_half_upu23
+end subroutine test_himpl_sparse_list_upu23
 
 
-subroutine test_hess_half_mb05(error)
+subroutine test_hess_list_mb05(error)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -2301,10 +2301,10 @@ subroutine test_hess_half_mb05(error)
    if (allocated(error)) return
    call test_hessian(error, mol, model)
 
-end subroutine test_hess_half_mb05
+end subroutine test_hess_list_mb05
 
 
-subroutine test_hess_pattern_half_upu23(error)
+subroutine test_hess_pattern_list_upu23(error)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -2318,10 +2318,10 @@ subroutine test_hess_pattern_half_upu23(error)
    ! The half list of the Hessian is shorter than the half neighbour list
    call test_hessian_pattern(error, mol, model, nlcutoff=12.0_wp, hcutoff=8.0_wp)
 
-end subroutine test_hess_pattern_half_upu23
+end subroutine test_hess_pattern_list_upu23
 
 
-subroutine test_hess_half_znooh(error)
+subroutine test_hess_list_znooh(error)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -2334,7 +2334,7 @@ subroutine test_hess_half_znooh(error)
    if (allocated(error)) return
    call test_hessian(error, mol, model)
 
-end subroutine test_hess_half_znooh
+end subroutine test_hess_list_znooh
 
 
 !> Charged ZnOOH molecule

@@ -1100,9 +1100,9 @@ subroutine get_group_dqdr(cache, list, x0, ng, nb, bloc, blist, qpos, pan, qcol)
 
    integer :: n, i
 
-   call gather_group_half(list, cache%lowlist, cache%dabdrlist_ut, &
+   call gather_group_list(list, cache%lowlist, cache%dabdrlist_ut, &
       & cache%dabdrlist_lt, x0, ng, nb, bloc, blist, qpos, pan)
-   call multiply_group_half(list, cache%ainvlist, 3 * ng, nb, bloc, blist, pan, &
+   call multiply_group_list(list, cache%ainvlist, 3 * ng, nb, bloc, blist, pan, &
       & qcol)
    do n = 1, nb
       do i = 1, ng
@@ -1118,7 +1118,7 @@ end subroutine get_group_dqdr
 !> the list holds the diagonal and B(c, x) of c > x in the lower triangle, the
 !> atoms c < x come from the lower triangle of the list and B(c, x) from the
 !> upper triangle in the row of c.
-subroutine gather_group_half(list, low, but, blt, x0, ng, nb, bloc, blist, qpos, &
+subroutine gather_group_list(list, low, but, blt, x0, ng, nb, bloc, blist, qpos, &
    & pan)
 
    !> Half neighborlist
@@ -1179,7 +1179,7 @@ subroutine gather_group_half(list, low, but, blt, x0, ng, nb, bloc, blist, qpos,
       end do
    end do
 
-end subroutine gather_group_half
+end subroutine gather_group_list
 
 
 !> Index of an atom in the union of the neighbors of a group, a new atom is
@@ -1224,7 +1224,7 @@ end subroutine add_union_atom
 !> list, each pair of the upper triangle also adds the mirrored element of the
 !> symmetric inverse to the row of its other atom, so the lower triangle of the
 !> list is not needed.
-subroutine multiply_group_half(list, ainv, nw, nb, bloc, blist, pan, qcol)
+subroutine multiply_group_list(list, ainv, nw, nb, bloc, blist, pan, qcol)
 
    !> Half neighborlist
    type(csr_list), intent(in) :: list
@@ -1268,7 +1268,7 @@ subroutine multiply_group_half(list, ainv, nw, nb, bloc, blist, pan, qcol)
       qcol(:nw, n) = qcol(:nw, n) + acc(:nw)
    end do
 
-end subroutine multiply_group_half
+end subroutine multiply_group_list
 
 
 !> Groups of consecutive atoms close to each other for the charge derivatives
@@ -1829,7 +1829,7 @@ subroutine get_implicit_hessian_list(self, mol, cache, hessian, list, times)
    integer, allocatable :: gstart(:)
 
    call get_list_groups(mol, list, gstart)
-   call add_implicit_blocks_half(mol, cache, hessian, list, gstart, tgroup)
+   call add_implicit_blocks_list(mol, cache, hessian, list, gstart, tgroup)
    if (present(times)) times(:) = tgroup
 
    ! Charge constraint term, sum_b (dX_b/dR_x - (dA/dR_x*q)_b) * uvec(b) is
@@ -1849,7 +1849,7 @@ end subroutine get_implicit_hessian_list
 !> which is gathered once in the order of the lower triangle of the list. The
 !> Hessian keeps the blocks of y >= x on a half list, only the group of atom x
 !> writes the blocks (x, y), so the groups are independent.
-subroutine add_implicit_blocks_half(mol, cache, hessian, list, gstart, times)
+subroutine add_implicit_blocks_list(mol, cache, hessian, list, gstart, times)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
@@ -2001,7 +2001,7 @@ subroutine add_implicit_blocks_half(mol, cache, hessian, list, gstart, times)
    !$omp end parallel
    times(:) = [tpan, tcon]
 
-end subroutine add_implicit_blocks_half
+end subroutine add_implicit_blocks_list
 
 
 !> Groups of consecutive atoms within a distance of the first atom of the group
