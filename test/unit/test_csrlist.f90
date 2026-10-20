@@ -23,7 +23,8 @@ module test_csrlist
    use mctc_csrlist, only : csr_list, new_csr_list
    use mstore, only : get_structure
    use multicharge_blas, only : gemv
-   use multicharge_model_type, only : mchrg_model_type, mchrg_hessian, get_dqdr_row
+   use multicharge_model_type, only : mchrg_model_type, mchrg_hessian, get_dqdr_row, &
+      & new_partial_derivs
    use multicharge_model_eeqbc, only : eeqbc_model
    use multicharge_param, only : new_eeq2019_model, new_eeqbc2025_model
    use multicharge_model_cache, only : mchrg_cache
@@ -1185,7 +1186,7 @@ end subroutine test_pair_derivs_ice
 
 
 !> Expand the half neighbour list storage of the partial derivatives
-subroutine expand_partial_derivs(mol, list, cache, dabdr)
+subroutine expand_partial_derivs(mol, list, dlist_ut, dlist_lt, dabdr)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
@@ -1193,8 +1194,11 @@ subroutine expand_partial_derivs(mol, list, cache, dabdr)
    !> Half CSR neighbour list
    type(csr_list), intent(in) :: list
 
-   !> Cache holding the partial derivatives in neighbour list storage
-   type(mchrg_cache), intent(in) :: cache
+   !> Diagonal and upper triangle of the partial derivatives
+   real(wp), intent(in) :: dlist_ut(:, :)
+
+   !> Lower triangle of the partial derivatives
+   real(wp), intent(in) :: dlist_lt(:, :)
 
    !> Dense partial derivatives
    real(wp), intent(out) :: dabdr(:, :, :)
@@ -1206,9 +1210,9 @@ subroutine expand_partial_derivs(mol, list, cache, dabdr)
    dabdr(:, :, :) = 0.0_wp
    do iat = 1, mol%nat
       do kat = list%inl(iat), list%inl(iat + 1) - 1
-         dabdr(:, list%nlat(kat), iat) = cache%dabdrlist_ut(:, kat)
+         dabdr(:, list%nlat(kat), iat) = dlist_ut(:, kat)
          if (list%nlat(kat) /= iat) &
-            & dabdr(:, iat, list%nlat(kat)) = cache%dabdrlist_lt(:, kat)
+            & dabdr(:, iat, list%nlat(kat)) = dlist_lt(:, kat)
       end do
    end do
 
@@ -1234,9 +1238,9 @@ subroutine test_partial_derivs(error, mol, model)
    type(mchrg_cache), allocatable :: cache1, cache2, cache3, cache4
    type(csr_list), allocatable :: list
    integer :: ndim, iscale, jat
-   real(wp), parameter :: scales(2, 2) = reshape([1.0_wp, 0.0_wp, 0.0_wp, 1.0_wp], &
-      & [2, 2])
-   real(wp), allocatable :: trans(:, :), dabdr(:, :, :)
+   real(wp), parameter :: scales(2, 3) = reshape([1.0_wp, 0.0_wp, 0.0_wp, 1.0_wp, &
+      & -1.0_wp, 1.0_wp], [2, 3])
+   real(wp), allocatable :: trans(:, :), dabdr(:, :, :), pvec(:)
    real(wp), allocatable :: dqdr1(:, :, :), dqdL1(:, :, :)
    real(wp), allocatable :: dqdr2(:, :, :), dqdL2(:, :, :)
    real(wp), allocatable :: dqdr3(:, :, :), dqdL3(:, :, :)
@@ -1331,14 +1335,20 @@ subroutine test_partial_derivs(error, mol, model)
       return
    end if
 
-   ! Coulomb matrix and electronegativity parts separately, same charges
+   ! Coulomb matrix and electronegativity parts separately and added to the
+   ! same partial derivatives, same charges
    cache2%vrhs(:) = cache1%vrhs
-   do iscale = 1, 2
-      call model%get_partial_derivs(mol, ndim, cache1, scales(1, iscale), &
-         & scales(2, iscale))
-      call model%get_partial_derivs(mol, ndim, cache2, scales(1, iscale), &
-         & scales(2, iscale), list=list)
-      call expand_partial_derivs(mol, list, cache2, dabdr)
+   do iscale = 1, 3
+      call new_partial_derivs(mol, ndim, cache1)
+      call model%get_xvec_derivs(mol, ndim, cache1, scales(2, iscale))
+      call model%get_coulomb_derivs(mol, ndim, cache1, scales(1, iscale), &
+         & cache1%vrhs(:mol%nat))
+      call new_partial_derivs(mol, ndim, cache2, list)
+      call model%get_xvec_derivs(mol, ndim, cache2, scales(2, iscale), list=list)
+      call model%get_coulomb_derivs(mol, ndim, cache2, scales(1, iscale), &
+         & cache2%vrhs(:mol%nat), list=list)
+      call expand_partial_derivs(mol, list, cache2%dabdrlist_ut, &
+         & cache2%dabdrlist_lt, dabdr)
 
       if (any(abs(dabdr - cache1%dabdr) > thr2)) then
          call test_failed(error, "Partial derivatives w.r.t. positions do not match")
@@ -1351,6 +1361,32 @@ subroutine test_partial_derivs(error, mol, model)
          return
       end if
    end do
+
+   ! Coulomb matrix derivatives contracted with an external vector, the partial
+   ! derivatives of the last combination stay as they are
+   allocate(pvec(mol%nat))
+   do jat = 1, mol%nat
+      pvec(jat) = cos(real(jat, wp)) - 0.3_wp
+   end do
+   call new_partial_derivs(mol, ndim, cache1, dafdr=.true.)
+   call model%get_coulomb_derivs(mol, ndim, cache1, 0.5_wp, pvec, dafdr=.true.)
+   call new_partial_derivs(mol, ndim, cache2, list, dafdr=.true.)
+   call model%get_coulomb_derivs(mol, ndim, cache2, 0.5_wp, pvec, list=list, &
+      & dafdr=.true.)
+   call expand_partial_derivs(mol, list, cache2%dafdrlist_ut, cache2%dafdrlist_lt, &
+      & dabdr)
+   if (any(abs(dabdr - cache1%dafdr) > thr1)) then
+      call test_failed(error, "Coulomb matrix derivatives times p do not match")
+      print'(es21.14)', maxval(abs(dabdr - cache1%dafdr))
+      return
+   end if
+   call expand_partial_derivs(mol, list, cache2%dabdrlist_ut, cache2%dabdrlist_lt, &
+      & dabdr)
+   if (any(abs(dabdr - cache1%dabdr) > thr2)) then
+      call test_failed(error, "Partial derivatives changed by dA/dR*p")
+      print'(es21.14)', maxval(abs(dabdr - cache1%dabdr))
+      return
+   end if
 
 end subroutine test_partial_derivs
 
@@ -1811,7 +1847,8 @@ subroutine test_implicit_hessian(error, mol, model, nlcutoff)
 
    ! The list stores the rows of each atom in its columns, so the reference is
    ! formed in the same order, -(dq/dR)^T (dX/dR - dA/dR*q)
-   call expand_partial_derivs(mol, list, cache, dabdr)
+   call expand_partial_derivs(mol, list, cache%dabdrlist_ut, cache%dabdrlist_lt, &
+      & dabdr)
    do jat = 1, mol%nat
       call get_dqdr_row(cache, list, jat, dqdr(:, :, jat))
    end do

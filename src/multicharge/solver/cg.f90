@@ -534,22 +534,17 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
    res(:, :) = bmat - res
 
    ! Initial norms
-   !$omp parallel do private(ivec) &
-   !$omp shared(bmat, bnorm, res, resnorm, tol_square, nrhs)
    do ivec = 1, nrhs
       bnorm(ivec) = dot(bmat(:, ivec), bmat(:, ivec))
       if (bnorm(ivec) < tol_square) bnorm(ivec) = 1.0_wp
       resnorm(ivec) = dot(res(:, ivec), res(:, ivec))
    end do
-   !$omp end parallel do
    rel_resnorm = maxval(resnorm / bnorm)
 
    ! Initial search directions P = orth(M^-1 R)
-   !$omp parallel do private(ivec) shared(dir, prec, res, nrhs)
    do ivec = 1, nrhs
       dir(:, ivec) = prec * res(:, ivec)
    end do
-   !$omp end parallel do
    call orthonormalize(dir, nrank, error)
    if (allocated(error)) return
 
@@ -606,11 +601,9 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
       call gemm(adir(:, :nrank), step, res, alpha=-1.0_wp, beta=1.0_wp)
 
       ! Compute the new residual norms
-      !$omp parallel do private(ivec) shared(res, resnorm, nrhs)
       do ivec = 1, nrhs
          resnorm(ivec) = dot(res(:, ivec), res(:, ivec))
       end do
-      !$omp end parallel do
 
       ! Largest relative residual norm to check convergence
       rel_resnorm = maxval(resnorm / bnorm)

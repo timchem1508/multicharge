@@ -36,13 +36,12 @@ module multicharge_model_type
    use multicharge_solver_type, only : mchrg_solver_type
    use multicharge_solver_cg, only : cg_solver
    use multicharge_lowerlist, only : lower_list, count_neighbors, get_neighbor
-   !$ use omp_lib, only : omp_get_num_threads, omp_get_thread_num
 
    implicit none
    private
 
    public :: mchrg_model_type, mchrg_hessian, get_dir_trans, get_rec_trans, &
-      & hess_index, get_dqdr_row
+      & hess_index, get_dqdr_row, new_partial_derivs
 
 
    !> Molecular nuclear Hessian in compressed-row storage on a half neighborlist
@@ -156,12 +155,15 @@ module multicharge_model_type
       !> Calculate right-hand side (electronegativity)
       procedure(get_xvec), deferred :: get_xvec
 
+      !> Add the electronegativity vector derivatives, beta * dX/dR
+      procedure(get_xvec_derivs), deferred :: get_xvec_derivs
 
       !> Calculate Coulomb matrix
       procedure(get_coulomb_matrix), deferred :: get_coulomb_matrix
 
-      !> Calculate alpha * dA/dR*q + beta * dX/dR
-      procedure(get_partial_derivs), deferred :: get_partial_derivs
+      !> Add the Coulomb matrix derivatives contracted with a vector,
+      !> alpha * dA/dR*p
+      procedure(get_coulomb_derivs), deferred :: get_coulomb_derivs
 
       !> Calculate capacitance-corrected electronegativity derivatives
       procedure(get_grad), deferred :: get_grad
@@ -252,10 +254,11 @@ module multicharge_model_type
          type(csr_list), intent(in), optional :: list
       end subroutine get_coulomb_matrix
 
-      !> Linear combination of the Coulomb matrix derivatives contracted with the
-      !> charges and the electronegativity vector derivatives,
-      !> alpha * dA/dR*q + beta * dX/dR, w.r.t. positions and strain
-      subroutine get_partial_derivs(self, mol, ndim, cache, alpha, beta, list)
+      !> Coulomb matrix derivatives contracted with a vector, alpha * dA/dR*p,
+      !> w.r.t. positions and strain, added to the partial derivatives in the
+      !> cache, dabdr (dabdrlist_ut and dabdrlist_lt with a neighborlist) and
+      !> dabdL, allocated with new_partial_derivs
+      subroutine get_coulomb_derivs(self, mol, ndim, cache, alpha, p, list, dafdr)
          import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
 
          !> Multicharge model type
@@ -270,15 +273,45 @@ module multicharge_model_type
          !> Multicharge cache holding the partial derivatives
          type(mchrg_cache), intent(inout) :: cache
 
-         !> Multiplier of the Coulomb matrix derivatives, dA/dR*q
+         !> Multiplier of the Coulomb matrix derivatives
          real(wp), intent(in) :: alpha
 
-         !> Multiplier of the electronegativity vector derivatives, dX/dR
+         !> Vector contracted with the Coulomb matrix derivatives
+         real(wp), intent(in) :: p(:)
+
+         !> Multicharge neighborlist type (half)
+         type(csr_list), intent(in), optional :: list
+
+         !> Add to dafdr (dafdrlist_ut and dafdrlist_lt with a neighborlist)
+         !> for an external vector instead, without strain derivatives
+         logical, intent(in), optional :: dafdr
+      end subroutine get_coulomb_derivs
+
+      !> Electronegativity vector derivatives, beta * dX/dR, w.r.t. positions and
+      !> strain, added to the partial derivatives in the cache, dabdr
+      !> (dabdrlist_ut and dabdrlist_lt with a neighborlist) and dabdL, allocated
+      !> with new_partial_derivs
+      subroutine get_xvec_derivs(self, mol, ndim, cache, beta, list)
+         import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
+
+         !> Multicharge model type
+         class(mchrg_model_type), intent(in) :: self
+
+         !> Structure type
+         type(structure_type), intent(in) :: mol
+
+         !> System size
+         integer, intent(in) :: ndim
+
+         !> Multicharge cache holding the partial derivatives
+         type(mchrg_cache), intent(inout) :: cache
+
+         !> Multiplier of the electronegativity vector derivatives
          real(wp), intent(in) :: beta
 
          !> Multicharge neighborlist type (half)
          type(csr_list), intent(in), optional :: list
-      end subroutine get_partial_derivs
+      end subroutine get_xvec_derivs
 
       !> Electronegativity vector construction
       subroutine get_xvec(self, mol, ndim, cache, list, efield)
@@ -716,8 +749,10 @@ subroutine solve(self, mol, solver, cache, error, &
 
       ! Right-hand sides of the response equations, dX/dR - dA/dR*q
       call timer%push("dabdr_setup")
-      call self%get_partial_derivs(mol, ndim, cache, alpha=-1.0_wp, beta=1.0_wp, &
-         & list=list)
+      call new_partial_derivs(mol, ndim, cache, list)
+      call self%get_xvec_derivs(mol, ndim, cache, beta=1.0_wp, list=list)
+      call self%get_coulomb_derivs(mol, ndim, cache, alpha=-1.0_wp, &
+         & p=cache%vrhs(:mol%nat), list=list)
       call timer%pop
       if (verbosity_solve > 1) then
          write(output_unit, '(a, 1x, a)') &
@@ -1319,6 +1354,62 @@ function get_max_neighbors(nat, list, low) result(kmax)
 end function get_max_neighbors
 
 
+!> Allocate the partial derivatives in the cache and set them to zero, which
+!> get_xvec_derivs and get_coulomb_derivs add to: dabdr (dabdrlist_ut and
+!> dabdrlist_lt with a neighborlist) and dabdL, or with dafdr the Coulomb
+!> matrix derivatives contracted with an external vector, dafdr (dafdrlist_ut
+!> and dafdrlist_lt with a neighborlist)
+subroutine new_partial_derivs(mol, ndim, cache, list, dafdr)
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> System size
+   integer, intent(in) :: ndim
+
+   !> Multicharge cache
+   type(mchrg_cache), intent(inout) :: cache
+
+   !> Multicharge neighborlist type (half)
+   type(csr_list), intent(in), optional :: list
+
+   !> Allocate dafdr for an external vector instead of the partial derivatives
+   logical, intent(in), optional :: dafdr
+
+   logical :: ext
+   integer(i8) :: nnz
+
+   ext = .false.
+   if (present(dafdr)) ext = dafdr
+
+   if (present(list)) then
+      nnz = size(list%nlat, kind=i8)
+      if (ext) then
+         if (allocated(cache%dafdrlist_ut)) deallocate(cache%dafdrlist_ut)
+         if (allocated(cache%dafdrlist_lt)) deallocate(cache%dafdrlist_lt)
+         allocate(cache%dafdrlist_ut(3, nnz), cache%dafdrlist_lt(3, nnz), &
+            & source=0.0_wp)
+      else
+         if (allocated(cache%dabdrlist_ut)) deallocate(cache%dabdrlist_ut)
+         if (allocated(cache%dabdrlist_lt)) deallocate(cache%dabdrlist_lt)
+         allocate(cache%dabdrlist_ut(3, nnz), cache%dabdrlist_lt(3, nnz), &
+            & source=0.0_wp)
+      end if
+   else if (ext) then
+      if (allocated(cache%dafdr)) deallocate(cache%dafdr)
+      allocate(cache%dafdr(3, mol%nat, mol%nat), source=0.0_wp)
+   else
+      if (allocated(cache%dabdr)) deallocate(cache%dabdr)
+      allocate(cache%dabdr(3, mol%nat, ndim), source=0.0_wp)
+   end if
+   if (.not. ext) then
+      if (allocated(cache%dabdL)) deallocate(cache%dabdL)
+      allocate(cache%dabdL(3, 3, ndim), source=0.0_wp)
+   end if
+
+end subroutine new_partial_derivs
+
+
 !> Position derivatives of the charge of one atom w.r.t. all atomic positions,
 !> expanded from the compressed storage on the pattern of the half
 !> neighborlist of the solve and the charge constraint term
@@ -1713,8 +1804,10 @@ subroutine get_hessian_csr(self, mol, solver, cache, error, hessian, list, qvec,
    ! Partial derivatives dX/dR - dA/dR*q and the inverse on the list
    call print_hessian_header(print_unit, verbosity_hess)
    call timer%push("dabdr")
-   call self%get_partial_derivs(mol, mol%nat, cache, alpha=-1.0_wp, beta=1.0_wp, &
-      & list=list)
+   call new_partial_derivs(mol, mol%nat, cache, list)
+   call self%get_xvec_derivs(mol, mol%nat, cache, beta=1.0_wp, list=list)
+   call self%get_coulomb_derivs(mol, mol%nat, cache, alpha=-1.0_wp, &
+      & p=cache%vrhs(:mol%nat), list=list)
    call timer%pop
    call timer%push("inverse")
    select type (solver)

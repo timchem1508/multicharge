@@ -68,10 +68,12 @@ module multicharge_model_eeqbc
       procedure :: get_capacitance_matrix
       !> Calculate Coulomb matrix
       procedure :: get_coulomb_matrix
-      !> Calculate alpha * dA/dR*q + beta * dX/dR
-      procedure :: get_partial_derivs
+      !> Add alpha * dA/dR*p
+      procedure :: get_coulomb_derivs
       !> Calculate right-hand side (electronegativity vector)
       procedure :: get_xvec
+      !> Add beta * dX/dR
+      procedure :: get_xvec_derivs
       !> Calculate constraint matrix (molecular)
       procedure :: get_cmat_0d
       !> Calculate constraint matrix (molecular) using neighborlist
@@ -467,10 +469,9 @@ subroutine get_xvec(self, mol, ndim, cache, list, efield)
 
 end subroutine get_xvec
 
-!> Compute the linear combination of the Coulomb matrix derivatives (multiplied
-!> by the charge vector) and the electronegativity vector derivatives,
-!> alpha * dA/dR*q + beta * dX/dR, w.r.t. positions and strain
-subroutine get_partial_derivs(self, mol, ndim, cache, alpha, beta, list)
+!> Add the electronegativity vector derivatives, beta * dX/dR, w.r.t. positions
+!> and strain to the partial derivatives in the cache
+subroutine get_xvec_derivs(self, mol, ndim, cache, beta, list)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Structure type
@@ -479,42 +480,29 @@ subroutine get_partial_derivs(self, mol, ndim, cache, alpha, beta, list)
    integer, intent(in) :: ndim
    !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
-   !> dA/dR*q multiplier
-   real(wp), intent(in) :: alpha
    !> dX/dR multiplier
    real(wp), intent(in) :: beta
    !> Multicharge neighborlist type (half) with its lower triangle in the cache
    type(csr_list), intent(in), optional :: list
 
-   if (.not. allocated(cache%dabdL)) allocate(cache%dabdL(3, 3, ndim))
-   cache%dabdL = 0.0_wp
-
    if (present(list)) then
-      ! The half list keeps the upper and the lower triangle of the derivatives
-      ! in separate arrays
-      if (allocated(cache%dabdrlist_ut)) deallocate(cache%dabdrlist_ut)
-      if (allocated(cache%dabdrlist_lt)) deallocate(cache%dabdrlist_lt)
-      allocate(cache%dabdrlist_ut(3, size(list%nlat, kind=i8)), &
-         & cache%dabdrlist_lt(3, size(list%nlat, kind=i8)), source=0.0_wp)
       if (any(mol%periodic)) then
-         call get_partial_derivs_3d_list(self, mol, list, cache, alpha, beta)
+         call get_xvec_derivs_3d_list(self, mol, list, cache, beta)
       else
-         call get_partial_derivs_0d_list(self, mol, list, cache, alpha, beta)
+         call get_xvec_derivs_0d_list(self, mol, list, cache, beta)
       end if
    else
-      if (.not. allocated(cache%dabdr)) allocate(cache%dabdr(3, mol%nat, ndim))
-      cache%dabdr = 0.0_wp
       if (any(mol%periodic)) then
-         call get_partial_derivs_3d(self, mol, ndim, cache, alpha, beta)
+         call get_xvec_derivs_3d(self, mol, ndim, cache, beta)
       else
-         call get_partial_derivs_0d(self, mol, ndim, cache, alpha, beta)
+         call get_xvec_derivs_0d(self, mol, ndim, cache, beta)
       end if
    end if
 
-end subroutine get_partial_derivs
+end subroutine get_xvec_derivs
 
-!> Compute the alpha * dA/dR*q + beta * dX/dR, for a non-periodic system.
-subroutine get_partial_derivs_0d(self, mol, ndim, cache, alpha, beta)
+!> Add beta * dX/dR for a non-periodic system
+subroutine get_xvec_derivs_0d(self, mol, ndim, cache, beta)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Structure type
@@ -523,14 +511,11 @@ subroutine get_partial_derivs_0d(self, mol, ndim, cache, alpha, beta)
    integer, intent(in) :: ndim
    !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
-   !> dA/dR*q multiplier
-   real(wp), intent(in) :: alpha
    !> dX/dR multiplier
    real(wp), intent(in) :: beta
 
-   integer :: iat, izp, jat, jzp
-   real(wp) :: vec(3), r2, gam, arg, dtmp, norm_cn, hardi, wtmp, wcni
-   real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3)
+   integer :: iat, izp, jat
+   real(wp) :: vec(3)
    real(wp), allocatable :: dtmpdr(:, :, :), dtmpdL(:, :, :)
 
    allocate(dtmpdr(3, mol%nat, ndim), dtmpdL(3, 3, ndim), source=0.0_wp)
@@ -547,34 +532,17 @@ subroutine get_partial_derivs_0d(self, mol, ndim, cache, alpha, beta)
    end do
    !$omp end parallel do
 
-   ! EN derivative through the capacitance matrix, initializes dabdr and dabdL
-   call gemm(dtmpdr, cache%cmat, cache%dabdr, alpha=beta)
-   call gemm(dtmpdL, cache%cmat, cache%dabdL, alpha=beta)
+   ! EN derivative through the capacitance matrix
+   call gemm(dtmpdr, cache%cmat, cache%dabdr, alpha=beta, beta=1.0_wp)
+   call gemm(dtmpdL, cache%cmat, cache%dabdL, alpha=beta, beta=1.0_wp)
 
    ! Each iteration only updates the derivatives of column iat (last index)
    !$omp parallel do default(none) schedule(runtime) &
-   !$omp shared(cache, mol, self, alpha, beta) &
-   !$omp private(iat, izp, jat, jzp, gam, vec, r2, dtmp, norm_cn, arg, hardi) &
-   !$omp private(wtmp, wcni, radi, radj, dradi, dradj, dG, dS)
+   !$omp shared(cache, mol, beta) private(iat, jat, vec)
    do iat = 1, mol%nat
-      izp = mol%id(iat)
-      ! Effective charge width of i
-      norm_cn = 1.0_wp / self%avg_cn(izp)
-      radi = self%rad(izp) * exp(-self%kcnrad(izp) * cache%cn(iat) * norm_cn)
-      dradi = -self%kcnrad(izp) * norm_cn * radi
-      ! Effective hardness of i
-      hardi = self%eta(izp) + self%kqeta_pre &
-      & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi
-      wcni = 0.0_wp
       do jat = 1, mol%nat
          if (jat == iat) cycle
-         jzp = mol%id(jat)
          vec = mol%xyz(:, jat) - mol%xyz(:, iat)
-         r2 = vec(1)**2 + vec(2)**2 + vec(3)**2
-         ! Effective charge width of j
-         norm_cn = 1.0_wp / self%avg_cn(jzp)
-         radj = self%rad(jzp) * exp(-self%kcnrad(jzp) * cache%cn(jat) * norm_cn)
-         dradj = -self%kcnrad(jzp) * norm_cn * radj
 
          ! EN derivative: capacitance matrix derivative
          cache%dabdr(:, iat, iat) = +beta * cache%xtmp(jat) * cache%dcdr(:, iat, &
@@ -583,43 +551,6 @@ subroutine get_partial_derivs_0d(self, mol, ndim, cache, alpha, beta)
          & * cache%dcdr(:, jat, iat) + cache%dabdr(:, jat, iat)
          cache%dabdL(:, :, iat) = +beta * cache%xtmp(jat) * spread(cache%dcdr(:, &
          & iat, jat), 1, 3) * spread(-vec, 2, 3) + cache%dabdL(:, :, iat)
-
-         ! Coulomb interaction of Gaussian charges
-         gam = 1.0_wp / sqrt(radi**2 + radj**2)
-         arg = gam * gam * r2
-
-         ! Explicit derivative
-         dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) &
-            & - erf(sqrt(arg)) / (r2 * sqrt(r2))
-         dG(:) = alpha * dtmp * vec * cache%vrhs(jat) * cache%cmat(jat, iat)
-         dS(:, :) = spread(dG, 1, 3) * spread(vec, 2, 3)
-         cache%dabdr(:, iat, iat) = cache%dabdr(:, iat, iat) - dG
-         cache%dabdr(:, jat, iat) = cache%dabdr(:, jat, iat) + dG
-         cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) + dS
-
-         ! Effective charge width derivative, CN of i is collected in wcni
-         wtmp = alpha * 2.0_wp * exp(-arg) / sqrtpi * cache%vrhs(jat) &
-         & * cache%cmat(jat, iat)
-         wcni = wcni - wtmp * radi * dradi * gam**3
-         dtmp = -wtmp * radj * dradj * gam**3
-         cache%dabdr(:, :, iat) = +dtmp * cache%dcndr(:, :, jat) &
-            & + cache%dabdr(:, :, iat)
-         cache%dabdL(:, :, iat) = +dtmp * cache%dcndL(:, :, jat) &
-            & + cache%dabdL(:, :, iat)
-
-         ! Capacitance derivative off-diagonal
-         dtmp = alpha * erf(sqrt(r2) * gam) / (sqrt(r2)) * cache%vrhs(jat)
-         cache%dabdr(:, iat, iat) = -dtmp * cache%dcdr(:, jat, iat) &
-         & + cache%dabdr(:, iat, iat)
-         cache%dabdr(:, jat, iat) = +dtmp * cache%dcdr(:, jat, iat) &
-         & + cache%dabdr(:, jat, iat)
-         cache%dabdL(:, :, iat) = -dtmp * spread(cache%dcdr(:, iat, jat), 2, 3) &
-         & * spread(vec, 1, 3) + cache%dabdL(:, :, iat)
-
-         ! Capacitance derivative diagonal
-         dtmp = alpha * hardi * cache%vrhs(iat)
-         cache%dabdr(:, jat, iat) = -dtmp * cache%dcdr(:, jat, iat) &
-         & + cache%dabdr(:, jat, iat)
       end do
 
       ! EN derivative: capacitance matrix derivative diagonal
@@ -627,35 +558,13 @@ subroutine get_partial_derivs_0d(self, mol, ndim, cache, alpha, beta)
       & iat) + cache%dabdr(:, iat, iat)
       cache%dabdL(:, :, iat) = +beta * cache%xtmp(iat) * cache%dcdL(:, :, &
       & iat) + cache%dabdL(:, :, iat)
-
-      ! Hardness derivative
-      dtmp = alpha * self%kqeta_pre * self%kqeta(izp) &
-      & / cosh(self%kqeta(izp) * cache%qloc(iat))**2 * cache%vrhs(iat) &
-      & * cache%cmat(iat, iat)
-      cache%dabdr(:, :, iat) = +dtmp * cache%dqlocdr(:, :, iat) &
-         & + cache%dabdr(:, :, iat)
-      cache%dabdL(:, :, iat) = +dtmp * cache%dqlocdL(:, :, iat) &
-         & + cache%dabdL(:, :, iat)
-
-      ! Effective charge width derivative
-      dtmp = -alpha * sqrt2pi * dradi / (radi**2) * cache%vrhs(iat) * cache%cmat(iat, iat)
-      cache%dabdr(:, :, iat) = +(dtmp + wcni) * cache%dcndr(:, :, iat) &
-         & + cache%dabdr(:, :, iat)
-      cache%dabdL(:, :, iat) = +(dtmp + wcni) * cache%dcndL(:, :, iat) &
-         & + cache%dabdL(:, :, iat)
-
-      ! Capacitance derivative
-      dtmp = alpha * hardi * cache%vrhs(iat)
-      cache%dabdr(:, iat, iat) = +dtmp * cache%dcdr(:, iat, iat) &
-      & + cache%dabdr(:, iat, iat)
-      cache%dabdL(:, :, iat) = +dtmp * cache%dcdL(:, :, iat) + cache%dabdL(:, :, iat)
    end do
    !$omp end parallel do
 
-end subroutine get_partial_derivs_0d
+end subroutine get_xvec_derivs_0d
 
-!> Compute the alpha * dA/dR*q + beta * dX/dR, for a periodic system.
-subroutine get_partial_derivs_3d(self, mol, ndim, cache, alpha, beta)
+!> Add beta * dX/dR for a periodic system
+subroutine get_xvec_derivs_3d(self, mol, ndim, cache, beta)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Structure type
@@ -664,20 +573,12 @@ subroutine get_partial_derivs_3d(self, mol, ndim, cache, alpha, beta)
    integer, intent(in) :: ndim
    !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
-   !> dA/dR*q multiplier
-   real(wp), intent(in) :: alpha
    !> dX/dR multiplier
    real(wp), intent(in) :: beta
 
    integer :: iat, jat, izp, jzp, img
-   real(wp) :: vec(3), gam, dtmp, norm_cn, rvdw, wsw, dgam, wgam, ctmp, hardi, hardj
-   real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), dgamdL(3, 3)
-   real(wp) :: capi, capj
-   real(wp), allocatable :: dtrans(:, :), dgamdr(:, :)
-   real(wp), allocatable :: dtmpdr(:, :, :), dtmpdL(:, :, :)
-
-   ! Thread-private arrays for reduction
-   real(wp), allocatable :: dabdr_local(:, :, :), dabdL_local(:, :, :)
+   real(wp) :: vec(3), rvdw, wsw, ctmp, capi, capj, dG(3), dS(3, 3)
+   real(wp), allocatable :: dtrans(:, :), dtmpdr(:, :, :), dtmpdL(:, :, :)
 
    call get_dir_trans(mol, dtrans, cutoff)
 
@@ -695,187 +596,61 @@ subroutine get_partial_derivs_3d(self, mol, ndim, cache, alpha, beta)
    end do
    !$omp end parallel do
 
-   ! EN derivative through the capacitance matrix, initializes dabdr and dabdL
-   call gemm(dtmpdr, cache%cmat, cache%dabdr, alpha=beta)
-   call gemm(dtmpdL, cache%cmat, cache%dabdL, alpha=beta)
+   ! EN derivative through the capacitance matrix
+   call gemm(dtmpdr, cache%cmat, cache%dabdr, alpha=beta, beta=1.0_wp)
+   call gemm(dtmpdL, cache%cmat, cache%dabdL, alpha=beta, beta=1.0_wp)
 
-   !$omp parallel default(none) &
-   !$omp shared(self, mol, cache, dtrans, alpha, beta, dtmpdr, dtmpdL) &
-   !$omp private(iat, izp, jat, jzp, img, gam, vec, dtmp, norm_cn, rvdw, wsw) &
-   !$omp private(radi, radj, dradi, dradj, capi, capj, dgam, wgam, dgamdr, dgamdL) &
-   !$omp private(ctmp, hardi, hardj, dG, dS) &
-   !$omp private(dabdr_local, dabdL_local)
-   allocate(dgamdr(3, mol%nat))
-   allocate(dabdr_local(3, mol%nat, size(cache%dabdr, 3)), source=0.0_wp)
-   allocate(dabdL_local(3, 3, size(cache%dabdL, 3)), source=0.0_wp)
-   !$omp do schedule(runtime)
+   ! Each iteration only updates the derivatives of column iat (last index)
+   !$omp parallel do default(none) schedule(runtime) &
+   !$omp shared(self, mol, cache, dtrans, beta, dtmpdr, dtmpdL) &
+   !$omp private(iat, izp, jat, jzp, img, vec, rvdw, wsw, ctmp, capi, capj, dG, dS)
    do iat = 1, mol%nat
       izp = mol%id(iat)
-      ! Effective charge width of i
-      norm_cn = 1.0_wp / self%avg_cn(izp)
-      radi = self%rad(izp) * exp(-self%kcnrad(izp) * cache%cn(iat) * norm_cn)
-      dradi = -self%kcnrad(izp) * norm_cn * radi
       capi = self%cap(izp)
-      ! Effective hardness of i
-      hardi = self%eta(izp) + self%kqeta_pre &
-      & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi
-
       do jat = 1, mol%nat
          jzp = mol%id(jat)
          capj = self%cap(jzp)
          rvdw = self%rvdw(izp, jzp)
 
          ! EN derivative: capacitance matrix derivative
-         dabdr_local(:, iat, iat) = dabdr_local(:, iat, iat) &
+         cache%dabdr(:, iat, iat) = cache%dabdr(:, iat, iat) &
             & + beta * cache%xtmp(jat) * cache%dcdr(:, iat, jat)
-         dabdr_local(:, iat, jat) = dabdr_local(:, iat, jat) &
-            & + beta * (cache%xtmp(iat) - cache%xtmp(jat)) * cache%dcdr(:, iat, jat)
+         cache%dabdr(:, jat, iat) = cache%dabdr(:, jat, iat) &
+            & + beta * (cache%xtmp(jat) - cache%xtmp(iat)) * cache%dcdr(:, jat, iat)
 
          wsw = 1.0_wp / real(cache%wsc%nimg(iat, jat), wp)
          do img = 1, cache%wsc%nimg(iat, jat)
             vec = mol%xyz(:, jat) - mol%xyz(:, iat) + cache%wsc%trans(:, &
             & cache%wsc%tridx(img, jat, iat))
             call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
-            dabdL_local(:, :, iat) = dabdL_local(:, :, iat) &
+            cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) &
                & - beta * wsw * dS * cache%xtmp(jat)
          end do
-
-         ! Coulomb matrix derivatives for each unordered pair
-         if (jat >= iat) cycle
-
-         ! Effective charge width of j
-         norm_cn = 1.0_wp / self%avg_cn(jzp)
-         radj = self%rad(jzp) * exp(-self%kcnrad(jzp) * cache%cn(jat) * norm_cn)
-         dradj = -self%kcnrad(jzp) * norm_cn * radj
-         ! Effective hardness of j
-         hardj = self%eta(jzp) + self%kqeta_pre &
-         & * tanh(self%kqeta(jzp) * cache%qloc(jat)) + sqrt2pi / radj
-
-         ! Coulomb interaction of Gaussian charges
-         gam = 1.0_wp / sqrt(radi**2 + radj**2)
-         dgamdr(:, :) = -(radi * dradi * cache%dcndr(:, :, iat) &
-         & + radj * dradj * cache%dcndr(:, :, jat)) * gam**3
-         dgamdL(:, :) = -(radi * dradi * cache%dcndL(:, :, iat) &
-         & + radj * dradj * cache%dcndL(:, :, jat)) * gam**3
-
-         wgam = 0.0_wp
-         wsw = 1.0_wp / real(cache%wsc%nimg(jat, iat), wp)
-         do img = 1, cache%wsc%nimg(jat, iat)
-            vec = mol%xyz(:, jat) - mol%xyz(:, iat) + cache%wsc%trans(:, &
-            & cache%wsc%tridx(img, jat, iat))
-
-            call get_damat_dir(vec, dtrans, capi, capj, rvdw, self%kbc, gam, dG, dS, dgam)
-            dG = alpha * dG * wsw
-            dS = alpha * dS * wsw
-            wgam = wgam + alpha * dgam * wsw
-
-            ! Explicit derivative
-            dabdr_local(:, iat, iat) = dabdr_local(:, iat, iat) - dG * cache%vrhs(jat)
-            dabdr_local(:, jat, jat) = dabdr_local(:, jat, jat) + dG * cache%vrhs(iat)
-            dabdr_local(:, iat, jat) = dabdr_local(:, iat, jat) - dG * cache%vrhs(iat)
-            dabdr_local(:, jat, iat) = dabdr_local(:, jat, iat) + dG * cache%vrhs(jat)
-            dabdL_local(:, :, jat) = dabdL_local(:, :, jat) + dS * cache%vrhs(iat)
-            dabdL_local(:, :, iat) = dabdL_local(:, :, iat) + dS * cache%vrhs(jat)
-
-            call get_damat_dc_dir(vec, dtrans, capi, capj, rvdw, self%kbc, gam, dG, dS)
-            dG = alpha * dG * wsw
-            dS = alpha * dS * wsw
-
-            ! Capacitance derivative off-diagonal
-            dabdr_local(:, iat, iat) = dabdr_local(:, iat, iat) + cache%vrhs(jat) * dG
-            dabdr_local(:, jat, jat) = dabdr_local(:, jat, jat) - cache%vrhs(iat) * dG
-            dabdr_local(:, jat, iat) = dabdr_local(:, jat, iat) - cache%vrhs(jat) * dG
-            dabdr_local(:, iat, jat) = dabdr_local(:, iat, jat) + cache%vrhs(iat) * dG
-            dabdL_local(:, :, jat) = dabdL_local(:, :, jat) - cache%vrhs(iat) * dS
-            dabdL_local(:, :, iat) = dabdL_local(:, :, iat) - cache%vrhs(jat) * dS
-
-            call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
-            dG = alpha * dG * wsw
-
-            ! Capacitance derivative diagonal
-            dabdr_local(:, jat, iat) = dabdr_local(:, jat, iat) &
-               & + hardi * cache%vrhs(iat) * dG
-            dabdr_local(:, iat, jat) = dabdr_local(:, iat, jat) &
-               & - hardj * cache%vrhs(jat) * dG
-         end do
-
-         ! Effective charge width derivative
-         dabdr_local(:, :, iat) = dabdr_local(:, :, iat) - wgam * cache%vrhs(jat) * dgamdr
-         dabdr_local(:, :, jat) = dabdr_local(:, :, jat) - wgam * cache%vrhs(iat) * dgamdr
-         dabdL_local(:, :, iat) = dabdL_local(:, :, iat) - wgam * cache%vrhs(jat) * dgamdL
-         dabdL_local(:, :, jat) = dabdL_local(:, :, jat) - wgam * cache%vrhs(iat) * dgamdL
       end do
 
       ! EN derivative: capacitance matrix derivative diagonal
-      dabdL_local(:, :, iat) = dabdL_local(:, :, iat) &
+      cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) &
          & + beta * cache%xtmp(iat) * cache%dcdL(:, :, iat)
 
-      ! Self-images, i = j and T != 0
-      gam = 1.0_wp / sqrt(2.0_wp * radi**2)
-      dgamdr(:, :) = -2.0_wp * radi * dradi * cache%dcndr(:, :, iat) * gam**3
-      dgamdL(:, :) = -2.0_wp * radi * dradi * cache%dcndL(:, :, iat) * gam**3
+      ! EN derivative through the self-image capacitance, i = j and T != 0
       rvdw = self%rvdw(izp, izp)
       wsw = 1.0_wp / real(cache%wsc%nimg(iat, iat), wp)
       do img = 1, cache%wsc%nimg(iat, iat)
          vec = cache%wsc%trans(:, cache%wsc%tridx(img, iat, iat))
-
-         ! EN derivative through the self-image capacitance
          call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, ctmp)
          ctmp = beta * ctmp * wsw
-         dabdr_local(:, :, iat) = dabdr_local(:, :, iat) - ctmp * dtmpdr(:, :, iat)
-         dabdL_local(:, :, iat) = dabdL_local(:, :, iat) - ctmp * dtmpdL(:, :, iat)
-
-         call get_damat_dir(vec, dtrans, capi, capi, rvdw, self%kbc, gam, dG, dS, dgam)
-         dS = alpha * dS * wsw
-         dgam = alpha * dgam * wsw
-
-         ! Explicit derivative
-         dabdL_local(:, :, iat) = dabdL_local(:, :, iat) + dS * cache%vrhs(iat)
-
-         ! Effective charge width derivative
-         dabdr_local(:, :, iat) = dabdr_local(:, :, iat) - cache%vrhs(iat) * dgam * dgamdr
-         dabdL_local(:, :, iat) = dabdL_local(:, :, iat) - cache%vrhs(iat) * dgam * dgamdL
-
-         ! Capacitance derivative
-         call get_damat_dc_dir(vec, dtrans, capi, capi, rvdw, self%kbc, gam, dG, dS)
-         dabdL_local(:, :, iat) = dabdL_local(:, :, iat) &
-            & - alpha * cache%vrhs(iat) * dS * wsw
+         cache%dabdr(:, :, iat) = cache%dabdr(:, :, iat) - ctmp * dtmpdr(:, :, iat)
+         cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) - ctmp * dtmpdL(:, :, iat)
       end do
-
-      ! Hardness derivative
-      dtmp = alpha * self%kqeta_pre * self%kqeta(izp) &
-      & / cosh(self%kqeta(izp) * cache%qloc(iat))**2 * cache%vrhs(iat) &
-      & * cache%cmat(iat, iat)
-      dabdr_local(:, :, iat) = dabdr_local(:, :, iat) + dtmp * cache%dqlocdr(:, :, iat)
-      dabdL_local(:, :, iat) = dabdL_local(:, :, iat) + dtmp * cache%dqlocdL(:, :, iat)
-
-      ! Effective charge width derivative
-      dtmp = -alpha * sqrt2pi * dradi / (radi**2) * cache%vrhs(iat) * cache%cmat(iat, iat)
-      dabdr_local(:, :, iat) = dabdr_local(:, :, iat) + dtmp * cache%dcndr(:, :, iat)
-      dabdL_local(:, :, iat) = dabdL_local(:, :, iat) + dtmp * cache%dcndL(:, :, iat)
-
-      ! Capacitance derivative
-      dtmp = alpha * hardi * cache%vrhs(iat)
-      dabdr_local(:, iat, iat) = dabdr_local(:, iat, iat) + dtmp * cache%dcdr(:, iat, iat)
-      dabdL_local(:, :, iat) = dabdL_local(:, :, iat) + dtmp * cache%dcdL(:, :, iat)
    end do
-   !$omp end do
-   !$omp critical (get_partial_derivs_3d_)
-   cache%dabdr(:, :, :) = cache%dabdr + dabdr_local
-   cache%dabdL(:, :, :) = cache%dabdL + dabdL_local
-   !$omp end critical (get_partial_derivs_3d_)
-   deallocate(dgamdr, dabdr_local, dabdL_local)
-   !$omp end parallel
+   !$omp end parallel do
 
-end subroutine get_partial_derivs_3d
+end subroutine get_xvec_derivs_3d
 
-!> Compute alpha * dA/dR*q + beta * dX/dR for a non-periodic system using a
-!> half neighborlist with its lower triangle in the cache. The derivative of
-!> component i w.r.t. atom x is stored at the entry of x in the row of i in
-!> dabdrlist_ut for x >= i, and at the entry of i in the row of x in
-!> dabdrlist_lt for x < i. The products with CN or local charge derivatives
-!> below cnthr are skipped.
-subroutine get_partial_derivs_0d_list(self, mol, list, cache, alpha, beta)
+!> Add beta * dX/dR for a non-periodic system using a half neighborlist with
+!> its lower triangle in the cache, stored as described in get_damat_0d_list.
+!> The products with CN or local charge derivatives below cnthr are skipped.
+subroutine get_xvec_derivs_0d_list(self, mol, list, cache, beta)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Molecular structure data
@@ -884,16 +659,12 @@ subroutine get_partial_derivs_0d_list(self, mol, list, cache, alpha, beta)
    type(csr_list), intent(in) :: list
    !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
-   !> dA/dR*q multiplier
-   real(wp), intent(in) :: alpha
    !> dX/dR multiplier
    real(wp), intent(in) :: beta
 
    integer :: iat, izp, jat, jzp, xat, nup, nrow, ient, xent, kmax
    integer(i8) :: kat, cat
-   real(wp) :: vec(3), r1, r2, gam, arg, dtmp, norm_cn, hardi, wtmp, wcni, cij
-   real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), dGc(3), dSc(3, 3)
-   real(wp) :: dcn(3)
+   real(wp) :: vec(3), cij, dGc(3), dSc(3, 3), dcn(3)
    real(wp), allocatable :: dtmpdL(:, :, :), drow(:, :)
    integer, allocatable :: cnat(:), pos(:)
    integer(i8), allocatable :: cninl(:), cnpos(:)
@@ -915,18 +686,14 @@ subroutine get_partial_derivs_0d_list(self, mol, list, cache, alpha, beta)
    end do
    !$omp end parallel do
 
-   cache%dabdL(:, :, :) = 0.0_wp
-
    ! Each iteration only forms the derivatives of component iat in drow, in the
    ! order of the neighbors of iat, pos holds the index of each neighbor.
    ! Without a maximum CN cutoff dCN_i/dR_j = -dCN_j/dR_i, the entry of a pair
    ! holds the derivative of the CN of the atom with the higher index.
    !$omp parallel default(none) &
-   !$omp shared(cache, mol, list, self, alpha, beta, dtmpdL, cninl, cnpos, cnat) &
-   !$omp shared(kmax) &
-   !$omp private(iat, izp, jat, jzp, xat, nup, nrow, ient, xent, kat, cat, gam) &
-   !$omp private(vec, r1, r2, dtmp, norm_cn, arg, hardi, wtmp, wcni, cij, radi) &
-   !$omp private(radj, dradi, dradj, dG, dS, dGc, dSc, dcn, pos, drow)
+   !$omp shared(cache, mol, list, self, beta, dtmpdL, cninl, cnpos, cnat, kmax) &
+   !$omp private(iat, izp, jat, jzp, xat, nup, nrow, ient, xent, kat, cat, vec) &
+   !$omp private(cij, dGc, dSc, dcn, pos, drow)
    allocate(pos(mol%nat), source=0)
    allocate(drow(3, kmax))
    !$omp do schedule(runtime)
@@ -958,25 +725,10 @@ subroutine get_partial_derivs_0d_list(self, mol, list, cache, alpha, beta)
             & + beta * cij * dtmpdL(:, :, jat)
       end do
 
-      ! Effective charge width of i
-      norm_cn = 1.0_wp / self%avg_cn(izp)
-      radi = self%rad(izp) * exp(-self%kcnrad(izp) * cache%cn(iat) * norm_cn)
-      dradi = -self%kcnrad(izp) * norm_cn * radi
-      ! Effective hardness of i
-      hardi = self%eta(izp) + self%kqeta_pre &
-      & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi
-      wcni = 0.0_wp
       do ient = 2, nrow
          call get_neighbor(list, cache%lowlist, iat, ient, jat, kat)
          jzp = mol%id(jat)
          vec = mol%xyz(:, jat) - mol%xyz(:, iat)
-         r2 = vec(1)**2 + vec(2)**2 + vec(3)**2
-         r1 = sqrt(r2)
-         cij = cache%clist(kat)
-         ! Effective charge width of j
-         norm_cn = 1.0_wp / self%avg_cn(jzp)
-         radj = self%rad(jzp) * exp(-self%kcnrad(jzp) * cache%cn(jat) * norm_cn)
-         dradj = -self%kcnrad(jzp) * norm_cn * radj
 
          ! Capacitance derivative, dC(i, j)/dR(i) = dGc = -dC(i, j)/dR(j)
          call get_dcpair(self%kbc, vec, self%rvdw(izp, jzp), self%cap(izp), &
@@ -987,44 +739,6 @@ subroutine get_partial_derivs_0d_list(self, mol, list, cache, alpha, beta)
          drow(:, ient) = drow(:, ient) &
             & - beta * (cache%xtmp(jat) - cache%xtmp(iat)) * dGc
          cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) - beta * cache%xtmp(jat) * dSc
-
-         ! Coulomb interaction of Gaussian charges
-         gam = 1.0_wp / sqrt(radi**2 + radj**2)
-         arg = gam * gam * r2
-
-         ! Explicit derivative
-         dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) - erf(sqrt(arg)) / (r2 * r1)
-         dG(:) = alpha * dtmp * vec * cache%vrhs(jat) * cij
-         dS(:, :) = spread(dG, 1, 3) * spread(vec, 2, 3)
-         drow(:, 1) = drow(:, 1) - dG
-         drow(:, ient) = drow(:, ient) + dG
-         cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) + dS
-
-         ! Effective charge width derivative, CN of i is collected in wcni
-         wtmp = alpha * 2.0_wp * exp(-arg) / sqrtpi * cache%vrhs(jat) * cij
-         wcni = wcni - wtmp * radi * dradi * gam**3
-         dtmp = -wtmp * radj * dradj * gam**3
-         drow(:, ient) = drow(:, ient) + dtmp * cache%dcndrlist(:, list%inl(jat))
-         do cat = cninl(jat) + 1, cninl(jat + 1) - 1
-            xat = cnat(cat)
-            xent = pos(xat)
-            if (xent == 0) cycle
-            dcn = cache%dcndrlist(:, cnpos(cat))
-            if (jat < xat) dcn = -dcn
-            drow(:, xent) = drow(:, xent) + dtmp * dcn
-         end do
-         cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) &
-            & + dtmp * cache%dcndL(:, :, jat)
-
-         ! Capacitance derivative off-diagonal
-         dtmp = alpha * erf(r1 * gam) / r1 * cache%vrhs(jat)
-         drow(:, 1) = drow(:, 1) + dtmp * dGc
-         drow(:, ient) = drow(:, ient) - dtmp * dGc
-         cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) - dtmp * dSc
-
-         ! Capacitance derivative diagonal
-         dtmp = alpha * hardi * cache%vrhs(iat)
-         drow(:, ient) = drow(:, ient) + dtmp * dGc
       end do
 
       ! EN derivative: capacitance matrix derivative diagonal
@@ -1032,43 +746,15 @@ subroutine get_partial_derivs_0d_list(self, mol, list, cache, alpha, beta)
       cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) &
          & + beta * cache%xtmp(iat) * cache%dcdL(:, :, iat)
 
-      ! Hardness derivative
-      dtmp = alpha * self%kqeta_pre * self%kqeta(izp) &
-      & / cosh(self%kqeta(izp) * cache%qloc(iat))**2 * cache%vrhs(iat) &
-      & * cache%clist(list%inl(iat))
-      do ient = 1, nrow
-         call get_neighbor(list, cache%lowlist, iat, ient, jat, kat)
-         drow(:, ient) = drow(:, ient) + dtmp * cache%dqlocdrlist(:, kat)
-      end do
-      cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) &
-         & + dtmp * cache%dqlocdL(:, :, iat)
-
-      ! Effective charge width derivative
-      dtmp = -alpha * sqrt2pi * dradi / (radi**2) * cache%vrhs(iat) &
-      & * cache%clist(list%inl(iat)) + wcni
-      drow(:, 1) = drow(:, 1) + dtmp * cache%dcndrlist(:, list%inl(iat))
-      do ient = 2, nrow
-         call get_neighbor(list, cache%lowlist, iat, ient, xat, kat)
-         dcn = cache%dcndrlist(:, kat)
-         if (iat < xat) dcn = -dcn
-         drow(:, ient) = drow(:, ient) + dtmp * dcn
-      end do
-      cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) + dtmp * cache%dcndL(:, :, iat)
-
-      ! Capacitance derivative
-      dtmp = alpha * hardi * cache%vrhs(iat)
-      drow(:, 1) = drow(:, 1) + dtmp * cache%dcdrdiag(:, iat)
-      cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) + dtmp * cache%dcdL(:, :, iat)
-
       ! The upper triangle is in the row of iat, the lower one in the rows of
       ! the neighbors of lower index
       do ient = 1, nrow
          call get_neighbor(list, cache%lowlist, iat, ient, jat, kat)
          pos(jat) = 0
          if (ient <= nup) then
-            cache%dabdrlist_ut(:, kat) = drow(:, ient)
+            cache%dabdrlist_ut(:, kat) = cache%dabdrlist_ut(:, kat) + drow(:, ient)
          else
-            cache%dabdrlist_lt(:, kat) = drow(:, ient)
+            cache%dabdrlist_lt(:, kat) = cache%dabdrlist_lt(:, kat) + drow(:, ient)
          end if
       end do
    end do
@@ -1076,15 +762,15 @@ subroutine get_partial_derivs_0d_list(self, mol, list, cache, alpha, beta)
    deallocate(pos, drow)
    !$omp end parallel
 
-end subroutine get_partial_derivs_0d_list
+end subroutine get_xvec_derivs_0d_list
 
-!> Compute alpha * dA/dR*q + beta * dX/dR for a periodic system using a half
-!> neighborlist with Wigner-Seitz images and its lower triangle in the cache,
-!> stored as in get_partial_derivs_0d_list. The images of a pair are kept for
-!> the vector from the atom of lower index, the row of the atom of higher index
-!> takes them with the opposite sign. The products with CN or local charge
-!> derivatives below cnthr are skipped.
-subroutine get_partial_derivs_3d_list(self, mol, list, cache, alpha, beta)
+!> Add beta * dX/dR for a periodic system using a half neighborlist with
+!> Wigner-Seitz images and its lower triangle in the cache, stored as described
+!> in get_damat_0d_list. The images of a pair are kept for the vector from the
+!> atom of lower index, the row of the atom of higher index takes them with the
+!> opposite sign. The products with CN or local charge derivatives below cnthr
+!> are skipped.
+subroutine get_xvec_derivs_3d_list(self, mol, list, cache, beta)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Molecular structure data
@@ -1093,16 +779,13 @@ subroutine get_partial_derivs_3d_list(self, mol, list, cache, alpha, beta)
    type(csr_list), intent(in) :: list
    !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
-   !> dA/dR*q multiplier
-   real(wp), intent(in) :: alpha
    !> dX/dR multiplier
    real(wp), intent(in) :: beta
 
    integer :: iat, izp, jat, jzp, xat, nup, nrow, ient, xent, kmax
    integer(i8) :: kat, cat, img
-   real(wp) :: vec(3), gam, dtmp, norm_cn, rvdw, wsw, dgam, wgam, ctmp, cself, hardi
-   real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), dGc(3), dSc(3, 3), wcni
-   real(wp) :: capi, capj, sgn, dcn(3)
+   real(wp) :: vec(3), rvdw, wsw, ctmp, cself, capi, capj, sgn
+   real(wp) :: dGc(3), dSc(3, 3), dcn(3)
    real(wp), allocatable :: dtrans(:, :), dtmpdL(:, :, :), drow(:, :)
    integer, allocatable :: cnat(:), pos(:)
    integer(i8), allocatable :: cninl(:), cnpos(:)
@@ -1126,19 +809,16 @@ subroutine get_partial_derivs_3d_list(self, mol, list, cache, alpha, beta)
    end do
    !$omp end parallel do
 
-   cache%dabdL(:, :, :) = 0.0_wp
-
    ! Each iteration only forms the derivatives of component iat in drow, in the
    ! order of the neighbors of iat, pos holds the index of each neighbor.
    ! Without a maximum CN cutoff dCN_i/dR_j = -dCN_j/dR_i, the entry of a pair
    ! holds the derivative of the CN of the atom with the higher index.
    !$omp parallel default(none) &
-   !$omp shared(cache, mol, list, self, alpha, beta, dtrans, dtmpdL, cninl, cnpos) &
-   !$omp shared(cnat, kmax) &
+   !$omp shared(cache, mol, list, self, beta, dtrans, dtmpdL, cninl, cnpos, cnat) &
+   !$omp shared(kmax) &
    !$omp private(iat, izp, jat, jzp, xat, nup, nrow, ient, xent, kat, cat, img) &
-   !$omp private(vec, gam, dtmp, norm_cn, rvdw, wsw, dgam, wgam, ctmp, cself) &
-   !$omp private(hardi, radi, radj, dradi, dradj, dG, dS, dGc, dSc, wcni, capi) &
-   !$omp private(capj, sgn, dcn, pos, drow)
+   !$omp private(vec, rvdw, wsw, ctmp, cself, capi, capj, sgn, dGc, dSc, dcn) &
+   !$omp private(pos, drow)
    allocate(pos(mol%nat), source=0)
    allocate(drow(3, kmax))
    !$omp do schedule(runtime)
@@ -1169,6 +849,674 @@ subroutine get_partial_derivs_3d_list(self, mol, list, cache, alpha, beta)
          cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) &
             & + beta * cache%clist(kat) * dtmpdL(:, :, jat)
       end do
+
+      capi = self%cap(izp)
+      do ient = 2, nrow
+         call get_neighbor(list, cache%lowlist, iat, ient, jat, kat)
+         if (cache%wsc%nimg_list(kat) == 0) cycle
+         jzp = mol%id(jat)
+         capj = self%cap(jzp)
+         rvdw = self%rvdw(izp, jzp)
+
+         ! The images of the pair belong to the vector from the atom of lower
+         ! index
+         sgn = merge(1.0_wp, -1.0_wp, ient <= nup)
+         wsw = 1.0_wp / real(cache%wsc%nimg_list(kat), wp)
+         do img = cache%wsc%itr_list(kat), cache%wsc%itr_list(kat + 1) - 1
+            vec = mol%xyz(:, jat) - mol%xyz(:, iat) &
+               & + sgn * cache%wsc%trans(:, cache%wsc%tridx_list(img))
+
+            ! Capacitance derivative, dC(i, j)/dR(i) = dGc = -dC(i, j)/dR(j)
+            call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dGc, dSc)
+            dGc = dGc * wsw
+            dSc = dSc * wsw
+
+            ! EN derivative: capacitance matrix derivative
+            drow(:, 1) = drow(:, 1) + beta * cache%xtmp(jat) * dGc
+            drow(:, ient) = drow(:, ient) &
+               & - beta * (cache%xtmp(jat) - cache%xtmp(iat)) * dGc
+            cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) &
+               & - beta * cache%xtmp(jat) * dSc
+         end do
+      end do
+
+      ! Self-images, i = j and T != 0
+      rvdw = self%rvdw(izp, izp)
+      cself = 0.0_wp
+      kat = list%inl(iat)
+      if (cache%wsc%nimg_list(kat) > 0) then
+         wsw = 1.0_wp / real(cache%wsc%nimg_list(kat), wp)
+         do img = cache%wsc%itr_list(kat), cache%wsc%itr_list(kat + 1) - 1
+            vec = cache%wsc%trans(:, cache%wsc%tridx_list(img))
+
+            ! Self-image capacitance in the EN
+            call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, ctmp)
+            cself = cself + ctmp * wsw
+
+            ! EN derivative: self-image capacitance derivative
+            call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, dGc, dSc)
+            cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) &
+               & - beta * cache%xtmp(iat) * dSc * wsw
+         end do
+      end if
+
+      ! EN derivative through the self-image capacitance
+      do cat = cninl(iat), cninl(iat + 1) - 1
+         xat = cnat(cat)
+         dcn = cache%dcndrlist(:, cnpos(cat))
+         if (iat < xat) dcn = -dcn
+         drow(:, pos(xat)) = drow(:, pos(xat)) - beta * cself &
+            & * (self%kcnchi(izp) * dcn &
+            & + self%kqchi(izp) * cache%dqlocdrlist(:, cnpos(cat)))
+      end do
+      cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) &
+         & - beta * cself * dtmpdL(:, :, iat)
+
+      ! EN derivative: capacitance matrix derivative diagonal
+      drow(:, 1) = drow(:, 1) + beta * cache%xtmp(iat) * cache%dcdrdiag(:, iat)
+      cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) &
+         & + beta * cache%xtmp(iat) * cache%dcdL(:, :, iat)
+
+      ! The upper triangle is in the row of iat, the lower one in the rows of
+      ! the neighbors of lower index
+      do ient = 1, nrow
+         call get_neighbor(list, cache%lowlist, iat, ient, jat, kat)
+         pos(jat) = 0
+         if (ient <= nup) then
+            cache%dabdrlist_ut(:, kat) = cache%dabdrlist_ut(:, kat) + drow(:, ient)
+         else
+            cache%dabdrlist_lt(:, kat) = cache%dabdrlist_lt(:, kat) + drow(:, ient)
+         end if
+      end do
+   end do
+   !$omp end do
+   deallocate(pos, drow)
+   !$omp end parallel
+
+end subroutine get_xvec_derivs_3d_list
+
+!> Add the Coulomb matrix derivatives contracted with a vector, alpha * dA/dR*p,
+!> w.r.t. positions and strain to the partial derivatives in the cache, or
+!> w.r.t. positions to dafdr for an external vector
+subroutine get_coulomb_derivs(self, mol, ndim, cache, alpha, p, list, dafdr)
+   !> EEQBC model type
+   class(eeqbc_model), intent(in) :: self
+   !> Structure type
+   type(structure_type), intent(in) :: mol
+   !> System size
+   integer, intent(in) :: ndim
+   !> Multicharge cache
+   type(mchrg_cache), intent(inout) :: cache
+   !> dA/dR*p multiplier
+   real(wp), intent(in) :: alpha
+   !> Vector contracted with the Coulomb matrix derivatives
+   real(wp), intent(in) :: p(:)
+   !> Multicharge neighborlist type (half) with its lower triangle in the cache
+   type(csr_list), intent(in), optional :: list
+   !> Add to dafdr (dafdrlist_ut and dafdrlist_lt with a neighborlist) instead
+   logical, intent(in), optional :: dafdr
+
+   logical :: ext
+   real(wp), allocatable :: dadr(:, :, :), dut(:, :), dlt(:, :), dadL(:, :, :)
+
+   ext = .false.
+   if (present(dafdr)) ext = dafdr
+
+   ! The kernels read the cache and add to the destination, which is moved out
+   ! of the cache for the call. The strain derivatives of dA/dR*p for an
+   ! external vector are not kept.
+   if (ext) then
+      call move_alloc(cache%dafdr, dadr)
+      call move_alloc(cache%dafdrlist_ut, dut)
+      call move_alloc(cache%dafdrlist_lt, dlt)
+      allocate(dadL(3, 3, ndim), source=0.0_wp)
+   else
+      call move_alloc(cache%dabdr, dadr)
+      call move_alloc(cache%dabdrlist_ut, dut)
+      call move_alloc(cache%dabdrlist_lt, dlt)
+      call move_alloc(cache%dabdL, dadL)
+   end if
+
+   if (present(list)) then
+      if (any(mol%periodic)) then
+         call get_damat_3d_list(self, mol, list, cache, alpha, p, dut, dlt, dadL)
+      else
+         call get_damat_0d_list(self, mol, list, cache, alpha, p, dut, dlt, dadL)
+      end if
+   else
+      if (any(mol%periodic)) then
+         call get_damat_3d(self, mol, cache, alpha, p, dadr, dadL)
+      else
+         call get_damat_0d(self, mol, cache, alpha, p, dadr, dadL)
+      end if
+   end if
+
+   if (ext) then
+      call move_alloc(dadr, cache%dafdr)
+      call move_alloc(dut, cache%dafdrlist_ut)
+      call move_alloc(dlt, cache%dafdrlist_lt)
+   else
+      call move_alloc(dadr, cache%dabdr)
+      call move_alloc(dut, cache%dabdrlist_ut)
+      call move_alloc(dlt, cache%dabdrlist_lt)
+      call move_alloc(dadL, cache%dabdL)
+   end if
+
+end subroutine get_coulomb_derivs
+
+!> Add alpha * dA/dR*p for a non-periodic system
+subroutine get_damat_0d(self, mol, cache, alpha, p, dadr, dadL)
+   !> EEQBC model type
+   class(eeqbc_model), intent(in) :: self
+   !> Structure type
+   type(structure_type), intent(in) :: mol
+   !> Multicharge cache
+   type(mchrg_cache), intent(in) :: cache
+   !> dA/dR*p multiplier
+   real(wp), intent(in) :: alpha
+   !> Vector contracted with the Coulomb matrix derivatives
+   real(wp), intent(in) :: p(:)
+   !> Derivatives w.r.t. positions, dadr(:, x, b) of component b w.r.t. atom x
+   real(wp), intent(inout) :: dadr(:, :, :)
+   !> Derivatives w.r.t. strain
+   real(wp), intent(inout) :: dadL(:, :, :)
+
+   integer :: iat, izp, jat, jzp
+   real(wp) :: vec(3), r2, gam, arg, dtmp, norm_cn, hardi, wtmp, wcni
+   real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3)
+
+   ! Each iteration only updates the derivatives of column iat (last index)
+   !$omp parallel do default(none) schedule(runtime) &
+   !$omp shared(cache, mol, self, alpha, p, dadr, dadL) &
+   !$omp private(iat, izp, jat, jzp, gam, vec, r2, dtmp, norm_cn, arg, hardi) &
+   !$omp private(wtmp, wcni, radi, radj, dradi, dradj, dG, dS)
+   do iat = 1, mol%nat
+      izp = mol%id(iat)
+      ! Effective charge width of i
+      norm_cn = 1.0_wp / self%avg_cn(izp)
+      radi = self%rad(izp) * exp(-self%kcnrad(izp) * cache%cn(iat) * norm_cn)
+      dradi = -self%kcnrad(izp) * norm_cn * radi
+      ! Effective hardness of i
+      hardi = self%eta(izp) + self%kqeta_pre &
+      & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi
+      wcni = 0.0_wp
+      do jat = 1, mol%nat
+         if (jat == iat) cycle
+         jzp = mol%id(jat)
+         vec = mol%xyz(:, jat) - mol%xyz(:, iat)
+         r2 = vec(1)**2 + vec(2)**2 + vec(3)**2
+         ! Effective charge width of j
+         norm_cn = 1.0_wp / self%avg_cn(jzp)
+         radj = self%rad(jzp) * exp(-self%kcnrad(jzp) * cache%cn(jat) * norm_cn)
+         dradj = -self%kcnrad(jzp) * norm_cn * radj
+
+         ! Coulomb interaction of Gaussian charges
+         gam = 1.0_wp / sqrt(radi**2 + radj**2)
+         arg = gam * gam * r2
+
+         ! Explicit derivative
+         dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) &
+            & - erf(sqrt(arg)) / (r2 * sqrt(r2))
+         dG(:) = alpha * dtmp * vec * p(jat) * cache%cmat(jat, iat)
+         dS(:, :) = spread(dG, 1, 3) * spread(vec, 2, 3)
+         dadr(:, iat, iat) = dadr(:, iat, iat) - dG
+         dadr(:, jat, iat) = dadr(:, jat, iat) + dG
+         dadL(:, :, iat) = dadL(:, :, iat) + dS
+
+         ! Effective charge width derivative, CN of i is collected in wcni
+         wtmp = alpha * 2.0_wp * exp(-arg) / sqrtpi * p(jat) * cache%cmat(jat, iat)
+         wcni = wcni - wtmp * radi * dradi * gam**3
+         dtmp = -wtmp * radj * dradj * gam**3
+         dadr(:, :, iat) = +dtmp * cache%dcndr(:, :, jat) + dadr(:, :, iat)
+         dadL(:, :, iat) = +dtmp * cache%dcndL(:, :, jat) + dadL(:, :, iat)
+
+         ! Capacitance derivative off-diagonal
+         dtmp = alpha * erf(sqrt(r2) * gam) / (sqrt(r2)) * p(jat)
+         dadr(:, iat, iat) = -dtmp * cache%dcdr(:, jat, iat) + dadr(:, iat, iat)
+         dadr(:, jat, iat) = +dtmp * cache%dcdr(:, jat, iat) + dadr(:, jat, iat)
+         dadL(:, :, iat) = -dtmp * spread(cache%dcdr(:, iat, jat), 2, 3) &
+         & * spread(vec, 1, 3) + dadL(:, :, iat)
+
+         ! Capacitance derivative diagonal
+         dtmp = alpha * hardi * p(iat)
+         dadr(:, jat, iat) = -dtmp * cache%dcdr(:, jat, iat) + dadr(:, jat, iat)
+      end do
+
+      ! Hardness derivative
+      dtmp = alpha * self%kqeta_pre * self%kqeta(izp) &
+      & / cosh(self%kqeta(izp) * cache%qloc(iat))**2 * p(iat) * cache%cmat(iat, iat)
+      dadr(:, :, iat) = +dtmp * cache%dqlocdr(:, :, iat) + dadr(:, :, iat)
+      dadL(:, :, iat) = +dtmp * cache%dqlocdL(:, :, iat) + dadL(:, :, iat)
+
+      ! Effective charge width derivative
+      dtmp = -alpha * sqrt2pi * dradi / (radi**2) * p(iat) * cache%cmat(iat, iat)
+      dadr(:, :, iat) = +(dtmp + wcni) * cache%dcndr(:, :, iat) + dadr(:, :, iat)
+      dadL(:, :, iat) = +(dtmp + wcni) * cache%dcndL(:, :, iat) + dadL(:, :, iat)
+
+      ! Capacitance derivative
+      dtmp = alpha * hardi * p(iat)
+      dadr(:, iat, iat) = +dtmp * cache%dcdr(:, iat, iat) + dadr(:, iat, iat)
+      dadL(:, :, iat) = +dtmp * cache%dcdL(:, :, iat) + dadL(:, :, iat)
+   end do
+   !$omp end parallel do
+
+end subroutine get_damat_0d
+
+!> Add alpha * dA/dR*p for a periodic system
+subroutine get_damat_3d(self, mol, cache, alpha, p, dadr, dadL)
+   !> EEQBC model type
+   class(eeqbc_model), intent(in) :: self
+   !> Structure type
+   type(structure_type), intent(in) :: mol
+   !> Multicharge cache
+   type(mchrg_cache), intent(in) :: cache
+   !> dA/dR*p multiplier
+   real(wp), intent(in) :: alpha
+   !> Vector contracted with the Coulomb matrix derivatives
+   real(wp), intent(in) :: p(:)
+   !> Derivatives w.r.t. positions, dadr(:, x, b) of component b w.r.t. atom x
+   real(wp), intent(inout) :: dadr(:, :, :)
+   !> Derivatives w.r.t. strain
+   real(wp), intent(inout) :: dadL(:, :, :)
+
+   integer :: iat, jat, izp, jzp, img
+   real(wp) :: vec(3), gam, dtmp, norm_cn, rvdw, wsw, dgam, wgam, hardi, hardj
+   real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), dgamdL(3, 3)
+   real(wp) :: capi, capj
+   real(wp), allocatable :: dtrans(:, :), dgamdr(:, :)
+
+   ! Thread-private arrays for reduction
+   real(wp), allocatable :: dadr_local(:, :, :), dadL_local(:, :, :)
+
+   call get_dir_trans(mol, dtrans, cutoff)
+
+   !$omp parallel default(none) &
+   !$omp shared(self, mol, cache, dtrans, alpha, p, dadr, dadL) &
+   !$omp private(iat, izp, jat, jzp, img, gam, vec, dtmp, norm_cn, rvdw, wsw) &
+   !$omp private(radi, radj, dradi, dradj, capi, capj, dgam, wgam, dgamdr, dgamdL) &
+   !$omp private(hardi, hardj, dG, dS) &
+   !$omp private(dadr_local, dadL_local)
+   allocate(dgamdr(3, mol%nat))
+   allocate(dadr_local(3, mol%nat, size(dadr, 3)), source=0.0_wp)
+   allocate(dadL_local(3, 3, size(dadL, 3)), source=0.0_wp)
+   !$omp do schedule(runtime)
+   do iat = 1, mol%nat
+      izp = mol%id(iat)
+      ! Effective charge width of i
+      norm_cn = 1.0_wp / self%avg_cn(izp)
+      radi = self%rad(izp) * exp(-self%kcnrad(izp) * cache%cn(iat) * norm_cn)
+      dradi = -self%kcnrad(izp) * norm_cn * radi
+      capi = self%cap(izp)
+      ! Effective hardness of i
+      hardi = self%eta(izp) + self%kqeta_pre &
+      & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi
+
+      ! Coulomb matrix derivatives for each unordered pair
+      do jat = 1, iat - 1
+         jzp = mol%id(jat)
+         capj = self%cap(jzp)
+         rvdw = self%rvdw(izp, jzp)
+
+         ! Effective charge width of j
+         norm_cn = 1.0_wp / self%avg_cn(jzp)
+         radj = self%rad(jzp) * exp(-self%kcnrad(jzp) * cache%cn(jat) * norm_cn)
+         dradj = -self%kcnrad(jzp) * norm_cn * radj
+         ! Effective hardness of j
+         hardj = self%eta(jzp) + self%kqeta_pre &
+         & * tanh(self%kqeta(jzp) * cache%qloc(jat)) + sqrt2pi / radj
+
+         ! Coulomb interaction of Gaussian charges
+         gam = 1.0_wp / sqrt(radi**2 + radj**2)
+         dgamdr(:, :) = -(radi * dradi * cache%dcndr(:, :, iat) &
+         & + radj * dradj * cache%dcndr(:, :, jat)) * gam**3
+         dgamdL(:, :) = -(radi * dradi * cache%dcndL(:, :, iat) &
+         & + radj * dradj * cache%dcndL(:, :, jat)) * gam**3
+
+         wgam = 0.0_wp
+         wsw = 1.0_wp / real(cache%wsc%nimg(jat, iat), wp)
+         do img = 1, cache%wsc%nimg(jat, iat)
+            vec = mol%xyz(:, jat) - mol%xyz(:, iat) + cache%wsc%trans(:, &
+            & cache%wsc%tridx(img, jat, iat))
+
+            call get_damat_dir(vec, dtrans, capi, capj, rvdw, self%kbc, gam, dG, dS, dgam)
+            dG = alpha * dG * wsw
+            dS = alpha * dS * wsw
+            wgam = wgam + alpha * dgam * wsw
+
+            ! Explicit derivative
+            dadr_local(:, iat, iat) = dadr_local(:, iat, iat) - dG * p(jat)
+            dadr_local(:, jat, jat) = dadr_local(:, jat, jat) + dG * p(iat)
+            dadr_local(:, iat, jat) = dadr_local(:, iat, jat) - dG * p(iat)
+            dadr_local(:, jat, iat) = dadr_local(:, jat, iat) + dG * p(jat)
+            dadL_local(:, :, jat) = dadL_local(:, :, jat) + dS * p(iat)
+            dadL_local(:, :, iat) = dadL_local(:, :, iat) + dS * p(jat)
+
+            call get_damat_dc_dir(vec, dtrans, capi, capj, rvdw, self%kbc, gam, dG, dS)
+            dG = alpha * dG * wsw
+            dS = alpha * dS * wsw
+
+            ! Capacitance derivative off-diagonal
+            dadr_local(:, iat, iat) = dadr_local(:, iat, iat) + p(jat) * dG
+            dadr_local(:, jat, jat) = dadr_local(:, jat, jat) - p(iat) * dG
+            dadr_local(:, jat, iat) = dadr_local(:, jat, iat) - p(jat) * dG
+            dadr_local(:, iat, jat) = dadr_local(:, iat, jat) + p(iat) * dG
+            dadL_local(:, :, jat) = dadL_local(:, :, jat) - p(iat) * dS
+            dadL_local(:, :, iat) = dadL_local(:, :, iat) - p(jat) * dS
+
+            call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
+            dG = alpha * dG * wsw
+
+            ! Capacitance derivative diagonal
+            dadr_local(:, jat, iat) = dadr_local(:, jat, iat) + hardi * p(iat) * dG
+            dadr_local(:, iat, jat) = dadr_local(:, iat, jat) - hardj * p(jat) * dG
+         end do
+
+         ! Effective charge width derivative
+         dadr_local(:, :, iat) = dadr_local(:, :, iat) - wgam * p(jat) * dgamdr
+         dadr_local(:, :, jat) = dadr_local(:, :, jat) - wgam * p(iat) * dgamdr
+         dadL_local(:, :, iat) = dadL_local(:, :, iat) - wgam * p(jat) * dgamdL
+         dadL_local(:, :, jat) = dadL_local(:, :, jat) - wgam * p(iat) * dgamdL
+      end do
+
+      ! Self-images, i = j and T != 0
+      gam = 1.0_wp / sqrt(2.0_wp * radi**2)
+      dgamdr(:, :) = -2.0_wp * radi * dradi * cache%dcndr(:, :, iat) * gam**3
+      dgamdL(:, :) = -2.0_wp * radi * dradi * cache%dcndL(:, :, iat) * gam**3
+      rvdw = self%rvdw(izp, izp)
+      wsw = 1.0_wp / real(cache%wsc%nimg(iat, iat), wp)
+      do img = 1, cache%wsc%nimg(iat, iat)
+         vec = cache%wsc%trans(:, cache%wsc%tridx(img, iat, iat))
+
+         call get_damat_dir(vec, dtrans, capi, capi, rvdw, self%kbc, gam, dG, dS, dgam)
+         dS = alpha * dS * wsw
+         dgam = alpha * dgam * wsw
+
+         ! Explicit derivative
+         dadL_local(:, :, iat) = dadL_local(:, :, iat) + dS * p(iat)
+
+         ! Effective charge width derivative
+         dadr_local(:, :, iat) = dadr_local(:, :, iat) - p(iat) * dgam * dgamdr
+         dadL_local(:, :, iat) = dadL_local(:, :, iat) - p(iat) * dgam * dgamdL
+
+         ! Capacitance derivative
+         call get_damat_dc_dir(vec, dtrans, capi, capi, rvdw, self%kbc, gam, dG, dS)
+         dadL_local(:, :, iat) = dadL_local(:, :, iat) - alpha * p(iat) * dS * wsw
+      end do
+
+      ! Hardness derivative
+      dtmp = alpha * self%kqeta_pre * self%kqeta(izp) &
+      & / cosh(self%kqeta(izp) * cache%qloc(iat))**2 * p(iat) * cache%cmat(iat, iat)
+      dadr_local(:, :, iat) = dadr_local(:, :, iat) + dtmp * cache%dqlocdr(:, :, iat)
+      dadL_local(:, :, iat) = dadL_local(:, :, iat) + dtmp * cache%dqlocdL(:, :, iat)
+
+      ! Effective charge width derivative
+      dtmp = -alpha * sqrt2pi * dradi / (radi**2) * p(iat) * cache%cmat(iat, iat)
+      dadr_local(:, :, iat) = dadr_local(:, :, iat) + dtmp * cache%dcndr(:, :, iat)
+      dadL_local(:, :, iat) = dadL_local(:, :, iat) + dtmp * cache%dcndL(:, :, iat)
+
+      ! Capacitance derivative
+      dtmp = alpha * hardi * p(iat)
+      dadr_local(:, iat, iat) = dadr_local(:, iat, iat) + dtmp * cache%dcdr(:, iat, iat)
+      dadL_local(:, :, iat) = dadL_local(:, :, iat) + dtmp * cache%dcdL(:, :, iat)
+   end do
+   !$omp end do
+   !$omp critical (get_damat_3d_)
+   dadr(:, :, :) = dadr + dadr_local
+   dadL(:, :, :) = dadL + dadL_local
+   !$omp end critical (get_damat_3d_)
+   deallocate(dgamdr, dadr_local, dadL_local)
+   !$omp end parallel
+
+end subroutine get_damat_3d
+
+!> Add alpha * dA/dR*p for a non-periodic system using a half neighborlist with
+!> its lower triangle in the cache. The derivative of component i w.r.t. atom x
+!> is stored at the entry of x in the row of i in dut for x >= i, and at the
+!> entry of i in the row of x in dlt for x < i. The products with CN or local
+!> charge derivatives below cnthr are skipped.
+subroutine get_damat_0d_list(self, mol, list, cache, alpha, p, dut, dlt, dadL)
+   !> EEQBC model type
+   class(eeqbc_model), intent(in) :: self
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+   !> Multicharge neighborlist type (half)
+   type(csr_list), intent(in) :: list
+   !> Multicharge cache
+   type(mchrg_cache), intent(in) :: cache
+   !> dA/dR*p multiplier
+   real(wp), intent(in) :: alpha
+   !> Vector contracted with the Coulomb matrix derivatives
+   real(wp), intent(in) :: p(:)
+   !> Diagonal and upper triangle of the derivatives w.r.t. positions
+   real(wp), intent(inout) :: dut(:, :)
+   !> Lower triangle of the derivatives w.r.t. positions
+   real(wp), intent(inout) :: dlt(:, :)
+   !> Derivatives w.r.t. strain
+   real(wp), intent(inout) :: dadL(:, :, :)
+
+   integer :: iat, izp, jat, jzp, xat, nup, nrow, ient, xent, kmax
+   integer(i8) :: kat, cat
+   real(wp) :: vec(3), r1, r2, gam, arg, dtmp, norm_cn, hardi, wtmp, wcni, cij
+   real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), dGc(3), dSc(3, 3)
+   real(wp) :: dcn(3)
+   real(wp), allocatable :: drow(:, :)
+   integer, allocatable :: cnat(:), pos(:)
+   integer(i8), allocatable :: cninl(:), cnpos(:)
+
+   ! Entries with CN or local charge derivatives, the products with the
+   ! derivatives of the second neighbors only run over these entries
+   call get_cn_entries_list(mol, list, cache, cninl, cnpos, cnat)
+
+   kmax = 0
+   !$omp parallel do default(none) schedule(runtime) &
+   !$omp shared(mol, list, cache) private(iat) reduction(max:kmax)
+   do iat = 1, mol%nat
+      kmax = max(kmax, count_neighbors(list, cache%lowlist, iat))
+   end do
+   !$omp end parallel do
+
+   ! Each iteration only forms the derivatives of component iat in drow, in the
+   ! order of the neighbors of iat, pos holds the index of each neighbor.
+   ! Without a maximum CN cutoff dCN_i/dR_j = -dCN_j/dR_i, the entry of a pair
+   ! holds the derivative of the CN of the atom with the higher index.
+   !$omp parallel default(none) &
+   !$omp shared(cache, mol, list, self, alpha, p, dut, dlt, dadL, cninl, cnpos) &
+   !$omp shared(cnat, kmax) &
+   !$omp private(iat, izp, jat, jzp, xat, nup, nrow, ient, xent, kat, cat, gam) &
+   !$omp private(vec, r1, r2, dtmp, norm_cn, arg, hardi, wtmp, wcni, cij, radi) &
+   !$omp private(radj, dradi, dradj, dG, dS, dGc, dSc, dcn, pos, drow)
+   allocate(pos(mol%nat), source=0)
+   allocate(drow(3, kmax))
+   !$omp do schedule(runtime)
+   do iat = 1, mol%nat
+      izp = mol%id(iat)
+      nup = int(list%inl(iat + 1) - list%inl(iat))
+      nrow = count_neighbors(list, cache%lowlist, iat)
+      do ient = 1, nrow
+         call get_neighbor(list, cache%lowlist, iat, ient, jat, kat)
+         pos(jat) = ient
+      end do
+      drow(:, :nrow) = 0.0_wp
+
+      ! Effective charge width of i
+      norm_cn = 1.0_wp / self%avg_cn(izp)
+      radi = self%rad(izp) * exp(-self%kcnrad(izp) * cache%cn(iat) * norm_cn)
+      dradi = -self%kcnrad(izp) * norm_cn * radi
+      ! Effective hardness of i
+      hardi = self%eta(izp) + self%kqeta_pre &
+      & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi
+      wcni = 0.0_wp
+      do ient = 2, nrow
+         call get_neighbor(list, cache%lowlist, iat, ient, jat, kat)
+         jzp = mol%id(jat)
+         vec = mol%xyz(:, jat) - mol%xyz(:, iat)
+         r2 = vec(1)**2 + vec(2)**2 + vec(3)**2
+         r1 = sqrt(r2)
+         cij = cache%clist(kat)
+         ! Effective charge width of j
+         norm_cn = 1.0_wp / self%avg_cn(jzp)
+         radj = self%rad(jzp) * exp(-self%kcnrad(jzp) * cache%cn(jat) * norm_cn)
+         dradj = -self%kcnrad(jzp) * norm_cn * radj
+
+         ! Capacitance derivative, dC(i, j)/dR(i) = dGc = -dC(i, j)/dR(j)
+         call get_dcpair(self%kbc, vec, self%rvdw(izp, jzp), self%cap(izp), &
+            & self%cap(jzp), dGc, dSc)
+
+         ! Coulomb interaction of Gaussian charges
+         gam = 1.0_wp / sqrt(radi**2 + radj**2)
+         arg = gam * gam * r2
+
+         ! Explicit derivative
+         dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) - erf(sqrt(arg)) / (r2 * r1)
+         dG(:) = alpha * dtmp * vec * p(jat) * cij
+         dS(:, :) = spread(dG, 1, 3) * spread(vec, 2, 3)
+         drow(:, 1) = drow(:, 1) - dG
+         drow(:, ient) = drow(:, ient) + dG
+         dadL(:, :, iat) = dadL(:, :, iat) + dS
+
+         ! Effective charge width derivative, CN of i is collected in wcni
+         wtmp = alpha * 2.0_wp * exp(-arg) / sqrtpi * p(jat) * cij
+         wcni = wcni - wtmp * radi * dradi * gam**3
+         dtmp = -wtmp * radj * dradj * gam**3
+         drow(:, ient) = drow(:, ient) + dtmp * cache%dcndrlist(:, list%inl(jat))
+         do cat = cninl(jat) + 1, cninl(jat + 1) - 1
+            xat = cnat(cat)
+            xent = pos(xat)
+            if (xent == 0) cycle
+            dcn = cache%dcndrlist(:, cnpos(cat))
+            if (jat < xat) dcn = -dcn
+            drow(:, xent) = drow(:, xent) + dtmp * dcn
+         end do
+         dadL(:, :, iat) = dadL(:, :, iat) + dtmp * cache%dcndL(:, :, jat)
+
+         ! Capacitance derivative off-diagonal
+         dtmp = alpha * erf(r1 * gam) / r1 * p(jat)
+         drow(:, 1) = drow(:, 1) + dtmp * dGc
+         drow(:, ient) = drow(:, ient) - dtmp * dGc
+         dadL(:, :, iat) = dadL(:, :, iat) - dtmp * dSc
+
+         ! Capacitance derivative diagonal
+         dtmp = alpha * hardi * p(iat)
+         drow(:, ient) = drow(:, ient) + dtmp * dGc
+      end do
+
+      ! Hardness derivative
+      dtmp = alpha * self%kqeta_pre * self%kqeta(izp) &
+      & / cosh(self%kqeta(izp) * cache%qloc(iat))**2 * p(iat) &
+      & * cache%clist(list%inl(iat))
+      do ient = 1, nrow
+         call get_neighbor(list, cache%lowlist, iat, ient, jat, kat)
+         drow(:, ient) = drow(:, ient) + dtmp * cache%dqlocdrlist(:, kat)
+      end do
+      dadL(:, :, iat) = dadL(:, :, iat) + dtmp * cache%dqlocdL(:, :, iat)
+
+      ! Effective charge width derivative
+      dtmp = -alpha * sqrt2pi * dradi / (radi**2) * p(iat) &
+      & * cache%clist(list%inl(iat)) + wcni
+      drow(:, 1) = drow(:, 1) + dtmp * cache%dcndrlist(:, list%inl(iat))
+      do ient = 2, nrow
+         call get_neighbor(list, cache%lowlist, iat, ient, xat, kat)
+         dcn = cache%dcndrlist(:, kat)
+         if (iat < xat) dcn = -dcn
+         drow(:, ient) = drow(:, ient) + dtmp * dcn
+      end do
+      dadL(:, :, iat) = dadL(:, :, iat) + dtmp * cache%dcndL(:, :, iat)
+
+      ! Capacitance derivative
+      dtmp = alpha * hardi * p(iat)
+      drow(:, 1) = drow(:, 1) + dtmp * cache%dcdrdiag(:, iat)
+      dadL(:, :, iat) = dadL(:, :, iat) + dtmp * cache%dcdL(:, :, iat)
+
+      ! The upper triangle is in the row of iat, the lower one in the rows of
+      ! the neighbors of lower index
+      do ient = 1, nrow
+         call get_neighbor(list, cache%lowlist, iat, ient, jat, kat)
+         pos(jat) = 0
+         if (ient <= nup) then
+            dut(:, kat) = dut(:, kat) + drow(:, ient)
+         else
+            dlt(:, kat) = dlt(:, kat) + drow(:, ient)
+         end if
+      end do
+   end do
+   !$omp end do
+   deallocate(pos, drow)
+   !$omp end parallel
+
+end subroutine get_damat_0d_list
+
+!> Add alpha * dA/dR*p for a periodic system using a half neighborlist with
+!> Wigner-Seitz images and its lower triangle in the cache, stored as in
+!> get_damat_0d_list. The images of a pair are kept for the vector from the
+!> atom of lower index, the row of the atom of higher index takes them with the
+!> opposite sign. The products with CN or local charge derivatives below cnthr
+!> are skipped.
+subroutine get_damat_3d_list(self, mol, list, cache, alpha, p, dut, dlt, dadL)
+   !> EEQBC model type
+   class(eeqbc_model), intent(in) :: self
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+   !> Multicharge neighborlist type (half)
+   type(csr_list), intent(in) :: list
+   !> Multicharge cache
+   type(mchrg_cache), intent(in) :: cache
+   !> dA/dR*p multiplier
+   real(wp), intent(in) :: alpha
+   !> Vector contracted with the Coulomb matrix derivatives
+   real(wp), intent(in) :: p(:)
+   !> Diagonal and upper triangle of the derivatives w.r.t. positions
+   real(wp), intent(inout) :: dut(:, :)
+   !> Lower triangle of the derivatives w.r.t. positions
+   real(wp), intent(inout) :: dlt(:, :)
+   !> Derivatives w.r.t. strain
+   real(wp), intent(inout) :: dadL(:, :, :)
+
+   integer :: iat, izp, jat, jzp, xat, nup, nrow, ient, xent, kmax
+   integer(i8) :: kat, cat, img
+   real(wp) :: vec(3), gam, dtmp, norm_cn, rvdw, wsw, dgam, wgam, hardi, wcni
+   real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), dGc(3), dSc(3, 3)
+   real(wp) :: capi, capj, sgn, dcn(3)
+   real(wp), allocatable :: dtrans(:, :), drow(:, :)
+   integer, allocatable :: cnat(:), pos(:)
+   integer(i8), allocatable :: cninl(:), cnpos(:)
+
+   call get_dir_trans(mol, dtrans, cutoff)
+
+   ! Entries with CN or local charge derivatives, the products with the
+   ! derivatives of the second neighbors only run over these entries
+   call get_cn_entries_list(mol, list, cache, cninl, cnpos, cnat)
+
+   kmax = 0
+   !$omp parallel do default(none) schedule(runtime) &
+   !$omp shared(mol, list, cache) private(iat) reduction(max:kmax)
+   do iat = 1, mol%nat
+      kmax = max(kmax, count_neighbors(list, cache%lowlist, iat))
+   end do
+   !$omp end parallel do
+
+   ! Each iteration only forms the derivatives of component iat in drow, in the
+   ! order of the neighbors of iat, pos holds the index of each neighbor.
+   ! Without a maximum CN cutoff dCN_i/dR_j = -dCN_j/dR_i, the entry of a pair
+   ! holds the derivative of the CN of the atom with the higher index.
+   !$omp parallel default(none) &
+   !$omp shared(cache, mol, list, self, alpha, p, dut, dlt, dadL, dtrans, cninl) &
+   !$omp shared(cnpos, cnat, kmax) &
+   !$omp private(iat, izp, jat, jzp, xat, nup, nrow, ient, xent, kat, cat, img) &
+   !$omp private(vec, gam, dtmp, norm_cn, rvdw, wsw, dgam, wgam, hardi, wcni) &
+   !$omp private(radi, radj, dradi, dradj, dG, dS, dGc, dSc, capi, capj, sgn, dcn) &
+   !$omp private(pos, drow)
+   allocate(pos(mol%nat), source=0)
+   allocate(drow(3, kmax))
+   !$omp do schedule(runtime)
+   do iat = 1, mol%nat
+      izp = mol%id(iat)
+      nup = int(list%inl(iat + 1) - list%inl(iat))
+      nrow = count_neighbors(list, cache%lowlist, iat)
+      do ient = 1, nrow
+         call get_neighbor(list, cache%lowlist, iat, ient, jat, kat)
+         pos(jat) = ient
+      end do
+      drow(:, :nrow) = 0.0_wp
 
       ! Effective charge width of i
       norm_cn = 1.0_wp / self%avg_cn(izp)
@@ -1205,39 +1553,31 @@ subroutine get_partial_derivs_3d_list(self, mol, list, cache, alpha, beta)
             ! Capacitance derivative, dC(i, j)/dR(i) = dGc = -dC(i, j)/dR(j)
             call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dGc, dSc)
             dGc = dGc * wsw
-            dSc = dSc * wsw
-
-            ! EN derivative: capacitance matrix derivative
-            drow(:, 1) = drow(:, 1) + beta * cache%xtmp(jat) * dGc
-            drow(:, ient) = drow(:, ient) &
-               & - beta * (cache%xtmp(jat) - cache%xtmp(iat)) * dGc
-            cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) &
-               & - beta * cache%xtmp(jat) * dSc
 
             ! Explicit derivative
             call get_damat_dir(vec, dtrans, capi, capj, rvdw, self%kbc, gam, dG, dS, dgam)
             dG = alpha * dG * wsw
             dS = alpha * dS * wsw
             wgam = wgam + alpha * dgam * wsw
-            drow(:, 1) = drow(:, 1) - dG * cache%vrhs(jat)
-            drow(:, ient) = drow(:, ient) + dG * cache%vrhs(jat)
-            cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) + dS * cache%vrhs(jat)
+            drow(:, 1) = drow(:, 1) - dG * p(jat)
+            drow(:, ient) = drow(:, ient) + dG * p(jat)
+            dadL(:, :, iat) = dadL(:, :, iat) + dS * p(jat)
 
             ! Capacitance derivative off-diagonal
             call get_damat_dc_dir(vec, dtrans, capi, capj, rvdw, self%kbc, gam, dG, dS)
             dG = alpha * dG * wsw
             dS = alpha * dS * wsw
-            drow(:, 1) = drow(:, 1) + dG * cache%vrhs(jat)
-            drow(:, ient) = drow(:, ient) - dG * cache%vrhs(jat)
-            cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) - dS * cache%vrhs(jat)
+            drow(:, 1) = drow(:, 1) + dG * p(jat)
+            drow(:, ient) = drow(:, ient) - dG * p(jat)
+            dadL(:, :, iat) = dadL(:, :, iat) - dS * p(jat)
 
             ! Capacitance derivative diagonal
-            drow(:, ient) = drow(:, ient) + alpha * hardi * cache%vrhs(iat) * dGc
+            drow(:, ient) = drow(:, ient) + alpha * hardi * p(iat) * dGc
          end do
 
          ! Effective charge width derivative, CN of i is collected in wcni
-         wcni = wcni + wgam * cache%vrhs(jat) * radi * dradi * gam**3
-         dtmp = wgam * cache%vrhs(jat) * radj * dradj * gam**3
+         wcni = wcni + wgam * p(jat) * radi * dradi * gam**3
+         dtmp = wgam * p(jat) * radj * dradj * gam**3
          drow(:, ient) = drow(:, ient) + dtmp * cache%dcndrlist(:, list%inl(jat))
          do cat = cninl(jat) + 1, cninl(jat + 1) - 1
             xat = cnat(cat)
@@ -1247,14 +1587,12 @@ subroutine get_partial_derivs_3d_list(self, mol, list, cache, alpha, beta)
             if (jat < xat) dcn = -dcn
             drow(:, xent) = drow(:, xent) + dtmp * dcn
          end do
-         cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) &
-            & + dtmp * cache%dcndL(:, :, jat)
+         dadL(:, :, iat) = dadL(:, :, iat) + dtmp * cache%dcndL(:, :, jat)
       end do
 
       ! Self-images, i = j and T != 0
       gam = 1.0_wp / sqrt(2.0_wp * radi**2)
       rvdw = self%rvdw(izp, izp)
-      cself = 0.0_wp
       kat = list%inl(iat)
       if (cache%wsc%nimg_list(kat) > 0) then
          wgam = 0.0_wp
@@ -1262,61 +1600,32 @@ subroutine get_partial_derivs_3d_list(self, mol, list, cache, alpha, beta)
          do img = cache%wsc%itr_list(kat), cache%wsc%itr_list(kat + 1) - 1
             vec = cache%wsc%trans(:, cache%wsc%tridx_list(img))
 
-            ! Self-image capacitance in the EN
-            call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, ctmp)
-            cself = cself + ctmp * wsw
-
-            ! EN derivative: self-image capacitance derivative
-            call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, dGc, dSc)
-            cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) &
-               & - beta * cache%xtmp(iat) * dSc * wsw
-
             ! Explicit derivative
             call get_damat_dir(vec, dtrans, capi, capi, rvdw, self%kbc, gam, dG, dS, dgam)
-            cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) &
-               & + alpha * cache%vrhs(iat) * dS * wsw
+            dadL(:, :, iat) = dadL(:, :, iat) + alpha * p(iat) * dS * wsw
             wgam = wgam + alpha * dgam * wsw
 
             ! Capacitance derivative
             call get_damat_dc_dir(vec, dtrans, capi, capi, rvdw, self%kbc, gam, dG, dS)
-            cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) &
-               & - alpha * cache%vrhs(iat) * dS * wsw
+            dadL(:, :, iat) = dadL(:, :, iat) - alpha * p(iat) * dS * wsw
          end do
 
          ! Effective charge width derivative
-         wcni = wcni + wgam * cache%vrhs(iat) * 2.0_wp * radi * dradi * gam**3
+         wcni = wcni + wgam * p(iat) * 2.0_wp * radi * dradi * gam**3
       end if
-
-      ! EN derivative through the self-image capacitance
-      do cat = cninl(iat), cninl(iat + 1) - 1
-         xat = cnat(cat)
-         dcn = cache%dcndrlist(:, cnpos(cat))
-         if (iat < xat) dcn = -dcn
-         drow(:, pos(xat)) = drow(:, pos(xat)) - beta * cself &
-            & * (self%kcnchi(izp) * dcn &
-            & + self%kqchi(izp) * cache%dqlocdrlist(:, cnpos(cat)))
-      end do
-      cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) &
-         & - beta * cself * dtmpdL(:, :, iat)
-
-      ! EN derivative: capacitance matrix derivative diagonal
-      drow(:, 1) = drow(:, 1) + beta * cache%xtmp(iat) * cache%dcdrdiag(:, iat)
-      cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) &
-         & + beta * cache%xtmp(iat) * cache%dcdL(:, :, iat)
 
       ! Hardness derivative
       dtmp = alpha * self%kqeta_pre * self%kqeta(izp) &
-      & / cosh(self%kqeta(izp) * cache%qloc(iat))**2 * cache%vrhs(iat) &
+      & / cosh(self%kqeta(izp) * cache%qloc(iat))**2 * p(iat) &
       & * cache%clist(list%inl(iat))
       do ient = 1, nrow
          call get_neighbor(list, cache%lowlist, iat, ient, jat, kat)
          drow(:, ient) = drow(:, ient) + dtmp * cache%dqlocdrlist(:, kat)
       end do
-      cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) &
-         & + dtmp * cache%dqlocdL(:, :, iat)
+      dadL(:, :, iat) = dadL(:, :, iat) + dtmp * cache%dqlocdL(:, :, iat)
 
       ! Effective charge width derivative
-      dtmp = -alpha * sqrt2pi * dradi / (radi**2) * cache%vrhs(iat) &
+      dtmp = -alpha * sqrt2pi * dradi / (radi**2) * p(iat) &
       & * cache%clist(list%inl(iat)) + wcni
       drow(:, 1) = drow(:, 1) + dtmp * cache%dcndrlist(:, list%inl(iat))
       do ient = 2, nrow
@@ -1325,12 +1634,12 @@ subroutine get_partial_derivs_3d_list(self, mol, list, cache, alpha, beta)
          if (iat < xat) dcn = -dcn
          drow(:, ient) = drow(:, ient) + dtmp * dcn
       end do
-      cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) + dtmp * cache%dcndL(:, :, iat)
+      dadL(:, :, iat) = dadL(:, :, iat) + dtmp * cache%dcndL(:, :, iat)
 
       ! Capacitance derivative
-      dtmp = alpha * hardi * cache%vrhs(iat)
+      dtmp = alpha * hardi * p(iat)
       drow(:, 1) = drow(:, 1) + dtmp * cache%dcdrdiag(:, iat)
-      cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) + dtmp * cache%dcdL(:, :, iat)
+      dadL(:, :, iat) = dadL(:, :, iat) + dtmp * cache%dcdL(:, :, iat)
 
       ! The upper triangle is in the row of iat, the lower one in the rows of
       ! the neighbors of lower index
@@ -1338,9 +1647,9 @@ subroutine get_partial_derivs_3d_list(self, mol, list, cache, alpha, beta)
          call get_neighbor(list, cache%lowlist, iat, ient, jat, kat)
          pos(jat) = 0
          if (ient <= nup) then
-            cache%dabdrlist_ut(:, kat) = drow(:, ient)
+            dut(:, kat) = dut(:, kat) + drow(:, ient)
          else
-            cache%dabdrlist_lt(:, kat) = drow(:, ient)
+            dlt(:, kat) = dlt(:, kat) + drow(:, ient)
          end if
       end do
    end do
@@ -1348,7 +1657,7 @@ subroutine get_partial_derivs_3d_list(self, mol, list, cache, alpha, beta)
    deallocate(pos, drow)
    !$omp end parallel
 
-end subroutine get_partial_derivs_3d_list
+end subroutine get_damat_3d_list
 
 !> Assemble the Coulomb matrix, including bond-capacitance contributions
 subroutine get_coulomb_matrix(self, mol, ndim, cache, list)

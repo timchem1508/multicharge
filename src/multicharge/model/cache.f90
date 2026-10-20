@@ -128,6 +128,21 @@ module multicharge_model_cache
       !> the diagonal entries are not used
       real(wp), allocatable :: dabdrlist_lt(:, :)
 
+      !> Coulomb matrix derivatives contracted with an external vector,
+      !> alpha * dA/dR*p w.r.t. positions, dafdr(:, x, b) is the derivative of
+      !> component b w.r.t. atom x
+      real(wp), allocatable :: dafdr(:, :, :)
+
+      !> Diagonal and upper triangle of dafdr on a half neighborlist, the entry
+      !> of atom x in the row of atom i holds the derivative of component i
+      !> w.r.t. atom x
+      real(wp), allocatable :: dafdrlist_ut(:, :)
+
+      !> Lower triangle of dafdr on a half neighborlist, the entry of atom x in
+      !> the row of atom i holds the derivative of component x w.r.t. atom i,
+      !> the diagonal entries are not used
+      real(wp), allocatable :: dafdrlist_lt(:, :)
+
       !> Lower triangle of the half neighborlist of the charge derivatives and
       !> the Hessian, row x holds the atoms b < x with the position of the entry
       !> of x in row b

@@ -20,7 +20,7 @@ module test_model
    use mctc_io_structure, only: structure_type, new
    use mstore, only: get_structure
    use multicharge_blas, only: gemv
-   use multicharge_model_type, only: mchrg_model_type, hess_index
+   use multicharge_model_type, only: mchrg_model_type, hess_index, new_partial_derivs
    use multicharge_model_eeqbc, only: eeqbc_model
    use multicharge_param, only: new_eeq2019_model, new_eeqbc2025_model
    use multicharge_model_cache, only: mchrg_cache
@@ -207,6 +207,11 @@ subroutine test_dadr(error, mol, model)
    call model%solve(mol, solver, cache, error, qvec=qvec, unit=output_unit)
    if (allocated(error)) return
 
+   ! Contract with a vector apart from the charges in the cache
+   do iat = 1, mol%nat
+      qvec(iat) = qvec(iat) + 0.1_wp * cos(real(iat, wp))
+   end do
+
    numgrad = 0.0_wp
 
    lp: do iat = 1, mol%nat
@@ -265,7 +270,8 @@ subroutine test_dadr(error, mol, model)
    ! Analytical gradient
    call model%update(mol, cache, trans, grad, dqdr=.true.)
    call model%get_capacitance_matrix(mol, ndim, cache)
-   call model%get_partial_derivs(mol, ndim, cache, alpha=1.0_wp, beta=0.0_wp)
+   call new_partial_derivs(mol, ndim, cache)
+   call model%get_coulomb_derivs(mol, ndim, cache, alpha=1.0_wp, p=qvec)
 
    if (any(abs(cache%dabdr(:, :, :) - numgrad(:, :, :)) > thr2_local)) then
       call test_failed(error, "Derivative of the A matrix does not match")
@@ -326,6 +332,11 @@ subroutine test_dadL(error, mol, model)
    call model%solve(mol, solver, cache, error, qvec=qvec, unit=output_unit)
    if (allocated(error)) return
 
+   ! Contract with a vector apart from the charges in the cache
+   do iat = 1, mol%nat
+      qvec(iat) = qvec(iat) + 0.1_wp * cos(real(iat, wp))
+   end do
+
    numsigma = 0.0_wp
 
    eps(:, :) = unity
@@ -363,7 +374,8 @@ subroutine test_dadL(error, mol, model)
 
    call model%update(mol, cache, trans, grad, dqdr=.true.)
    call model%get_capacitance_matrix(mol, ndim, cache)
-   call model%get_partial_derivs(mol, ndim, cache, alpha=1.0_wp, beta=0.0_wp)
+   call new_partial_derivs(mol, ndim, cache)
+   call model%get_coulomb_derivs(mol, ndim, cache, alpha=1.0_wp, p=qvec)
    if (allocated(error)) return
 
    if (any(abs(cache%dabdL(:, :, :) - numsigma(:, :, :)) > thr2)) then
@@ -446,7 +458,8 @@ subroutine test_dbdr(error, mol, model)
    ! Solve for the charges to set up the capacitance matrix and xtmp (eeqbc)
    call model%solve(mol, solver, cache, error, unit=output_unit)
    if (allocated(error)) return
-   call model%get_partial_derivs(mol, ndim, cache, alpha=0.0_wp, beta=1.0_wp)
+   call new_partial_derivs(mol, ndim, cache)
+   call model%get_xvec_derivs(mol, ndim, cache, beta=1.0_wp)
 
    dbdr = cache%dabdr
 
@@ -542,7 +555,8 @@ subroutine test_dbdL(error, mol, model)
    ! Solve for the charges to set up the capacitance matrix and xtmp (eeqbc)
    call model%solve(mol, solver, cache, error, unit=output_unit)
    if (allocated(error)) return
-   call model%get_partial_derivs(mol, ndim, cache, alpha=0.0_wp, beta=1.0_wp)
+   call new_partial_derivs(mol, ndim, cache)
+   call model%get_xvec_derivs(mol, ndim, cache, beta=1.0_wp)
 
    dbdL = cache%dabdL
 
