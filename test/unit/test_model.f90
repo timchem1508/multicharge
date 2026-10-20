@@ -92,6 +92,8 @@ subroutine collect_model(testsuite)
    & new_unittest("eeqbc-hess-impl-znooh", test_eeqbc_himpl_znooh), &
    & new_unittest("eeqbc-hess-mb05", test_eeqbc_hess_mb05), &
    & new_unittest("eeqbc-hess-cg-znooh", test_eeqbc_hess_cg_znooh), &
+   & new_unittest("eeqbc-hess-ext-mb05", test_eeqbc_hext_mb05), &
+   & new_unittest("eeqbc-hess-ext-cg-znooh", test_eeqbc_hext_cg_znooh), &
    & new_unittest("eeqbc-dqdr-no-update", test_eeqbc_dqdr_no_update), &
    & new_unittest("eeqbc-charges-mb01", test_eeqbc_q_mb01), &
    & new_unittest("eeqbc-charges-mb02", test_eeqbc_q_mb02), &
@@ -1736,6 +1738,208 @@ subroutine test_hessian(error, mol, model, cg)
 end subroutine test_hessian
 
 
+!> Partial derivatives of the external test function
+!> f(q, R) = sum_i q_i (e.R_i + 0.5 k |R_i|^2) + 0.5 q^T F q with the constant
+!> coupling F_ij = 0.1 / (1 + |i - j|)
+subroutine external_function_derivs(mol, qvec, dfdq, d2fdq2, dfdrdq, dfdr, d2fdr2)
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Atomic partial charges
+   real(wp), intent(in) :: qvec(:)
+
+   !> Derivative w.r.t. the charges
+   real(wp), intent(out) :: dfdq(:)
+
+   !> Second derivative w.r.t. the charges
+   real(wp), intent(out) :: d2fdq2(:, :)
+
+   !> Mixed derivative, dfdrdq(:, x, b) = d2f/dR_x dq_b
+   real(wp), intent(out) :: dfdrdq(:, :, :)
+
+   !> Derivative w.r.t. positions at fixed charges
+   real(wp), intent(out) :: dfdr(:, :)
+
+   !> Second derivative w.r.t. positions at fixed charges
+   real(wp), intent(out) :: d2fdr2(:, :)
+
+   real(wp), parameter :: efield(3) = [0.1_wp, -0.2_wp, 0.3_wp]
+   real(wp), parameter :: kpot = 0.05_wp
+   integer :: iat, jat, ic
+
+   do iat = 1, mol%nat
+      do jat = 1, mol%nat
+         d2fdq2(jat, iat) = 0.1_wp / (1.0_wp + real(abs(iat - jat), wp))
+      end do
+   end do
+
+   dfdrdq(:, :, :) = 0.0_wp
+   d2fdr2(:, :) = 0.0_wp
+   do iat = 1, mol%nat
+      dfdq(iat) = dot_product(efield, mol%xyz(:, iat)) &
+         & + 0.5_wp * kpot * sum(mol%xyz(:, iat)**2)
+      dfdrdq(:, iat, iat) = efield + kpot * mol%xyz(:, iat)
+      dfdr(:, iat) = qvec(iat) * dfdrdq(:, iat, iat)
+      do ic = 1, 3
+         d2fdr2(3*(iat - 1) + ic, 3*(iat - 1) + ic) = kpot * qvec(iat)
+      end do
+   end do
+   dfdq(:) = dfdq + matmul(d2fdq2, qvec)
+
+end subroutine external_function_derivs
+
+
+!> Total gradient df/dR of the external test function for a displaced
+!> structure using a fresh cache
+subroutine displaced_external_gradient(mol, model, solver, error, gradient)
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Electronegativity equilibration model
+   class(mchrg_model_type), intent(in) :: model
+
+   !> The solver instance
+   class(mchrg_solver_type), intent(in) :: solver
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Total gradient of the external function
+   real(wp), intent(out) :: gradient(:, :)
+
+   type(mchrg_cache), allocatable :: cache
+   real(wp), parameter :: trans(3, 1) = 0.0_wp
+   real(wp) :: sigma(3, 3)
+   real(wp), allocatable :: qvec(:), dfdq(:), d2fdq2(:, :), dfdrdq(:, :, :)
+   real(wp), allocatable :: d2fdr2(:, :)
+
+   allocate(qvec(mol%nat), dfdq(mol%nat), d2fdq2(mol%nat, mol%nat), &
+      & dfdrdq(3, mol%nat, mol%nat), d2fdr2(3*mol%nat, 3*mol%nat))
+
+   allocate(cache)
+   call model%update(mol, cache, trans, .true.)
+   call model%solve(mol, solver, cache, error, qvec=qvec, unit=output_unit)
+   if (allocated(error)) return
+
+   ! Partial derivative at fixed charges and the response p^T dB/dR
+   call external_function_derivs(mol, qvec, dfdq, d2fdq2, dfdrdq, gradient, &
+      & d2fdr2)
+   sigma(:, :) = 0.0_wp
+   call model%get_external_gradient(mol, solver, cache, error, dfdq, gradient, &
+      & sigma)
+
+end subroutine displaced_external_gradient
+
+
+!> Check the analytical Hessian of an external function of the charges against
+!> central differences of its analytical gradient, and its symmetry
+subroutine test_external_hessian(error, mol, model, cg)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular structure data
+   type(structure_type), intent(inout) :: mol
+
+   !> Electronegativity equilibration model
+   class(mchrg_model_type), intent(in) :: model
+
+   !> Use the conjugate-gradient solver instead of the direct solver
+   logical, intent(in), optional :: cg
+
+   class(mchrg_solver_type), allocatable :: solver
+   class(mchrg_solver_input), allocatable :: solver_input
+   type(mchrg_cache), allocatable :: cache
+   integer :: iat, ic, ndim
+   real(wp), parameter :: trans(3, 1) = 0.0_wp
+   real(wp), parameter :: step = 1.0e-6_wp
+   real(wp) :: xorig
+   real(wp), allocatable :: gr(:, :), gl(:, :), hessian(:, :), numhess(:, :)
+   real(wp), allocatable :: qvec(:), dfdq(:), d2fdq2(:, :), dfdrdq(:, :, :)
+   real(wp), allocatable :: dfdr(:, :), d2fdr2(:, :)
+   logical :: use_cg
+
+   allocate(direct_input :: solver_input)
+   select type (solver_input)
+    type is (direct_input)
+      solver_input%verbosity = 0
+   end select
+   call solver_maker(solver, solver_input, error)
+   if (allocated(error)) return
+
+   ndim = 3*mol%nat
+   allocate(gr(3, mol%nat), gl(3, mol%nat), hessian(ndim, ndim), numhess(ndim, ndim))
+   allocate(qvec(mol%nat), dfdq(mol%nat), d2fdq2(mol%nat, mol%nat), &
+      & dfdrdq(3, mol%nat, mol%nat), dfdr(3, mol%nat), d2fdr2(ndim, ndim))
+
+   do iat = 1, mol%nat
+      do ic = 1, 3
+         xorig = mol%xyz(ic, iat)
+         mol%xyz(ic, iat) = xorig + step
+         call displaced_external_gradient(mol, model, solver, error, gr)
+         if (allocated(error)) return
+         mol%xyz(ic, iat) = xorig - step
+         call displaced_external_gradient(mol, model, solver, error, gl)
+         if (allocated(error)) return
+         mol%xyz(ic, iat) = xorig
+         numhess(:, 3*(iat - 1) + ic) = reshape(0.5_wp*(gr - gl)/step, [ndim])
+      end do
+   end do
+
+   ! Derivatives of the external function at the charges of the structure
+   allocate(cache)
+   call model%update(mol, cache, trans, .false.)
+   call model%solve(mol, solver, cache, error, qvec=qvec, unit=output_unit)
+   if (allocated(error)) return
+   call external_function_derivs(mol, qvec, dfdq, d2fdq2, dfdrdq, dfdr, d2fdr2)
+   deallocate(cache)
+
+   ! Analytic Hessian from the CG solver, while the finite-difference
+   ! reference above keeps the direct solver to avoid iterative noise
+   use_cg = .false.
+   if (present(cg)) use_cg = cg
+   if (use_cg) then
+      deallocate(solver, solver_input)
+      allocate(cg_input :: solver_input)
+      select type (solver_input)
+       type is (cg_input)
+         solver_input%cgtol = 1.0e-15_wp
+         solver_input%cgmiter = 1000
+         solver_input%verbosity = 0
+      end select
+      call solver_maker(solver, solver_input, error)
+      if (allocated(error)) return
+   end if
+
+   allocate(cache)
+   call model%get_external_hessian(mol, solver, cache, error, dfdq, d2fdq2, &
+      & dfdrdq, hessian)
+   if (allocated(error)) return
+   hessian(:, :) = hessian + d2fdr2
+
+   if (any(abs(hessian - numhess) > thr2)) then
+      call test_failed(error, "External Hessian does not match")
+      print'(a)', "hessian:"
+      print'(3es21.12)', hessian
+      print'(a)', "numhess:"
+      print'(3es21.12)', numhess
+      print'(a)', "diff:"
+      print'(3es21.12)', hessian - numhess
+      return
+   end if
+
+   if (any(abs(hessian - transpose(hessian)) > thr1)) then
+      call test_failed(error, "External Hessian is not symmetric")
+      print'(a)', "asymmetry:"
+      print'(3es21.12)', hessian - transpose(hessian)
+      return
+   end if
+
+end subroutine test_external_hessian
+
+
 subroutine test_eeq_dadr_mb01(error)
 
    !> Error handling
@@ -2592,6 +2796,47 @@ subroutine test_eeqbc_hess_cg_znooh(error)
    call test_hessian(error, mol, model, cg=.true.)
 
 end subroutine test_eeqbc_hess_cg_znooh
+
+
+subroutine test_eeqbc_hext_mb05(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "MB16-43", "05")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_external_hessian(error, mol, model)
+
+end subroutine test_eeqbc_hext_mb05
+
+
+subroutine test_eeqbc_hext_cg_znooh(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   integer, parameter :: nat = 4
+   real(wp), parameter :: charge = -1.0_wp
+   integer, parameter :: num(nat) = [30, 8, 8, 1]
+   real(wp), parameter :: xyz(3, nat) = reshape([ &
+   & -0.30631629283878_wp, -1.11507514203552_wp, +0.00000000000000_wp, &
+   & -0.06543072660074_wp, -4.32862093666082_wp, +0.00000000000000_wp, &
+   & -0.64012239724097_wp, +2.34966763895920_wp, +0.00000000000000_wp, &
+   & +1.01186941668051_wp, +3.09402843973713_wp, +0.00000000000000_wp],&
+   & [3, nat])
+
+   call new(mol, num, xyz, charge)
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_external_hessian(error, mol, model, cg=.true.)
+
+end subroutine test_eeqbc_hext_cg_znooh
 
 
 subroutine test_eeqbc_q_mb01(error)

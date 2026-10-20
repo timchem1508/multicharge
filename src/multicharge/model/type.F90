@@ -112,6 +112,10 @@ module multicharge_model_type
       !> Get external gradient
       procedure :: get_external_gradient
 
+      !> Calculate the analytical Hessian of an external function of the
+      !> charges (molecular)
+      procedure :: get_external_hessian
+
       !> Calculate the analytical Hessian of the electrostatic energy (molecular)
       procedure :: get_hessian_dense
 
@@ -1562,7 +1566,7 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
    ! Evaluate external gradients via adjoint contraction:
    ! dfdr = p^T * (db/dr - dA/dr X q)
 
-   call self%get_grad(mol, cache, padj, dfdr, dfdL, alpha=-1.0_wp, &
+   call self%get_grad(mol, cache, padj(:mol%nat), dfdr, dfdL, alpha=-1.0_wp, &
       & beta=1.0_wp, list=list)
 
    ! pop dfdr timer
@@ -2132,6 +2136,159 @@ subroutine get_atom_groups(mol, radius, max_group, gstart)
    gstart = tmp(:ngrp + 1)
 
 end subroutine get_atom_groups
+
+
+!> Compute the molecular nuclear Hessian of an external function f(q, R) of the
+!> charges with the adjoint vector p = S df/dq, the explicit part
+!> p^T (d2X/dR2 - d2A/dR2*q) at fixed charges and the implicit part
+!> G^T dq/dR + (dq/dR)^T G + (dq/dR)^T d2f/dq2 dq/dR from the response of the
+!> charges with G = d2f/dRdq - dA/dR*p. The derivatives of f are taken at the
+!> charges of the structure, the second derivative d2f/dR2 at fixed charges is
+!> added by the caller. The charges, energy, gradient and virial of the
+!> electrostatic energy of the same solve are optional.
+subroutine get_external_hessian(self, mol, solver, cache, error, dfdq, d2fdq2, &
+   & dfdrdq, hessian, qvec, energy, gradient, sigma, unit, verbosity)
+
+   !> Electronegativity-equilibration model
+   class(mchrg_model_type), intent(in) :: self
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Solver instance
+   class(mchrg_solver_type), intent(in) :: solver
+
+   !> Cache handling
+   type(mchrg_cache), intent(inout) :: cache
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Derivative of the external function w.r.t. atomic charges
+   real(wp), intent(in) :: dfdq(:)
+
+   !> Second derivative of the external function w.r.t. atomic charges
+   real(wp), intent(in) :: d2fdq2(:, :)
+
+   !> Mixed derivative of the external function w.r.t. positions and charges,
+   !> dfdrdq(:, x, b) = d2f/dR_x dq_b
+   real(wp), intent(in) :: dfdrdq(:, :, :)
+
+   !> Molecular nuclear Hessian of the external function without d2f/dR2
+   real(wp), intent(out) :: hessian(:, :)
+
+   !> Optional atomic partial charges
+   real(wp), intent(out), contiguous, optional :: qvec(:)
+
+   !> Optional electrostatic energy
+   real(wp), intent(inout), contiguous, optional :: energy(:)
+
+   !> Optional energy gradient
+   real(wp), intent(inout), contiguous, optional :: gradient(:, :)
+
+   !> Optional virial
+   real(wp), intent(inout), contiguous, optional :: sigma(:, :)
+
+   !> Output unit
+   integer, intent(in), optional :: unit
+
+   !> Verbosity level
+   integer, intent(in), optional :: verbosity
+
+   real(wp), parameter :: trans(3, 1) = 0.0_wp
+   real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :), dtmpdr(:, :, :)
+   real(wp), allocatable :: yvec(:), padj(:), dfdq_loc(:)
+   real(wp) :: uvecsum, yvecsum, scale
+   integer :: iat, ndim, print_unit, verbosity_solve
+
+   if (any(mol%periodic)) then
+      call fatal_error(error, &
+         & "Analytical Hessian is not available for periodic systems")
+      return
+   end if
+
+   if (size(dfdq) /= mol%nat .or. any(shape(d2fdq2) /= [mol%nat, mol%nat]) &
+      & .or. any(shape(dfdrdq) /= [3, mol%nat, mol%nat])) then
+      call fatal_error(error, "External partial derivatives are wrong size")
+      return
+   end if
+
+   verbosity_solve = 0
+   if (present(verbosity)) verbosity_solve = verbosity
+   print_unit = output_unit
+   if (present(unit)) print_unit = unit
+
+   ! Charges and their derivatives
+   call self%update(mol, cache, trans, grad=.false., hess=.true.)
+   allocate(dqdL(3, 3, mol%nat), dqdr(3, mol%nat, mol%nat))
+   call self%solve(mol, solver, cache, error, energy=energy, gradient=gradient, &
+      & sigma=sigma, qvec=qvec, dqdr=dqdr, dqdL=dqdL, verbosity=verbosity, &
+      & unit=unit)
+   if (allocated(error)) return
+
+   ! Adjoint vector p = S df/dq
+   if (solver%need_pos_def) then
+      ndim = mol%nat
+      allocate(yvec(ndim))
+      do iat = 1, mol%nat
+         yvec(iat) = dfdq(iat) / cache%amat(iat, iat)
+      end do
+
+      ! Unconstrained response: J*yvec = dfdq
+      call print_adjoint_message(print_unit, verbosity_solve)
+      call solver%solve(amat=cache%amat, xvec=dfdq, vrhs=yvec, &
+         & new_unit=print_unit, error=error)
+      if (allocated(error)) return
+
+      ! Projection of uvec on yvec
+      yvecsum = sum(yvec)
+      uvecsum = sum(cache%uvec)
+      scale = yvecsum / (uvecsum + eps)
+      allocate(padj(mol%nat))
+      padj = yvec - scale * cache%uvec
+   else
+      ndim = mol%nat + 1
+      allocate(dfdq_loc(ndim), source=0.0_wp)
+      dfdq_loc(:mol%nat) = dfdq
+      allocate(padj(ndim))
+
+      ! Direct solution: J*yvec = dfdq
+      call print_adjoint_message(print_unit, verbosity_solve)
+      call solver%solve(amat=cache%amat, xvec=dfdq_loc, vrhs=padj, &
+         & new_unit=print_unit, error=error)
+      if (allocated(error)) return
+   end if
+
+   hessian(:, :) = 0.0_wp
+
+   ! Mixed derivatives of the Lagrangian, G^T = d2f/dRdq - dA/dR*p
+   call new_partial_derivs(mol, ndim, cache, dafdr=.true.)
+   call self%get_coulomb_derivs(mol, ndim, cache, alpha=-1.0_wp, &
+      & p=padj(:mol%nat), dafdr=.true.)
+   cache%dafdr = cache%dafdr + dfdrdq
+
+   ! Implicit part G^T dq/dR + (dq/dR)^T G
+   call gemm(reshape(cache%dafdr, [3 * mol%nat, mol%nat]), &
+      & reshape(dqdr, [3 * mol%nat, mol%nat]), hessian, transb='t', &
+      & alpha=+1.0_wp, beta=1.0_wp)
+
+   call gemm(reshape(dqdr, [3 * mol%nat, mol%nat]), &
+      & reshape(cache%dafdr, [3 * mol%nat, mol%nat]), hessian, transb='t', &
+      & alpha=+1.0_wp, beta=1.0_wp)
+
+   ! Implicit part (dq/dR)^T d2f/dq2 dq/dR
+   allocate(dtmpdr(3, mol%nat, mol%nat))
+   call gemm(dqdr, d2fdq2, dtmpdr)
+   call gemm(reshape(dtmpdr, [3 * mol%nat, mol%nat]), &
+      & reshape(dqdr, [3 * mol%nat, mol%nat]), hessian, transb='t', &
+      & alpha=+1.0_wp, beta=1.0_wp)
+
+   ! Second derivatives of p^T (X - A*q) at fixed charges and adjoint vector
+   call self%get_explicit_hessian(mol, cache, padj(:mol%nat), hessian, &
+      & error, alpha=-1.0_wp, beta=1.0_wp)
+   if (allocated(error)) return
+
+end subroutine get_external_hessian
 
 
 !> Semi-numerical Hessian and pressure tensor from central differences of
