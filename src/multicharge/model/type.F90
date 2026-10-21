@@ -450,13 +450,9 @@ module multicharge_model_type
    !> Smallest positive working-precision number
    real(wp), parameter :: eps = tiny(1.0_wp)
 
-   !> Largest number of atoms in a group of the charge derivatives on a
-   !> neighborlist
+   !> Number of atoms in a group of the charge derivatives on a neighborlist,
+   !> the last group of the spatial order may hold fewer atoms
    integer, parameter :: max_group = 8
-
-   !> Largest distance of an atom of a group to its first atom, relative to the
-   !> cutoff of the list
-   real(wp), parameter :: group_scale = 0.2_wp
 
 
 contains
@@ -951,9 +947,10 @@ end subroutine get_inverse_list
 !> compressed storage on the pattern of the list, dq_j/dR_i for i >= j in
 !> cache%dqdrlist_ut at the entry of i in the row of j and for i < j in
 !> cache%dqdrlist_lt at the entry of j in the row of i. The columns of S B are
-!> formed for groups of consecutive atoms, the elements outside of the pattern
-!> are of the order of the inverse at the cutoff and are dropped. The factors
-!> w / sum(u) of the charge constraint term follow from get_constraint_factors.
+!> formed for groups of atoms close to each other, the elements outside of the
+!> pattern are of the order of the inverse at the cutoff and are dropped. The
+!> factors w / sum(u) of the charge constraint term follow from
+!> get_constraint_factors.
 subroutine get_dqdr_list(mol, cache, list)
 
    !> Molecular structure data
@@ -968,12 +965,12 @@ subroutine get_dqdr_list(mol, cache, list)
 
    integer :: igrp, ngrp, nbmax, x0, ng, nb, n, i
    integer(i8) :: kat
-   integer, allocatable :: gstart(:), bloc(:), blist(:)
+   integer, allocatable :: order(:), bloc(:), blist(:)
    integer(i8), allocatable :: qpos(:, :)
    real(wp), allocatable :: pan(:, :), qcol(:, :)
 
-   call get_list_groups(mol, list, gstart)
-   ngrp = size(gstart) - 1
+   call get_spatial_order(mol, order)
+   ngrp = (mol%nat + max_group - 1) / max_group
    nbmax = min(mol%nat, max_group * get_max_neighbors(mol%nat, list, cache%lowlist))
 
    if (allocated(cache%dqdrlist_ut)) deallocate(cache%dqdrlist_ut)
@@ -983,16 +980,17 @@ subroutine get_dqdr_list(mol, cache, list)
 
    ! Only the group of atom x writes the derivatives w.r.t. R_x
    !$omp parallel default(none) &
-   !$omp shared(mol, cache, list, gstart, ngrp, nbmax) &
+   !$omp shared(mol, cache, list, order, ngrp, nbmax) &
    !$omp private(igrp, x0, ng, nb, n, i, kat, bloc, blist, qpos, pan, qcol)
    allocate(bloc(mol%nat), source=0)
    allocate(blist(nbmax), qpos(max_group, nbmax), pan(3 * max_group, nbmax), &
       & qcol(3 * max_group, nbmax))
    !$omp do schedule(runtime)
    do igrp = 1, ngrp
-      x0 = gstart(igrp)
-      ng = gstart(igrp + 1) - x0
-      call get_group_dqdr(cache, list, x0, ng, nb, bloc, blist, qpos, pan, qcol)
+      x0 = max_group * (igrp - 1)
+      ng = min(max_group, mol%nat - x0)
+      call get_group_dqdr(cache, list, order(x0 + 1:x0 + ng), nb, bloc, blist, &
+         & qpos, pan, qcol)
       do n = 1, nb
          do i = 1, ng
             kat = qpos(i, n)
@@ -1096,14 +1094,14 @@ subroutine get_dqdL_list(mol, cache, list, dqdL)
 end subroutine get_dqdL_list
 
 
-!> Charge derivatives dq_b/dR_x of a group of consecutive atoms x for the
-!> union of their neighbors b on a half neighborlist, in
-!> qcol(3*(i-1)+1:3*i, n) for atom i of the group and atom n of the union.
+!> Charge derivatives dq_b/dR_x of a group of atoms x for the union of their
+!> neighbors b on a half neighborlist, in qcol(3*(i-1)+1:3*i, n) for atom i
+!> of the group and atom n of the union.
 !> The product of the inverse S on the list with the columns x of the partial
 !> derivatives is only formed on the rows of the union, the elements of the
 !> atoms b outside of the list of x are dropped. The caller resets bloc for
 !> the atoms of the union.
-subroutine get_group_dqdr(cache, list, x0, ng, nb, bloc, blist, qpos, pan, qcol)
+subroutine get_group_dqdr(cache, list, group, nb, bloc, blist, qpos, pan, qcol)
 
    !> Cache with the inverse and the partial derivatives on the list and the
    !> lower triangle of the list
@@ -1112,11 +1110,8 @@ subroutine get_group_dqdr(cache, list, x0, ng, nb, bloc, blist, qpos, pan, qcol)
    !> Half neighborlist
    type(csr_list), intent(in) :: list
 
-   !> First atom of the group
-   integer, intent(in) :: x0
-
-   !> Number of atoms of the group
-   integer, intent(in) :: ng
+   !> Atoms of the group
+   integer, intent(in), contiguous :: group(:)
 
    !> Number of atoms in the union of the neighbors of the group
    integer, intent(out) :: nb
@@ -1140,11 +1135,11 @@ subroutine get_group_dqdr(cache, list, x0, ng, nb, bloc, blist, qpos, pan, qcol)
    integer :: n, i
 
    call gather_group_list(list, cache%lowlist, cache%dabdrlist_ut, &
-      & cache%dabdrlist_lt, x0, ng, nb, bloc, blist, qpos, pan)
-   call multiply_group_list(list, cache%ainvlist, 3 * ng, nb, bloc, blist, pan, &
-      & qcol)
+      & cache%dabdrlist_lt, group, nb, bloc, blist, qpos, pan)
+   call multiply_group_list(list, cache%ainvlist, 3 * size(group), nb, bloc, &
+      & blist, pan, qcol)
    do n = 1, nb
-      do i = 1, ng
+      do i = 1, size(group)
          if (qpos(i, n) == 0) qcol(3 * i - 2:3 * i, n) = 0.0_wp
       end do
    end do
@@ -1152,12 +1147,12 @@ subroutine get_group_dqdr(cache, list, x0, ng, nb, bloc, blist, qpos, pan, qcol)
 end subroutine get_group_dqdr
 
 
-!> Union of the neighbors of a group of consecutive atoms on a half list with
-!> the columns x of the partial derivatives of the group atoms. The row of x in
-!> the list holds the diagonal and B(c, x) of c > x in the lower triangle, the
-!> atoms c < x come from the lower triangle of the list and B(c, x) from the
-!> upper triangle in the row of c.
-subroutine gather_group_list(list, low, but, blt, x0, ng, nb, bloc, blist, qpos, &
+!> Union of the neighbors of a group of atoms on a half list with the columns
+!> x of the partial derivatives of the group atoms. The row of x in the list
+!> holds the diagonal and B(c, x) of c > x in the lower triangle, the atoms
+!> c < x come from the lower triangle of the list and B(c, x) from the upper
+!> triangle in the row of c.
+subroutine gather_group_list(list, low, but, blt, group, nb, bloc, blist, qpos, &
    & pan)
 
    !> Half neighborlist
@@ -1172,11 +1167,8 @@ subroutine gather_group_list(list, low, but, blt, x0, ng, nb, bloc, blist, qpos,
    !> Lower triangle of the partial derivatives on the list
    real(wp), intent(in), contiguous :: blt(:, :)
 
-   !> First atom of the group
-   integer, intent(in) :: x0
-
-   !> Number of atoms of the group
-   integer, intent(in) :: ng
+   !> Atoms of the group
+   integer, intent(in), contiguous :: group(:)
 
    !> Number of atoms in the union of the neighbors of the group
    integer, intent(out) :: nb
@@ -1198,8 +1190,8 @@ subroutine gather_group_list(list, low, but, blt, x0, ng, nb, bloc, blist, qpos,
    integer(i8) :: kat, lat
 
    nb = 0
-   do i = 1, ng
-      xat = x0 + i - 1
+   do i = 1, size(group)
+      xat = group(i)
       ic = 3 * (i - 1)
       kat = list%inl(xat)
       call add_union_atom(xat, nb, bloc, blist, qpos, pan, n)
@@ -1310,26 +1302,107 @@ subroutine multiply_group_list(list, ainv, nw, nb, bloc, blist, pan, qcol)
 end subroutine multiply_group_list
 
 
-!> Groups of consecutive atoms close to each other for the charge derivatives
-!> on a neighborlist, which share most of their neighbors
-subroutine get_list_groups(mol, list, gstart)
+!> Order of the atoms from a recursive bisection of the structure, which is
+!> independent of the input order of the atoms. Each max_group consecutive
+!> atoms of the order form a group of the charge derivatives on a
+!> neighborlist, whose atoms are close to each other and share most of their
+!> neighbors.
+subroutine get_spatial_order(mol, order)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
 
-   !> Half neighborlist
-   type(csr_list), intent(in) :: list
+   !> Atoms in the spatial order, order(i) is the atom at position i
+   integer, allocatable, intent(out) :: order(:)
 
-   !> First atom of each group, the last entry is the number of atoms plus one
-   integer, allocatable, intent(out) :: gstart(:)
+   integer :: iat
 
-   real(wp) :: radius
+   order = [(iat, iat = 1, mol%nat)]
+   call bisect_atoms(mol%xyz, order)
 
-   radius = 0.0_wp
-   if (allocated(list%cutoff)) radius = group_scale * list%cutoff
-   call get_atom_groups(mol, radius, max_group, gstart)
+end subroutine get_spatial_order
 
-end subroutine get_list_groups
+
+!> Split the atoms at the median of the longest side of their bounding box
+!> until each part holds at most max_group atoms. The first part holds half
+!> of the groups of max_group atoms, so only the last part of the order holds
+!> fewer atoms.
+recursive subroutine bisect_atoms(xyz, order)
+
+   !> Cartesian coordinates
+   real(wp), intent(in) :: xyz(:, :)
+
+   !> Atoms to split, reordered in place
+   integer, intent(inout), contiguous :: order(:)
+
+   integer :: iat, nleft, dir
+   real(wp) :: lower(3), upper(3)
+
+   if (size(order) <= max_group) return
+
+   lower(:) = xyz(:, order(1))
+   upper(:) = lower
+   do iat = 2, size(order)
+      lower(:) = min(lower, xyz(:, order(iat)))
+      upper(:) = max(upper, xyz(:, order(iat)))
+   end do
+   dir = maxloc(upper - lower, 1)
+
+   nleft = max_group * ((size(order) + max_group - 1) / max_group / 2)
+   call select_atoms(xyz(dir, :), order, nleft)
+   call bisect_atoms(xyz, order(:nleft))
+   call bisect_atoms(xyz, order(nleft + 1:))
+
+end subroutine bisect_atoms
+
+
+!> Partial sort of the atoms by a coordinate with the selection algorithm of
+!> Hoare, the first k atoms of the order have no larger coordinate than the
+!> others
+subroutine select_atoms(coord, order, k)
+
+   !> Coordinate of each atom
+   real(wp), intent(in) :: coord(:)
+
+   !> Atoms to reorder
+   integer, intent(inout), contiguous :: order(:)
+
+   !> Number of atoms in the first part
+   integer, intent(in) :: k
+
+   integer :: lo, hi, i, j, tmp
+   real(wp) :: pivot, first, last
+
+   lo = 1
+   hi = size(order)
+   do while (lo < hi)
+      ! Median of the first, k-th and last coordinate of the range
+      first = coord(order(lo))
+      last = coord(order(hi))
+      pivot = max(min(first, last), min(max(first, last), coord(order(k))))
+      i = lo
+      j = hi
+      do while (i <= j)
+         do while (coord(order(i)) < pivot)
+            i = i + 1
+         end do
+         do while (pivot < coord(order(j)))
+            j = j - 1
+         end do
+         if (i <= j) then
+            tmp = order(i)
+            order(i) = order(j)
+            order(j) = tmp
+            i = i + 1
+            j = j - 1
+         end if
+      end do
+      ! The atoms between j and i have the coordinate of the pivot
+      if (j < k) lo = i
+      if (k < i) hi = j
+   end do
+
+end subroutine select_atoms
 
 
 !> Largest number of neighbors of an atom in a half list with its lower
@@ -1894,8 +1967,8 @@ end subroutine get_implicit_hessian_dense
 !> -sum_b (dX_b/dR_y - (dA/dR_y*q)_b) (dq_b/dR_x)^T over the atoms b in the
 !> lists of x and y, without the constraint term of the charge derivatives.
 !> The charge derivatives dq_b/dR_x = (S B)_bx on the pattern of the list are
-!> formed for groups of consecutive atoms x and used at once, they are not
-!> stored. The block of y and x is the transpose and the diagonal blocks are
+!> formed for groups of atoms x close to each other and used at once, they are
+!> not stored. The block of y and x is the transpose and the diagonal blocks are
 !> symmetrized, so this part is symmetric. The blocks are added on the pattern
 !> of the half list of the Hessian, which only keeps the blocks of y >= x. The
 !> charge constraint gives the dense rank-1 term
@@ -1923,10 +1996,10 @@ subroutine get_implicit_hessian_list(self, mol, cache, hessian, list, times)
    real(wp), intent(out), optional :: times(2)
 
    real(wp) :: tgroup(2)
-   integer, allocatable :: gstart(:)
+   integer, allocatable :: order(:)
 
-   call get_list_groups(mol, list, gstart)
-   call add_implicit_blocks_list(mol, cache, hessian, list, gstart, tgroup)
+   call get_spatial_order(mol, order)
+   call add_implicit_blocks_list(mol, cache, hessian, list, order, tgroup)
    if (present(times)) times(:) = tgroup
 
    ! Charge constraint term, sum_b (dX_b/dR_x - (dA/dR_x*q)_b) * uvec(b) is
@@ -1938,15 +2011,16 @@ end subroutine get_implicit_hessian_list
 
 
 !> Add the implicit blocks of the atoms x <= y on a half neighborlist with its
-!> lower triangle in the cache for groups of consecutive atoms. The charge
-!> derivatives of a group are contracted with the column y of the partial
-!> derivatives at once, so each column is read once per group. The column y of
-!> the partial derivatives holds the diagonal and the lower triangle in the row
-!> of y and the upper triangle in the rows of the neighbors of lower index,
-!> which is gathered once in the order of the lower triangle of the list. The
-!> Hessian keeps the blocks of y >= x on a half list, only the group of atom x
-!> writes the blocks (x, y), so the groups are independent.
-subroutine add_implicit_blocks_list(mol, cache, hessian, list, gstart, times)
+!> lower triangle in the cache for groups of max_group consecutive atoms of a
+!> spatial order. The charge derivatives of a group are contracted with the
+!> column y of the partial derivatives at once, so each column is read once
+!> per group. The column y of the partial derivatives holds the diagonal and
+!> the lower triangle in the row of y and the upper triangle in the rows of
+!> the neighbors of lower index, which is gathered once in the order of the
+!> lower triangle of the list. The Hessian keeps the blocks of y >= x on a half
+!> list, only the group of atom x writes the blocks (x, y), so the groups are
+!> independent.
+subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
@@ -1961,14 +2035,15 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, gstart, times)
    !> Half neighborlist
    type(csr_list), intent(in) :: list
 
-   !> First atom of each group, the last entry is the number of atoms plus one
-   integer, intent(in) :: gstart(:)
+   !> Atoms in the spatial order of the groups
+   integer, intent(in), contiguous :: order(:)
 
    !> Time of the charge derivatives of the groups and of their contraction
    !> in seconds, summed over the threads
    real(wp), intent(out) :: times(2)
 
    integer :: igrp, ngrp, nbmax, numax, x0, ng, i, ic, xat, yat, nb, nu, n, u
+   integer :: na, ia, act(max_group)
    integer(i8) :: kat, lat, hat, tick(3), rate
    real(wp) :: dy(3), tpan, tcon
    integer, allocatable :: bloc(:), hloc(:), blist(:), ulist(:)
@@ -1976,7 +2051,7 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, gstart, times)
    real(wp), allocatable :: dlow(:, :), pan(:, :), qcol(:, :), acc(:, :, :)
 
    times(:) = 0.0_wp
-   ngrp = size(gstart) - 1
+   ngrp = (mol%nat + max_group - 1) / max_group
    if (ngrp < 1) return
    nbmax = min(mol%nat, max_group * get_max_neighbors(mol%nat, list, cache%lowlist))
    numax = min(mol%nat, max_group * int(maxval(hessian%list%inl(2:mol%nat + 1) &
@@ -1997,11 +2072,11 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, gstart, times)
    tpan = 0.0_wp
    tcon = 0.0_wp
    !$omp parallel default(none) &
-   !$omp shared(mol, cache, hessian, list, dlow, gstart, ngrp, nbmax) &
+   !$omp shared(mol, cache, hessian, list, dlow, order, ngrp, nbmax) &
    !$omp shared(numax) &
    !$omp private(igrp, x0, ng, i, ic, xat, yat, nb, nu, n, u, kat, lat, hat) &
    !$omp private(tick, rate, dy, bloc, hloc, blist, ulist, qpos, jmap, pan, qcol) &
-   !$omp private(acc) &
+   !$omp private(na, ia, act, acc) &
    !$omp reduction(+:tpan, tcon)
    allocate(bloc(mol%nat), hloc(mol%nat), source=0)
    allocate(blist(nbmax), ulist(numax), qpos(max_group, nbmax), &
@@ -2010,19 +2085,20 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, gstart, times)
    !$omp do schedule(runtime)
    do igrp = 1, ngrp
       call system_clock(tick(1), rate)
-      x0 = gstart(igrp)
-      ng = gstart(igrp + 1) - x0
+      x0 = max_group * (igrp - 1)
+      ng = min(max_group, mol%nat - x0)
 
       ! Charge derivatives dq_b/dR_x of the atoms x of the group for the union
       ! of their neighbors b, zero if b is not a neighbor of x
-      call get_group_dqdr(cache, list, x0, ng, nb, bloc, blist, qpos, pan, qcol)
+      call get_group_dqdr(cache, list, order(x0 + 1:x0 + ng), nb, bloc, blist, &
+         & qpos, pan, qcol)
       call system_clock(tick(2))
 
       ! Union of the atoms y >= x in the rows of the Hessian of the group with
       ! the positions of the blocks (x, y), zero if not present
       nu = 0
       do i = 1, ng
-         xat = x0 + i - 1
+         xat = order(x0 + i)
          do hat = hessian%list%inl(xat), hessian%list%inl(xat + 1) - 1
             yat = hessian%list%nlat(hat)
             if (hloc(yat) == 0) then
@@ -2035,54 +2111,61 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, gstart, times)
          end do
       end do
 
-      ! acc(jc, ic, i) = sum_b (dX_b/dR_y,jc - (dA/dR_y,jc*q)_b) dq_b/dR_x,ic
-      ! for the atoms x of the group, the block (x, y) is -acc
+      ! acc(jc, ic, ia) = sum_b (dX_b/dR_y,jc - (dA/dR_y,jc*q)_b) dq_b/dR_x,ic
+      ! for the atoms x = act(ia) of the group with a block (x, y) in the
+      ! Hessian, the block (x, y) is -acc
       do u = 1, nu
          yat = ulist(u)
          hloc(yat) = 0
-         acc(:, :, :ng) = 0.0_wp
+         na = 0
+         do i = 1, ng
+            if (jmap(i, u) == 0) cycle
+            na = na + 1
+            act(na) = i
+         end do
+         acc(:, :, :na) = 0.0_wp
          kat = list%inl(yat)
          n = bloc(yat)
          if (n > 0) then
             dy = cache%dabdrlist_ut(:, kat)
-            do i = 1, ng
-               ic = 3 * (i - 1)
-               acc(:, 1, i) = acc(:, 1, i) + dy * qcol(ic + 1, n)
-               acc(:, 2, i) = acc(:, 2, i) + dy * qcol(ic + 2, n)
-               acc(:, 3, i) = acc(:, 3, i) + dy * qcol(ic + 3, n)
+            do ia = 1, na
+               ic = 3 * (act(ia) - 1)
+               acc(:, 1, ia) = acc(:, 1, ia) + dy * qcol(ic + 1, n)
+               acc(:, 2, ia) = acc(:, 2, ia) + dy * qcol(ic + 2, n)
+               acc(:, 3, ia) = acc(:, 3, ia) + dy * qcol(ic + 3, n)
             end do
          end if
          do kat = list%inl(yat) + 1, list%inl(yat + 1) - 1
             n = bloc(list%nlat(kat))
             if (n == 0) cycle
             dy = cache%dabdrlist_lt(:, kat)
-            do i = 1, ng
-               ic = 3 * (i - 1)
-               acc(:, 1, i) = acc(:, 1, i) + dy * qcol(ic + 1, n)
-               acc(:, 2, i) = acc(:, 2, i) + dy * qcol(ic + 2, n)
-               acc(:, 3, i) = acc(:, 3, i) + dy * qcol(ic + 3, n)
+            do ia = 1, na
+               ic = 3 * (act(ia) - 1)
+               acc(:, 1, ia) = acc(:, 1, ia) + dy * qcol(ic + 1, n)
+               acc(:, 2, ia) = acc(:, 2, ia) + dy * qcol(ic + 2, n)
+               acc(:, 3, ia) = acc(:, 3, ia) + dy * qcol(ic + 3, n)
             end do
          end do
          do lat = cache%lowlist%inl(yat), cache%lowlist%inl(yat + 1) - 1
             n = bloc(cache%lowlist%nlat(lat))
             if (n == 0) cycle
             dy = dlow(:, lat)
-            do i = 1, ng
-               ic = 3 * (i - 1)
-               acc(:, 1, i) = acc(:, 1, i) + dy * qcol(ic + 1, n)
-               acc(:, 2, i) = acc(:, 2, i) + dy * qcol(ic + 2, n)
-               acc(:, 3, i) = acc(:, 3, i) + dy * qcol(ic + 3, n)
+            do ia = 1, na
+               ic = 3 * (act(ia) - 1)
+               acc(:, 1, ia) = acc(:, 1, ia) + dy * qcol(ic + 1, n)
+               acc(:, 2, ia) = acc(:, 2, ia) + dy * qcol(ic + 2, n)
+               acc(:, 3, ia) = acc(:, 3, ia) + dy * qcol(ic + 3, n)
             end do
          end do
-         do i = 1, ng
+         do ia = 1, na
+            i = act(ia)
             hat = jmap(i, u)
-            if (hat == 0) cycle
-            if (yat == x0 + i - 1) then
+            if (yat == order(x0 + i)) then
                hessian%hesslist(:, :, hat) = hessian%hesslist(:, :, hat) &
-                  & - 0.5_wp * (acc(:, :, i) + transpose(acc(:, :, i)))
+                  & - 0.5_wp * (acc(:, :, ia) + transpose(acc(:, :, ia)))
             else
                hessian%hesslist(:, :, hat) = hessian%hesslist(:, :, hat) &
-                  & - acc(:, :, i)
+                  & - acc(:, :, ia)
             end if
          end do
       end do
@@ -2099,43 +2182,6 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, gstart, times)
    times(:) = [tpan, tcon]
 
 end subroutine add_implicit_blocks_list
-
-
-!> Groups of consecutive atoms within a distance of the first atom of the group
-subroutine get_atom_groups(mol, radius, max_group, gstart)
-
-   !> Molecular structure data
-   type(structure_type), intent(in) :: mol
-
-   !> Largest distance of an atom of a group to its first atom
-   real(wp), intent(in) :: radius
-
-   !> Largest number of atoms in a group
-   integer, intent(in) :: max_group
-
-   !> First atom of each group, the last entry is the number of atoms plus one
-   integer, allocatable, intent(out) :: gstart(:)
-
-   integer :: ngrp, iat, ng
-   integer, allocatable :: tmp(:)
-
-   allocate(tmp(mol%nat + 1))
-   ngrp = 0
-   iat = 1
-   do while (iat <= mol%nat)
-      ngrp = ngrp + 1
-      tmp(ngrp) = iat
-      ng = 1
-      do while (iat + ng <= mol%nat .and. ng < max_group)
-         if (norm2(mol%xyz(:, iat + ng) - mol%xyz(:, iat)) > radius) exit
-         ng = ng + 1
-      end do
-      iat = iat + ng
-   end do
-   tmp(ngrp + 1) = mol%nat + 1
-   gstart = tmp(:ngrp + 1)
-
-end subroutine get_atom_groups
 
 
 !> Compute the molecular nuclear Hessian of an external function f(q, R) of the
