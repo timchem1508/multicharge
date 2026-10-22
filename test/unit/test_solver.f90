@@ -26,6 +26,7 @@ module test_solver
    use multicharge_solver_direct, only : direct_solver, new_direct_solver, direct_input
    use multicharge_solver_cg, only : cg_solver, new_cg_solver, cg_input
    use mctc_csrlist, only : csr_list
+   use multicharge_atomsort, only : get_half_offsets
    implicit none
    private
 
@@ -57,7 +58,7 @@ subroutine collect_solver(testsuite)
    & new_unittest("block-cg-dense", test_block_cg_dense), &
    & new_unittest("block-cg-sparse", test_block_cg_sparse), &
    & new_unittest("cg-invert-dense", test_cg_invert_dense), &
-   & new_unittest("cg-invert-list-upper", test_cg_invert_list_upper), &
+   & new_unittest("cg-invert-list-half", test_cg_invert_list_half), &
    & new_unittest("cg-invert-list-local", test_cg_invert_list_local) &
    & ]
 
@@ -679,7 +680,8 @@ subroutine test_block_cg_dense(error)
 end subroutine test_block_cg_dense
 
 
-!> Test: Block CG with an upper-triangular CSR matrix against the dense solve
+!> Test: Block CG with a matrix in the half storage of a sorted complete list
+!> against the dense solve
 subroutine test_block_cg_sparse(error)
 
    !> Error handling
@@ -688,7 +690,7 @@ subroutine test_block_cg_sparse(error)
    integer, parameter :: n = 120, nrhs = 16, band = 5
    real(wp), allocatable :: amat(:, :), alist(:), bmat(:, :)
    real(wp), allocatable :: xdense(:, :), xsparse(:, :)
-   integer :: iat, jat, nnz
+   integer :: iat, jat
    type(csr_list) :: list
    type(cg_solver) :: solver
 
@@ -702,19 +704,7 @@ subroutine test_block_cg_sparse(error)
       end do
    end do
 
-   ! Upper triangle in CSR format, diagonal element first in each row
-   list%complete = .false.
-   allocate(list%inl(n + 1), list%nlat(n * (band + 1)), alist(n * (band + 1)))
-   nnz = 0
-   do iat = 1, n
-      list%inl(iat) = nnz + 1
-      do jat = iat, min(n, iat + band)
-         nnz = nnz + 1
-         list%nlat(nnz) = jat
-         alist(nnz) = amat(iat, jat)
-      end do
-   end do
-   list%inl(n + 1) = nnz + 1
+   call dense_to_csr(amat, alist, list)
 
    allocate(bmat(n, nrhs))
    call random_number(bmat)
@@ -727,7 +717,7 @@ subroutine test_block_cg_sparse(error)
 
    call new_cg_solver(solver, cg_input(cgtol=1.0e-12_wp, cgmiter=1000, &
       & verbosity=0, use_nlist=.true.))
-   call solver%solve_block(alist=alist(:nnz), bmat=bmat, xmat=xsparse, &
+   call solver%solve_block(alist=alist, bmat=bmat, xmat=xsparse, &
       & list=list, error=error)
    if (allocated(error)) return
 
@@ -765,9 +755,9 @@ subroutine test_cg_invert_dense(error)
 end subroutine test_cg_invert_dense
 
 
-!> Test: Block-CG inversion on an upper-triangular list keeps the upper
-!> triangle of the inverse
-subroutine test_cg_invert_list_upper(error)
+!> Test: Block-CG inversion on a sorted complete list keeps the upper triangle
+!> of the inverse in the half storage
+subroutine test_cg_invert_list_half(error)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -776,13 +766,11 @@ subroutine test_cg_invert_list_upper(error)
    real(wp), allocatable :: amat(:, :), alist(:), adense(:, :), ainvlist(:)
    type(csr_list) :: list
    type(cg_solver) :: solver
-   integer :: iat
-   integer(i8) :: kat
    real(wp) :: dev
 
    call grouped_spd(n, ngroup, amat)
    call dense_to_csr(amat, alist, list)
-   allocate(adense(n, n), ainvlist(size(list%nlat)))
+   allocate(adense(n, n), ainvlist(size(alist)))
 
    call new_cg_solver(solver, cg_input(cgtol=1.0e-14_wp, cgmiter=1000, &
       & verbosity=0, use_nlist=.false.))
@@ -794,18 +782,13 @@ subroutine test_cg_invert_list_upper(error)
    call solver%invert_list(alist, list, ainvlist, error=error)
    if (allocated(error)) return
 
-   dev = 0.0_wp
-   do iat = 1, n
-      do kat = list%inl(iat), list%inl(iat + 1) - 1
-         dev = max(dev, abs(ainvlist(kat) - adense(list%nlat(kat), iat)))
-      end do
-   end do
+   dev = list_deviation(list, ainvlist, adense) * maxval(abs(adense))
    if (dev > thr1) then
-      call test_failed(error, "Inverse on the upper list differs from the dense inverse")
+      call test_failed(error, "Inverse on the half storage differs from the dense inverse")
       print '(a, es12.4)', "Max deviation: ", dev
    end if
 
-end subroutine test_cg_invert_list_upper
+end subroutine test_cg_invert_list_half
 
 
 !> Test: Block-CG inversion on the subsystems of spatial blocks for a chain
@@ -828,7 +811,7 @@ subroutine test_cg_invert_list_local(error)
 
    call chain_spd(n, cutoff, xyz, amat)
    call dense_to_csr(amat, alist, list)
-   allocate(adense(n, n), ainvlist(size(list%nlat)))
+   allocate(adense(n, n), ainvlist(size(alist)))
 
    call new_cg_solver(solver, cg_input(cgtol=1.0e-14_wp, cgmiter=1000, &
       & verbosity=0, use_nlist=.false.))
@@ -850,14 +833,14 @@ subroutine test_cg_invert_list_local(error)
 end subroutine test_cg_invert_list_local
 
 
-!> Largest deviation of the inverse on the pattern of a list from the dense
-!> inverse, relative to its largest element
+!> Largest deviation of the inverse in the half storage of a sorted complete
+!> list from the dense inverse, relative to its largest element
 function list_deviation(list, ainvlist, adense) result(dev)
 
-   !> Upper triangular neighborlist
+   !> Sorted complete neighborlist
    type(csr_list), intent(in) :: list
 
-   !> Inverse on the pattern of the list
+   !> Inverse in the half storage of the list
    real(wp), intent(in) :: ainvlist(:)
 
    !> Dense inverse
@@ -867,12 +850,15 @@ function list_deviation(list, ainvlist, adense) result(dev)
    real(wp) :: dev
 
    integer :: iat
-   integer(i8) :: kat
+   integer(i8) :: hat, koff
+   integer(i8), allocatable :: hinl(:)
 
+   call get_half_offsets(list, hinl)
    dev = 0.0_wp
    do iat = 1, size(adense, 1)
-      do kat = list%inl(iat), list%inl(iat + 1) - 1
-         dev = max(dev, abs(ainvlist(kat) - adense(list%nlat(kat), iat)))
+      koff = list%inl(iat) - hinl(iat)
+      do hat = hinl(iat), hinl(iat + 1) - 1
+         dev = max(dev, abs(ainvlist(hat) - adense(list%nlat(hat + koff), iat)))
       end do
    end do
    dev = dev / maxval(abs(adense))
@@ -980,36 +966,46 @@ subroutine grouped_spd(n, ngroup, amat)
 end subroutine grouped_spd
 
 
-!> Compressed-row storage of the nonzero elements of the upper triangle of a
-!> symmetric matrix with the diagonal element first in each row
+!> Sorted complete compressed-row storage of the nonzero pattern of a symmetric
+!> matrix with a nonzero diagonal, the diagonal element first in each row and
+!> the other elements in descending order, and the upper triangle of the
+!> matrix in the half storage of the list
 subroutine dense_to_csr(amat, alist, list)
 
    !> Dense symmetric matrix
    real(wp), intent(in) :: amat(:, :)
 
-   !> Matrix values in compressed-row storage
+   !> Upper triangle of the matrix in the half storage of the list
    real(wp), allocatable, intent(out) :: alist(:)
 
-   !> Compressed-row index of the matrix
+   !> Sorted complete compressed-row index of the matrix
    type(csr_list), intent(out) :: list
 
-   integer :: n, iat, jat, nnz
+   integer :: n, iat, jat, nnz, nhalf
 
    n = size(amat, 1)
    nnz = count(abs(amat) > 0.0_wp)
-   list%complete = .false.
-   allocate(list%inl(n + 1), list%nlat(nnz), alist(nnz))
+   list%complete = .true.
+   allocate(list%inl(n + 1), list%nlat(nnz), alist((nnz + n) / 2))
    nnz = 0
+   nhalf = 0
    do iat = 1, n
       list%inl(iat) = nnz + 1
       nnz = nnz + 1
       list%nlat(nnz) = iat
-      alist(nnz) = amat(iat, iat)
-      do jat = iat + 1, n
+      nhalf = nhalf + 1
+      alist(nhalf) = amat(iat, iat)
+      do jat = n, iat + 1, -1
          if (.not. abs(amat(jat, iat)) > 0.0_wp) cycle
          nnz = nnz + 1
          list%nlat(nnz) = jat
-         alist(nnz) = amat(jat, iat)
+         nhalf = nhalf + 1
+         alist(nhalf) = amat(jat, iat)
+      end do
+      do jat = iat - 1, 1, -1
+         if (.not. abs(amat(jat, iat)) > 0.0_wp) cycle
+         nnz = nnz + 1
+         list%nlat(nnz) = jat
       end do
    end do
    list%inl(n + 1) = nnz + 1

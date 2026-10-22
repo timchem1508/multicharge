@@ -169,7 +169,7 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, h
    grad = present(gradient) .and. present(sigma)
    sparse = .false.
    if (.not. present(dqdr) .and. present(cache) .and. present(list)) &
-      & sparse = allocated(cache%dqdrlist_ut)
+      & sparse = allocated(cache%dqdrlist)
    qgrad = present(dqdL) .and. (present(dqdr) .or. sparse)
 
    write(unit, '(a,":", t25, es20.13, 1x, a)') &
@@ -206,8 +206,7 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, h
    if (qgrad) then
       ! The compressed derivatives are expanded one charge at a time
       if (sparse) then
-         dqsum = sum(cache%dqdrlist_ut) + sum(cache%dqdrlist_lt) &
-            & - sum(cache%uvec) * sum(cache%dlambdadr)
+         dqsum = sum(cache%dqdrlist) - sum(cache%uvec) * sum(cache%dlambdadr)
       else
          dqsum = sum(dqdr)
       end if
@@ -322,7 +321,8 @@ end subroutine write_ascii_results
 !> Write the Hessian in compressed storage, the blocks on the pattern of its list
 !> including the charge constraint term and the factors of this term, which
 !> give the blocks outside of the pattern. The rows follow the order of the
-!> half list, which only holds the blocks of the atoms y >= x of each row x.
+!> upper triangles of the list, which only hold the blocks of the atoms y >= x
+!> of each row x.
 !> The lines of each row are formatted in parallel, as the format of the dense
 !> Hessian, and the rows are written in order.
 subroutine write_ascii_hessian_list(unit, mol, hessian)
@@ -338,7 +338,7 @@ subroutine write_ascii_hessian_list(unit, mol, hessian)
    type(mchrg_hessian), intent(in) :: hessian
 
    integer :: iat, jat, isp, jsp, ic, pos
-   integer(i8) :: hat
+   integer(i8) :: hat, hoff
    real(wp) :: hblk(3, 3), dnorm2, hnorm, usum
    real(wp) :: hrow(3)
    character(len=:), allocatable :: buffer
@@ -348,16 +348,17 @@ subroutine write_ascii_hessian_list(unit, mol, hessian)
 
    ! Frobenius norm from the blocks on the pattern, the charge constraint term
    ! of all other blocks is sum(u)^2 |dlambda|^4 without its blocks on the
-   ! pattern. The half list holds the block of y and x as the transpose of the
-   ! block of x and y.
+   ! pattern. The upper triangles hold the block of y and x as the transpose of
+   ! the block of x and y.
    usum = hessian%weight
    dnorm2 = sum(hessian%dlambda**2)
    hnorm = usum**2 * dnorm2**2
    !$omp parallel do default(none) schedule(runtime) reduction(+:hnorm) &
-   !$omp shared(mol, hessian, usum) private(iat, jat, ic, hat, hblk)
+   !$omp shared(mol, hessian, usum) private(iat, jat, ic, hat, hoff, hblk)
    do iat = 1, mol%nat
-      do hat = hessian%list%inl(iat), hessian%list%inl(iat + 1) - 1
-         jat = hessian%list%nlat(hat)
+      hoff = hessian%list%inl(iat) - hessian%hinl(iat)
+      do hat = hessian%hinl(iat), hessian%hinl(iat + 1) - 1
+         jat = hessian%list%nlat(hat + hoff)
          do ic = 1, 3
             hblk(:, ic) = hessian%hesslist(:, ic, hat) &
                & + usum * hessian%dlambda(ic, iat) * hessian%dlambda(:, jat)
@@ -377,8 +378,8 @@ subroutine write_ascii_hessian_list(unit, mol, hessian)
    write(unit, '(a,":", t25, es20.13, 1x, a)') &
    & "Hessian matrix norm", sqrt(max(hnorm, 0.0_wp)), "Eh/a0^2"
    write(unit, '(a, 1x, i0, a, f0.1, a)') "Hessian blocks on the pattern:", &
-   & size(hessian%list%nlat, kind=i8), " (", &
-   & real(size(hessian%list%nlat, kind=i8), wp) / mol%nat, " per atom)"
+   & size(hessian%hesslist, 3, kind=i8), " (", &
+   & real(size(hessian%hesslist, 3, kind=i8), wp) / mol%nat, " per atom)"
    write(unit, '(a)') &
    & "Upper triangle, the block of A and # is the transpose of the block of # and A"
    write(unit, '(78("-"))')
@@ -387,14 +388,15 @@ subroutine write_ascii_hessian_list(unit, mol, hessian)
    write(unit, '(78("-"))')
    !$omp parallel do default(none) ordered schedule(dynamic) &
    !$omp shared(unit, mol, hessian) &
-   !$omp private(iat, jat, isp, jsp, ic, hat, pos, hrow, buffer)
+   !$omp private(iat, jat, isp, jsp, ic, hat, hoff, pos, hrow, buffer)
    do iat = 1, mol%nat
       isp = mol%id(iat)
       allocate(character(len=3 * (hlen + 1) &
-         & * (hessian%list%inl(iat + 1) - hessian%list%inl(iat))) :: buffer)
+         & * (hessian%hinl(iat + 1) - hessian%hinl(iat))) :: buffer)
       pos = 0
-      do hat = hessian%list%inl(iat), hessian%list%inl(iat + 1) - 1
-         jat = hessian%list%nlat(hat)
+      hoff = hessian%list%inl(iat) - hessian%hinl(iat)
+      do hat = hessian%hinl(iat), hessian%hinl(iat + 1) - 1
+         jat = hessian%list%nlat(hat + hoff)
          jsp = mol%id(jat)
          do ic = 1, 3
             hrow(:) = hessian%hesslist(:, ic, hat) + hessian%weight &
@@ -638,7 +640,7 @@ subroutine json_results(unit, indentation, energy, gradient, dqdr, charges, cn, 
    end if
    sparse = .false.
    if (.not. present(dqdr) .and. present(cache) .and. present(list)) &
-      & sparse = allocated(cache%dqdrlist_ut)
+      & sparse = allocated(cache%dqdrlist)
    if (present(dqdr) .or. sparse) then
       write(unit, '(",")', advance='no')
       if (allocated(indent)) write(unit, '(/,a)', advance='no') repeat(indent, 1)

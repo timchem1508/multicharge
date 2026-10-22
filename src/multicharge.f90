@@ -14,6 +14,7 @@
 ! limitations under the License.
 
 module multicharge
+   use multicharge_atomsort, only : new_sorted_list
    use multicharge_charge, only : get_charges, get_eeq_charges, get_eeqbc_charges
    use multicharge_model, only : mchrg_model_type
    use multicharge_model_cache, only: mchrg_cache

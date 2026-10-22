@@ -22,7 +22,6 @@ module multicharge_model_cache
    use mctc_env, only : wp, i8
    use mctc_io, only : structure_type
    use mctc_wignerseitz, only : wignerseitz_cell
-   use multicharge_lowerlist, only : lower_list
    implicit none
    private
 
@@ -40,10 +39,10 @@ module multicharge_model_cache
       !> Coordination number derivatives w.r.t. lattice vectors
       real(wp), allocatable :: dcndL(:, :, :)
 
-      !> Coordination number derivatives w.r.t. positions on the pattern of the
-      !> neighborlist, the entry of atom j in the row of atom i holds dCN_j/dR_i.
-      !> Without a maximum CN cutoff dCN_i/dR_j = -dCN_j/dR_i, so a half list
-      !> only stores the upper triangle.
+      !> Coordination number derivatives w.r.t. positions in the half storage of
+      !> the neighborlist, the entry of atom j >= i in the upper
+      !> triangle of the row of atom i holds dCN_j/dR_i. Without a maximum CN
+      !> cutoff dCN_i/dR_j = -dCN_j/dR_i.
       real(wp), allocatable :: dcndrlist(:, :)
 
       !> Ewald separation parameter
@@ -64,16 +63,20 @@ module multicharge_model_cache
       !> Local charge derivatives w.r.t. lattice vectors
       real(wp), allocatable :: dqlocdL(:, :, :)
 
-      !> Local charge derivatives w.r.t. positions on the pattern of the
-      !> neighborlist, the entry of atom j in the row of atom i holds dqloc_j/dR_i.
-      !> Without a maximum CN cutoff dqloc_i/dR_j = dqloc_j/dR_i, so a half list
-      !> only stores the upper triangle.
+      !> Local charge derivatives w.r.t. positions in the half storage of the
+      !> neighborlist, the entry of atom j >= i in the upper
+      !> triangle of the row of atom i holds dqloc_j/dR_i. Without a maximum CN
+      !> cutoff dqloc_i/dR_j = dqloc_j/dR_i.
       real(wp), allocatable :: dqlocdrlist(:, :)
+
+      !> Offsets of the upper triangles of the rows of the neighborlist in the
+      !> half storage of the symmetric pair arrays, the row offsets of a half list
+      integer(i8), allocatable :: hinl(:)
 
       !> Full Maxwell capacitance matrix
       real(wp), allocatable :: cmat(:, :)
 
-      !> Compressed version of the C-matrix
+      !> Capacitance matrix in the half storage of the neighborlist
       real(wp), allocatable :: clist(:)
 
       !> Store tmp array from xvec calculation for reuse
@@ -85,15 +88,14 @@ module multicharge_model_cache
       !> Coulomb matrix
       real(wp), allocatable :: amat(:, :)
 
-      !> Compressed version of the A-matrix
+      !> Coulomb matrix in the half storage of the neighborlist
       real(wp), allocatable :: alist(:)
 
       !> Inversed amat
       real(wp), allocatable :: ainv(:, :)
 
-      !> Inverse of amat on the pattern of the neighborlist, the charge
-      !> constraint part -uvec*uvec^T/sum(uvec) is not stored. A half list only
-      !> stores the upper triangle of the symmetric inverse.
+      !> Inverse of amat on the pattern of the neighborlist in its half storage,
+      !> the charge constraint part -uvec*uvec^T/sum(uvec) is not stored
       real(wp), allocatable :: ainvlist(:)
 
       !> Solution of the ES equation
@@ -118,49 +120,27 @@ module multicharge_model_cache
       !> Linear combination alpha * dA/dL*q + beta * dX/dL w.r.t. strain
       real(wp), allocatable :: dabdL(:, :, :)
 
-      !> Diagonal and upper triangle of dabdr on a half neighborlist, the entry
-      !> of atom x in the row of atom i holds the derivative of component i
-      !> w.r.t. atom x
-      real(wp), allocatable :: dabdrlist_ut(:, :)
-
-      !> Lower triangle of dabdr on a half neighborlist, the entry of atom x in
-      !> the row of atom i holds the derivative of component x w.r.t. atom i,
-      !> the diagonal entries are not used
-      real(wp), allocatable :: dabdrlist_lt(:, :)
+      !> Partial derivatives dabdr on the sorted complete neighborlist, the entry
+      !> of atom b in the row of atom x holds the derivative of component b
+      !> w.r.t. atom x, so row x holds the column dabdr(:, x, :)
+      real(wp), allocatable :: dabdrlist(:, :)
 
       !> Coulomb matrix derivatives contracted with an external vector,
       !> alpha * dA/dR*p w.r.t. positions, dafdr(:, x, b) is the derivative of
       !> component b w.r.t. atom x
       real(wp), allocatable :: dafdr(:, :, :)
 
-      !> Diagonal and upper triangle of dafdr on a half neighborlist, the entry
-      !> of atom x in the row of atom i holds the derivative of component i
-      !> w.r.t. atom x
-      real(wp), allocatable :: dafdrlist_ut(:, :)
+      !> Derivatives dafdr on the sorted complete neighborlist in the layout of
+      !> dabdrlist
+      real(wp), allocatable :: dafdrlist(:, :)
 
-      !> Lower triangle of dafdr on a half neighborlist, the entry of atom x in
-      !> the row of atom i holds the derivative of component x w.r.t. atom i,
-      !> the diagonal entries are not used
-      real(wp), allocatable :: dafdrlist_lt(:, :)
-
-      !> Lower triangle of the half neighborlist of the charge derivatives and
-      !> the Hessian, row x holds the atoms b < x with the position of the entry
-      !> of x in row b
-      type(lower_list) :: lowlist
-
-      !> Diagonal and upper triangle of the position derivatives of the charges
-      !> on the pattern of the half neighborlist of the solve without the charge
-      !> constraint term, the entry of atom i in row j holds dq_j/dR_i
-      real(wp), allocatable :: dqdrlist_ut(:, :)
-
-      !> Lower triangle of the position derivatives of the charges on the
-      !> pattern of the half neighborlist of the solve without the charge
-      !> constraint term, the entry of atom i in row j holds dq_i/dR_j, the
-      !> diagonal entries are not used
-      real(wp), allocatable :: dqdrlist_lt(:, :)
+      !> Position derivatives of the charges on the pattern of the sorted
+      !> complete neighborlist of the solve without the charge constraint term,
+      !> the entry of atom b in the row of atom x holds dq_b/dR_x
+      real(wp), allocatable :: dqdrlist(:, :)
 
       !> Factors of the charge constraint term of the position derivatives,
-      !> dq_j/dR_i = dqdrlist_ut(:, (j, i)) - dlambdadr(:, i) * uvec(j) for i >= j
+      !> dq_b/dR_x = dqdrlist(:, (x, b)) - dlambdadr(:, x) * uvec(b)
       real(wp), allocatable :: dlambdadr(:, :)
 
       !> Diagonal part of the second derivative of the Maxwell capacitance

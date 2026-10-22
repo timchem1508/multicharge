@@ -24,6 +24,7 @@ program main
    & new_eeqbc2025_model, get_multicharge_version, &
    & write_ascii_model, write_ascii_properties, write_ascii_results
    use multicharge_model_type, only: hess_index, mchrg_hessian
+   use multicharge_atomsort, only: new_sorted_list
    use multicharge_output, only: json_results
    use multicharge_solver, only: new_mchrg_solver, mchrg_solver_type, direct_solver, &
    & cg_solver, mchrg_solver_input, cg_input, direct_input
@@ -119,11 +120,17 @@ program main
 
    allocate(cache)
 
-   ! Create a half neighborlist if requested, which keeps each pair once
+   ! Create a neighborlist if requested, a half list for the charges and the
+   ! energy gradient, and a sorted complete list for the charge derivatives and
+   ! the Hessian. The symmetric matrices keep the upper triangles of its rows.
    if (use_nlist) then
       call timer%push("nlist")
       allocate(list)
-      if (any(mol%periodic)) then
+      if ((qgrad .or. analytic_hessian) .and. any(mol%periodic)) then
+         call new_sorted_list(list, mol, error, cutoff, cache%wsc)
+      else if (qgrad .or. analytic_hessian) then
+         call new_sorted_list(list, mol, error, cutoff)
+      else if (any(mol%periodic)) then
          call new_csr_list(list, mol, error, cache%wsc, cutoff, complete=.false.)
       else
          call new_csr_list(list, mol, error, cutoff=cutoff, complete=.false.)
