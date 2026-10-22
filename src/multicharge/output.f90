@@ -350,7 +350,7 @@ subroutine write_ascii_hessian_list(unit, mol, hessian)
    ! of all other blocks is sum(u)^2 |dlambda|^4 without its blocks on the
    ! pattern. The half list holds the block of y and x as the transpose of the
    ! block of x and y.
-   usum = hessian%uvecsum
+   usum = hessian%weight
    dnorm2 = sum(hessian%dlambda**2)
    hnorm = usum**2 * dnorm2**2
    !$omp parallel do default(none) schedule(runtime) reduction(+:hnorm) &
@@ -397,7 +397,7 @@ subroutine write_ascii_hessian_list(unit, mol, hessian)
          jat = hessian%list%nlat(hat)
          jsp = mol%id(jat)
          do ic = 1, 3
-            hrow(:) = hessian%hesslist(:, ic, hat) + hessian%uvecsum &
+            hrow(:) = hessian%hesslist(:, ic, hat) + hessian%weight &
                & * hessian%dlambda(ic, iat) * hessian%dlambda(:, jat)
             ! (i10,1x,i3,1x,a2,1x,i6,1x,i3,1x,a2,2x,a4,5x,3(2x,es11.3))
             buffer(pos+1:pos+hlen+1) = format_int(iat, 10) // " " &
@@ -429,7 +429,7 @@ subroutine write_ascii_hessian_list(unit, mol, hessian)
       do ic = 1, 3
          write(unit, '(i10,1x,i3,1x,a2,2x,a4,5x,*(2x,es11.3))') &
          & iat, mol%num(isp), mol%sym(isp), comp(ic), &
-         & hessian%uvecsum * hessian%dlambda(ic, iat), hessian%dlambda(ic, iat)
+         & hessian%weight * hessian%dlambda(ic, iat), hessian%dlambda(ic, iat)
       end do
    end do
    write(unit, '(62("-"))')

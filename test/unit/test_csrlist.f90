@@ -102,7 +102,10 @@ subroutine collect_csrlist(testsuite)
    & new_unittest("implicit-hessian-sparse-list-upu23", test_himpl_sparse_list_upu23), &
    & new_unittest("hessian-list-mb05", test_hess_list_mb05), &
    & new_unittest("hessian-list-znooh", test_hess_list_znooh), &
-   & new_unittest("hessian-pattern-list-upu23", test_hess_pattern_list_upu23) &
+   & new_unittest("hessian-pattern-list-upu23", test_hess_pattern_list_upu23), &
+   & new_unittest("external-hessian-list-mb05", test_hext_list_mb05), &
+   & new_unittest("external-hessian-list-znooh", test_hext_list_znooh), &
+   & new_unittest("external-hessian-sparse-list-upu23", test_hext_sparse_list_upu23) &
    & ]
 
 end subroutine collect_csrlist
@@ -2046,7 +2049,7 @@ subroutine test_hessian_pattern(error, mol, model, nlcutoff, hcutoff)
       return
    end select
 
-   if (abs(sphess%uvecsum - refhess%uvecsum) > thr1 &
+   if (abs(sphess%weight - refhess%weight) > thr1 &
       & .or. any(abs(sphess%dlambda - refhess%dlambda) > thr1)) then
       call test_failed(error, "Charge constraint term depends on the list of the Hessian")
       return
@@ -2074,6 +2077,342 @@ subroutine test_hessian_pattern(error, mol, model, nlcutoff, hcutoff)
    end do
 
 end subroutine test_hessian_pattern
+
+
+!> Check the Hessian of an external function with a half neighbour list holding
+!> all pairs against the dense evaluation. The second and the mixed derivatives
+!> of the external function are given on shorter half lists of their own.
+subroutine test_external_hessian(error, mol, model)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular structure data
+   type(structure_type), intent(inout) :: mol
+
+   !> Electronegativity equilibration model
+   class(mchrg_model_type), intent(in) :: model
+
+   class(mchrg_solver_type), allocatable :: solver
+   class(mchrg_solver_input), allocatable :: solver_input
+   type(mchrg_cache), allocatable :: cache
+   type(csr_list), allocatable :: list, qlist, rlist
+   type(mchrg_hessian), allocatable :: sphess
+   integer :: ndim
+   real(wp), allocatable :: dfdq(:), d2fdq2(:, :), dfdrdq(:, :, :), qval(:)
+   real(wp), allocatable :: rval_ut(:, :), rval_lt(:, :), hessian(:, :), refhess(:, :)
+
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      solver_input%cgtol = 1.0e-15_wp
+      solver_input%cgmiter = 1000
+      solver_input%verbosity = 0
+      solver_input%use_nlist = .true.
+   end select
+   call solver_maker(solver, solver_input, error)
+   if (allocated(error)) return
+
+   allocate(list, qlist, rlist)
+   call new_csr_list(list, mol, error, cutoff=cutoff, complete=.false.)
+   if (allocated(error)) return
+   if (size(list%nlat) /= mol%nat * (mol%nat + 1) / 2) then
+      call test_failed(error, "Neighbour list does not hold all pairs")
+      return
+   end if
+   call new_csr_list(qlist, mol, error, cutoff=6.0_wp, complete=.false.)
+   if (allocated(error)) return
+   call new_csr_list(rlist, mol, error, cutoff=8.0_wp, complete=.false.)
+   if (allocated(error)) return
+   call get_external_derivs(mol, qlist, rlist, dfdq, d2fdq2, dfdrdq, qval, &
+      & rval_ut, rval_lt)
+
+   ndim = 3*mol%nat
+   allocate(hessian(ndim, ndim), refhess(ndim, ndim))
+   select type (model)
+   type is (eeqbc_model)
+      allocate(cache)
+      call model%get_external_hessian(mol, solver, cache, error, dfdq, d2fdq2, &
+         & dfdrdq, refhess)
+      if (allocated(error)) return
+
+      ! The list of the Hessian is a copy of the neighbour list
+      deallocate(cache)
+      allocate(cache, sphess)
+      call model%get_external_hessian(mol, solver, cache, error, dfdq, qval, &
+         & qlist, rval_ut, rval_lt, rlist, sphess, list)
+      if (allocated(error)) return
+   class default
+      call test_failed(error, "Analytical Hessian requires the EEQBC model")
+      return
+   end select
+   call expand_hessian(mol, sphess, hessian)
+
+   if (any(abs(hessian - refhess) > thr2)) then
+      call test_failed(error, "External Hessian does not match the dense one")
+      print'(a)', "diff:"
+      print'(3es21.12)', hessian - refhess
+   end if
+
+end subroutine test_external_hessian
+
+
+!> Check the Hessian of an external function with a half neighbour list holding
+!> part of the pairs against its evaluation from the inverse, the partial
+!> derivatives and the charge derivatives on the same list. Each atom x only
+!> couples through its neighbours b, c and d,
+!> dp_b/dR_x = sum_c S_bc (G_cx + sum_d F_cd dq_d/dR_x), and the mixed
+!> derivatives G of the pairs outside of the list are dropped. Without df/dq the
+!> adjoint vector vanishes and with it the explicit part, so the blocks only
+!> hold the response to the derivatives of the external function.
+subroutine test_external_hessian_sparse(error, mol, model, nlcutoff, ecutoff)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular structure data
+   type(structure_type), intent(inout) :: mol
+
+   !> Electronegativity equilibration model
+   class(mchrg_model_type), intent(in) :: model
+
+   !> Cutoff of the neighbour list
+   real(wp), intent(in) :: nlcutoff
+
+   !> Cutoff of the lists of the derivatives of the external function
+   real(wp), intent(in) :: ecutoff
+
+   class(mchrg_solver_type), allocatable :: solver
+   class(mchrg_solver_input), allocatable :: solver_input
+   type(mchrg_cache), allocatable :: cache
+   type(csr_list), allocatable :: list, qlist, rlist
+   type(mchrg_hessian), allocatable :: sphess
+   integer :: xat, yat, bat, cat, ic
+   integer(i8) :: kat, hat
+   real(wp), parameter :: trans(3, 1) = 0.0_wp
+   real(wp) :: blk(3, 3)
+   logical, allocatable :: nbr(:, :)
+   real(wp), allocatable :: dfdq(:), d2fdq2(:, :), dfdrdq(:, :, :), qval(:)
+   real(wp), allocatable :: rval_ut(:, :), rval_lt(:, :), dqdL(:, :, :)
+   real(wp), allocatable :: ainv(:, :), dabdr(:, :, :), dqdr(:, :, :)
+   real(wp), allocatable :: mvec(:, :), pvec(:, :), fuvec(:), tvec(:), wvec(:, :)
+
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+   type is (cg_input)
+      solver_input%cgtol = 1.0e-15_wp
+      solver_input%cgmiter = 1000
+      solver_input%verbosity = 0
+      solver_input%use_nlist = .true.
+   end select
+   call solver_maker(solver, solver_input, error)
+   if (allocated(error)) return
+
+   allocate(list, qlist, rlist)
+   call new_csr_list(list, mol, error, cutoff=nlcutoff, complete=.false.)
+   if (allocated(error)) return
+   call new_csr_list(qlist, mol, error, cutoff=ecutoff, complete=.false.)
+   if (allocated(error)) return
+   call new_csr_list(rlist, mol, error, cutoff=ecutoff, complete=.false.)
+   if (allocated(error)) return
+   if (size(rlist%nlat) <= size(list%nlat)) then
+      call test_failed(error, "Lists of the external derivatives are not longer")
+      return
+   end if
+   call get_external_derivs(mol, qlist, rlist, dfdq, d2fdq2, dfdrdq, qval, &
+      & rval_ut, rval_lt)
+   dfdq(:) = 0.0_wp
+
+   select type (model)
+   type is (eeqbc_model)
+      allocate(cache)
+      call new_allpairs_hessian(mol, sphess, error)
+      if (allocated(error)) return
+      call model%get_external_hessian(mol, solver, cache, error, dfdq, qval, &
+         & qlist, rval_ut, rval_lt, rlist, sphess, list)
+      if (allocated(error)) return
+   class default
+      call test_failed(error, "Analytical Hessian requires the EEQBC model")
+      return
+   end select
+
+   ! Inverse, partial derivatives and charge derivatives without the charge
+   ! constraint term on the list
+   deallocate(cache)
+   allocate(cache)
+   allocate(dqdL(3, 3, mol%nat))
+   call model%update(mol, cache, trans, grad=.false., list=list, dqdr=.true.)
+   call model%solve(mol, solver, cache, error, dqdL=dqdL, list=list, &
+      & unit=output_unit)
+   if (allocated(error)) return
+
+   allocate(nbr(mol%nat, mol%nat), source=.false.)
+   allocate(ainv(mol%nat, mol%nat), source=0.0_wp)
+   do xat = 1, mol%nat
+      do kat = list%inl(xat), list%inl(xat + 1) - 1
+         bat = list%nlat(kat)
+         nbr(bat, xat) = .true.
+         nbr(xat, bat) = .true.
+         ainv(bat, xat) = cache%ainvlist(kat)
+         ainv(xat, bat) = cache%ainvlist(kat)
+      end do
+   end do
+   allocate(dabdr(3, mol%nat, mol%nat), dqdr(3, mol%nat, mol%nat))
+   call expand_partial_derivs(mol, list, cache%dabdrlist_ut, cache%dabdrlist_lt, &
+      & dabdr)
+   call expand_partial_derivs(mol, list, cache%dqdrlist_ut, cache%dqdrlist_lt, &
+      & dqdr)
+   do xat = 1, mol%nat
+      do bat = 1, mol%nat
+         if (.not. nbr(bat, xat)) dfdrdq(:, xat, bat) = 0.0_wp
+      end do
+   end do
+
+   ! Factor w = G^T u + B^T A^-1 F u of the charge constraint term
+   allocate(fuvec(mol%nat), tvec(mol%nat), wvec(3, mol%nat))
+   fuvec(:) = matmul(d2fdq2, cache%uvec)
+   tvec(:) = 0.0_wp
+   call solver%solve(alist=cache%alist, xvec=fuvec, vrhs=tvec, list=list, &
+      & error=error)
+   if (allocated(error)) return
+   do xat = 1, mol%nat
+      wvec(:, xat) = matmul(dfdrdq(:, xat, :), cache%uvec) &
+         & + matmul(dabdr(:, xat, :), tvec)
+   end do
+   if (abs(sphess%weight - dot_product(cache%uvec, fuvec)) > thr1 &
+      & .or. any(abs(sphess%wvec - wvec) > thr1)) then
+      call test_failed(error, "Charge constraint term of the external Hessian "// &
+         & "does not match")
+      print'(a)', "diff:"
+      print'(3es21.12)', sphess%wvec - wvec
+      return
+   end if
+
+   ! dp_b/dR_x for the neighbours b of x and the blocks (x, y) of y >= x
+   allocate(mvec(3, mol%nat), pvec(3, mol%nat))
+   do xat = 1, mol%nat
+      mvec(:, :) = 0.0_wp
+      pvec(:, :) = 0.0_wp
+      do cat = 1, mol%nat
+         if (.not. nbr(cat, xat)) cycle
+         mvec(:, cat) = dfdrdq(:, xat, cat)
+         do bat = 1, mol%nat
+            if (nbr(bat, xat)) mvec(:, cat) = mvec(:, cat) &
+               & + d2fdq2(cat, bat) * dqdr(:, xat, bat)
+         end do
+      end do
+      do bat = 1, mol%nat
+         if (.not. nbr(bat, xat)) cycle
+         do cat = 1, mol%nat
+            if (nbr(cat, xat)) pvec(:, bat) = pvec(:, bat) &
+               & + ainv(bat, cat) * mvec(:, cat)
+         end do
+      end do
+
+      do hat = sphess%list%inl(xat), sphess%list%inl(xat + 1) - 1
+         yat = sphess%list%nlat(hat)
+         blk(:, :) = 0.0_wp
+         do bat = 1, mol%nat
+            if (.not. nbr(bat, xat)) cycle
+            do ic = 1, 3
+               blk(:, ic) = blk(:, ic) + dfdrdq(:, yat, bat) * dqdr(ic, xat, bat) &
+                  & + dabdr(:, yat, bat) * pvec(ic, bat)
+            end do
+         end do
+         if (yat == xat) blk(:, :) = 0.5_wp * (blk + transpose(blk))
+         if (any(abs(sphess%hesslist(:, :, hat) - blk) > thr1)) then
+            call test_failed(error, "External Hessian block does not match the "// &
+               & "restriction to the neighbours")
+            print'(a, 2i6)', "block", xat, yat
+            print'(3es21.12)', sphess%hesslist(:, :, hat) - blk
+            return
+         end if
+      end do
+   end do
+
+end subroutine test_external_hessian_sparse
+
+
+!> Partial derivatives of an external function on half lists of their own and
+!> in dense storage: df/dq, the second derivatives d2f/dq2 = 0.1 / (1 + r_ab)
+!> on the pairs of qlist and the mixed derivatives d2f/dR_x dq_b on the pairs
+!> of rlist, which are not symmetric in x and b
+subroutine get_external_derivs(mol, qlist, rlist, dfdq, d2fdq2, dfdrdq, qval, &
+   & rval_ut, rval_lt)
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Half list of the second derivatives w.r.t. the charges
+   type(csr_list), intent(in) :: qlist
+
+   !> Half list of the mixed derivatives
+   type(csr_list), intent(in) :: rlist
+
+   !> Derivative w.r.t. the charges
+   real(wp), allocatable, intent(out) :: dfdq(:)
+
+   !> Second derivative w.r.t. the charges
+   real(wp), allocatable, intent(out) :: d2fdq2(:, :)
+
+   !> Mixed derivative, dfdrdq(:, x, b) = d2f/dR_x dq_b
+   real(wp), allocatable, intent(out) :: dfdrdq(:, :, :)
+
+   !> Upper triangle of the second derivative w.r.t. the charges on qlist
+   real(wp), allocatable, intent(out) :: qval(:)
+
+   !> Diagonal and upper triangle of the mixed derivative on rlist
+   real(wp), allocatable, intent(out) :: rval_ut(:, :)
+
+   !> Lower triangle of the mixed derivative on rlist
+   real(wp), allocatable, intent(out) :: rval_lt(:, :)
+
+   real(wp), parameter :: efield(3) = [0.1_wp, -0.2_wp, 0.3_wp]
+   real(wp), parameter :: kpot = 0.05_wp
+   integer :: iat, jat
+   integer(i8) :: kat
+   real(wp) :: vec(3), r2
+
+   allocate(dfdq(mol%nat), d2fdq2(mol%nat, mol%nat), dfdrdq(3, mol%nat, mol%nat), &
+      & qval(size(qlist%nlat)), rval_ut(3, size(rlist%nlat)), &
+      & rval_lt(3, size(rlist%nlat)))
+
+   do iat = 1, mol%nat
+      dfdq(iat) = dot_product(efield, mol%xyz(:, iat)) &
+         & + 0.5_wp * kpot * sum(mol%xyz(:, iat)**2)
+   end do
+
+   d2fdq2(:, :) = 0.0_wp
+   do iat = 1, mol%nat
+      do kat = qlist%inl(iat), qlist%inl(iat + 1) - 1
+         jat = qlist%nlat(kat)
+         qval(kat) = 0.1_wp / (1.0_wp + norm2(mol%xyz(:, jat) - mol%xyz(:, iat)))
+         d2fdq2(jat, iat) = qval(kat)
+         d2fdq2(iat, jat) = qval(kat)
+      end do
+   end do
+
+   ! The entry of atom x in the row of atom b holds d2f/dR_x dq_b in rval_ut and
+   ! d2f/dR_b dq_x in rval_lt
+   do iat = 1, mol%nat
+      do kat = rlist%inl(iat), rlist%inl(iat + 1) - 1
+         jat = rlist%nlat(kat)
+         vec(:) = mol%xyz(:, jat) - mol%xyz(:, iat)
+         r2 = sum(vec**2)
+         if (jat == iat) then
+            rval_ut(:, kat) = efield + kpot * mol%xyz(:, iat)
+            rval_lt(:, kat) = 0.0_wp
+         else
+            rval_ut(:, kat) = 0.02_wp * (1.0_wp + 0.1_wp * real(iat, wp)) * vec &
+               & / (1.0_wp + r2)
+            rval_lt(:, kat) = -0.03_wp * (1.0_wp + 0.1_wp * real(jat, wp)) * vec &
+               & / (1.0_wp + r2)
+         end if
+      end do
+   end do
+   call expand_partial_derivs(mol, rlist, rval_ut, rval_lt, dfdrdq)
+
+end subroutine get_external_derivs
 
 
 !> Compressed Hessian with zero blocks on a half list holding all pairs
@@ -2124,8 +2463,12 @@ subroutine expand_hessian(mol, hessian, dense)
          do yat = 1, mol%nat
             jj = 3 * (yat - 1)
             do ic = 1, 3
-               dense(jj+1:jj+3, ii+ic) = hessian%uvecsum * hessian%dlambda(ic, xat) &
+               dense(jj+1:jj+3, ii+ic) = hessian%weight * hessian%dlambda(ic, xat) &
                   & * hessian%dlambda(:, yat)
+               if (allocated(hessian%wvec)) dense(jj+1:jj+3, ii+ic) = &
+                  & dense(jj+1:jj+3, ii+ic) &
+                  & - hessian%wvec(ic, xat) * hessian%dlambda(:, yat) &
+                  & - hessian%dlambda(ic, xat) * hessian%wvec(:, yat)
             end do
          end do
       end do
@@ -2372,6 +2715,56 @@ subroutine test_hess_list_znooh(error)
    call test_hessian(error, mol, model)
 
 end subroutine test_hess_list_znooh
+
+
+subroutine test_hext_list_mb05(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "MB16-43", "05")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_external_hessian(error, mol, model)
+
+end subroutine test_hext_list_mb05
+
+
+subroutine test_hext_list_znooh(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_znooh(mol)
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_external_hessian(error, mol, model)
+
+end subroutine test_hext_list_znooh
+
+
+subroutine test_hext_sparse_list_upu23(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "UPU23", "0a")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   ! The lists of the external derivatives are longer than the neighbour list
+   call test_external_hessian_sparse(error, mol, model, nlcutoff=12.0_wp, &
+      & ecutoff=16.0_wp)
+
+end subroutine test_hext_sparse_list_upu23
 
 
 !> Charged ZnOOH molecule

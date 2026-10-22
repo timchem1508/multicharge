@@ -47,9 +47,12 @@ module multicharge_model_type
    !> Molecular nuclear Hessian in compressed-row storage on a half neighborlist
    !> of its own, which keeps the blocks of the atoms y >= x in the row of x, the
    !> block of y and x is the transpose. The charge constraint couples all atoms
-   !> by the dense rank-1 term sum(u) dlambda dlambda^T, which is kept in its
-   !> factors, the block of the atoms x and y is
-   !> hesslist(:, :, (x, y)) + uvecsum * dlambda(:, x) dlambda(:, y)^T.
+   !> by a dense term, which is kept in its factors, the block of the atoms x
+   !> and y in the layout of hesslist is hesslist(:, :, (x, y))
+   !> + weight * dlambda(:, y) dlambda(:, x)^T - wvec(:, y) dlambda(:, x)^T
+   !> - dlambda(:, y) wvec(:, x)^T. The term is of rank one for the
+   !> electrostatic energy, without wvec, and of rank two for an external
+   !> function of the charges.
    type :: mchrg_hessian
 
       !> Half neighborlist of the atom pairs with a stored block, the first entry
@@ -65,9 +68,15 @@ module multicharge_model_type
       !> charge constraint term
       real(wp), allocatable :: dlambda(:, :)
 
-      !> Sum of the constraint response, sum(u) = 1^T A^-1 1, the weight of the
-      !> charge constraint term
-      real(wp) :: uvecsum = 0.0_wp
+      !> Second factor of the charge constraint term of an external function,
+      !> w = G^T u + B^T A^-1 d2f/dq2 u with the mixed derivatives G, the partial
+      !> derivatives B and the constraint response u = A^-1 1
+      real(wp), allocatable :: wvec(:, :)
+
+      !> Weight of the charge constraint term dlambda dlambda^T, sum(u) =
+      !> 1^T A^-1 1 for the electrostatic energy and u^T d2f/dq2 u for an
+      !> external function
+      real(wp) :: weight = 0.0_wp
 
    end type mchrg_hessian
 
@@ -114,7 +123,15 @@ module multicharge_model_type
 
       !> Calculate the analytical Hessian of an external function of the
       !> charges (molecular)
-      procedure :: get_external_hessian
+      procedure :: get_external_hessian_dense
+
+      !> Calculate the analytical Hessian of an external function of the
+      !> charges on a half neighborlist in compressed storage (molecular)
+      procedure :: get_external_hessian_list
+
+      !> Calculate the analytical Hessian of an external function of the charges
+      generic :: get_external_hessian => get_external_hessian_dense, &
+         & get_external_hessian_list
 
       !> Calculate the analytical Hessian of the electrostatic energy (molecular)
       procedure :: get_hessian_dense
@@ -1029,24 +1046,47 @@ subroutine get_constraint_factors(mol, cache, list, dlambdadr)
    !> Lagrange multiplier
    real(wp), allocatable, intent(out) :: dlambdadr(:, :)
 
-   integer :: iat, jat
-   integer(i8) :: kat
-   real(wp) :: uvecsum
-
-   uvecsum = sum(cache%uvec)
    allocate(dlambdadr(3, mol%nat), source=0.0_wp)
-   do iat = 1, mol%nat
-      do kat = list%inl(iat), list%inl(iat + 1) - 1
-         jat = list%nlat(kat)
-         dlambdadr(:, jat) = dlambdadr(:, jat) &
-            & + cache%dabdrlist_ut(:, kat) * cache%uvec(iat)
-         if (jat /= iat) dlambdadr(:, iat) = dlambdadr(:, iat) &
-            & + cache%dabdrlist_lt(:, kat) * cache%uvec(jat)
-      end do
-   end do
-   dlambdadr(:, :) = dlambdadr / (uvecsum + eps)
+   call add_transposed_product(list, cache%dabdrlist_ut, cache%dabdrlist_lt, &
+      & cache%uvec, dlambdadr)
+   dlambdadr(:, :) = dlambdadr / (sum(cache%uvec) + eps)
 
 end subroutine get_constraint_factors
+
+
+!> Add the transposed product of partial derivatives D on a half neighborlist
+!> with a vector, w(:, x) = w(:, x) + sum_b D(b, x) v(b), where D(b, x) is the
+!> derivative of component b w.r.t. atom x in the layout of dabdrlist_ut and
+!> dabdrlist_lt
+subroutine add_transposed_product(list, dut, dlt, vec, wvec)
+
+   !> Half neighborlist
+   type(csr_list), intent(in) :: list
+
+   !> Diagonal and upper triangle of the partial derivatives on the list
+   real(wp), intent(in) :: dut(:, :)
+
+   !> Lower triangle of the partial derivatives on the list
+   real(wp), intent(in) :: dlt(:, :)
+
+   !> Vector contracted with the components
+   real(wp), intent(in) :: vec(:)
+
+   !> Product for each atom, dimension (3, nat)
+   real(wp), intent(inout) :: wvec(:, :)
+
+   integer :: iat, jat
+   integer(i8) :: kat
+
+   do iat = 1, size(wvec, 2)
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         jat = list%nlat(kat)
+         wvec(:, jat) = wvec(:, jat) + dut(:, kat) * vec(iat)
+         if (jat /= iat) wvec(:, iat) = wvec(:, iat) + dlt(:, kat) * vec(jat)
+      end do
+   end do
+
+end subroutine add_transposed_product
 
 
 !> Derivatives of the charges w.r.t. the lattice vectors, B_L^T S with the
@@ -1145,6 +1185,84 @@ subroutine get_group_dqdr(cache, list, group, nb, bloc, blist, qpos, pan, qcol)
    end do
 
 end subroutine get_group_dqdr
+
+
+!> Derivatives of the adjoint vector dp_b/dR_x = (S (G + d2f/dq2 dq/dR))_bx of
+!> an external function for a group of atoms x and the union of their
+!> neighbors b from get_group_dqdr, in the layout of the charge derivatives.
+!> The mixed derivatives G = d2f/dRdq - dA/dR*p are read from the cache, the
+!> products with d2f/dq2 and the inverse S are only formed on the rows of the
+!> union and the elements of the atoms b outside of the list of x are dropped.
+subroutine get_group_dpdr(cache, list, d2fdq2, d2fdq2_list, ng, nb, bloc, blist, &
+   & qpos, qcol, pan, pcol)
+
+   !> Cache with the inverse and the mixed derivatives on the list
+   type(mchrg_cache), intent(in) :: cache
+
+   !> Half neighborlist
+   type(csr_list), intent(in) :: list
+
+   !> Upper triangle of the second derivatives w.r.t. the charges on their list
+   real(wp), intent(in), contiguous :: d2fdq2(:)
+
+   !> Half list of the second derivatives w.r.t. the charges
+   type(csr_list), intent(in) :: d2fdq2_list
+
+   !> Number of atoms in the group
+   integer, intent(in) :: ng
+
+   !> Number of atoms in the union of the neighbors of the group
+   integer, intent(in) :: nb
+
+   !> Index of each atom in the union, zero outside
+   integer, intent(in), contiguous :: bloc(:)
+
+   !> Atoms of the union
+   integer, intent(in), contiguous :: blist(:)
+
+   !> Position of the pair of x and each atom of the union in the list, zero if
+   !> the atom is not a neighbor of x, negative for the lower triangle
+   integer(i8), intent(in), contiguous :: qpos(:, :)
+
+   !> Charge derivatives dq_b/dR_x of the union
+   real(wp), intent(in), contiguous :: qcol(:, :)
+
+   !> Workspace for G + d2f/dq2 dq/dR of the union
+   real(wp), intent(inout), contiguous :: pan(:, :)
+
+   !> Derivatives dp_b/dR_x of the adjoint vector of the union
+   real(wp), intent(inout), contiguous :: pcol(:, :)
+
+   integer :: n, i
+   integer(i8) :: kat
+
+   ! G + d2f/dq2 dq/dR on the neighbors of x
+   call multiply_group_list(d2fdq2_list, d2fdq2, 3 * ng, nb, bloc, blist, qcol, &
+      & pan)
+   do n = 1, nb
+      do i = 1, ng
+         kat = qpos(i, n)
+         if (kat > 0) then
+            pan(3 * i - 2:3 * i, n) = pan(3 * i - 2:3 * i, n) &
+               & + cache%dafdrlist_ut(:, kat)
+         else if (kat < 0) then
+            pan(3 * i - 2:3 * i, n) = pan(3 * i - 2:3 * i, n) &
+               & + cache%dafdrlist_lt(:, -kat)
+         else
+            pan(3 * i - 2:3 * i, n) = 0.0_wp
+         end if
+      end do
+   end do
+   ! Product with the inverse on the neighbors of x
+   call multiply_group_list(list, cache%ainvlist, 3 * ng, nb, bloc, blist, pan, &
+      & pcol)
+   do n = 1, nb
+      do i = 1, ng
+         if (qpos(i, n) == 0) pcol(3 * i - 2:3 * i, n) = 0.0_wp
+      end do
+   end do
+
+end subroutine get_group_dpdr
 
 
 !> Union of the neighbors of a group of atoms on a half list with the columns
@@ -1250,18 +1368,19 @@ pure subroutine add_union_atom(bat, nb, bloc, blist, qpos, pan, n)
 end subroutine add_union_atom
 
 
-!> Product of the inverse S on a half list with the partial derivatives of the
-!> union U of a group, qcol = S_UU pan. The rows of the union are read from the
-!> list, each pair of the upper triangle also adds the mirrored element of the
-!> symmetric inverse to the row of its other atom, so the lower triangle of the
-!> list is not needed.
-subroutine multiply_group_list(list, ainv, nw, nb, bloc, blist, pan, qcol)
+!> Product of a symmetric matrix S on a half list, the inverse or the second
+!> derivatives of an external function w.r.t. the charges, with the
+!> derivatives of the union U of a group, qcol = S_UU pan. The rows of the
+!> union are read from the list, each pair of the upper triangle also adds the
+!> mirrored element of the symmetric matrix to the row of its other atom, so
+!> the lower triangle of the list is not needed.
+subroutine multiply_group_list(list, smat, nw, nb, bloc, blist, pan, qcol)
 
-   !> Half neighborlist
+   !> Half list of the symmetric matrix
    type(csr_list), intent(in) :: list
 
-   !> Upper triangle of the inverse on the pattern of the list
-   real(wp), intent(in), contiguous :: ainv(:)
+   !> Upper triangle of the symmetric matrix on the pattern of the list
+   real(wp), intent(in), contiguous :: smat(:)
 
    !> Number of derivatives of each atom of the union, three per group atom
    integer, intent(in) :: nw
@@ -1275,10 +1394,10 @@ subroutine multiply_group_list(list, ainv, nw, nb, bloc, blist, pan, qcol)
    !> Atoms of the union
    integer, intent(in), contiguous :: blist(:)
 
-   !> Partial derivatives of the union
+   !> Derivatives of the union
    real(wp), intent(in), contiguous :: pan(:, :)
 
-   !> Product with the inverse on the union
+   !> Product with the symmetric matrix on the union
    real(wp), intent(inout), contiguous :: qcol(:, :)
 
    integer :: n, m, bat
@@ -1292,7 +1411,7 @@ subroutine multiply_group_list(list, ainv, nw, nb, bloc, blist, pan, qcol)
       do kat = list%inl(bat), list%inl(bat + 1) - 1
          m = bloc(list%nlat(kat))
          if (m == 0) cycle
-         s = ainv(kat)
+         s = smat(kat)
          acc(:nw) = acc(:nw) + s * pan(:nw, m)
          if (m /= n) qcol(:nw, m) = qcol(:nw, m) + s * pan(:nw, n)
       end do
@@ -1487,6 +1606,63 @@ subroutine new_partial_derivs(mol, ndim, cache, list, dafdr)
 end subroutine new_partial_derivs
 
 
+!> Add partial derivatives on a half list of their own to the partial
+!> derivatives on the pattern of a half neighborlist, both in the layout of
+!> dabdrlist_ut and dabdrlist_lt. Both lists keep each pair in the row of its
+!> atom of lower index, the pairs outside of the neighborlist are dropped.
+subroutine add_list_derivs(nat, list, dut, dlt, plist, put, plt)
+
+   !> Number of atoms
+   integer, intent(in) :: nat
+
+   !> Half neighborlist
+   type(csr_list), intent(in) :: list
+
+   !> Diagonal and upper triangle of the partial derivatives on the list
+   real(wp), intent(inout) :: dut(:, :)
+
+   !> Lower triangle of the partial derivatives on the list
+   real(wp), intent(inout) :: dlt(:, :)
+
+   !> Half list of the added partial derivatives
+   type(csr_list), intent(in) :: plist
+
+   !> Diagonal and upper triangle of the added partial derivatives
+   real(wp), intent(in) :: put(:, :)
+
+   !> Lower triangle of the added partial derivatives
+   real(wp), intent(in) :: plt(:, :)
+
+   integer :: iat
+   integer(i8) :: kat, pat
+   integer(i8), allocatable :: loc(:)
+
+   ! loc holds the position of each atom in the row of the neighborlist
+   !$omp parallel default(none) shared(nat, list, dut, dlt, plist, put, plt) &
+   !$omp private(iat, kat, pat, loc)
+   allocate(loc(nat), source=0_i8)
+   !$omp do schedule(runtime)
+   do iat = 1, nat
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         loc(list%nlat(kat)) = kat
+      end do
+      do pat = plist%inl(iat), plist%inl(iat + 1) - 1
+         kat = loc(plist%nlat(pat))
+         if (kat == 0) cycle
+         dut(:, kat) = dut(:, kat) + put(:, pat)
+         dlt(:, kat) = dlt(:, kat) + plt(:, pat)
+      end do
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         loc(list%nlat(kat)) = 0
+      end do
+   end do
+   !$omp end do
+   deallocate(loc)
+   !$omp end parallel
+
+end subroutine add_list_derivs
+
+
 !> Position derivatives of the charge of one atom w.r.t. all atomic positions,
 !> expanded from the compressed storage on the pattern of the half
 !> neighborlist of the solve and the charge constraint term
@@ -1562,14 +1738,7 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
    !> Verbosity level
    integer, intent(in), optional :: verbosity
 
-   integer :: iat
-   integer :: ndim
-   real(wp), allocatable :: yvec(:)
    real(wp), allocatable :: padj(:)
-   real(wp), allocatable :: dfdq_loc(:)
-   real(wp) :: uvecsum
-   real(wp) :: yvecsum
-   real(wp) :: scale
    integer :: print_unit, verbosity_solve
    type(timer_type) :: timer
 
@@ -1581,14 +1750,6 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
    if (size(dfdq) > mol%nat) then
       call fatal_error(error, "External partial derivative is wrong size")
       return
-   end if
-
-   if (solver%need_pos_def) then
-      ndim = mol%nat
-   else
-      ndim = mol%nat + 1
-      allocate(dfdq_loc(ndim), source=0.0_wp)
-      dfdq_loc(:mol%nat) = dfdq
    end if
 
    call timer%push("setup_external")
@@ -1608,33 +1769,9 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
       return
    end if
 
-   if (solver%need_pos_def) then
-      allocate(yvec(ndim))
-      do iat = 1, mol%nat
-         yvec(iat) = dfdq(iat) / cache%amat(iat, iat)
-      end do
-
-      ! Unconstrained response: J*yvec = dfdq
-      call print_adjoint_message(print_unit, verbosity_solve)
-      call solver%solve(amat=cache%amat, alist=cache%alist, &
-         & xvec=dfdq, vrhs=yvec, list=list, error=error)
-      if (allocated(error)) return
-
-      ! Projection of uvec on yvec
-      yvecsum = sum(yvec)
-      uvecsum = sum(cache%uvec)
-      scale = yvecsum / (uvecsum + eps)
-      allocate(padj(mol%nat))
-      padj = yvec - scale * cache%uvec
-   else
-      allocate(padj(ndim))
-
-      ! Direct solution: J*yvec = dfdq
-      call print_adjoint_message(print_unit, verbosity_solve)
-      call solver%solve(amat=cache%amat, xvec=dfdq_loc, vrhs=padj, &
-         & new_unit=print_unit, error=error)
-      if (allocated(error)) return
-   end if
+   call get_adjoint_vector(mol, solver, cache, error, dfdq, padj, list, &
+      & print_unit, verbosity_solve)
+   if (allocated(error)) return
 
    ! Evaluate external gradients via adjoint contraction:
    ! dfdr = p^T * (db/dr - dA/dr X q)
@@ -1913,21 +2050,7 @@ subroutine get_hessian_csr(self, mol, solver, cache, error, hessian, list, qvec,
    call timer%pop
    if (allocated(error)) return
 
-   if (verbosity_hess > 0) then
-      call print_stage_time(print_unit, "CN and local charge derivatives", &
-         & timer%get("update"))
-      call print_stage_time(print_unit, "Charges and energy", timer%get("charges"))
-      call print_stage_time(print_unit, "Partial derivatives dB/dR", &
-         & timer%get("dabdr"))
-      call print_stage_time(print_unit, "Inverse on the neighborlist", &
-         & timer%get("inverse"))
-      call print_stage_time(print_unit, "Implicit Hessian", timer%get("implicit"))
-      write(print_unit, '(a, t34, ":", 2(1x, f0.3))') &
-         & "  S*dB/dR/contraction (thread s)", tgroup
-      call print_stage_time(print_unit, "Explicit Hessian", timer%get("explicit"))
-      call print_stage_time(print_unit, "Total Hessian", timer%get("total"))
-      write(print_unit, '(a)') ''
-   end if
+   if (verbosity_hess > 0) call print_hessian_stages(print_unit, timer, tgroup)
 
 end subroutine get_hessian_csr
 
@@ -2005,28 +2128,35 @@ subroutine get_implicit_hessian_list(self, mol, cache, hessian, list, times)
    ! Charge constraint term, sum_b (dX_b/dR_x - (dA/dR_x*q)_b) * uvec(b) is
    ! sum(u) * dlambda(:, x), where sum(u) = 1^T A^-1 1 is positive
    call get_constraint_factors(mol, cache, list, hessian%dlambda)
-   hessian%uvecsum = sum(cache%uvec)
+   hessian%weight = sum(cache%uvec)
+   if (allocated(hessian%wvec)) deallocate(hessian%wvec)
 
 end subroutine get_implicit_hessian_list
 
 
 !> Add the implicit blocks of the atoms x <= y on a half neighborlist with its
 !> lower triangle in the cache for groups of max_group consecutive atoms of a
-!> spatial order. The charge derivatives of a group are contracted with the
-!> column y of the partial derivatives at once, so each column is read once
-!> per group. The column y of the partial derivatives holds the diagonal and
-!> the lower triangle in the row of y and the upper triangle in the rows of
-!> the neighbors of lower index, which is gathered once in the order of the
-!> lower triangle of the list. The Hessian keeps the blocks of y >= x on a half
-!> list, only the group of atom x writes the blocks (x, y), so the groups are
-!> independent.
-subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times)
+!> spatial order, without the charge constraint term. The block of the
+!> electrostatic energy is -sum_b B(b, y) dq_b/dR_x with the partial
+!> derivatives B = dX/dR - dA/dR*q. With d2f/dq2 of an external function it is
+!> the response of its gradient df/dR + p^T B, sum_b G(b, y) dq_b/dR_x
+!> + B(b, y) dp_b/dR_x, with the mixed derivatives G = d2f/dRdq - dA/dR*p in
+!> the cache and the derivatives of the adjoint vector
+!> dp/dR = S (G + d2f/dq2 dq/dR). The derivatives of a group are contracted
+!> with the column y of B and G at once, so each column is read once per group.
+!> The column y holds the diagonal and the lower triangle in the row of y and
+!> the upper triangle in the rows of the neighbors of lower index, which is
+!> gathered once in the order of the lower triangle of the list. The Hessian
+!> keeps the blocks of y >= x on a half list, only the group of atom x writes
+!> the blocks (x, y), so the groups are independent.
+subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times, &
+   & d2fdq2, d2fdq2_list)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
 
    !> Cache with the inverse and the partial derivatives on the half list and
-   !> its lower triangle
+   !> its lower triangle, and the mixed derivatives of an external function
    type(mchrg_cache), intent(in) :: cache
 
    !> Molecular nuclear Hessian on a half list with allocated blocks
@@ -2038,17 +2168,26 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times)
    !> Atoms in the spatial order of the groups
    integer, intent(in), contiguous :: order(:)
 
-   !> Time of the charge derivatives of the groups and of their contraction
-   !> in seconds, summed over the threads
+   !> Time of the derivatives of the groups and of their contraction in
+   !> seconds, summed over the threads
    real(wp), intent(out) :: times(2)
 
-   integer :: igrp, ngrp, nbmax, numax, x0, ng, i, ic, xat, yat, nb, nu, n, u
+   !> Upper triangle of the second derivatives of an external function w.r.t.
+   !> the charges on their list, selects the external Hessian
+   real(wp), intent(in), contiguous, optional :: d2fdq2(:)
+
+   !> Half list of the second derivatives w.r.t. the charges
+   type(csr_list), intent(in), optional :: d2fdq2_list
+
+   integer :: igrp, ngrp, nbmax, numax, x0, ng, i, xat, yat, nb, nu, n, u
    integer :: na, ia, act(max_group)
-   integer(i8) :: kat, lat, hat, tick(3), rate
-   real(wp) :: dy(3), tpan, tcon
+   integer(i8) :: lat, hat, pos, tick(3), rate
+   real(wp) :: scale, tpan, tcon
+   logical :: ext
    integer, allocatable :: bloc(:), hloc(:), blist(:), ulist(:)
    integer(i8), allocatable :: qpos(:, :), jmap(:, :)
-   real(wp), allocatable :: dlow(:, :), pan(:, :), qcol(:, :), acc(:, :, :)
+   real(wp), allocatable :: dlow(:, :), glow(:, :), pan(:, :), qcol(:, :)
+   real(wp), allocatable :: pcol(:, :), acc(:, :, :)
 
    times(:) = 0.0_wp
    ngrp = (mol%nat + max_group - 1) / max_group
@@ -2056,15 +2195,21 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times)
    nbmax = min(mol%nat, max_group * get_max_neighbors(mol%nat, list, cache%lowlist))
    numax = min(mol%nat, max_group * int(maxval(hessian%list%inl(2:mol%nat + 1) &
       & - hessian%list%inl(:mol%nat))))
+   ext = present(d2fdq2) .and. present(d2fdq2_list)
+   scale = -1.0_wp
+   if (ext) scale = 1.0_wp
 
-   ! Upper triangle of the columns of the partial derivatives in the order of
-   ! the lower triangle of the list
+   ! Upper triangle of the columns of B and G in the order of the lower
+   ! triangle of the list
    allocate(dlow(3, size(cache%lowlist%nlat, kind=i8)))
+   if (ext) allocate(glow(3, size(cache%lowlist%nlat, kind=i8)))
    !$omp parallel do default(none) schedule(runtime) &
-   !$omp shared(mol, cache, dlow) private(xat, lat)
+   !$omp shared(mol, cache, dlow, glow, ext) private(xat, lat, pos)
    do xat = 1, mol%nat
       do lat = cache%lowlist%inl(xat), cache%lowlist%inl(xat + 1) - 1
-         dlow(:, lat) = cache%dabdrlist_ut(:, cache%lowlist%pos(lat))
+         pos = cache%lowlist%pos(lat)
+         dlow(:, lat) = cache%dabdrlist_ut(:, pos)
+         if (ext) glow(:, lat) = cache%dafdrlist_ut(:, pos)
       end do
    end do
 
@@ -2072,16 +2217,17 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times)
    tpan = 0.0_wp
    tcon = 0.0_wp
    !$omp parallel default(none) &
-   !$omp shared(mol, cache, hessian, list, dlow, order, ngrp, nbmax) &
-   !$omp shared(numax) &
-   !$omp private(igrp, x0, ng, i, ic, xat, yat, nb, nu, n, u, kat, lat, hat) &
-   !$omp private(tick, rate, dy, bloc, hloc, blist, ulist, qpos, jmap, pan, qcol) &
+   !$omp shared(mol, cache, hessian, list, dlow, glow, order, ngrp, nbmax) &
+   !$omp shared(numax, ext, scale, d2fdq2, d2fdq2_list) &
+   !$omp private(igrp, x0, ng, i, xat, yat, nb, nu, n, u, hat, tick, rate) &
+   !$omp private(bloc, hloc, blist, ulist, qpos, jmap, pan, qcol, pcol) &
    !$omp private(na, ia, act, acc) &
    !$omp reduction(+:tpan, tcon)
    allocate(bloc(mol%nat), hloc(mol%nat), source=0)
    allocate(blist(nbmax), ulist(numax), qpos(max_group, nbmax), &
       & jmap(max_group, numax), pan(3 * max_group, nbmax), &
       & qcol(3 * max_group, nbmax), acc(3, 3, max_group))
+   if (ext) allocate(pcol(3 * max_group, nbmax))
    !$omp do schedule(runtime)
    do igrp = 1, ngrp
       call system_clock(tick(1), rate)
@@ -2089,9 +2235,12 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times)
       ng = min(max_group, mol%nat - x0)
 
       ! Charge derivatives dq_b/dR_x of the atoms x of the group for the union
-      ! of their neighbors b, zero if b is not a neighbor of x
+      ! of their neighbors b, zero if b is not a neighbor of x, and the
+      ! derivatives of the adjoint vector of an external function
       call get_group_dqdr(cache, list, order(x0 + 1:x0 + ng), nb, bloc, blist, &
          & qpos, pan, qcol)
+      if (ext) call get_group_dpdr(cache, list, d2fdq2, d2fdq2_list, ng, nb, &
+         & bloc, blist, qpos, qcol, pan, pcol)
       call system_clock(tick(2))
 
       ! Union of the atoms y >= x in the rows of the Hessian of the group with
@@ -2111,9 +2260,10 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times)
          end do
       end do
 
-      ! acc(jc, ic, ia) = sum_b (dX_b/dR_y,jc - (dA/dR_y,jc*q)_b) dq_b/dR_x,ic
-      ! for the atoms x = act(ia) of the group with a block (x, y) in the
-      ! Hessian, the block (x, y) is -acc
+      ! acc(jc, ic, ia) = sum_b B(b, y)_jc dq_b/dR_x,ic, for an external
+      ! function sum_b B(b, y)_jc dp_b/dR_x,ic + G(b, y)_jc dq_b/dR_x,ic, of
+      ! the atoms x = act(ia) of the group with a block (x, y) in the Hessian,
+      ! the block (x, y) is scale * acc
       do u = 1, nu
          yat = ulist(u)
          hloc(yat) = 0
@@ -2124,48 +2274,24 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times)
             act(na) = i
          end do
          acc(:, :, :na) = 0.0_wp
-         kat = list%inl(yat)
-         n = bloc(yat)
-         if (n > 0) then
-            dy = cache%dabdrlist_ut(:, kat)
-            do ia = 1, na
-               ic = 3 * (act(ia) - 1)
-               acc(:, 1, ia) = acc(:, 1, ia) + dy * qcol(ic + 1, n)
-               acc(:, 2, ia) = acc(:, 2, ia) + dy * qcol(ic + 2, n)
-               acc(:, 3, ia) = acc(:, 3, ia) + dy * qcol(ic + 3, n)
-            end do
+         if (ext) then
+            call add_column_products(list, cache%lowlist, cache%dabdrlist_ut, &
+               & cache%dabdrlist_lt, dlow, yat, bloc, act(:na), pcol, acc)
+            call add_column_products(list, cache%lowlist, cache%dafdrlist_ut, &
+               & cache%dafdrlist_lt, glow, yat, bloc, act(:na), qcol, acc)
+         else
+            call add_column_products(list, cache%lowlist, cache%dabdrlist_ut, &
+               & cache%dabdrlist_lt, dlow, yat, bloc, act(:na), qcol, acc)
          end if
-         do kat = list%inl(yat) + 1, list%inl(yat + 1) - 1
-            n = bloc(list%nlat(kat))
-            if (n == 0) cycle
-            dy = cache%dabdrlist_lt(:, kat)
-            do ia = 1, na
-               ic = 3 * (act(ia) - 1)
-               acc(:, 1, ia) = acc(:, 1, ia) + dy * qcol(ic + 1, n)
-               acc(:, 2, ia) = acc(:, 2, ia) + dy * qcol(ic + 2, n)
-               acc(:, 3, ia) = acc(:, 3, ia) + dy * qcol(ic + 3, n)
-            end do
-         end do
-         do lat = cache%lowlist%inl(yat), cache%lowlist%inl(yat + 1) - 1
-            n = bloc(cache%lowlist%nlat(lat))
-            if (n == 0) cycle
-            dy = dlow(:, lat)
-            do ia = 1, na
-               ic = 3 * (act(ia) - 1)
-               acc(:, 1, ia) = acc(:, 1, ia) + dy * qcol(ic + 1, n)
-               acc(:, 2, ia) = acc(:, 2, ia) + dy * qcol(ic + 2, n)
-               acc(:, 3, ia) = acc(:, 3, ia) + dy * qcol(ic + 3, n)
-            end do
-         end do
          do ia = 1, na
             i = act(ia)
             hat = jmap(i, u)
             if (yat == order(x0 + i)) then
                hessian%hesslist(:, :, hat) = hessian%hesslist(:, :, hat) &
-                  & - 0.5_wp * (acc(:, :, ia) + transpose(acc(:, :, ia)))
+                  & + 0.5_wp * scale * (acc(:, :, ia) + transpose(acc(:, :, ia)))
             else
                hessian%hesslist(:, :, hat) = hessian%hesslist(:, :, hat) &
-                  & - acc(:, :, ia)
+                  & + scale * acc(:, :, ia)
             end if
          end do
       end do
@@ -2178,10 +2304,92 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times)
    end do
    !$omp end do
    deallocate(bloc, hloc, blist, ulist, qpos, jmap, pan, qcol, acc)
+   if (ext) deallocate(pcol)
    !$omp end parallel
    times(:) = [tpan, tcon]
 
 end subroutine add_implicit_blocks_list
+
+
+!> Add the products of the column y of partial derivatives D on a half list
+!> with the derivatives of a group for the union of their neighbors,
+!> acc(jc, ic, ia) = acc(jc, ic, ia) + sum_b D(b, y)_jc col(3 * (act(ia) - 1)
+!> + ic, bloc(b)) over the atoms b of the union. The column holds the diagonal
+!> and the lower triangle in the row of y and the upper triangle in the rows of
+!> the neighbors of lower index, given in the order of the lower triangle of
+!> the list.
+subroutine add_column_products(list, low, dut, dlt, dlow, yat, bloc, act, col, &
+   & acc)
+
+   !> Half neighborlist
+   type(csr_list), intent(in) :: list
+
+   !> Lower triangle of the list
+   type(lower_list), intent(in) :: low
+
+   !> Diagonal and upper triangle of the partial derivatives on the list
+   real(wp), intent(in), contiguous :: dut(:, :)
+
+   !> Lower triangle of the partial derivatives on the list
+   real(wp), intent(in), contiguous :: dlt(:, :)
+
+   !> Upper triangle of the partial derivatives in the order of the lower
+   !> triangle of the list
+   real(wp), intent(in), contiguous :: dlow(:, :)
+
+   !> Atom of the column
+   integer, intent(in) :: yat
+
+   !> Index of each atom in the union, zero outside
+   integer, intent(in), contiguous :: bloc(:)
+
+   !> Group atoms of the products
+   integer, intent(in), contiguous :: act(:)
+
+   !> Derivatives of the group for the union
+   real(wp), intent(in), contiguous :: col(:, :)
+
+   !> Products for each atom of act
+   real(wp), intent(inout) :: acc(3, 3, max_group)
+
+   integer :: n, ia, ic
+   integer(i8) :: kat, lat
+   real(wp) :: dy(3)
+
+   n = bloc(yat)
+   if (n > 0) then
+      dy = dut(:, list%inl(yat))
+      do ia = 1, size(act)
+         ic = 3 * (act(ia) - 1)
+         acc(:, 1, ia) = acc(:, 1, ia) + dy * col(ic + 1, n)
+         acc(:, 2, ia) = acc(:, 2, ia) + dy * col(ic + 2, n)
+         acc(:, 3, ia) = acc(:, 3, ia) + dy * col(ic + 3, n)
+      end do
+   end if
+   do kat = list%inl(yat) + 1, list%inl(yat + 1) - 1
+      n = bloc(list%nlat(kat))
+      if (n == 0) cycle
+      dy = dlt(:, kat)
+      do ia = 1, size(act)
+         ic = 3 * (act(ia) - 1)
+         acc(:, 1, ia) = acc(:, 1, ia) + dy * col(ic + 1, n)
+         acc(:, 2, ia) = acc(:, 2, ia) + dy * col(ic + 2, n)
+         acc(:, 3, ia) = acc(:, 3, ia) + dy * col(ic + 3, n)
+      end do
+   end do
+   do lat = low%inl(yat), low%inl(yat + 1) - 1
+      n = bloc(low%nlat(lat))
+      if (n == 0) cycle
+      dy = dlow(:, lat)
+      do ia = 1, size(act)
+         ic = 3 * (act(ia) - 1)
+         acc(:, 1, ia) = acc(:, 1, ia) + dy * col(ic + 1, n)
+         acc(:, 2, ia) = acc(:, 2, ia) + dy * col(ic + 2, n)
+         acc(:, 3, ia) = acc(:, 3, ia) + dy * col(ic + 3, n)
+      end do
+   end do
+
+end subroutine add_column_products
 
 
 !> Compute the molecular nuclear Hessian of an external function f(q, R) of the
@@ -2192,8 +2400,8 @@ end subroutine add_implicit_blocks_list
 !> charges of the structure, the second derivative d2f/dR2 at fixed charges is
 !> added by the caller. The charges, energy, gradient and virial of the
 !> electrostatic energy of the same solve are optional.
-subroutine get_external_hessian(self, mol, solver, cache, error, dfdq, d2fdq2, &
-   & dfdrdq, hessian, qvec, energy, gradient, sigma, unit, verbosity)
+subroutine get_external_hessian_dense(self, mol, solver, cache, error, dfdq, &
+   & d2fdq2, dfdrdq, hessian, qvec, energy, gradient, sigma, unit, verbosity)
 
    !> Electronegativity-equilibration model
    class(mchrg_model_type), intent(in) :: self
@@ -2242,10 +2450,7 @@ subroutine get_external_hessian(self, mol, solver, cache, error, dfdq, d2fdq2, &
    integer, intent(in), optional :: verbosity
 
    real(wp), parameter :: trans(3, 1) = 0.0_wp
-   real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :), dtmpdr(:, :, :)
-   real(wp), allocatable :: yvec(:), padj(:), dfdq_loc(:)
-   real(wp) :: uvecsum, yvecsum, scale
-   integer :: iat, ndim, print_unit, verbosity_solve
+   real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :), padj(:)
 
    if (any(mol%periodic)) then
       call fatal_error(error, &
@@ -2259,11 +2464,6 @@ subroutine get_external_hessian(self, mol, solver, cache, error, dfdq, d2fdq2, &
       return
    end if
 
-   verbosity_solve = 0
-   if (present(verbosity)) verbosity_solve = verbosity
-   print_unit = output_unit
-   if (present(unit)) print_unit = unit
-
    ! Charges and their derivatives
    call self%update(mol, cache, trans, grad=.false., hess=.true.)
    allocate(dqdL(3, 3, mol%nat), dqdr(3, mol%nat, mol%nat))
@@ -2272,69 +2472,326 @@ subroutine get_external_hessian(self, mol, solver, cache, error, dfdq, d2fdq2, &
       & unit=unit)
    if (allocated(error)) return
 
-   ! Adjoint vector p = S df/dq
-   if (solver%need_pos_def) then
-      ndim = mol%nat
-      allocate(yvec(ndim))
-      do iat = 1, mol%nat
-         yvec(iat) = dfdq(iat) / cache%amat(iat, iat)
-      end do
-
-      ! Unconstrained response: J*yvec = dfdq
-      call print_adjoint_message(print_unit, verbosity_solve)
-      call solver%solve(amat=cache%amat, xvec=dfdq, vrhs=yvec, &
-         & new_unit=print_unit, error=error)
-      if (allocated(error)) return
-
-      ! Projection of uvec on yvec
-      yvecsum = sum(yvec)
-      uvecsum = sum(cache%uvec)
-      scale = yvecsum / (uvecsum + eps)
-      allocate(padj(mol%nat))
-      padj = yvec - scale * cache%uvec
-   else
-      ndim = mol%nat + 1
-      allocate(dfdq_loc(ndim), source=0.0_wp)
-      dfdq_loc(:mol%nat) = dfdq
-      allocate(padj(ndim))
-
-      ! Direct solution: J*yvec = dfdq
-      call print_adjoint_message(print_unit, verbosity_solve)
-      call solver%solve(amat=cache%amat, xvec=dfdq_loc, vrhs=padj, &
-         & new_unit=print_unit, error=error)
-      if (allocated(error)) return
-   end if
-
-   hessian(:, :) = 0.0_wp
+   call get_adjoint_vector(mol, solver, cache, error, dfdq, padj, unit=unit, &
+      & verbosity=verbosity)
+   if (allocated(error)) return
 
    ! Mixed derivatives of the Lagrangian, G^T = d2f/dRdq - dA/dR*p
-   call new_partial_derivs(mol, ndim, cache, dafdr=.true.)
-   call self%get_coulomb_derivs(mol, ndim, cache, alpha=-1.0_wp, &
+   call new_partial_derivs(mol, size(padj), cache, dafdr=.true.)
+   call self%get_coulomb_derivs(mol, size(padj), cache, alpha=-1.0_wp, &
       & p=padj(:mol%nat), dafdr=.true.)
    cache%dafdr = cache%dafdr + dfdrdq
 
-   ! Implicit part G^T dq/dR + (dq/dR)^T G
+   ! Implicit part G^T dq/dR + (dq/dR)^T (G + d2f/dq2 dq/dR), the second
+   ! factor replaces G in place
    call gemm(reshape(cache%dafdr, [3 * mol%nat, mol%nat]), &
-      & reshape(dqdr, [3 * mol%nat, mol%nat]), hessian, transb='t', &
-      & alpha=+1.0_wp, beta=1.0_wp)
-
+      & reshape(dqdr, [3 * mol%nat, mol%nat]), hessian, transb='t')
+   call gemm(dqdr, d2fdq2, cache%dafdr, beta=1.0_wp)
    call gemm(reshape(dqdr, [3 * mol%nat, mol%nat]), &
       & reshape(cache%dafdr, [3 * mol%nat, mol%nat]), hessian, transb='t', &
-      & alpha=+1.0_wp, beta=1.0_wp)
-
-   ! Implicit part (dq/dR)^T d2f/dq2 dq/dR
-   allocate(dtmpdr(3, mol%nat, mol%nat))
-   call gemm(dqdr, d2fdq2, dtmpdr)
-   call gemm(reshape(dtmpdr, [3 * mol%nat, mol%nat]), &
-      & reshape(dqdr, [3 * mol%nat, mol%nat]), hessian, transb='t', &
-      & alpha=+1.0_wp, beta=1.0_wp)
+      & beta=1.0_wp)
+   deallocate(cache%dafdr)
 
    ! Second derivatives of p^T (X - A*q) at fixed charges and adjoint vector
    call self%get_explicit_hessian(mol, cache, padj(:mol%nat), hessian, &
       & error, alpha=-1.0_wp, beta=1.0_wp)
    if (allocated(error)) return
 
-end subroutine get_external_hessian
+end subroutine get_external_hessian_dense
+
+
+!> Compute the molecular nuclear Hessian of an external function f(q, R) of the
+!> charges on a half neighborlist, which requires the CG solver with
+!> neighborlist support. The second derivatives d2f/dq2 and the mixed
+!> derivatives d2f/dRdq are given on half lists of their own, the mixed
+!> derivatives of the pairs outside of the neighborlist are dropped. With the
+!> adjoint vector p = S df/dq, the response of the gradient df/dR + p^T B with
+!> the partial derivatives B = dX/dR - dA/dR*q gives the block of the atoms x
+!> and y, sum_b G(b, y) dq_b/dR_x + B(b, y) dp_b/dR_x with the mixed
+!> derivatives G = d2f/dRdq - dA/dR*p and the derivatives of the adjoint
+!> vector dp/dR = S (G + d2f/dq2 dq/dR), plus the explicit part
+!> p^T (d2X/dR2 - d2A/dR2*q). The inverse S is kept on the pattern of the
+!> neighborlist, the dense rank-2 term of the charge constraint in its factors,
+!> where w = G^T u + B^T A^-1 d2f/dq2 u is exact with one further solve. The
+!> list of the Hessian is a copy of the neighborlist unless it is set up on
+!> entry. The derivatives of f are taken at the charges of the structure, the
+!> second derivative d2f/dR2 at fixed charges is added by the caller. The
+!> charges, energy, gradient and virial of the electrostatic energy of the same
+!> solve are optional.
+subroutine get_external_hessian_list(self, mol, solver, cache, error, dfdq, &
+   & d2fdq2, d2fdq2_list, dfdrdq_ut, dfdrdq_lt, dfdrdq_list, hessian, list, &
+   & qvec, energy, gradient, sigma, unit, verbosity)
+
+   !> Electronegativity-equilibration model
+   class(mchrg_model_type), intent(in) :: self
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Solver instance
+   class(mchrg_solver_type), intent(in) :: solver
+
+   !> Cache handling
+   type(mchrg_cache), intent(inout) :: cache
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Derivative of the external function w.r.t. atomic charges
+   real(wp), intent(in) :: dfdq(:)
+
+   !> Second derivative of the external function w.r.t. atomic charges, the
+   !> upper triangle of the symmetric matrix on the pattern of its list
+   real(wp), intent(in), contiguous :: d2fdq2(:)
+
+   !> Half list of the second derivative w.r.t. atomic charges
+   type(csr_list), intent(in) :: d2fdq2_list
+
+   !> Diagonal and upper triangle of the mixed derivative of the external
+   !> function w.r.t. positions and charges on its list, the entry of atom x in
+   !> the row of atom b holds d2f/dR_x dq_b
+   real(wp), intent(in) :: dfdrdq_ut(:, :)
+
+   !> Lower triangle of the mixed derivative on its list, the entry of atom x in
+   !> the row of atom b holds d2f/dR_b dq_x
+   real(wp), intent(in) :: dfdrdq_lt(:, :)
+
+   !> Half list of the mixed derivative w.r.t. positions and charges
+   type(csr_list), intent(in) :: dfdrdq_list
+
+   !> Molecular nuclear Hessian of the external function without d2f/dR2 in
+   !> compressed storage, the pattern of an allocated list is kept
+   type(mchrg_hessian), intent(inout) :: hessian
+
+   !> Multicharge neighborlist type (half)
+   type(csr_list), intent(in) :: list
+
+   !> Optional atomic partial charges
+   real(wp), intent(out), contiguous, optional :: qvec(:)
+
+   !> Optional electrostatic energy
+   real(wp), intent(inout), contiguous, optional :: energy(:)
+
+   !> Optional energy gradient
+   real(wp), intent(inout), contiguous, optional :: gradient(:, :)
+
+   !> Optional virial
+   real(wp), intent(inout), contiguous, optional :: sigma(:, :)
+
+   !> Output unit
+   integer, intent(in), optional :: unit
+
+   !> Verbosity level
+   integer, intent(in), optional :: verbosity
+
+   real(wp), parameter :: trans(3, 1) = 0.0_wp
+   integer :: iat, print_unit, verbosity_hess
+   real(wp) :: tgroup(2)
+   integer, allocatable :: order(:)
+   real(wp), allocatable :: padj(:), fuvec(:), tvec(:)
+   type(timer_type) :: timer
+
+   if (any(mol%periodic)) then
+      call fatal_error(error, &
+         & "Analytical Hessian is not available for periodic systems")
+      return
+   end if
+
+   if (size(dfdq) /= mol%nat &
+      & .or. size(d2fdq2, kind=i8) /= size(d2fdq2_list%nlat, kind=i8) &
+      & .or. size(dfdrdq_ut, 1) /= 3 &
+      & .or. size(dfdrdq_ut, 2, kind=i8) /= size(dfdrdq_list%nlat, kind=i8) &
+      & .or. any(shape(dfdrdq_lt) /= shape(dfdrdq_ut))) then
+      call fatal_error(error, "External partial derivatives are wrong size")
+      return
+   end if
+
+   if (.not. allocated(hessian%list%inl)) hessian%list = list
+   if (list%complete .or. hessian%list%complete .or. d2fdq2_list%complete &
+      & .or. dfdrdq_list%complete) then
+      call fatal_error(error, "The external Hessian on a neighborlist requires "// &
+         & "half lists")
+      return
+   end if
+   select type (solver)
+   class is (cg_solver)
+   class default
+      call fatal_error(error, "The Hessian on a neighborlist requires the CG solver")
+      return
+   end select
+
+   print_unit = output_unit
+   if (present(unit)) print_unit = unit
+   verbosity_hess = 0
+   if (present(verbosity)) verbosity_hess = verbosity
+
+   call timer%push("total")
+
+   ! CN and local charge derivatives, and the lower triangle of the list
+   call timer%push("update")
+   call self%update(mol, cache, trans, grad=.false., list=list, hess=.true.)
+   call timer%pop
+
+   ! Charges, energy and gradient
+   call timer%push("charges")
+   call self%solve(mol, solver, cache, error, energy=energy, gradient=gradient, &
+      & sigma=sigma, qvec=qvec, list=list, verbosity=verbosity, unit=unit)
+   call timer%pop
+   if (allocated(error)) return
+
+   ! Adjoint vector p = S df/dq and the response t = A^-1 d2f/dq2 u of the
+   ! factor w of the charge constraint term
+   call timer%push("adjoint")
+   call get_adjoint_vector(mol, solver, cache, error, dfdq, padj, list, unit, &
+      & verbosity)
+   if (allocated(error)) return
+   allocate(fuvec(mol%nat), tvec(mol%nat))
+   call spsymv_csr(mol%nat, d2fdq2, d2fdq2_list%inl, d2fdq2_list%nlat, &
+      & cache%uvec, fuvec)
+   do iat = 1, mol%nat
+      tvec(iat) = fuvec(iat) / (cache%alist(list%inl(iat)) + eps)
+   end do
+   call solver%solve(alist=cache%alist, xvec=fuvec, vrhs=tvec, list=list, &
+      & new_unit=print_unit, error=error)
+   call timer%pop
+   if (allocated(error)) return
+
+   ! Partial derivatives B = dX/dR - dA/dR*q and the mixed derivatives
+   ! G = d2f/dRdq - dA/dR*p on the list, and the inverse on the list
+   call print_hessian_header(print_unit, verbosity_hess)
+   call timer%push("dabdr")
+   call new_partial_derivs(mol, mol%nat, cache, list)
+   call self%get_xvec_derivs(mol, mol%nat, cache, beta=1.0_wp, list=list)
+   call self%get_coulomb_derivs(mol, mol%nat, cache, alpha=-1.0_wp, &
+      & p=cache%vrhs(:mol%nat), list=list)
+   call new_partial_derivs(mol, mol%nat, cache, list, dafdr=.true.)
+   call self%get_coulomb_derivs(mol, mol%nat, cache, alpha=-1.0_wp, p=padj, &
+      & list=list, dafdr=.true.)
+   call add_list_derivs(mol%nat, list, cache%dafdrlist_ut, cache%dafdrlist_lt, &
+      & dfdrdq_list, dfdrdq_ut, dfdrdq_lt)
+   call timer%pop
+   call timer%push("inverse")
+   select type (solver)
+   class is (cg_solver)
+      call get_inverse_list(mol, solver, cache, list, error, unit)
+   end select
+   call timer%pop
+   if (allocated(error)) return
+   deallocate(cache%alist)
+
+   ! Charge constraint term -(w dlambda^T + dlambda w^T) + phi dlambda dlambda^T
+   ! with dlambda = B^T u / sum(u), w = G^T u + B^T t and phi = u^T d2f/dq2 u
+   call get_constraint_factors(mol, cache, list, hessian%dlambda)
+   if (allocated(hessian%wvec)) deallocate(hessian%wvec)
+   allocate(hessian%wvec(3, mol%nat), source=0.0_wp)
+   call add_transposed_product(list, cache%dafdrlist_ut, cache%dafdrlist_lt, &
+      & cache%uvec, hessian%wvec)
+   call add_transposed_product(list, cache%dabdrlist_ut, cache%dabdrlist_lt, &
+      & tvec, hessian%wvec)
+   hessian%weight = dot_product(cache%uvec, fuvec)
+
+   if (allocated(hessian%hesslist)) deallocate(hessian%hesslist)
+   allocate(hessian%hesslist(3, 3, size(hessian%list%nlat, kind=i8)), &
+      & source=0.0_wp)
+
+   ! Response of the charges and of the adjoint vector,
+   ! sum_b G(b, y) dq_b/dR_x + B(b, y) dp_b/dR_x
+   call timer%push("implicit")
+   call get_spatial_order(mol, order)
+   call add_implicit_blocks_list(mol, cache, hessian, list, order, tgroup, &
+      & d2fdq2, d2fdq2_list)
+   call timer%pop
+   deallocate(cache%ainvlist, cache%dabdrlist_ut, cache%dabdrlist_lt, &
+      & cache%dafdrlist_ut, cache%dafdrlist_lt)
+
+   ! Second derivatives of p^T (X - A*q) at fixed charges and adjoint vector
+   call timer%push("explicit")
+   call self%get_explicit_hessian(mol, cache, padj, hessian, error, list, &
+      & alpha=-1.0_wp, beta=1.0_wp)
+   call timer%pop
+   call timer%pop
+   if (allocated(error)) return
+
+   if (verbosity_hess > 0) call print_hessian_stages(print_unit, timer, tgroup, &
+      & adjoint=.true.)
+
+end subroutine get_external_hessian_list
+
+
+!> Adjoint vector p = S df/dq of an external function of the charges, the
+!> response of the charges to df/dq under the charge constraint. The CG solver
+!> projects A^-1 df/dq onto the constraint with the constraint response u,
+!> the direct solver solves the augmented system, whose last element is the
+!> response of the Lagrange multiplier.
+subroutine get_adjoint_vector(mol, solver, cache, error, dfdq, padj, list, unit, &
+   & verbosity)
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Solver instance
+   class(mchrg_solver_type), intent(in) :: solver
+
+   !> Cache with the coefficient matrix, on the neighborlist if present, and
+   !> the constraint response of the CG solver
+   type(mchrg_cache), intent(in) :: cache
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Derivative of the external function w.r.t. atomic charges
+   real(wp), intent(in) :: dfdq(:)
+
+   !> Adjoint vector, of the dimension of the linear system
+   real(wp), allocatable, intent(out) :: padj(:)
+
+   !> Multicharge neighborlist type
+   type(csr_list), intent(in), optional :: list
+
+   !> Output unit
+   integer, intent(in), optional :: unit
+
+   !> Verbosity level
+   integer, intent(in), optional :: verbosity
+
+   integer :: iat, print_unit, verbosity_solve
+   real(wp) :: scale
+   real(wp), allocatable :: dfdq_loc(:)
+
+   verbosity_solve = 0
+   if (present(verbosity)) verbosity_solve = verbosity
+   print_unit = output_unit
+   if (present(unit)) print_unit = unit
+
+   call print_adjoint_message(print_unit, verbosity_solve)
+   if (solver%need_pos_def) then
+      ! Unconstrained response J*y = df/dq from the diagonal guess
+      allocate(padj(mol%nat))
+      if (present(list)) then
+         do iat = 1, mol%nat
+            padj(iat) = dfdq(iat) / (cache%alist(list%inl(iat)) + eps)
+         end do
+      else
+         do iat = 1, mol%nat
+            padj(iat) = dfdq(iat) / (cache%amat(iat, iat) + eps)
+         end do
+      end if
+      call solver%solve(amat=cache%amat, alist=cache%alist, xvec=dfdq, &
+         & vrhs=padj, list=list, new_unit=print_unit, error=error)
+      if (allocated(error)) return
+
+      ! Projection of the constraint response u on y
+      scale = sum(padj) / (sum(cache%uvec) + eps)
+      padj(:) = padj - scale * cache%uvec
+   else
+      allocate(dfdq_loc(mol%nat + 1), source=0.0_wp)
+      dfdq_loc(:mol%nat) = dfdq
+      allocate(padj(mol%nat + 1))
+      call solver%solve(amat=cache%amat, xvec=dfdq_loc, vrhs=padj, &
+         & new_unit=print_unit, error=error)
+   end if
+
+end subroutine get_adjoint_vector
 
 
 !> Semi-numerical Hessian and pressure tensor from central differences of
@@ -2869,5 +3326,39 @@ subroutine print_stage_time(unit, label, time)
 
    write(unit, '(a, t34, ":", a)') label, format_time(time)
 end subroutine print_stage_time
+
+
+!> Print the elapsed time of the stages of the Hessian on a neighborlist
+subroutine print_hessian_stages(unit, timer, tgroup, adjoint)
+   !> Output unit
+   integer, intent(in) :: unit
+
+   !> Timer of the stages
+   type(timer_type), intent(in) :: timer
+
+   !> Time of the derivatives of the groups and of their contraction in
+   !> seconds, summed over the threads
+   real(wp), intent(in) :: tgroup(2)
+
+   !> Print the stage of the adjoint solves of an external function
+   logical, intent(in), optional :: adjoint
+
+   call print_stage_time(unit, "CN and local charge derivatives", &
+      & timer%get("update"))
+   call print_stage_time(unit, "Charges and energy", timer%get("charges"))
+   if (present(adjoint)) then
+      if (adjoint) call print_stage_time(unit, "Adjoint vector", &
+         & timer%get("adjoint"))
+   end if
+   call print_stage_time(unit, "Partial derivatives dB/dR", timer%get("dabdr"))
+   call print_stage_time(unit, "Inverse on the neighborlist", &
+      & timer%get("inverse"))
+   call print_stage_time(unit, "Implicit Hessian", timer%get("implicit"))
+   write(unit, '(a, t34, ":", 2(1x, f0.3))') &
+      & "  S*dB/dR/contraction (thread s)", tgroup
+   call print_stage_time(unit, "Explicit Hessian", timer%get("explicit"))
+   call print_stage_time(unit, "Total Hessian", timer%get("total"))
+   write(unit, '(a)') ''
+end subroutine print_hessian_stages
 
 end module multicharge_model_type
