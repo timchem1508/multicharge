@@ -31,6 +31,7 @@ module multicharge_model_type
    use mctc_cutoff, only : get_lattice_points
    use mctc_ncoord, only : ncoord_type
    use mctc_csrlist, only : csr_list, spgemv_csr, spsymv_csr, new_csr_list
+   use multicharge_atomsort, only : get_spatial_order
    use multicharge_blas, only : gemv, symv, gemm
    use multicharge_model_cache, only : mchrg_cache
    use multicharge_solver_type, only : mchrg_solver_type
@@ -1421,109 +1422,6 @@ subroutine multiply_group_list(list, smat, nw, nb, bloc, blist, pan, qcol)
 end subroutine multiply_group_list
 
 
-!> Order of the atoms from a recursive bisection of the structure, which is
-!> independent of the input order of the atoms. Each max_group consecutive
-!> atoms of the order form a group of the charge derivatives on a
-!> neighborlist, whose atoms are close to each other and share most of their
-!> neighbors.
-subroutine get_spatial_order(mol, order)
-
-   !> Molecular structure data
-   type(structure_type), intent(in) :: mol
-
-   !> Atoms in the spatial order, order(i) is the atom at position i
-   integer, allocatable, intent(out) :: order(:)
-
-   integer :: iat
-
-   order = [(iat, iat = 1, mol%nat)]
-   call bisect_atoms(mol%xyz, order)
-
-end subroutine get_spatial_order
-
-
-!> Split the atoms at the median of the longest side of their bounding box
-!> until each part holds at most max_group atoms. The first part holds half
-!> of the groups of max_group atoms, so only the last part of the order holds
-!> fewer atoms.
-recursive subroutine bisect_atoms(xyz, order)
-
-   !> Cartesian coordinates
-   real(wp), intent(in) :: xyz(:, :)
-
-   !> Atoms to split, reordered in place
-   integer, intent(inout), contiguous :: order(:)
-
-   integer :: iat, nleft, dir
-   real(wp) :: lower(3), upper(3)
-
-   if (size(order) <= max_group) return
-
-   lower(:) = xyz(:, order(1))
-   upper(:) = lower
-   do iat = 2, size(order)
-      lower(:) = min(lower, xyz(:, order(iat)))
-      upper(:) = max(upper, xyz(:, order(iat)))
-   end do
-   dir = maxloc(upper - lower, 1)
-
-   nleft = max_group * ((size(order) + max_group - 1) / max_group / 2)
-   call select_atoms(xyz(dir, :), order, nleft)
-   call bisect_atoms(xyz, order(:nleft))
-   call bisect_atoms(xyz, order(nleft + 1:))
-
-end subroutine bisect_atoms
-
-
-!> Partial sort of the atoms by a coordinate with the selection algorithm of
-!> Hoare, the first k atoms of the order have no larger coordinate than the
-!> others
-subroutine select_atoms(coord, order, k)
-
-   !> Coordinate of each atom
-   real(wp), intent(in) :: coord(:)
-
-   !> Atoms to reorder
-   integer, intent(inout), contiguous :: order(:)
-
-   !> Number of atoms in the first part
-   integer, intent(in) :: k
-
-   integer :: lo, hi, i, j, tmp
-   real(wp) :: pivot, first, last
-
-   lo = 1
-   hi = size(order)
-   do while (lo < hi)
-      ! Median of the first, k-th and last coordinate of the range
-      first = coord(order(lo))
-      last = coord(order(hi))
-      pivot = max(min(first, last), min(max(first, last), coord(order(k))))
-      i = lo
-      j = hi
-      do while (i <= j)
-         do while (coord(order(i)) < pivot)
-            i = i + 1
-         end do
-         do while (pivot < coord(order(j)))
-            j = j - 1
-         end do
-         if (i <= j) then
-            tmp = order(i)
-            order(i) = order(j)
-            order(j) = tmp
-            i = i + 1
-            j = j - 1
-         end if
-      end do
-      ! The atoms between j and i have the coordinate of the pivot
-      if (j < k) lo = i
-      if (k < i) hi = j
-   end do
-
-end subroutine select_atoms
-
-
 !> Largest number of neighbors of an atom in a half list with its lower
 !> triangle, including the atom itself
 function get_max_neighbors(nat, list, low) result(kmax)
@@ -1789,10 +1687,11 @@ end subroutine get_external_gradient
 
 !> Compute the molecular nuclear Hessian of the electrostatic energy, the
 !> explicit part at fixed charges and the implicit part from the response of
-!> the charges. The charges, energy, gradient and virial of the same solve are
-!> optional.
-subroutine get_hessian_dense(self, mol, solver, cache, error, hessian, qvec, &
-   & energy, gradient, sigma, unit, verbosity)
+!> the charges. The cache has to hold the solve and the CN derivatives, update
+!> it with hess and solve first. The direct solver keeps the inverse of the
+!> augmented matrix only if the solve requested the charge derivatives.
+subroutine get_hessian_dense(self, mol, solver, cache, error, hessian, &
+   & unit, verbosity)
 
    !> Electronegativity-equilibration model
    class(mchrg_model_type), intent(in) :: self
@@ -1812,25 +1711,12 @@ subroutine get_hessian_dense(self, mol, solver, cache, error, hessian, qvec, &
    !> Molecular nuclear Hessian
    real(wp), intent(out) :: hessian(:, :)
 
-   !> Optional atomic partial charges
-   real(wp), intent(out), contiguous, optional :: qvec(:)
-
-   !> Optional electrostatic energy
-   real(wp), intent(inout), contiguous, optional :: energy(:)
-
-   !> Optional energy gradient
-   real(wp), intent(inout), contiguous, optional :: gradient(:, :)
-
-   !> Optional virial
-   real(wp), intent(inout), contiguous, optional :: sigma(:, :)
-
    !> Output unit
    integer, intent(in), optional :: unit
 
    !> Verbosity level
    integer, intent(in), optional :: verbosity
 
-   real(wp), parameter :: trans(3, 1) = 0.0_wp
    real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
 
    if (any(mol%periodic)) then
@@ -1839,12 +1725,21 @@ subroutine get_hessian_dense(self, mol, solver, cache, error, hessian, qvec, &
       return
    end if
 
-   ! Charges and their derivatives
-   call self%update(mol, cache, trans, grad=.false., hess=.true.)
+   ! Get variables from the model cache
+   if (.not. allocated(cache%vrhs) .or. .not. allocated(cache%dcndr)) then
+      call fatal_error(error, "Charges and CN derivatives are not in the cache, "// &
+         & "update the cache with hess and solve first")
+      return
+   end if
+
+   ! Charge derivatives
+   call new_partial_derivs(mol, mol%nat, cache)
+   call self%get_xvec_derivs(mol, mol%nat, cache, beta=1.0_wp)
+   call self%get_coulomb_derivs(mol, mol%nat, cache, alpha=-1.0_wp, &
+      & p=cache%vrhs(:mol%nat))
    allocate(dqdL(3, 3, mol%nat), dqdr(3, mol%nat, mol%nat))
-   call self%solve(mol, solver, cache, error, energy=energy, gradient=gradient, &
-      & sigma=sigma, qvec=qvec, dqdr=dqdr, dqdL=dqdL, verbosity=verbosity, &
-      & unit=unit)
+   call get_q_derivs(mol, solver, cache, error, mol%nat, dqdr, dqdL, &
+      & unit=unit, verbosity=verbosity)
    if (allocated(error)) return
 
    ! Second derivatives of 0.5 * q^T A q - q^T X at fixed charges
@@ -1863,10 +1758,10 @@ end subroutine get_hessian_dense
 !> which keeps the blocks of the atoms y >= x, and the dense charge constraint
 !> term in its factors. Without a neighborlist the list of the Hessian serves as
 !> neighborlist, with a neighborlist the list of the Hessian is a copy of it
-!> unless it is set up on entry. The charges, energy, gradient and virial of
-!> the same solve are optional.
-subroutine get_hessian_list(self, mol, solver, cache, error, hessian, list, qvec, &
-   & energy, gradient, sigma, unit, verbosity)
+!> unless it is set up on entry. The cache has to hold the solve and the lower
+!> triangle of the list, update it with hess and solve first.
+subroutine get_hessian_list(self, mol, solver, cache, error, hessian, list, &
+   & unit, verbosity)
 
    !> Electronegativity-equilibration model
    class(mchrg_model_type), intent(in) :: self
@@ -1891,18 +1786,6 @@ subroutine get_hessian_list(self, mol, solver, cache, error, hessian, list, qvec
    !> absent
    type(csr_list), intent(in), optional :: list
 
-   !> Optional atomic partial charges
-   real(wp), intent(out), contiguous, optional :: qvec(:)
-
-   !> Optional electrostatic energy
-   real(wp), intent(inout), contiguous, optional :: energy(:)
-
-   !> Optional energy gradient
-   real(wp), intent(inout), contiguous, optional :: gradient(:, :)
-
-   !> Optional virial
-   real(wp), intent(inout), contiguous, optional :: sigma(:, :)
-
    !> Output unit
    integer, intent(in), optional :: unit
 
@@ -1918,7 +1801,7 @@ subroutine get_hessian_list(self, mol, solver, cache, error, hessian, list, qvec
    if (present(list)) then
       if (.not. allocated(hessian%list%inl)) hessian%list = list
       call get_hessian_csr(self, mol, solver, cache, error, hessian, list, &
-         & qvec, energy, gradient, sigma, unit, verbosity)
+         & unit, verbosity)
    else
       if (.not. allocated(hessian%list%inl)) then
          call fatal_error(error, "The Hessian on a neighborlist requires a "// &
@@ -1927,7 +1810,7 @@ subroutine get_hessian_list(self, mol, solver, cache, error, hessian, list, qvec
       end if
       ! The list of the Hessian is only read, its blocks are written
       call get_hessian_csr(self, mol, solver, cache, error, hessian, &
-         & hessian%list, qvec, energy, gradient, sigma, unit, verbosity)
+         & hessian%list, unit, verbosity)
    end if
 
 end subroutine get_hessian_list
@@ -1937,8 +1820,8 @@ end subroutine get_hessian_list
 !> allocated half list of the Hessian. The implicit part is formed first from
 !> the inverse and the partial derivatives, which are freed before the
 !> explicit part.
-subroutine get_hessian_csr(self, mol, solver, cache, error, hessian, list, qvec, &
-   & energy, gradient, sigma, unit, verbosity)
+subroutine get_hessian_csr(self, mol, solver, cache, error, hessian, list, &
+   & unit, verbosity)
 
    !> Electronegativity-equilibration model
    class(mchrg_model_type), intent(in) :: self
@@ -1961,25 +1844,12 @@ subroutine get_hessian_csr(self, mol, solver, cache, error, hessian, list, qvec,
    !> Multicharge neighborlist type (half)
    type(csr_list), intent(in) :: list
 
-   !> Optional atomic partial charges
-   real(wp), intent(out), contiguous, optional :: qvec(:)
-
-   !> Optional electrostatic energy
-   real(wp), intent(inout), contiguous, optional :: energy(:)
-
-   !> Optional energy gradient
-   real(wp), intent(inout), contiguous, optional :: gradient(:, :)
-
-   !> Optional virial
-   real(wp), intent(inout), contiguous, optional :: sigma(:, :)
-
    !> Output unit
    integer, intent(in), optional :: unit
 
    !> Verbosity level
    integer, intent(in), optional :: verbosity
 
-   real(wp), parameter :: trans(3, 1) = 0.0_wp
    real(wp) :: tgroup(2)
    type(timer_type) :: timer
    integer :: print_unit, verbosity_hess
@@ -2003,17 +1873,13 @@ subroutine get_hessian_csr(self, mol, solver, cache, error, hessian, list, qvec,
 
    call timer%push("total")
 
-   ! CN and local charge derivatives, and the lower triangle of the list
-   call timer%push("update")
-   call self%update(mol, cache, trans, grad=.false., list=list, hess=.true.)
-   call timer%pop
+   if (.not. allocated(cache%vrhs) .or. .not. allocated(cache%lowlist%inl)) then
+      call fatal_error(error, "Charges and the lower triangle of the list are "// &
+         & "not in the cache, update the cache with hess and solve first")
+      return
+   end if
 
-   ! Charges, energy and gradient
-   call timer%push("charges")
-   call self%solve(mol, solver, cache, error, energy=energy, gradient=gradient, &
-      & sigma=sigma, qvec=qvec, list=list, verbosity=verbosity, unit=unit)
-   call timer%pop
-   if (allocated(error)) return
+   call timer%push("total")
 
    ! Partial derivatives dX/dR - dA/dR*q and the inverse on the list
    call print_hessian_header(print_unit, verbosity_hess)
@@ -2398,10 +2264,11 @@ end subroutine add_column_products
 !> G^T dq/dR + (dq/dR)^T G + (dq/dR)^T d2f/dq2 dq/dR from the response of the
 !> charges with G = d2f/dRdq - dA/dR*p. The derivatives of f are taken at the
 !> charges of the structure, the second derivative d2f/dR2 at fixed charges is
-!> added by the caller. The charges, energy, gradient and virial of the
-!> electrostatic energy of the same solve are optional.
+!> added by the caller. The cache has to hold the solve and the CN derivatives,
+!> update it with hess and solve first. The direct solver keeps the inverse of
+!> the augmented matrix only if the solve requested the charge derivatives.
 subroutine get_external_hessian_dense(self, mol, solver, cache, error, dfdq, &
-   & d2fdq2, dfdrdq, hessian, qvec, energy, gradient, sigma, unit, verbosity)
+   & d2fdq2, dfdrdq, hessian, unit, verbosity)
 
    !> Electronegativity-equilibration model
    class(mchrg_model_type), intent(in) :: self
@@ -2431,25 +2298,12 @@ subroutine get_external_hessian_dense(self, mol, solver, cache, error, dfdq, &
    !> Molecular nuclear Hessian of the external function without d2f/dR2
    real(wp), intent(out) :: hessian(:, :)
 
-   !> Optional atomic partial charges
-   real(wp), intent(out), contiguous, optional :: qvec(:)
-
-   !> Optional electrostatic energy
-   real(wp), intent(inout), contiguous, optional :: energy(:)
-
-   !> Optional energy gradient
-   real(wp), intent(inout), contiguous, optional :: gradient(:, :)
-
-   !> Optional virial
-   real(wp), intent(inout), contiguous, optional :: sigma(:, :)
-
    !> Output unit
    integer, intent(in), optional :: unit
 
    !> Verbosity level
    integer, intent(in), optional :: verbosity
 
-   real(wp), parameter :: trans(3, 1) = 0.0_wp
    real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :), padj(:)
 
    if (any(mol%periodic)) then
@@ -2464,12 +2318,21 @@ subroutine get_external_hessian_dense(self, mol, solver, cache, error, dfdq, &
       return
    end if
 
-   ! Charges and their derivatives
-   call self%update(mol, cache, trans, grad=.false., hess=.true.)
+   ! Get variables from the model cache
+   if (.not. allocated(cache%vrhs) .or. .not. allocated(cache%dcndr)) then
+      call fatal_error(error, "Charges and CN derivatives are not in the cache, "// &
+         & "update the cache with hess and solve first")
+      return
+   end if
+
+   ! Charge derivatives
+   call new_partial_derivs(mol, mol%nat, cache)
+   call self%get_xvec_derivs(mol, mol%nat, cache, beta=1.0_wp)
+   call self%get_coulomb_derivs(mol, mol%nat, cache, alpha=-1.0_wp, &
+      & p=cache%vrhs(:mol%nat))
    allocate(dqdL(3, 3, mol%nat), dqdr(3, mol%nat, mol%nat))
-   call self%solve(mol, solver, cache, error, energy=energy, gradient=gradient, &
-      & sigma=sigma, qvec=qvec, dqdr=dqdr, dqdL=dqdL, verbosity=verbosity, &
-      & unit=unit)
+   call get_q_derivs(mol, solver, cache, error, mol%nat, dqdr, dqdL, &
+      & unit=unit, verbosity=verbosity)
    if (allocated(error)) return
 
    call get_adjoint_vector(mol, solver, cache, error, dfdq, padj, unit=unit, &
@@ -2515,12 +2378,12 @@ end subroutine get_external_hessian_dense
 !> where w = G^T u + B^T A^-1 d2f/dq2 u is exact with one further solve. The
 !> list of the Hessian is a copy of the neighborlist unless it is set up on
 !> entry. The derivatives of f are taken at the charges of the structure, the
-!> second derivative d2f/dR2 at fixed charges is added by the caller. The
-!> charges, energy, gradient and virial of the electrostatic energy of the same
-!> solve are optional.
+!> second derivative d2f/dR2 at fixed charges is added by the caller. The cache
+!> has to hold the solve and the lower triangle of the list, update it with
+!> hess and solve first.
 subroutine get_external_hessian_list(self, mol, solver, cache, error, dfdq, &
    & d2fdq2, d2fdq2_list, dfdrdq_ut, dfdrdq_lt, dfdrdq_list, hessian, list, &
-   & qvec, energy, gradient, sigma, unit, verbosity)
+   & unit, verbosity)
 
    !> Electronegativity-equilibration model
    class(mchrg_model_type), intent(in) :: self
@@ -2566,25 +2429,12 @@ subroutine get_external_hessian_list(self, mol, solver, cache, error, dfdq, &
    !> Multicharge neighborlist type (half)
    type(csr_list), intent(in) :: list
 
-   !> Optional atomic partial charges
-   real(wp), intent(out), contiguous, optional :: qvec(:)
-
-   !> Optional electrostatic energy
-   real(wp), intent(inout), contiguous, optional :: energy(:)
-
-   !> Optional energy gradient
-   real(wp), intent(inout), contiguous, optional :: gradient(:, :)
-
-   !> Optional virial
-   real(wp), intent(inout), contiguous, optional :: sigma(:, :)
-
    !> Output unit
    integer, intent(in), optional :: unit
 
    !> Verbosity level
    integer, intent(in), optional :: verbosity
 
-   real(wp), parameter :: trans(3, 1) = 0.0_wp
    integer :: iat, print_unit, verbosity_hess
    real(wp) :: tgroup(2)
    integer, allocatable :: order(:)
@@ -2625,19 +2475,13 @@ subroutine get_external_hessian_list(self, mol, solver, cache, error, dfdq, &
    verbosity_hess = 0
    if (present(verbosity)) verbosity_hess = verbosity
 
+   if (.not. allocated(cache%vrhs) .or. .not. allocated(cache%lowlist%inl)) then
+      call fatal_error(error, "Charges and the lower triangle of the list are "// &
+         & "not in the cache, update the cache with hess and solve first")
+      return
+   end if
+
    call timer%push("total")
-
-   ! CN and local charge derivatives, and the lower triangle of the list
-   call timer%push("update")
-   call self%update(mol, cache, trans, grad=.false., list=list, hess=.true.)
-   call timer%pop
-
-   ! Charges, energy and gradient
-   call timer%push("charges")
-   call self%solve(mol, solver, cache, error, energy=energy, gradient=gradient, &
-      & sigma=sigma, qvec=qvec, list=list, verbosity=verbosity, unit=unit)
-   call timer%pop
-   if (allocated(error)) return
 
    ! Adjoint vector p = S df/dq and the response t = A^-1 d2f/dq2 u of the
    ! factor w of the charge constraint term
@@ -2718,11 +2562,7 @@ subroutine get_external_hessian_list(self, mol, solver, cache, error, dfdq, &
 end subroutine get_external_hessian_list
 
 
-!> Adjoint vector p = S df/dq of an external function of the charges, the
-!> response of the charges to df/dq under the charge constraint. The CG solver
-!> projects A^-1 df/dq onto the constraint with the constraint response u,
-!> the direct solver solves the augmented system, whose last element is the
-!> response of the Lagrange multiplier.
+!> Adjoint vector p = S df/dq of an external function of the charges.
 subroutine get_adjoint_vector(mol, solver, cache, error, dfdq, padj, list, unit, &
    & verbosity)
 

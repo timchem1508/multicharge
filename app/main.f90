@@ -173,7 +173,8 @@ program main
    grad = egrad .or. qgrad
 
    call timer%push("update")
-   call model%update(mol, cache, trans, grad, list, dqdr=qgrad)
+   call model%update(mol, cache, trans, grad, list, dqdr=qgrad, &
+   & hess=analytic_hessian)
    call timer%pop
    if (verbosity > 1) then
       write(output_unit, '(a, 1x, a)') "Get coordination number time : ", &
@@ -197,12 +198,17 @@ program main
       ! charge constraint term, only expanded for the output. The neighborlist
       ! moves into the Hessian, which then serves as the only list.
       allocate(hesslist)
+      call timer%push("hess")
+      call model%solve(mol, solver, cache, error, energy, gradient, sigma, &
+      & qvec, list=list, efield=efield, verbosity=verbosity, unit=output_unit)
+      if (allocated(error)) then
+         write(error_unit, '(a)') error%message
+         error stop
+      end if
       hesslist%list = list
       deallocate(list)
-      call timer%push("hess")
-      call model%get_hessian(mol, solver, cache, error, hesslist, qvec=qvec, &
-      & energy=energy, gradient=gradient, sigma=sigma, unit=output_unit, &
-      & verbosity=verbosity)
+      call model%get_hessian(mol, solver, cache, error, hesslist, &
+      & unit=output_unit, verbosity=verbosity)
       call timer%pop
       if (verbosity > 1) then
          write(output_unit, '(a, 1x, a)') "Get analytical Hessian time : ", &
@@ -211,8 +217,14 @@ program main
    else if (analytic_hessian) then
       allocate(hessian(3 * mol%nat, 3 * mol%nat))
       call timer%push("hess")
-      call model%get_hessian(mol, solver, cache, error, hessian, qvec, energy, &
-      & gradient, sigma, unit=output_unit, verbosity=verbosity)
+      call model%solve(mol, solver, cache, error, energy, gradient, sigma, &
+      & qvec, efield=efield, verbosity=verbosity, unit=output_unit)
+      if (allocated(error)) then
+         write(error_unit, '(a)') error%message
+         error stop
+      end if
+      call model%get_hessian(mol, solver, cache, error, hessian, &
+      & unit=output_unit, verbosity=verbosity)
       call timer%pop
       if (verbosity > 1) then
          write(output_unit, '(a, 1x, a)') "Get analytical Hessian time : ", &

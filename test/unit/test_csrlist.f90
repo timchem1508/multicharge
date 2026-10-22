@@ -28,7 +28,6 @@ module test_csrlist
    use multicharge_model_eeqbc, only : eeqbc_model
    use multicharge_param, only : new_eeq2019_model, new_eeqbc2025_model
    use multicharge_model_cache, only : mchrg_cache
-   use multicharge_ncoord, only : get_pair_derivs
    use mctc_ncoord, only : ncoord_type
    use multicharge_charge, only : get_charges, get_eeq_charges, get_eeqbc_charges
    use multicharge_solver_type, only : mchrg_solver_type, mchrg_solver_input
@@ -82,10 +81,6 @@ subroutine collect_csrlist(testsuite)
    & new_unittest("eeqbc-api-mb01", test_eeqbc_api_mb01), &
    & new_unittest("eeqbc-api-mb02", test_eeqbc_api_mb02), &
    & new_unittest("eeqbc-api-actinides", test_eeqbc_api_actinides), &
-   & new_unittest("pair-derivs-mb01", test_pair_derivs_mb01), &
-   & new_unittest("pair-derivs-charged", test_pair_derivs_charged), &
-   & new_unittest("pair-derivs-co2", test_pair_derivs_co2), &
-   & new_unittest("pair-derivs-ice", test_pair_derivs_ice), &
    & new_unittest("partial-derivs-mb01", test_partial_derivs_mb01), &
    & new_unittest("partial-derivs-co2", test_partial_derivs_co2), &
    & new_unittest("partial-derivs-ice", test_partial_derivs_ice), &
@@ -1023,171 +1018,6 @@ subroutine test_eeqbc_api_actinides(error)
 
 end subroutine test_eeqbc_api_actinides
 
-
-!> Rebuild dense CN derivatives from the pair derivatives and compare them
-subroutine check_pair_derivs(error, mol, ncoord, trans, cn, dcndr, dcndL)
-
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
-
-   !> Molecular structure data
-   type(structure_type), intent(in) :: mol
-
-   !> Coordination number container
-   class(ncoord_type), intent(in) :: ncoord
-
-   !> Lattice points
-   real(wp), intent(in) :: trans(:, :)
-
-   !> Coordination numbers including the maximum CN cutoff
-   real(wp), intent(in) :: cn(:)
-
-   !> Reference derivative w.r.t. the Cartesian coordinates
-   real(wp), intent(in) :: dcndr(:, :, :)
-
-   !> Reference derivative w.r.t. strain deformations
-   real(wp), intent(in) :: dcndL(:, :, :)
-
-   integer :: iat, jat, itr
-   real(wp) :: vec(3), dpair(3, 2), spair(3, 3, 2)
-   real(wp), allocatable :: dcndr_pair(:, :, :), dcndL_pair(:, :, :)
-
-   allocate(dcndr_pair(3, mol%nat, mol%nat), dcndL_pair(3, 3, mol%nat), &
-      & source=0.0_wp)
-
-   do iat = 1, mol%nat
-      do jat = 1, iat
-         do itr = 1, size(trans, 2)
-            vec = mol%xyz(:, iat) - (mol%xyz(:, jat) + trans(:, itr))
-            call get_pair_derivs(ncoord, mol, iat, jat, vec, cn(iat), cn(jat), &
-               & dpair, spair)
-
-            dcndr_pair(:, iat, iat) = dcndr_pair(:, iat, iat) + dpair(:, 1)
-            dcndr_pair(:, jat, iat) = dcndr_pair(:, jat, iat) - dpair(:, 1)
-            dcndr_pair(:, iat, jat) = dcndr_pair(:, iat, jat) + dpair(:, 2)
-            dcndr_pair(:, jat, jat) = dcndr_pair(:, jat, jat) - dpair(:, 2)
-
-            dcndL_pair(:, :, iat) = dcndL_pair(:, :, iat) + spair(:, :, 1)
-            dcndL_pair(:, :, jat) = dcndL_pair(:, :, jat) + spair(:, :, 2)
-         end do
-      end do
-   end do
-
-   if (any(abs(dcndr_pair - dcndr) > thr1)) then
-      call test_failed(error, "Pair derivatives w.r.t. positions do not match")
-      print'(es21.14)', maxval(abs(dcndr_pair - dcndr))
-      return
-   end if
-
-   if (any(abs(dcndL_pair - dcndL) > thr1)) then
-      call test_failed(error, "Pair derivatives w.r.t. strain do not match")
-      print'(es21.14)', maxval(abs(dcndL_pair - dcndL))
-      return
-   end if
-
-end subroutine check_pair_derivs
-
-
-!> Check pair derivatives of the CN and the local charges of a model
-subroutine test_pair_derivs(error, mol, model)
-
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
-
-   !> Molecular structure data
-   type(structure_type), intent(in) :: mol
-
-   !> Electronegativity equilibration model
-   class(mchrg_model_type), intent(in) :: model
-
-   real(wp), allocatable :: trans(:, :)
-   real(wp), allocatable :: cn(:), dcndr(:, :, :), dcndL(:, :, :)
-   real(wp), allocatable :: qloc(:), dqlocdr(:, :, :), dqlocdL(:, :, :)
-
-   allocate(cn(mol%nat), dcndr(3, mol%nat, mol%nat), dcndL(3, 3, mol%nat))
-   allocate(qloc(mol%nat), dqlocdr(3, mol%nat, mol%nat), dqlocdL(3, 3, mol%nat))
-
-   call get_lattice_points(mol%periodic, mol%lattice, model%ncoord%cutoff, trans)
-
-   call model%ncoord%get_coordination_number(mol, trans, cn, dcndr=dcndr, &
-      & dcndL=dcndL)
-   call check_pair_derivs(error, mol, model%ncoord, trans, cn, dcndr, dcndL)
-   if (allocated(error)) return
-
-   ! The maximum CN cutoff acts on the local charges before the total charge
-   ! is distributed
-   call model%local_charge(mol, trans, qloc, dqlocdr=dqlocdr, dqlocdL=dqlocdL)
-   call check_pair_derivs(error, mol, model%ncoord_en, trans, &
-      & qloc - mol%charge / real(mol%nat, wp), dqlocdr, dqlocdL)
-
-end subroutine test_pair_derivs
-
-
-subroutine test_pair_derivs_mb01(error)
-
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
-
-   type(structure_type) :: mol
-   class(mchrg_model_type), allocatable :: model
-
-   call get_structure(mol, "MB16-43", "01")
-   call new_eeqbc2025_model(mol, model, error)
-   if (allocated(error)) return
-   call test_pair_derivs(error, mol, model)
-
-end subroutine test_pair_derivs_mb01
-
-
-subroutine test_pair_derivs_charged(error)
-
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
-
-   type(structure_type) :: mol
-   class(mchrg_model_type), allocatable :: model
-
-   call get_structure(mol, "MB16-43", "02")
-   mol%charge = -2.0_wp
-   call new_eeqbc2025_model(mol, model, error)
-   if (allocated(error)) return
-   call test_pair_derivs(error, mol, model)
-
-end subroutine test_pair_derivs_charged
-
-
-subroutine test_pair_derivs_co2(error)
-
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
-
-   type(structure_type) :: mol
-   class(mchrg_model_type), allocatable :: model
-
-   call get_structure(mol, "X23", "CO2")
-   call new_eeqbc2025_model(mol, model, error)
-   if (allocated(error)) return
-   call test_pair_derivs(error, mol, model)
-
-end subroutine test_pair_derivs_co2
-
-
-subroutine test_pair_derivs_ice(error)
-
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
-
-   type(structure_type) :: mol
-   class(mchrg_model_type), allocatable :: model
-
-   call get_structure(mol, "ICE10", "vi")
-   call new_eeqbc2025_model(mol, model, error)
-   if (allocated(error)) return
-   call test_pair_derivs(error, mol, model)
-
-end subroutine test_pair_derivs_ice
-
-
 !> Expand the half neighbour list storage of the partial derivatives
 subroutine expand_partial_derivs(mol, list, dlist_ut, dlist_lt, dabdr)
 
@@ -1922,6 +1752,7 @@ subroutine test_hessian(error, mol, model)
    type(csr_list), allocatable :: list
    type(mchrg_hessian), allocatable :: sphess
    integer :: ndim
+   real(wp), parameter :: trans(3, 1) = 0.0_wp
    real(wp), allocatable :: hessian(:, :), refhess(:, :)
 
    allocate(cg_input :: solver_input)
@@ -1949,12 +1780,18 @@ subroutine test_hessian(error, mol, model)
    select type (model)
    type is (eeqbc_model)
       allocate(cache)
+      call model%update(mol, cache, trans, grad=.false., hess=.true.)
+      call model%solve(mol, solver, cache, error)
+      if (allocated(error)) return
       call model%get_hessian(mol, solver, cache, error, refhess)
       if (allocated(error)) return
 
       ! The list of the Hessian is a copy of the neighbour list
       deallocate(cache)
       allocate(cache, sphess)
+      call model%update(mol, cache, trans, grad=.false., hess=.true., list=list)
+      call model%solve(mol, solver, cache, error, list=list)
+      if (allocated(error)) return
       call model%get_hessian(mol, solver, cache, error, sphess, list=list)
       if (allocated(error)) return
    class default
@@ -2005,6 +1842,7 @@ subroutine test_hessian_pattern(error, mol, model, nlcutoff, hcutoff)
    type(mchrg_cache), allocatable :: cache
    type(csr_list), allocatable :: list
    type(mchrg_hessian), allocatable :: refhess, sphess
+   real(wp), parameter :: trans(3, 1) = 0.0_wp
    integer :: xat
    integer(i8) :: hat, kat
    logical :: found
@@ -2037,11 +1875,17 @@ subroutine test_hessian_pattern(error, mol, model, nlcutoff, hcutoff)
       allocate(cache)
       call new_allpairs_hessian(mol, refhess, error)
       if (allocated(error)) return
+      call model%update(mol, cache, trans, grad=.false., hess=.true., list=list)
+      call model%solve(mol, solver, cache, error, list=list)
+      if (allocated(error)) return
       call model%get_hessian(mol, solver, cache, error, refhess, list)
       if (allocated(error)) return
 
       deallocate(cache)
       allocate(cache)
+      call model%update(mol, cache, trans, grad=.false., hess=.true., list=list)
+      call model%solve(mol, solver, cache, error, list=list)
+      if (allocated(error)) return
       call model%get_hessian(mol, solver, cache, error, sphess, list)
       if (allocated(error)) return
    class default
@@ -2100,6 +1944,7 @@ subroutine test_external_hessian(error, mol, model)
    type(mchrg_hessian), allocatable :: sphess
    integer :: ndim
    real(wp), allocatable :: dfdq(:), d2fdq2(:, :), dfdrdq(:, :, :), qval(:)
+   real(wp), parameter :: trans(3, 1) = 0.0_wp
    real(wp), allocatable :: rval_ut(:, :), rval_lt(:, :), hessian(:, :), refhess(:, :)
 
    allocate(cg_input :: solver_input)
@@ -2132,6 +1977,9 @@ subroutine test_external_hessian(error, mol, model)
    select type (model)
    type is (eeqbc_model)
       allocate(cache)
+      call model%update(mol, cache, trans, grad=.false., hess=.true.)
+      call model%solve(mol, solver, cache, error)
+      if (allocated(error)) return
       call model%get_external_hessian(mol, solver, cache, error, dfdq, d2fdq2, &
          & dfdrdq, refhess)
       if (allocated(error)) return
@@ -2139,6 +1987,9 @@ subroutine test_external_hessian(error, mol, model)
       ! The list of the Hessian is a copy of the neighbour list
       deallocate(cache)
       allocate(cache, sphess)
+      call model%update(mol, cache, trans, grad=.false., hess=.true., list=list)
+      call model%solve(mol, solver, cache, error, list=list)
+      if (allocated(error)) return
       call model%get_external_hessian(mol, solver, cache, error, dfdq, qval, &
          & qlist, rval_ut, rval_lt, rlist, sphess, list)
       if (allocated(error)) return
@@ -2227,6 +2078,9 @@ subroutine test_external_hessian_sparse(error, mol, model, nlcutoff, ecutoff)
    type is (eeqbc_model)
       allocate(cache)
       call new_allpairs_hessian(mol, sphess, error)
+      if (allocated(error)) return
+      call model%update(mol, cache, trans, grad=.false., hess=.true., list=list)
+      call model%solve(mol, solver, cache, error, list=list)
       if (allocated(error)) return
       call model%get_external_hessian(mol, solver, cache, error, dfdq, qval, &
          & qlist, rval_ut, rval_lt, rlist, sphess, list)

@@ -1650,9 +1650,11 @@ subroutine test_hessian(error, mol, model, cg)
    class(mchrg_solver_input), allocatable :: solver_input
    type(mchrg_cache), allocatable :: cache
    integer :: iat, ic, ndim
+   real(wp), parameter :: trans(3, 1) = 0.0_wp
    real(wp), parameter :: step = 1.0e-6_wp
    real(wp) :: xorig, sr(3, 3), sl(3, 3)
    real(wp), allocatable :: gr(:, :), gl(:, :), hessian(:, :), numhess(:, :)
+   real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
    logical :: use_cg
 
    allocate(direct_input :: solver_input)
@@ -1700,6 +1702,10 @@ subroutine test_hessian(error, mol, model, cg)
    allocate(cache)
    select type (model)
     type is (eeqbc_model)
+      allocate(dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat))
+      call model%update(mol, cache, trans, grad=.false., hess=.true.)
+      call model%solve(mol, solver, cache, error, dqdr=dqdr, dqdL=dqdL)
+      if (allocated(error)) return
       call model%get_hessian(mol, solver, cache, error, hessian)
       if (allocated(error)) return
     class default
@@ -1857,6 +1863,7 @@ subroutine test_external_hessian(error, mol, model, cg)
    real(wp), parameter :: step = 1.0e-6_wp
    real(wp) :: xorig
    real(wp), allocatable :: gr(:, :), gl(:, :), hessian(:, :), numhess(:, :)
+   real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: qvec(:), dfdq(:), d2fdq2(:, :), dfdrdq(:, :, :)
    real(wp), allocatable :: dfdr(:, :), d2fdr2(:, :)
    logical :: use_cg
@@ -1914,6 +1921,10 @@ subroutine test_external_hessian(error, mol, model, cg)
    end if
 
    allocate(cache)
+   allocate(dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat))
+   call model%update(mol, cache, trans, grad=.false., hess=.true.)
+   call model%solve(mol, solver, cache, error, dqdr=dqdr, dqdL=dqdL)
+   if (allocated(error)) return
    call model%get_external_hessian(mol, solver, cache, error, dfdq, d2fdq2, &
       & dfdrdq, hessian)
    if (allocated(error)) return

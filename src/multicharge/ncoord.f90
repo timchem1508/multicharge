@@ -35,99 +35,165 @@
 !> For the local charges the CN of the electronegativity weighted container
 !> has to be passed, i.e. the local charges without the distributed total charge.
 module multicharge_ncoord
-   use mctc_env, only : wp
+   use mctc_csrlist, only : csr_list
+   use multicharge_lowerlist, only : count_neighbors, get_neighbor
+   use multicharge_model_cache, only : mchrg_cache
+   use multicharge_model_type, only : mchrg_hessian
+   use mctc_env, only : wp, i8
    use mctc_io, only : structure_type
    use mctc_ncoord, only : ncoord_type
    implicit none
    private
 
-   public :: get_pair_derivs
+   public :: add_ncoord_hessian_list, get_cn_entries_list
 
+   real(wp), parameter :: cnthr = epsilon(1.0_wp)**2
 
 contains
 
 
-!> Derivative of a single pair contribution with the directed factor and the
-!> chain rule of the maximum CN cutoff
-pure subroutine get_pair_derivs(ncoord, mol, iat, jat, vec, cni, cnj, dcndr, dcndL)
-
+!> Add dE/dCN contracted with the Cartesian Hessian of the coordination numbers
+!> to the compressed Hessian on a half list, as add_coordination_number_hessian
+!> of mctc-lib for a molecular system with a half neighborlist with its lower
+!> triangle in the cache and without a maximum CN cutoff. Each iteration only
+!> updates the row of atom iat of the Hessian, the diagonal block from all
+!> pairs of iat and the blocks of the atoms of higher index.
+subroutine add_ncoord_hessian_list(ncoord, mol, list, cache, dEdcn, hessian)
    !> Coordination number container
    class(ncoord_type), intent(in) :: ncoord
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
 
-   !> Index of the first atom of the pair
-   integer, intent(in) :: iat
+   !> Multicharge neighborlist type (half)
+   type(csr_list), intent(in) :: list
 
-   !> Index of the second atom of the pair
-   integer, intent(in) :: jat
+   !> Cache with the lower triangle of the list
+   type(mchrg_cache), intent(in) :: cache
 
-   !> Distance vector, vec = r(iat) - r(jat) - T
-   real(wp), intent(in) :: vec(3)
+   !> Derivative of the expression w.r.t. the coordination numbers
+   real(wp), intent(in) :: dEdcn(:)
 
-   !> Coordination number of the first atom including the cutoff
-   real(wp), intent(in) :: cni
+   !> Molecular nuclear Hessian on a half list with allocated blocks
+   type(mchrg_hessian), intent(inout) :: hessian
 
-   !> Coordination number of the second atom including the cutoff
-   real(wp), intent(in) :: cnj
+   integer :: iat, jat, izp, jzp, ic, ient
+   integer(i8) :: kat, hat
+   real(wp) :: rij(3), r1, r2, cutoff2, den, dEdcnij, countd, countd2
+   real(wp) :: box(3, 3)
+   integer(i8), allocatable :: hpos(:)
 
-   !> Derivatives of CN(iat) and CN(jat) w.r.t. the distance vector
-   real(wp), intent(out) :: dcndr(3, 2)
+   cutoff2 = ncoord%cutoff**2
 
-   !> Derivatives of CN(iat) and CN(jat) w.r.t. strain deformations
-   real(wp), intent(out) :: dcndL(3, 3, 2)
+   !$omp parallel default(none) &
+   !$omp shared(ncoord, mol, list, cache, dEdcn, hessian, cutoff2) &
+   !$omp private(iat, jat, izp, jzp, ic, ient, kat, hat, rij, r1, r2, den) &
+   !$omp private(dEdcnij, countd, countd2, box, hpos)
+   allocate(hpos(mol%nat), source=0_i8)
+   !$omp do schedule(runtime)
+   do iat = 1, mol%nat
+      izp = mol%id(iat)
+      do hat = hessian%list%inl(iat), hessian%list%inl(iat + 1) - 1
+         hpos(hessian%list%nlat(hat)) = hat
+      end do
+      do ient = 2, count_neighbors(list, cache%lowlist, iat)
+         call get_neighbor(list, cache%lowlist, iat, ient, jat, kat)
+         jzp = mol%id(jat)
+         rij = mol%xyz(:, iat) - mol%xyz(:, jat)
+         r2 = sum(rij**2)
+         if (r2 > cutoff2 .or. r2 < 1.0e-12_wp) cycle
+         r1 = sqrt(r2)
+         den = ncoord%get_en_factor(izp, jzp)
+         dEdcnij = dEdcn(iat) + dEdcn(jat) * ncoord%directed_factor
+         countd = den * ncoord%ncoord_dcount(izp, jzp, r1)
+         countd2 = den * ncoord%ncoord_d2count(izp, jzp, r1)
 
-   integer :: izp, jzp
-   real(wp) :: r1, r2, countd(3), sigma(3, 3), dcuti, dcutj
+         ! Second derivative of the pair count w.r.t. R_i, R_j gives its negative
+         do ic = 1, 3
+            box(:, ic) = dEdcnij * (countd2 / r2 - countd / (r2 * r1)) &
+               & * rij * rij(ic)
+            box(ic, ic) = box(ic, ic) + dEdcnij * countd / r1
+         end do
+         hat = hessian%list%inl(iat)
+         hessian%hesslist(:, :, hat) = hessian%hesslist(:, :, hat) + box
+         hat = hpos(jat)
+         if (hat > 0) hessian%hesslist(:, :, hat) = hessian%hesslist(:, :, hat) - box
+      end do
+      do hat = hessian%list%inl(iat), hessian%list%inl(iat + 1) - 1
+         hpos(hessian%list%nlat(hat)) = 0
+      end do
+   end do
+   !$omp end do
+   deallocate(hpos)
+   !$omp end parallel
 
-   dcndr(:, :) = 0.0_wp
-   dcndL(:, :, :) = 0.0_wp
+end subroutine add_ncoord_hessian_list
 
-   r2 = sum(vec**2)
-   if (r2 > ncoord%cutoff**2 .or. r2 < 1.0e-12_wp) return
-   r1 = sqrt(r2)
+!> Neighbors of each atom with CN or local charge derivatives above cnthr in a
+!> half neighborlist with its lower triangle in the cache, the atom itself
+!> first. The rows cninl give the neighbor atoms in cnat and the positions of
+!> the pairs in the list in cnpos. Apart from the diagonal, the entry of a pair
+!> holds the derivatives of the CN of the atom with the higher index.
+subroutine get_cn_entries_list(mol, list, cache, cninl, cnpos, cnat)
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
 
-   izp = mol%id(iat)
-   jzp = mol%id(jat)
-   countd = ncoord%get_en_factor(izp, jzp) * ncoord%ncoord_dcount(izp, jzp, r1) &
-      & * vec / r1
-   sigma = spread(countd, 1, 3) * spread(vec, 2, 3)
+   !> Multicharge neighborlist type (half)
+   type(csr_list), intent(in) :: list
 
-   dcuti = 1.0_wp
-   dcutj = 1.0_wp
-   if (ncoord%cut > 0.0_wp) then
-      dcuti = dlog_cn_cut(cni, ncoord%cut)
-      dcutj = dlog_cn_cut(cnj, ncoord%cut)
-   end if
+   !> Cache with the CN and local charge derivatives and the lower triangle
+   type(mchrg_cache), intent(in) :: cache
 
-   dcndr(:, 1) = countd * dcuti
-   dcndL(:, :, 1) = sigma * dcuti
-   if (iat /= jat) then
-      dcndr(:, 2) = countd * ncoord%directed_factor * dcutj
-      dcndL(:, :, 2) = sigma * ncoord%directed_factor * dcutj
-   end if
+   !> Offsets of the rows of the entries
+   integer(i8), allocatable, intent(out) :: cninl(:)
 
-end subroutine get_pair_derivs
+   !> Positions of the pairs in the list
+   integer(i8), allocatable, intent(out) :: cnpos(:)
 
+   !> Neighbor atoms of the entries
+   integer, allocatable, intent(out) :: cnat(:)
 
-!> Slope of the smooth maximum CN cutoff, evaluated from the cut CN
-!>
-!> With cnp = log(1 + exp(cnmax)) - log(1 + exp(cnmax - cn)) the slope
-!> exp(cnmax) / (exp(cnmax) + exp(cn)) equals 1 - exp(cnp) / (1 + exp(cnmax)).
-elemental function dlog_cn_cut(cnp, cnmax) result(dcnpdcn)
+   integer :: iat, jat, ient
+   integer(i8) :: kat, cnt
 
-   !> Coordination number including the cutoff
-   real(wp), intent(in) :: cnp
+   allocate(cninl(mol%nat + 1))
+   cninl(1) = 1
+   !$omp parallel do default(none) schedule(runtime) &
+   !$omp shared(mol, list, cache, cninl) private(iat, jat, ient, kat, cnt)
+   do iat = 1, mol%nat
+      cnt = 1
+      do ient = 2, count_neighbors(list, cache%lowlist, iat)
+         call get_neighbor(list, cache%lowlist, iat, ient, jat, kat)
+         if (any(abs(cache%dcndrlist(:, kat)) > cnthr) &
+            & .or. any(abs(cache%dqlocdrlist(:, kat)) > cnthr)) cnt = cnt + 1
+      end do
+      cninl(iat + 1) = cnt
+   end do
+   !$omp end parallel do
+   do iat = 1, mol%nat
+      cninl(iat + 1) = cninl(iat) + cninl(iat + 1)
+   end do
 
-   !> Maximum coordination number
-   real(wp), intent(in) :: cnmax
+   allocate(cnpos(cninl(mol%nat + 1) - 1), cnat(cninl(mol%nat + 1) - 1))
+   !$omp parallel do default(none) schedule(runtime) &
+   !$omp shared(mol, list, cache, cninl, cnpos, cnat) private(iat, jat, ient, kat, cnt)
+   do iat = 1, mol%nat
+      cnt = cninl(iat)
+      cnpos(cnt) = list%inl(iat)
+      cnat(cnt) = iat
+      do ient = 2, count_neighbors(list, cache%lowlist, iat)
+         call get_neighbor(list, cache%lowlist, iat, ient, jat, kat)
+         if (any(abs(cache%dcndrlist(:, kat)) > cnthr) &
+            & .or. any(abs(cache%dqlocdrlist(:, kat)) > cnthr)) then
+            cnt = cnt + 1
+            cnpos(cnt) = kat
+            cnat(cnt) = jat
+         end if
+      end do
+   end do
+   !$omp end parallel do
 
-   real(wp) :: dcnpdcn
-
-   dcnpdcn = 1.0_wp - exp(cnp - log(1.0_wp + exp(cnmax)))
-
-end function dlog_cn_cut
+end subroutine get_cn_entries_list
 
 
 end module multicharge_ncoord
