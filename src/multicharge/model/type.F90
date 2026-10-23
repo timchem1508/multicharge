@@ -58,6 +58,9 @@ module multicharge_model_type
       !> CN scaling factor for charge width
       real(wp), allocatable :: kcnrad
 
+      !> Scaling factor for the external electric field
+      real(wp) :: efield_scale = 1.0_wp
+
       !> Coordination number
       class(ncoord_type), allocatable :: ncoord
 
@@ -173,7 +176,7 @@ module multicharge_model_type
       end subroutine get_coulomb_derivs
 
       !> Electronegativity vector construction
-      subroutine get_xvec(self, mol, ndim, cache)
+      subroutine get_xvec(self, mol, ndim, cache, efield)
          import :: mchrg_model_type, mchrg_cache, structure_type, wp
 
          !> Multicharge model type
@@ -187,6 +190,9 @@ module multicharge_model_type
 
          !> Multicharge cache holding the electronegativity vector
          type(mchrg_cache), intent(inout) :: cache
+
+         !> External electric field
+         real(wp), intent(in), optional :: efield(:)
       end subroutine get_xvec
 
       !> Derivatives of electronegativity vector
@@ -301,7 +307,7 @@ end subroutine get_rec_trans
 
 !> Top-level solve routine with optional persistent cache
 subroutine solve(self, mol, solver, cache, error, &
-   & energy, gradient, sigma, qvec, dqdr, dqdL, verbosity, unit)
+   & energy, gradient, sigma, qvec, dqdr, dqdL, efield, verbosity, unit)
 
    !> Electronegativity-equilibration model
    class(mchrg_model_type), intent(in) :: self
@@ -335,6 +341,9 @@ subroutine solve(self, mol, solver, cache, error, &
 
    !> Optional derivative of the partial charges w.r.t. lattice vectors
    real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
+
+   !> Optional external electric field
+   real(wp), intent(in), contiguous, optional :: efield(:)
 
    !> Optional print verbosity level
    integer, intent(in), optional :: verbosity
@@ -388,7 +397,7 @@ subroutine solve(self, mol, solver, cache, error, &
    ! Setup the system matrices and vectors
    call self%get_capacitance_matrix(mol, ndim, cache)
    call self%get_coulomb_matrix(mol, ndim, cache)
-   call self%get_xvec(mol, ndim, cache)
+   call self%get_xvec(mol, ndim, cache, efield)
    if (.not. allocated(cache%vrhs)) then
       allocate(cache%vrhs(mol%nat + 1))
    end if

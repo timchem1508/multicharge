@@ -109,6 +109,9 @@ module multicharge_model_eeqbc
    !> Default cutoff radius for the direct lattice translations
    real(wp), parameter :: cutoff = 25.0_wp
 
+   !> Default scaling factor for the external electric field
+   real(wp), parameter :: default_efield_scale = 10.0_wp
+
 
 contains
 
@@ -116,7 +119,7 @@ contains
 !> Construct an EEQBC model from element-wise parameters
 subroutine new_eeqbc_model(self, mol, error, chi, rad, &
    & eta, kcnchi, kqchi, kqeta, kcnrad, cap, avg_cn, rvdw, &
-   & kbc, cutoff, cn_exp, rcov, en, cn_max, norm_exp)
+   & kbc, cutoff, cn_exp, rcov, en, cn_max, norm_exp, efield_scale)
 
    !> Bond capacitor electronegativity equilibration model
    type(eeqbc_model), intent(out) :: self
@@ -178,6 +181,9 @@ subroutine new_eeqbc_model(self, mol, error, chi, rad, &
    !> Pauling electronegativities normalized to fluorine
    real(wp), intent(in), optional :: en(:)
 
+   !> Scaling factor for external electric field
+   real(wp), intent(in), optional :: efield_scale
+
    self%chi = chi
    self%rad = rad
    self%eta = eta
@@ -199,6 +205,12 @@ subroutine new_eeqbc_model(self, mol, error, chi, rad, &
       self%norm_exp = norm_exp
    else
       self%norm_exp = default_norm_exp
+   end if
+
+   if (present(efield_scale)) then
+      self%efield_scale = efield_scale
+   else
+      self%efield_scale = default_efield_scale
    end if
 
    ! Coordination number
@@ -293,7 +305,7 @@ end subroutine get_capacitance_matrix
 
 
 !> Build the electronegativity vector, including local-charge corrections
-subroutine get_xvec(self, mol, ndim, cache)
+subroutine get_xvec(self, mol, ndim, cache, efield)
 
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
@@ -306,6 +318,9 @@ subroutine get_xvec(self, mol, ndim, cache)
 
    !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
+
+   !> External electric field
+   real(wp), intent(in), optional :: efield(:)
 
    integer :: iat, izp, img
    real(wp) :: ctmp, vec(3), rvdw, capi, wsw
@@ -330,6 +345,17 @@ subroutine get_xvec(self, mol, ndim, cache)
          & + self%kqchi(izp) * cache%qloc(iat)
    end do
    !$omp end parallel do
+
+   ! Add external electric field to the RHS if present
+   if (present(efield)) then
+      !$omp parallel do default(none) schedule(runtime) &
+      !$omp shared(mol, self, cache, efield) private(iat)
+      do iat = 1, mol%nat
+         cache%xtmp(iat) = cache%xtmp(iat) + self%efield_scale &
+            & * dot_product(mol%xyz(:, iat), efield)
+      end do
+      !$omp end parallel do
+   end if
 
    if (size(cache%xtmp) == mol%nat + 1) then
       cache%xtmp(mol%nat + 1) = mol%charge

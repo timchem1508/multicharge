@@ -76,13 +76,16 @@ module multicharge_model_eeq
    !> Threshold below which distances and norms are treated as zero
    real(wp), parameter :: eps = sqrt(epsilon(0.0_wp))
 
+   !> Default scaling factor for the external electric field
+   real(wp), parameter :: default_efield_scale = 1.0_wp
+
 
 contains
 
 
 !> Construct an EEQ model from element-wise parameters
 subroutine new_eeq_model(self, mol, error, chi, rad, eta, kcnchi, &
-   & cutoff, cn_exp, rcov, cn_max)
+   & cutoff, cn_exp, rcov, cn_max, efield_scale)
 
    !> Electronegativity equilibration model
    type(eeq_model), intent(out) :: self
@@ -117,10 +120,19 @@ subroutine new_eeq_model(self, mol, error, chi, rad, eta, kcnchi, &
    !> Maximum CN cutoff for CN
    real(wp), intent(in), optional :: cn_max
 
+   !> Scaling factor for the external electric field
+   real(wp), intent(in), optional :: efield_scale
+
    self%chi = chi
    self%rad = rad
    self%eta = eta
    self%kcnchi = kcnchi
+
+   if (present(efield_scale)) then
+      self%efield_scale = efield_scale
+   else
+      self%efield_scale = default_efield_scale
+   end if
 
    call new_ncoord(self%ncoord, mol, cn_count%erf, error, &
       & cutoff=cutoff, kcn=cn_exp, rcov=rcov, cut=cn_max)
@@ -193,7 +205,7 @@ end subroutine get_capacitance_matrix
 
 
 !> Build the electronegativity vector with CN correction.
-subroutine get_xvec(self, mol, ndim, cache)
+subroutine get_xvec(self, mol, ndim, cache, efield)
 
    !> EEQ model type
    class(eeq_model), intent(in) :: self
@@ -206,6 +218,9 @@ subroutine get_xvec(self, mol, ndim, cache)
 
    !> Multicharge cache (provides CN and will store the vector)
    type(mchrg_cache), intent(inout) :: cache
+
+   !> External electric field
+   real(wp), intent(in), optional :: efield(:)
 
    real(wp), parameter :: reg = 1.0e-14_wp
 
@@ -226,6 +241,17 @@ subroutine get_xvec(self, mol, ndim, cache)
       tmp = self%kcnchi(izp) / sqrt(cache%cn(iat) + reg)
       cache%xvec(iat) = -self%chi(izp) + tmp * cache%cn(iat)
    end do
+
+   ! Add external electric field to the RHS if present
+   if (present(efield)) then
+      !$omp parallel do default(none) schedule(runtime) &
+      !$omp shared(mol, self, cache, efield) private(iat)
+      do iat = 1, mol%nat
+         cache%xvec(iat) = cache%xvec(iat) + self%efield_scale &
+            & * dot_product(mol%xyz(:, iat), efield)
+      end do
+   end if
+
    if (ndim == mol%nat + 1) then
       cache%xvec(mol%nat + 1) = mol%charge
    end if

@@ -100,6 +100,7 @@ contains
       real(wp), parameter :: cutoff = 25.0_wp
       real(wp), parameter :: cn_exp = 2.0_wp
       real(wp), parameter :: norm_exp = 0.75_wp
+      real(wp), parameter :: efield_scale = 5.0_wp
 
       integer :: isp, jsp, ksp, izp, jzp
 
@@ -145,7 +146,7 @@ contains
       & kcnrad=kcnrad, cap=cap, avg_cn=avg_cn, rvdw=rvdw, &
       & kbc=kbc, &
       & cutoff=cutoff, cn_exp=cn_exp, rcov=rcov, en=en, &
-      & norm_exp=norm_exp)
+      & norm_exp=norm_exp, efield_scale=efield_scale)
       call move_alloc(eeqbc, model)
 
    end subroutine new_eeqbc2025_model

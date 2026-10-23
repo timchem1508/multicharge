@@ -55,6 +55,7 @@ subroutine collect_model(testsuite)
       & new_unittest("eeq-dbdL-mb01", test_eeq_dbdL_mb01), &
       & new_unittest("eeq-charges-mb01", test_eeq_q_mb01), &
       & new_unittest("eeq-charges-mb02", test_eeq_q_mb02), &
+      & new_unittest("eeq-charges-efield-mb03", test_eeq_q_efield_mb03), &
       & new_unittest("eeq-charges-actinides", test_eeq_q_actinides), &
       & new_unittest("eeq-energy-mb03", test_eeq_e_mb03), &
       & new_unittest("eeq-energy-mb04", test_eeq_e_mb04), &
@@ -82,6 +83,7 @@ subroutine collect_model(testsuite)
       & new_unittest("eeqbc-dbdr-mb05", test_eeqbc_dbdr_mb05), &
       & new_unittest("eeqbc-charges-mb01", test_eeqbc_q_mb01), &
       & new_unittest("eeqbc-charges-mb02", test_eeqbc_q_mb02), &
+      & new_unittest("eeqbc-charges-efield-mb03", test_eeqbc_q_efield_mb03), &
       & new_unittest("eeqbc-charges-actinides", test_eeqbc_q_actinides), &
       & new_unittest("eeqbc-energy-mb03", test_eeqbc_e_mb03), &
       & new_unittest("eeqbc-energy-mb04", test_eeqbc_e_mb04), &
@@ -545,7 +547,7 @@ subroutine test_dbdL(error, mol, model)
 end subroutine test_dbdL
 
 
-subroutine gen_test(error, mol, model, qref, eref)
+subroutine gen_test(error, mol, model, qref, eref, efield)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -561,6 +563,9 @@ subroutine gen_test(error, mol, model, qref, eref)
 
    !> Reference energies
    real(wp), intent(in), optional :: eref(:)
+
+   !> Optional external electric field
+   real(wp), intent(in), contiguous, optional :: efield(:)
 
    type(mchrg_cache), allocatable :: cache
 
@@ -595,7 +600,8 @@ subroutine gen_test(error, mol, model, qref, eref)
    end if
 
    call model%update(mol, cache, trans, grad=.false.)
-   call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, unit=output_unit)
+   call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, &
+      & efield=efield, unit=output_unit)
    if (allocated(error)) return
 
    if (present(qref)) then
@@ -1201,6 +1207,33 @@ subroutine test_eeq_q_mb02(error)
 end subroutine test_eeq_q_mb02
 
 
+subroutine test_eeq_q_efield_mb03(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular structure data
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   real(wp), parameter :: ref(16) = [&
+   &-4.64683071797936E-2_wp, -5.88362906740707E-1_wp, -2.43193732528000E-1_wp, &
+   & 3.51507795107742E-1_wp,  1.07024670739935E+0_wp, -1.33168464005268E+0_wp, &
+   &-3.16175726821207E-1_wp,  1.00361461209188E-1_wp, -4.01096542813355E-1_wp, &
+   & 1.92924990021589E-1_wp,  5.17680704422172E-1_wp, -7.08449332513941E-1_wp, &
+   &-6.26659781146154E-1_wp,  2.23247991084403E-1_wp,  1.68482074733023E+0_wp, &
+   & 1.21300573221157E-1_wp]
+
+   !> External electric field
+   real(wp), parameter :: efield(3) = [0.2_wp, 0.0_wp, 0.0_wp]
+
+   call get_structure(mol, "MB16-43", "03")
+   call new_eeq2019_model(mol, model, error)
+   if (allocated(error)) return
+   call gen_test(error, mol, model, qref=ref, efield=efield)
+
+end subroutine test_eeq_q_efield_mb03
+
+
 subroutine test_eeq_q_actinides(error)
 
    !> Error handling
@@ -1786,6 +1819,33 @@ subroutine test_eeqbc_q_mb02(error)
 
 
 end subroutine test_eeqbc_q_mb02
+
+
+subroutine test_eeqbc_q_efield_mb03(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular structure data
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   real(wp), parameter :: ref(16) = [&
+   &-4.28277800567498E-3_wp, -2.70490782936609E-1_wp, -5.08680343096443E-1_wp, &
+   &-1.87384666291912E-1_wp,  1.36541310890821E+0_wp, -2.60606218495392E+0_wp, &
+   &-3.64782532576783E-1_wp,  1.59545634972394E-1_wp, -8.14114159163079E-1_wp, &
+   & 3.47368288325200E-1_wp,  1.18972825588504E+0_wp, -6.68988148668005E-1_wp, &
+   &-9.90207762515528E-1_wp, -3.03114653320752E-3_wp,  3.07535497173940E+0_wp, &
+   & 2.80614244910914E-1_wp]
+
+   !> External electric field
+   real(wp), parameter :: efield(3) = [0.2_wp, 0.0_wp, 0.0_wp]
+
+   call get_structure(mol, "MB16-43", "03")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call gen_test(error, mol, model, qref=ref, efield=efield)
+
+end subroutine test_eeqbc_q_efield_mb03
 
 
 subroutine test_eeqbc_q_actinides(error)

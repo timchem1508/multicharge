@@ -45,13 +45,14 @@ program main
    real(wp), allocatable :: qvec(:)
    real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: charge
+   real(wp), allocatable :: efield(:)
    integer, allocatable :: verbosity
    type(timer_type) :: timer
 
    call timer%push("total")
 
    call get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
-      & json, solver_input, verbosity, error)
+      & efield, json, solver_input, verbosity, error)
    if (allocated(error)) then
       write(error_unit, "(a)") error%message
       error stop
@@ -140,7 +141,8 @@ program main
          & format_time(timer%get("update"))
    end if
    call model%solve(mol, solver, cache, error, &
-   & energy, gradient, sigma, qvec, dqdr, dqdL, verbosity=verbosity, unit=output_unit)
+      & energy, gradient, sigma, qvec, dqdr, dqdL, efield=efield, &
+      & verbosity=verbosity, unit=output_unit)
 
    if (allocated(error)) then
       write(error_unit, "(a)") error%message
@@ -188,6 +190,8 @@ subroutine help(unit)
       "-m, -model, --model <model>", "Choose the charge model (eeq or eeqbc)", &
       "-i, -input, --input <format>", "Hint for the format of the input file", &
       "-c, -charge, --charge <value>", "Provide the molecular charge", &
+      "-e, -efield, --efield <x>,<y>,<z>", &
+      & "Provide the external electric field in atomic units", &
       "-solver, --solver <type>", &
       & "Provide the partial charge solver: 'cg' or 'direct' (default)", &
       "-it, -maxiter, --maxiter <int>", "Provide the maximal number of CG iterations", &
@@ -224,7 +228,7 @@ end subroutine version
 
 !> Parse the command line arguments
 subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
-      & json, solver_input, verbosity, error)
+      & efield, json, solver_input, verbosity, error)
 
    !> Input file name
    character(len=:), allocatable :: input
@@ -243,6 +247,9 @@ subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
 
    !> Charge
    real(wp), allocatable, intent(out) :: charge
+
+   !> External electric field
+   real(wp), allocatable, intent(out) :: efield(:)
 
    !> Provide JSON output
    logical, intent(out) :: json
@@ -324,6 +331,19 @@ subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
             read(arg, *, iostat=iostat) charge
             if (iostat /= 0) then
                call fatal_error(error, "Invalid charge value")
+               exit
+            end if
+         case("-e", "-efield", "--efield")
+            iarg = iarg + 1
+            call get_argument(iarg, arg)
+            if (.not. allocated(arg)) then
+               call fatal_error(error, "Missing argument for electric field")
+               exit
+            end if
+            allocate(efield(3))
+            read(arg, *, iostat=iostat) efield
+            if (iostat /= 0) then
+               call fatal_error(error, "Invalid electric field value")
                exit
             end if
          case("-g", "-eg", "-grad", "--grad", "-egrad", "--egrad")
