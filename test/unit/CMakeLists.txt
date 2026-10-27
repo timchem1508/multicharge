@@ -17,9 +17,11 @@
 set(
   tests
   "model"
+  "charge-gradient"
   "hessian"
   "pbc"
   "wignerseitz"
+  "solver"
 )
 set(
   test-srcs

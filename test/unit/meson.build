@@ -30,9 +30,11 @@ endif
 
 tests = [
   'model',
+  'charge-gradient',
   'hessian',
   'pbc',
   'wignerseitz',
+  'solver',
 ]
 
 test_srcs = files(

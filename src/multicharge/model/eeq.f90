@@ -22,7 +22,6 @@
 !> and S. Grimme, *J. Chem. Phys.*, **2019**, 150, 154122.
 !> DOI: [10.1063/1.5090222](https://dx.doi.org/10.1063/1.5090222)
 module multicharge_model_eeq
-   use mctc_cutoff, only: get_lattice_points
    use mctc_env, only: error_type, fatal_error, wp
    use mctc_io, only: structure_type
    use mctc_io_constants, only: pi
@@ -31,7 +30,7 @@ module multicharge_model_eeq
    use mctc_wignerseitz, only: wignerseitz_cell, new_wignerseitz_cell
    use multicharge_blas, only: gemm
    use multicharge_ewald, only: get_alpha
-   use multicharge_model_cache, only: cache_container, model_cache
+   use multicharge_model_cache, only : mchrg_cache
    use multicharge_model_hessian, only: coulomb_kernel, radial_hessian, add_pair_hessian, add_pair_block
    use multicharge_model_type, only: mchrg_model_type, get_dir_trans, get_rec_trans
    implicit none
@@ -39,13 +38,12 @@ module multicharge_model_eeq
 
    public :: eeq_model, new_eeq_model
 
-   type, extends(model_cache), public :: eeq_cache
-   end type eeq_cache
-
    type, extends(mchrg_model_type) :: eeq_model
    contains
       !> Update and allocate cache
       procedure :: update
+      !> Calculate capacitance matrix
+      procedure :: get_capacitance_matrix
       !> Calculate Coulomb matrix
       procedure :: get_coulomb_matrix
       !> Calculate derivatives of Coulomb matrix
@@ -56,16 +54,24 @@ module multicharge_model_eeq
       procedure :: get_xvec_derivs
       !> Cartesian second-response curvature at fixed lattice
       procedure :: add_model_hessian
+      !> Calculate gradient
+      procedure :: get_grad
    end type eeq_model
 
    real(wp), parameter :: sqrtpi = sqrt(pi)
    real(wp), parameter :: sqrt2pi = sqrt(2.0_wp/pi)
    real(wp), parameter :: eps = sqrt(epsilon(0.0_wp))
 
+   !> Default scaling factor for the external electric field
+   real(wp), parameter :: default_efield_scale = 1.0_wp
+
+
 contains
 
+
+!> Construct an EEQ model from element-wise parameters
 subroutine new_eeq_model(self, mol, error, chi, rad, eta, kcnchi, &
-   & cutoff, cn_exp, rcov, cn_max)
+   & cutoff, cn_exp, rcov, cn_max, efield_scale)
    !> Electronegativity equilibration model
    type(eeq_model), intent(out) :: self
    !> Molecular structure data
@@ -89,97 +95,182 @@ subroutine new_eeq_model(self, mol, error, chi, rad, eta, kcnchi, &
    !> Maximum CN cutoff for CN
    real(wp), intent(in), optional :: cn_max
 
+   !> Scaling factor for the external electric field
+   real(wp), intent(in), optional :: efield_scale
+
    self%chi = chi
    self%rad = rad
    self%eta = eta
    self%kcnchi = kcnchi
+
+   if (present(efield_scale)) then
+      self%efield_scale = efield_scale
+   else
+      self%efield_scale = default_efield_scale
+   end if
 
    call new_ncoord(self%ncoord, mol, cn_count%erf, error, &
       & cutoff=cutoff, kcn=cn_exp, rcov=rcov, cut=cn_max)
 
 end subroutine new_eeq_model
 
-subroutine update(self, mol, cache, cn, qloc, dcndr, dcndL, dqlocdr, dqlocdL)
+
+!> Update coordination numbers and, if needed, the Wigner-Seitz cell and alpha
+subroutine update(self, mol, cache, trans, grad)
+
+   !> EEQ model type
    class(eeq_model), intent(in) :: self
+
+   !> Structure type
    type(structure_type), intent(in) :: mol
-   type(cache_container), intent(inout) :: cache
-   real(wp), intent(in) :: cn(:)
-   real(wp), intent(in), optional :: qloc(:)
-   real(wp), intent(in), optional :: dcndr(:, :, :)
-   real(wp), intent(in), optional :: dcndL(:, :, :)
-   real(wp), intent(in), optional :: dqlocdr(:, :, :)
-   real(wp), intent(in), optional :: dqlocdL(:, :, :)
 
-   type(eeq_cache), pointer :: ptr
+   !> Multicharge cache
+   type(mchrg_cache), intent(inout) :: cache
 
-   call taint(cache, ptr)
+   !> Lattice vectors
+   real(wp), intent(in) :: trans(:, :)
+
+   !> Flag to compute derivatives
+   logical, intent(in) :: grad
+
+   if (.not. allocated(cache%cn)) then
+      allocate(cache%cn(mol%nat))
+   end if
+
+   cache%trans = trans
 
    ! Refer CN arrays in cache
-   ptr%cn = cn
-   if (present(dcndr) .and. present(dcndL)) then
-      ptr%dcndr = dcndr
-      ptr%dcndL = dcndL
+   if (grad) then
+      if (.not. allocated(cache%dcndr)) then
+         allocate(cache%dcndr(3, mol%nat, mol%nat))
+      end if
+      if (.not. allocated(cache%dcndL)) then
+         allocate(cache%dcndL(3, 3, mol%nat))
+      end if
+      call self%ncoord%get_coordination_number(mol, trans, cache%cn, &
+         & cache%dcndr, cache%dcndL)
+   else
+      call self%ncoord%get_coordination_number(mol, trans, cache%cn)
    end if
 
    if (any(mol%periodic)) then
       ! Create WSC
-      call new_wignerseitz_cell(ptr%wsc, mol)
-      call get_alpha(mol%lattice, ptr%alpha)
+      call new_wignerseitz_cell(cache%wsc, mol)
+      call get_alpha(mol%lattice, cache%alpha)
    end if
 
 end subroutine update
 
-subroutine get_xvec(self, mol, cache, xvec)
+
+!> No-op override: the EEQ model does not use a capacitance matrix.
+subroutine get_capacitance_matrix(self, mol, ndim, cache)
+
+   !> EEQ model type
    class(eeq_model), intent(in) :: self
+
+   !> Structure type
    type(structure_type), intent(in) :: mol
-   type(cache_container), intent(inout) :: cache
-   real(wp), intent(out) :: xvec(:)
+
+   !> System size
+   integer, intent(in) :: ndim
+
+   !> Multicharge cache
+   type(mchrg_cache), intent(inout) :: cache
+end subroutine get_capacitance_matrix
+
+
+!> Build the electronegativity vector with CN correction.
+subroutine get_xvec(self, mol, ndim, cache, efield)
+
+   !> EEQ model type
+   class(eeq_model), intent(in) :: self
+
+   !> Structure type
+   type(structure_type), intent(in) :: mol
+
+   !> System size (nat, or nat + 1 with a Lagrange multiplier)
+   integer, intent(in) :: ndim
+
+   !> Multicharge cache (provides CN and will store the vector)
+   type(mchrg_cache), intent(inout) :: cache
+
+   !> External electric field
+   real(wp), intent(in), optional :: efield(:)
    real(wp), parameter :: reg = 1.0e-14_wp
 
    integer :: iat, izp
    real(wp) :: tmp
 
-   type(eeq_cache), pointer :: ptr
-
-   call view(cache, ptr)
+   if (.not. allocated(cache%xvec)) then
+      allocate(cache%xvec(ndim))
+   else if (size(cache%xvec) /= ndim) then
+      deallocate(cache%xvec)
+      allocate(cache%xvec(ndim))
+   end if
 
    !$omp parallel do default(none) schedule(runtime) &
-   !$omp shared(mol, self, xvec, ptr) private(iat, izp, tmp)
+   !$omp shared(mol, self, cache) private(iat, izp, tmp)
    do iat = 1, mol%nat
       izp = mol%id(iat)
-      tmp = self%kcnchi(izp) / sqrt(ptr%cn(iat) + reg)
-      xvec(iat) = -self%chi(izp) + tmp * ptr%cn(iat)
+      tmp = self%kcnchi(izp) / sqrt(cache%cn(iat) + reg)
+      cache%xvec(iat) = -self%chi(izp) + tmp * cache%cn(iat)
    end do
-   xvec(mol%nat + 1) = mol%charge
+
+   ! Add external electric field to the RHS if present
+   if (present(efield)) then
+      !$omp parallel do default(none) schedule(runtime) &
+      !$omp shared(mol, self, cache, efield) private(iat)
+      do iat = 1, mol%nat
+         cache%xvec(iat) = cache%xvec(iat) + self%efield_scale &
+            & * dot_product(mol%xyz(:, iat), efield)
+      end do
+   end if
+
+   if (ndim == mol%nat + 1) then
+      cache%xvec(mol%nat + 1) = mol%charge
+   end if
 
 end subroutine get_xvec
 
-subroutine get_xvec_derivs(self, mol, cache, dxdr, dxdL)
+
+!> Derivatives of the electronegativity vector w.r.t. positions and lattice
+subroutine get_xvec_derivs(self, mol, ndim, cache)
+
+   !> EEQ model type
    class(eeq_model), intent(in) :: self
+
+   !> Structure type
    type(structure_type), intent(in) :: mol
-   type(cache_container), intent(inout) :: cache
-   real(wp), intent(out), contiguous :: dxdr(:, :, :)
-   real(wp), intent(out), contiguous :: dxdL(:, :, :)
+
+   !> System size
+   integer, intent(in) :: ndim
+
+   !> Multicharge cache (provides CN derivatives, stores x-vector derivatives)
+   type(mchrg_cache), intent(inout) :: cache
    real(wp), parameter :: reg = 1.0e-14_wp
 
    integer :: iat, izp
    real(wp) :: tmp
 
-   type(eeq_cache), pointer :: ptr
+   if (.not. allocated(cache%dxdr)) then
+      allocate(cache%dxdr(3, mol%nat, ndim))
+   end if
+   if (.not. allocated(cache%dxdL)) then
+      allocate(cache%dxdL(3, 3, ndim))
+   end if
 
-   call view(cache, ptr)
-
-   dxdr(:, :, :) = 0.0_wp
-   dxdL(:, :, :) = 0.0_wp
+   cache%dxdr(:, :, :) = 0.0_wp
+   cache%dxdL(:, :, :) = 0.0_wp
 
    !$omp parallel do default(none) schedule(runtime) &
-   !$omp shared(mol, self, ptr, dxdr, dxdL) &
+   !$omp shared(mol, self, cache) &
    !$omp private(iat, izp, tmp)
    do iat = 1, mol%nat
       izp = mol%id(iat)
-      tmp = self%kcnchi(izp) * (0.5_wp*ptr%cn(iat) + reg) / (ptr%cn(iat) + reg)**1.5_wp
-      dxdr(:, :, iat) = tmp * ptr%dcndr(:, :, iat)
-      dxdL(:, :, iat) = tmp * ptr%dcndL(:, :, iat)
+      tmp = self%kcnchi(izp) * (0.5_wp * cache%cn(iat) + reg) &
+         & / (cache%cn(iat) + reg)**1.5_wp
+      cache%dxdr(:, :, iat) = tmp * cache%dcndr(:, :, iat)
+      cache%dxdL(:, :, iat) = tmp * cache%dcndL(:, :, iat)
    end do
 
 end subroutine get_xvec_derivs
@@ -189,39 +280,45 @@ subroutine add_model_hessian(self, mol, error, cache, adj, hessian)
    class(eeq_model), intent(in) :: self
    type(structure_type), intent(in) :: mol
    type(error_type), allocatable, intent(out) :: error
-   type(cache_container), intent(inout) :: cache
+
+   !> Response cache retained by get_charges
+   type(mchrg_cache), intent(inout) :: cache
+
+   !> Adjoint of the weighted charge response
    real(wp), intent(in) :: adj(:)
+
+   !> Cartesian Hessian, the curvature is added to it
    real(wp), intent(inout) :: hessian(:, :)
 
-   type(eeq_cache), pointer :: ptr
-   integer :: iat, jat, izp, jzp, nat, ipair, npair, ii
    real(wp), parameter :: reg = 1.0e-14_wp
+
+   integer :: iat, jat, izp, jzp, nat, ipair, npair, ii
    real(wp) :: c, vec(3), r, gam, val, dr, drr, weight
-   real(wp), allocatable :: dEdcn(:), dcndr(:, :), work(:, :), trans(:, :)
+   real(wp), allocatable :: dEdcn(:), dcndr(:, :), work(:, :)
    real(wp), allocatable :: diagonal(:, :, :)
 
-   call view(cache, ptr)
-   if (.not. associated(ptr)) then
+   if (.not. allocated(cache%dcndr)) then
       call fatal_error(error, "Incompatible EEQ response cache")
       return
    end if
    nat = mol%nat
    allocate(dEdcn(nat), work(3*nat, nat))
-   dcndr = reshape(ptr%dcndr, [3*nat, nat])
+   dcndr = reshape(cache%dcndr, [3 * nat, nat])
    do iat = 1, nat
       izp = mol%id(iat)
-      c = ptr%cn(iat)
+      c = cache%cn(iat)
       dEdcn(iat) = adj(iat)*self%kcnchi(izp)*(0.5_wp*c+reg)/(c+reg)**1.5_wp
       weight = -adj(iat)*self%kcnchi(izp)*(0.25_wp*c+reg)/(c+reg)**2.5_wp
       work(:, iat) = weight*dcndr(:, iat)
    end do
-   call get_lattice_points(mol%periodic, mol%lattice, self%ncoord%cutoff, trans)
-   call self%ncoord%add_coordination_number_hessian(mol, trans, dEdcn, hessian)
+   call self%ncoord%add_coordination_number_hessian(mol, cache%trans, dEdcn, &
+      & hessian)
    call gemm(work, dcndr, hessian, transb="t", beta=1.0_wp)
 
    allocate(diagonal(3, 3, nat), source=0.0_wp)
    if (any(mol%periodic)) then
-      call add_periodic_hessian(self, mol, ptr%wsc, ptr%alpha, cache%qvec, adj, hessian, diagonal)
+      call add_periodic_hessian(self, mol, cache%wsc, cache%alpha, cache%vrhs, &
+         & adj, hessian, diagonal)
    else
       npair = nat*(nat+1)/2
       !$omp parallel do default(none) schedule(runtime) &
@@ -239,13 +336,14 @@ subroutine add_model_hessian(self, mol, error, cache, adj, hessian)
          r = norm2(vec)
          gam = 1.0_wp/sqrt(self%rad(izp)**2+self%rad(jzp)**2)
          call coulomb_kernel(r, gam, val, dr, drr)
-         weight = -(adj(iat)*cache%qvec(jat)+adj(jat)*cache%qvec(iat))
+         weight = -(adj(iat) * cache%vrhs(jat) + adj(jat) * cache%vrhs(iat))
          call add_pair_hessian(iat, jat, vec, weight*dr, weight*drr, hessian, diagonal)
       end do
       !$omp end parallel do
    end if
 
-   !$omp parallel do default(none) schedule(static) shared(nat, hessian, diagonal) private(ii)
+   !$omp parallel do default(none) schedule(static) &
+   !$omp shared(nat, hessian, diagonal) private(ii)
    do iat = 1, nat
       ii = 3*(iat-1)
       hessian(ii+1:ii+3, ii+1:ii+3) = hessian(ii+1:ii+3, ii+1:ii+3)+diagonal(:, :, iat)
@@ -259,7 +357,15 @@ subroutine add_periodic_hessian(self, mol, wsc, alpha, qvec, adj, hessian, diago
    class(eeq_model), intent(in) :: self
    type(structure_type), intent(in) :: mol
    type(wignerseitz_cell), intent(in) :: wsc
-   real(wp), intent(in) :: alpha, qvec(:), adj(:)
+
+   !> Ewald splitting parameter
+   real(wp), intent(in) :: alpha
+
+   !> Charge vector
+   real(wp), intent(in) :: qvec(:)
+
+   !> Adjoint of the weighted charge response
+   real(wp), intent(in) :: adj(:)
    real(wp), intent(inout) :: hessian(:, :)
    real(wp), intent(inout) :: diagonal(:, :, :)
    integer :: iat, jat, izp, jzp, img, itr, ipair, npair
@@ -268,15 +374,17 @@ subroutine add_periodic_hessian(self, mol, wsc, alpha, qvec, adj, hessian, diago
    real(wp), allocatable :: dtrans(:, :), rtrans(:, :), rec_weight(:)
 
    call get_dir_trans(mol, dtrans)
-   call get_rec_trans(mol%lattice, rtrans)
+   call get_rec_trans(mol, rtrans)
    call get_rec_weights(abs(matdet_3x3(mol%lattice)), alpha, rtrans, rec_weight)
 
    ! Each pair owns its off-diagonal blocks. Only the diagonal blocks are
    ! reduced, avoiding a full (3N, 3N) Hessian copy for every OpenMP thread.
    npair = mol%nat*(mol%nat+1)/2
    !$omp parallel do default(none) schedule(runtime) &
-   !$omp shared(self, mol, wsc, alpha, qvec, adj, hessian, dtrans, rtrans, rec_weight, npair) &
-   !$omp private(iat, jat, izp, jzp, img, itr, rij, vec, box, gam, r, weight, wsw, val, dr, drr, ar, arr) &
+   !$omp shared(self, mol, wsc, alpha, qvec, adj, hessian, dtrans, rtrans) &
+   !$omp shared(rec_weight, npair) &
+   !$omp private(iat, jat, izp, jzp, img, itr, rij, vec, box, gam, r, weight) &
+   !$omp private(wsw, val, dr, drr, ar, arr) &
    !$omp reduction(+:diagonal)
    do ipair = 1, npair
       iat = int(0.5_wp*(sqrt(8.0_wp*real(ipair, wp)+1.0_wp)-1.0_wp))
@@ -311,20 +419,61 @@ subroutine add_periodic_hessian(self, mol, wsc, alpha, qvec, adj, hessian, diago
 end subroutine add_periodic_hessian
 
 
-subroutine get_coulomb_matrix(self, mol, cache, amat)
+!> Reciprocal-space weights independent of the atom pair
+subroutine get_rec_weights(vol, alpha, trans, weight)
+
+   !> Unit cell volume
+   real(wp), intent(in) :: vol
+
+   !> Ewald splitting parameter
+   real(wp), intent(in) :: alpha
+
+   !> Reciprocal lattice translation vectors (3 x N)
+   real(wp), intent(in) :: trans(:, :)
+
+   !> Reciprocal-space weight of each translation
+   real(wp), allocatable, intent(out) :: weight(:)
+
+   integer :: itr
+   real(wp) :: fac, g2
+
+   fac = 4.0_wp * pi / vol
+   allocate(weight(size(trans, 2)), source=0.0_wp)
+   do itr = 1, size(trans, 2)
+      g2 = dot_product(trans(:, itr), trans(:, itr))
+      if (g2 < eps) cycle
+      weight(itr) = fac * exp(-0.25_wp * g2 / alpha**2) / g2
+   end do
+
+end subroutine get_rec_weights
+
+
+!> Assemble the Coulomb matrix (periodic or non-periodic).
+subroutine get_coulomb_matrix(self, mol, ndim, cache)
+
+   !> EEQ model type
    class(eeq_model), intent(in) :: self
+
+   !> Structure type
    type(structure_type), intent(in) :: mol
-   type(cache_container), intent(inout) :: cache
-   real(wp), intent(out) :: amat(:, :)
 
-   type(eeq_cache), pointer :: ptr
+   !> System size
+   integer, intent(in) :: ndim
 
-   call view(cache, ptr)
+   !> Multicharge cache (will hold the Coulomb matrix)
+   type(mchrg_cache), intent(inout) :: cache
+
+   if (.not. allocated(cache%amat)) then
+      allocate(cache%amat(ndim, ndim))
+   else if (size(cache%amat, 1) /= ndim) then
+      deallocate(cache%amat)
+      allocate(cache%amat(ndim, ndim))
+   end if
 
    if (any(mol%periodic)) then
-      call get_amat_3d(self, mol, ptr%wsc, ptr%alpha, amat)
+      call get_amat_3d(self, mol, cache%wsc, cache%alpha, cache%amat)
    else
-      call get_amat_0d(self, mol, amat)
+      call get_amat_0d(self, mol, cache%amat)
    end if
 end subroutine get_coulomb_matrix
 
@@ -333,36 +482,43 @@ subroutine get_amat_0d(self, mol, amat)
    type(structure_type), intent(in) :: mol
    real(wp), intent(out) :: amat(:, :)
 
-   integer :: iat, jat, izp, jzp, ipair, npair
+   integer :: iat, jat, izp, jzp
    real(wp) :: vec(3), r2, gam, tmp
 
-   ! Every matrix element belongs to one pair; no thread-local matrix is needed.
-   npair = mol%nat*(mol%nat+1)/2
-   !$omp parallel do default(none) schedule(runtime) &
-   !$omp shared(amat, mol, self, npair) &
-   !$omp private(iat, jat, izp, jzp, gam, vec, r2, tmp)
-   do ipair = 1, npair
-      iat = int(0.5_wp*(sqrt(8.0_wp*real(ipair, wp)+1.0_wp)-1.0_wp))
-      if (iat*(iat+1)/2 < ipair) iat = iat+1
-      jat = ipair-iat*(iat-1)/2
+   real(wp), allocatable :: amat_local(:, :)
+
+   amat(:, :) = 0.0_wp
+   !$omp parallel default(none) &
+   !$omp shared(amat, mol, self) &
+   !$omp private(iat, izp, jat, jzp, gam, vec, r2, tmp, amat_local)
+   allocate(amat_local, source=amat)
+   !$omp do schedule(runtime)
+   do iat = 1, mol%nat
       izp = mol%id(iat)
-      if (iat == jat) then
-         tmp = self%eta(izp) + sqrt2pi / self%rad(izp)
-      else
+      do jat = 1, iat - 1
          jzp = mol%id(jat)
          vec = mol%xyz(:, jat) - mol%xyz(:, iat)
          r2 = vec(1)**2 + vec(2)**2 + vec(3)**2
          gam = 1.0_wp / (self%rad(izp)**2 + self%rad(jzp)**2)
          tmp = erf(sqrt(r2 * gam)) / sqrt(r2)
-      end if
-      amat(jat, iat) = tmp
-      amat(iat, jat) = tmp
+         amat_local(jat, iat) = amat_local(jat, iat) + tmp
+         amat_local(iat, jat) = amat_local(iat, jat) + tmp
+      end do
+      tmp = self%eta(izp) + sqrt2pi / self%rad(izp)
+      amat_local(iat, iat) = amat_local(iat, iat) + tmp
    end do
-   !$omp end parallel do
+   !$omp end do
+   !$omp critical (get_amat_0d_)
+   amat(:, :) = amat(:, :) + amat_local(:, :)
+   !$omp end critical (get_amat_0d_)
+   deallocate(amat_local)
+   !$omp end parallel
 
-   amat(mol%nat + 1, 1:mol%nat + 1) = 1.0_wp
-   amat(1:mol%nat + 1, mol%nat + 1) = 1.0_wp
-   amat(mol%nat + 1, mol%nat + 1) = 0.0_wp
+   if (size(amat, 1) == mol%nat + 1) then
+      amat(mol%nat + 1, 1:mol%nat + 1) = 1.0_wp
+      amat(1:mol%nat + 1, mol%nat + 1) = 1.0_wp
+      amat(mol%nat + 1, mol%nat + 1) = 0.0_wp
+   end if
 end subroutine get_amat_0d
 
 subroutine get_amat_3d(self, mol, wsc, alpha, amat)
@@ -372,42 +528,63 @@ subroutine get_amat_3d(self, mol, wsc, alpha, amat)
    real(wp), intent(in) :: alpha
    real(wp), intent(out) :: amat(:, :)
 
-   integer :: iat, jat, izp, jzp, img, ipair, npair
-   real(wp) :: vec(3), gam, wsw, dtmp, rtmp, tmp
-   real(wp), allocatable :: dtrans(:, :), rtrans(:, :), rec_weight(:)
+   integer :: iat, jat, izp, jzp, img
+   real(wp) :: vec(3), gam, wsw, dtmp, rtmp, vol
+   real(wp), allocatable :: dtrans(:, :), rtrans(:, :)
 
+   real(wp), allocatable :: amat_local(:, :)
+
+   amat(:, :) = 0.0_wp
+
+   vol = abs(matdet_3x3(mol%lattice))
    call get_dir_trans(mol, dtrans)
-   call get_rec_trans(mol%lattice, rtrans)
-   call get_rec_weights(abs(matdet_3x3(mol%lattice)), alpha, rtrans, rec_weight)
+   call get_rec_trans(mol, rtrans)
 
-   npair = mol%nat*(mol%nat+1)/2
-   !$omp parallel do default(none) schedule(runtime) &
-   !$omp shared(amat, mol, self, wsc, dtrans, rtrans, rec_weight, alpha, npair) &
-   !$omp private(iat, jat, izp, jzp, img, gam, wsw, vec, dtmp, rtmp, tmp)
-   do ipair = 1, npair
-      iat = int(0.5_wp*(sqrt(8.0_wp*real(ipair, wp)+1.0_wp)-1.0_wp))
-      if (iat*(iat+1)/2 < ipair) iat = iat+1
-      jat = ipair-iat*(iat-1)/2
+   !$omp parallel default(none) &
+   !$omp shared(amat, mol, self, wsc, dtrans, rtrans, alpha, vol) &
+   !$omp private(iat, izp, jat, jzp, gam, wsw, vec, dtmp, rtmp, amat_local)
+   allocate(amat_local, source=amat)
+   !$omp do schedule(runtime)
+   do iat = 1, mol%nat
       izp = mol%id(iat)
-      jzp = mol%id(jat)
-      gam = 1.0_wp / sqrt(self%rad(izp)**2 + self%rad(jzp)**2)
-      wsw = 1.0_wp / real(wsc%nimg(jat, iat), wp)
-      tmp = 0.0_wp
-      do img = 1, wsc%nimg(jat, iat)
-         vec = mol%xyz(:, jat) - mol%xyz(:, iat) + wsc%trans(:, wsc%tridx(img, jat, iat))
-         call get_amat_dir_3d(vec, gam, alpha, dtrans, dtmp)
-         call get_amat_rec_3d(vec, rtrans, rec_weight, rtmp)
-         tmp = tmp + (dtmp + rtmp) * wsw
+      do jat = 1, iat - 1
+         jzp = mol%id(jat)
+         gam = 1.0_wp / sqrt(self%rad(izp)**2 + self%rad(jzp)**2)
+         wsw = 1.0_wp / real(wsc%nimg(jat, iat), wp)
+         do img = 1, wsc%nimg(jat, iat)
+            vec = mol%xyz(:, jat) - mol%xyz(:, iat) &
+               & + wsc%trans(:, wsc%tridx(img, jat, iat))
+            call get_amat_dir_3d(vec, gam, alpha, dtrans, dtmp)
+            call get_amat_rec_3d(vec, vol, alpha, rtrans, rtmp)
+            amat_local(jat, iat) = amat_local(jat, iat) + (dtmp + rtmp) * wsw
+            amat_local(iat, jat) = amat_local(iat, jat) + (dtmp + rtmp) * wsw
+         end do
       end do
-      if (iat == jat) tmp = tmp + self%eta(izp) + sqrt2pi / self%rad(izp) - 2 * alpha / sqrtpi
-      amat(jat, iat) = tmp
-      amat(iat, jat) = tmp
-   end do
-   !$omp end parallel do
 
-   amat(mol%nat + 1, 1:mol%nat + 1) = 1.0_wp
-   amat(1:mol%nat + 1, mol%nat + 1) = 1.0_wp
-   amat(mol%nat + 1, mol%nat + 1) = 0.0_wp
+      gam = 1.0_wp / sqrt(2.0_wp * self%rad(izp)**2)
+      wsw = 1.0_wp / real(wsc%nimg(iat, iat), wp)
+      do img = 1, wsc%nimg(iat, iat)
+         vec = wsc%trans(:, wsc%tridx(img, iat, iat))
+         call get_amat_dir_3d(vec, gam, alpha, dtrans, dtmp)
+         call get_amat_rec_3d(vec, vol, alpha, rtrans, rtmp)
+         amat_local(iat, iat) = amat_local(iat, iat) + (dtmp + rtmp) * wsw
+      end do
+
+      dtmp = self%eta(izp) + sqrt2pi / self%rad(izp) - 2.0_wp * alpha / sqrtpi
+      amat_local(iat, iat) = amat_local(iat, iat) + dtmp
+   end do
+   !$omp end do
+   !$omp critical (get_amat_3d_)
+   amat(:, :) = amat(:, :) + amat_local(:, :)
+   !$omp end critical (get_amat_3d_)
+   deallocate(amat_local)
+   !$omp end parallel
+
+   if (size(amat, 1) == mol%nat + 1) then
+      amat(mol%nat + 1, 1:mol%nat + 1) = 1.0_wp
+      amat(1:mol%nat + 1, mol%nat + 1) = 1.0_wp
+      amat(mol%nat + 1, mol%nat + 1) = 0.0_wp
+   end if
 end subroutine get_amat_3d
 
 subroutine get_amat_dir_3d(rij, gam, alp, trans, amat)
@@ -432,80 +609,142 @@ subroutine get_amat_dir_3d(rij, gam, alp, trans, amat)
 
 end subroutine get_amat_dir_3d
 
-subroutine get_amat_rec_3d(rij, trans, weight, amat)
-   real(wp), intent(in) :: rij(3), trans(:, :), weight(:)
+
+!> Reciprocal-space contribution to the Coulomb matrix (Ewald sum).
+subroutine get_amat_rec_3d(rij, vol, alp, trans, amat)
+
+   !> Distance vector between two atoms (including lattice translation)
+   real(wp), intent(in) :: rij(3)
+
+   !> Unit cell volume
+   real(wp), intent(in) :: vol
+
+   !> Ewald splitting parameter
+   real(wp), intent(in) :: alp
+
+   !> Reciprocal lattice translation vectors (3 x N)
+   real(wp), intent(in) :: trans(:, :)
+
+   !> Output contribution to the Coulomb matrix
    real(wp), intent(out) :: amat
+
    integer :: itr
+   real(wp) :: fac, vec(3), g2, tmp
 
    amat = 0.0_wp
+   fac = 4.0_wp * pi / vol
+
    do itr = 1, size(trans, 2)
-      amat = amat + weight(itr) * cos(dot_product(rij, trans(:, itr)))
+      vec(:) = trans(:, itr)
+      g2 = dot_product(vec, vec)
+      if (g2 < eps) cycle
+      tmp = cos(dot_product(rij, vec)) * fac &
+         & * exp(-0.25_wp * g2 / (alp * alp)) / g2
+      amat = amat + tmp
    end do
+
 end subroutine get_amat_rec_3d
 
-subroutine get_coulomb_derivs(self, mol, cache, qvec, dadr, dadL, atrace)
+
+!> Derivatives of the Coulomb matrix contracted with the charge vector
+subroutine get_coulomb_derivs(self, mol, ndim, cache)
+
+   !> EEQ model type
    class(eeq_model), intent(in) :: self
+
+   !> Structure type
    type(structure_type), intent(in) :: mol
-   type(cache_container), intent(inout) :: cache
-   real(wp), intent(in) :: qvec(:)
-   real(wp), intent(out) :: dadr(:, :, :), dadL(:, :, :), atrace(:, :)
 
-   type(eeq_cache), pointer :: ptr
+   !> System size
+   integer, intent(in) :: ndim
 
-   call view(cache, ptr)
+   !> Multicharge cache (provides charges and will store derivatives)
+   type(mchrg_cache), intent(inout) :: cache
+
+   real(wp), allocatable :: atrace(:, :)
+
+   integer :: iat
+
+   allocate(atrace(3, mol%nat))
+
+   if (.not. allocated(cache%dadr)) then
+      allocate(cache%dadr(3, mol%nat, ndim))
+   end if
+   if (.not. allocated(cache%dadL)) then
+      allocate(cache%dadL(3, 3, ndim))
+   end if
 
    if (any(mol%periodic)) then
-      call get_damat_3d(self, mol, ptr%wsc, ptr%alpha, qvec, dadr, dadL, atrace)
+      call get_damat_3d(self, mol, cache%wsc, cache%alpha, &
+         & cache%vrhs, cache%dadr, cache%dadL, atrace)
    else
-      call get_damat_0d(self, mol, qvec, dadr, dadL, atrace)
+      call get_damat_0d(self, mol, cache%vrhs, cache%dadr, cache%dadL, atrace)
    end if
+
+   do iat = 1, mol%nat
+      cache%dadr(:, iat, iat) = atrace(:, iat) + cache%dadr(:, iat, iat)
+   end do
 end subroutine get_coulomb_derivs
 
 subroutine get_damat_0d(self, mol, qvec, dadr, dadL, atrace)
    class(eeq_model), intent(in) :: self
    type(structure_type), intent(in) :: mol
    real(wp), intent(in) :: qvec(:)
-   real(wp), intent(out) :: dadr(:, :, :), dadL(:, :, :), atrace(:, :)
 
-   integer :: iat, jat, izp, jzp, ipair, npair
+   !> Derivative of Coulomb matrix w.r.t. atomic positions (3 x nat x ndim)
+   real(wp), intent(out) :: dadr(:, :, :)
+
+   !> Derivative of Coulomb matrix w.r.t. lattice parameters (3 x 3 x ndim)
+   real(wp), intent(out) :: dadL(:, :, :)
+
+   !> Trace-like array for diagonal contributions
+   real(wp), intent(out) :: atrace(:, :)
+
+   integer :: iat, jat, izp, jzp
    real(wp) :: vec(3), r2, gam, arg, dtmp, dG(3), dS(3, 3)
 
+   real(wp), allocatable :: atrace_local(:, :)
+   real(wp), allocatable :: dadr_local(:, :, :), dadL_local(:, :, :)
+
    atrace(:, :) = 0.0_wp
+   dadr(:, :, :) = 0.0_wp
    dadL(:, :, :) = 0.0_wp
-   npair = mol%nat*(mol%nat+1)/2
-   ! Pair derivatives have unique owners. Only atom-wise traces and strain
-   ! derivatives need reduction, with O(N) storage per thread.
-   !$omp parallel default(none) shared(dadr, mol, self, qvec, npair) &
-   !$omp private(iat, jat, izp, jzp, ipair, gam, r2, vec, dG, dS, dtmp, arg) &
-   !$omp reduction(+:atrace, dadL)
-   !$omp do schedule(static)
-   do iat = 1, size(dadr, 3)
-      dadr(:, :, iat) = 0.0_wp
-   end do
-   !$omp end do
+
+   !$omp parallel default(none) &
+   !$omp shared(atrace, dadr, dadL, mol, self, qvec) &
+   !$omp private(iat, izp, jat, jzp, gam, r2, vec, dG, dS, dtmp, arg) &
+   !$omp private(atrace_local, dadr_local, dadL_local)
+   allocate(atrace_local, source=atrace)
+   allocate(dadr_local, source=dadr)
+   allocate(dadL_local, source=dadL)
    !$omp do schedule(runtime)
-   do ipair = 1, npair
-      iat = int(0.5_wp*(sqrt(8.0_wp*real(ipair, wp)+1.0_wp)-1.0_wp))
-      if (iat*(iat+1)/2 < ipair) iat = iat+1
-      jat = ipair-iat*(iat-1)/2
-      if (iat == jat) cycle
+   do iat = 1, mol%nat
       izp = mol%id(iat)
-      jzp = mol%id(jat)
-      vec = mol%xyz(:, jat) - mol%xyz(:, iat)
-      r2 = vec(1)**2 + vec(2)**2 + vec(3)**2
-      gam = 1.0_wp / sqrt(self%rad(izp)**2 + self%rad(jzp)**2)
-      arg = gam * gam * r2
-      dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) - erf(sqrt(arg)) / (r2 * sqrt(r2))
-      dG = dtmp * vec
-      dS = spread(dG, 1, 3) * spread(vec, 2, 3)
-      atrace(:, iat) = atrace(:, iat) - dG * qvec(jat)
-      atrace(:, jat) = atrace(:, jat) + dG * qvec(iat)
-      dadr(:, iat, jat) = -dG * qvec(iat)
-      dadr(:, jat, iat) = +dG * qvec(jat)
-      dadL(:, :, jat) = dadL(:, :, jat) + dS * qvec(iat)
-      dadL(:, :, iat) = dadL(:, :, iat) + dS * qvec(jat)
+      do jat = 1, iat - 1
+         jzp = mol%id(jat)
+         vec = mol%xyz(:, jat) - mol%xyz(:, iat)
+         r2 = vec(1)**2 + vec(2)**2 + vec(3)**2
+         gam = 1.0_wp / sqrt(self%rad(izp)**2 + self%rad(jzp)**2)
+         arg = gam * gam * r2
+         dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) &
+            & - erf(sqrt(arg)) / (r2 * sqrt(r2))
+         dG = dtmp * vec
+         dS = spread(dG, 1, 3) * spread(vec, 2, 3)
+         atrace_local(:, iat) = -dG * qvec(jat) + atrace_local(:, iat)
+         atrace_local(:, jat) = +dG * qvec(iat) + atrace_local(:, jat)
+         dadr_local(:, iat, jat) = -dG * qvec(iat)
+         dadr_local(:, jat, iat) = +dG * qvec(jat)
+         dadL_local(:, :, jat) = +dS * qvec(iat) + dadL_local(:, :, jat)
+         dadL_local(:, :, iat) = +dS * qvec(jat) + dadL_local(:, :, iat)
+      end do
    end do
    !$omp end do
+   !$omp critical (get_damat_0d_)
+   atrace(:, :) = atrace(:, :) + atrace_local(:, :)
+   dadr(:, :, :) = dadr(:, :, :) + dadr_local(:, :, :)
+   dadL(:, :, :) = dadL(:, :, :) + dadL_local(:, :, :)
+   !$omp end critical (get_damat_0d_)
+   deallocate(dadL_local, dadr_local, atrace_local)
    !$omp end parallel
 end subroutine get_damat_0d
 
@@ -513,60 +752,89 @@ subroutine get_damat_3d(self, mol, wsc, alpha, qvec, dadr, dadL, atrace)
    class(eeq_model), intent(in) :: self
    type(structure_type), intent(in) :: mol
    type(wignerseitz_cell), intent(in) :: wsc
-   real(wp), intent(in) :: alpha, qvec(:)
-   real(wp), intent(out) :: dadr(:, :, :), dadL(:, :, :), atrace(:, :)
 
-   integer :: iat, jat, izp, jzp, img, ipair, npair
-   real(wp) :: gam, wsw, vec(3), dG(3), dS(3, 3)
+   !> Ewald splitting parameter
+   real(wp), intent(in) :: alpha
+
+   !> Charge vector (right-hand side)
+   real(wp), intent(in) :: qvec(:)
+
+   !> Derivative of Coulomb matrix w.r.t. atomic positions (3 x nat x ndim)
+   real(wp), intent(out) :: dadr(:, :, :)
+
+   !> Derivative of Coulomb matrix w.r.t. lattice parameters (3 x 3 x ndim)
+   real(wp), intent(out) :: dadL(:, :, :)
+
+   !> Trace-like array for diagonal contributions
+   real(wp), intent(out) :: atrace(:, :)
+
+   integer :: iat, jat, izp, jzp, img
+   real(wp) :: vol, gam, wsw, vec(3), dG(3), dS(3, 3)
    real(wp) :: dGd(3), dSd(3, 3), dGr(3), dSr(3, 3)
-   real(wp), allocatable :: dtrans(:, :), rtrans(:, :), rec_weight(:), rec_strain(:, :, :)
+   real(wp), allocatable :: dtrans(:, :), rtrans(:, :)
+
+   real(wp), allocatable :: atrace_local(:, :)
+   real(wp), allocatable :: dadr_local(:, :, :), dadL_local(:, :, :)
 
    atrace(:, :) = 0.0_wp
+   dadr(:, :, :) = 0.0_wp
    dadL(:, :, :) = 0.0_wp
-   call get_dir_trans(mol, dtrans)
-   call get_rec_trans(mol%lattice, rtrans)
-   call get_rec_weights(abs(matdet_3x3(mol%lattice)), alpha, rtrans, rec_weight, rec_strain)
 
-   npair = mol%nat*(mol%nat+1)/2
+   vol = abs(matdet_3x3(mol%lattice))
+   call get_dir_trans(mol, dtrans)
+   call get_rec_trans(mol, rtrans)
+
    !$omp parallel default(none) &
-   !$omp shared(mol, self, wsc, alpha, dtrans, rtrans, rec_weight, rec_strain, qvec, dadr, npair) &
-   !$omp private(iat, jat, izp, jzp, img, ipair, gam, wsw, vec, dG, dS, dGr, dSr, dGd, dSd) &
-   !$omp reduction(+:atrace, dadL)
-   !$omp do schedule(static)
-   do iat = 1, size(dadr, 3)
-      dadr(:, :, iat) = 0.0_wp
-   end do
-   !$omp end do
+   !$omp shared(mol, self, wsc, alpha, vol, dtrans, rtrans, qvec) &
+   !$omp shared(atrace, dadr, dadL) &
+   !$omp private(iat, izp, jat, jzp, img, gam, wsw, vec, dG, dS) &
+   !$omp private(dGr, dSr, dGd, dSd, atrace_local, dadr_local, dadL_local)
+   allocate(atrace_local, source=atrace)
+   allocate(dadr_local, source=dadr)
+   allocate(dadL_local, source=dadL)
    !$omp do schedule(runtime)
-   do ipair = 1, npair
-      iat = int(0.5_wp*(sqrt(8.0_wp*real(ipair, wp)+1.0_wp)-1.0_wp))
-      if (iat*(iat+1)/2 < ipair) iat = iat+1
-      jat = ipair-iat*(iat-1)/2
+   do iat = 1, mol%nat
       izp = mol%id(iat)
-      jzp = mol%id(jat)
-      dG(:) = 0.0_wp
+      do jat = 1, iat - 1
+         jzp = mol%id(jat)
+         dG(:) = 0.0_wp
+         dS(:, :) = 0.0_wp
+         gam = 1.0_wp / sqrt(self%rad(izp)**2 + self%rad(jzp)**2)
+         wsw = 1.0_wp / real(wsc%nimg(jat, iat), wp)
+         do img = 1, wsc%nimg(jat, iat)
+            vec = mol%xyz(:, jat) - mol%xyz(:, iat) &
+               & + wsc%trans(:, wsc%tridx(img, jat, iat))
+            call get_damat_dir_3d(vec, gam, alpha, dtrans, dGd, dSd)
+            call get_damat_rec_3d(vec, vol, alpha, rtrans, dGr, dSr)
+            dG = dG + (dGd + dGr) * wsw
+            dS = dS + (dSd + dSr) * wsw
+         end do
+         atrace_local(:, iat) = -dG * qvec(jat) + atrace_local(:, iat)
+         atrace_local(:, jat) = +dG * qvec(iat) + atrace_local(:, jat)
+         dadr_local(:, iat, jat) = -dG * qvec(iat) + dadr_local(:, iat, jat)
+         dadr_local(:, jat, iat) = +dG * qvec(jat) + dadr_local(:, jat, iat)
+         dadL_local(:, :, jat) = +dS * qvec(iat) + dadL_local(:, :, jat)
+         dadL_local(:, :, iat) = +dS * qvec(jat) + dadL_local(:, :, iat)
+      end do
+
       dS(:, :) = 0.0_wp
-      gam = 1.0_wp / sqrt(self%rad(izp)**2 + self%rad(jzp)**2)
-      wsw = 1.0_wp / real(wsc%nimg(jat, iat), wp)
-      do img = 1, wsc%nimg(jat, iat)
-         vec = mol%xyz(:, jat) - mol%xyz(:, iat) + wsc%trans(:, wsc%tridx(img, jat, iat))
+      gam = 1.0_wp / sqrt(2.0_wp * self%rad(izp)**2)
+      wsw = 1.0_wp / real(wsc%nimg(iat, iat), wp)
+      do img = 1, wsc%nimg(iat, iat)
+         vec = wsc%trans(:, wsc%tridx(img, iat, iat))
          call get_damat_dir_3d(vec, gam, alpha, dtrans, dGd, dSd)
-         call get_damat_rec_3d(vec, rtrans, rec_weight, rec_strain, dGr, dSr)
-         dG = dG + (dGd + dGr) * wsw
+         call get_damat_rec_3d(vec, vol, alpha, rtrans, dGr, dSr)
          dS = dS + (dSd + dSr) * wsw
       end do
-      if (iat == jat) then
-         dadL(:, :, iat) = dadL(:, :, iat) + dS * qvec(iat)
-      else
-         atrace(:, iat) = atrace(:, iat) - dG * qvec(jat)
-         atrace(:, jat) = atrace(:, jat) + dG * qvec(iat)
-         dadr(:, iat, jat) = -dG * qvec(iat)
-         dadr(:, jat, iat) = +dG * qvec(jat)
-         dadL(:, :, jat) = dadL(:, :, jat) + dS * qvec(iat)
-         dadL(:, :, iat) = dadL(:, :, iat) + dS * qvec(jat)
-      end if
+      dadL_local(:, :, iat) = +dS * qvec(iat) + dadL_local(:, :, iat)
    end do
    !$omp end do
+   !$omp critical (get_damat_3d_)
+   atrace(:, :) = atrace(:, :) + atrace_local(:, :)
+   dadr(:, :, :) = dadr(:, :, :) + dadr_local(:, :, :)
+   dadL(:, :, :) = dadL(:, :, :) + dadL_local(:, :, :)
+   !$omp end critical (get_damat_3d_)
+   deallocate(dadL_local, dadr_local, atrace_local)
    !$omp end parallel
 end subroutine get_damat_3d
 
@@ -592,90 +860,321 @@ subroutine get_damat_dir_3d(rij, gam, alp, trans, dg, ds)
       r1 = norm2(vec)
       if (r1 < eps) cycle
       r2 = r1 * r1
-      gtmp = +2 * gam * exp(-r2 * gam2) / (sqrtpi * r2) - erf(r1 * gam) / (r2 * r1)
-      atmp = -2 * alp * exp(-r2 * alp2) / (sqrtpi * r2) + erf(r1 * alp) / (r2 * r1)
+      gtmp = +2.0_wp * gam * exp(-r2 * gam2) / (sqrtpi * r2) &
+         & - erf(r1 * gam) / (r2 * r1)
+      atmp = -2.0_wp * alp * exp(-r2 * alp2) / (sqrtpi * r2) &
+         & + erf(r1 * alp) / (r2 * r1)
       dg(:) = dg + (gtmp + atmp) * vec
       ds(:, :) = ds + (gtmp + atmp) * spread(vec, 1, 3) * spread(vec, 2, 3)
    end do
 
 end subroutine get_damat_dir_3d
 
-subroutine get_damat_rec_3d(rij, trans, weight, strain, dg, ds)
-   real(wp), intent(in) :: rij(3), trans(:, :), weight(:), strain(:, :, :)
-   real(wp), intent(out) :: dg(3), ds(3, 3)
+
+!> Reciprocal-space contribution to the Coulomb matrix derivatives.
+subroutine get_damat_rec_3d(rij, vol, alp, trans, dg, ds)
+
+   !> Distance vector between two atoms (including lattice translation)
+   real(wp), intent(in) :: rij(3)
+
+   !> Unit cell volume
+   real(wp), intent(in) :: vol
+
+   !> Ewald splitting parameter
+   real(wp), intent(in) :: alp
+
+   !> Reciprocal lattice translation vectors (3 x N)
+   real(wp), intent(in) :: trans(:, :)
+
+   !> Derivative of the Coulomb matrix element w.r.t. atomic position (3)
+   real(wp), intent(out) :: dg(3)
+
+   !> Derivative of the Coulomb matrix element w.r.t. lattice parameters (3x3)
+   real(wp), intent(out) :: ds(3, 3)
+
    integer :: itr
-   real(wp) :: gv
+   real(wp) :: fac, vec(3), g2, gv, etmp, dtmp, alp2
+   real(wp), parameter :: unity(3, 3) = reshape(&
+      & [1.0_wp, 0.0_wp, 0.0_wp, 0.0_wp, 1.0_wp, 0.0_wp, &
+      & 0.0_wp, 0.0_wp, 1.0_wp], [3, 3])
 
    dg(:) = 0.0_wp
    ds(:, :) = 0.0_wp
-   do itr = 1, size(trans, 2)
-      gv = dot_product(rij, trans(:, itr))
-      dg(:) = dg - weight(itr) * sin(gv) * trans(:, itr)
-      ds(:, :) = ds + cos(gv) * strain(:, :, itr)
-   end do
-end subroutine get_damat_rec_3d
+   fac = 4.0_wp * pi / vol
+   alp2 = alp * alp
 
-!> Reciprocal-space factors independent of the atom pair.
-!> Prepare once for each matrix/response evaluation, including strain when needed.
-subroutine get_rec_weights(vol, alpha, trans, weight, strain)
-   real(wp), intent(in) :: vol, alpha, trans(:, :)
-   real(wp), allocatable, intent(out) :: weight(:)
-   real(wp), allocatable, intent(out), optional :: strain(:, :, :)
-   integer :: itr
-   real(wp) :: g2, fac, vec(3)
-   real(wp), parameter :: unity(3, 3) = reshape(&
-      & [1, 0, 0, 0, 1, 0, 0, 0, 1], [3, 3])
-
-   fac = 4 * pi / vol
-   allocate(weight(size(trans, 2)), source=0.0_wp)
-   if (present(strain)) allocate(strain(3, 3, size(trans, 2)), source=0.0_wp)
    do itr = 1, size(trans, 2)
-      vec = trans(:, itr)
+      vec(:) = trans(:, itr)
       g2 = dot_product(vec, vec)
       if (g2 < eps) cycle
-      weight(itr) = fac * exp(-0.25_wp * g2 / alpha**2) / g2
-      if (present(strain)) then
-         strain(:, :, itr) = weight(itr) * ((2.0_wp / g2 + 0.5_wp / alpha**2) &
-            & * spread(vec, 1, 3) * spread(vec, 2, 3) - unity)
-      end if
+      gv = dot_product(rij, vec)
+      etmp = fac * exp(-0.25_wp * g2 / alp2) / g2
+      dtmp = -sin(gv) * etmp
+      dg(:) = dg + dtmp * vec
+      ds(:, :) = ds + etmp * cos(gv) &
+         & * ((2.0_wp / g2 + 0.5_wp / alp2) &
+         & * spread(vec, 1, 3) * spread(vec, 2, 3) - unity)
    end do
-end subroutine get_rec_weights
 
-!> Inspect cache and reallocate it in case of type mismatch
-subroutine taint(cache, ptr)
-   !> Instance of the cache
-   type(cache_container), target, intent(inout) :: cache
-   !> Reference to the cache
-   type(eeq_cache), pointer, intent(out) :: ptr
+end subroutine get_damat_rec_3d
 
-   if (allocated(cache%raw)) then
-      call view(cache, ptr)
-      if (associated(ptr)) return
-      deallocate(cache%raw)
+
+!> Accumulate the gradient and stress contributions of the EEQ model
+subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta)
+
+   !> EEQ model type
+   class(eeq_model), intent(in) :: self
+
+   !> Structure type
+   type(structure_type), intent(in) :: mol
+
+   !> Multicharge cache
+   type(mchrg_cache), intent(in) :: cache
+
+   !> Solution vector
+   real(wp), intent(in) :: p(:)
+
+   !> Cartesian gradient
+   real(wp), intent(inout) :: gradient(:, :)
+
+   !> Lattice stress contribution
+   real(wp), intent(inout) :: sigma(:, :)
+
+   !> Optional gradient prefactor
+   real(wp), intent(in), optional :: alpha
+
+   !> Optional electronegativity prefactor
+   real(wp), intent(in), optional :: beta
+
+   if (any(mol%periodic)) then
+      call get_grad_3d(self, mol, cache, p, gradient, sigma, &
+         & alphain=alpha, betain=beta)
+   else
+      call get_grad_0d(self, mol, cache, p, gradient, sigma, &
+         & alphain=alpha, betain=beta)
    end if
 
-   if (.not. allocated(cache%raw)) then
-      block
-         type(eeq_cache), allocatable :: tmp
-         allocate(tmp)
-         call move_alloc(tmp, cache%raw)
-      end block
-   end if
+end subroutine get_grad
 
-   call view(cache, ptr)
-end subroutine taint
 
-!> Return reference to cache after resolving its type
-subroutine view(cache, ptr)
-   !> Instance of the cache
-   type(cache_container), target, intent(inout) :: cache
-   !> Reference to the cache
-   type(eeq_cache), pointer, intent(out) :: ptr
-   nullify(ptr)
-   select type(target => cache%raw)
-   type is(eeq_cache)
-      ptr => target
-   end select
-end subroutine view
+!> Accumulate gradient and stress contributions for a non-periodic system
+subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
+
+   !> EEQ model type
+   class(eeq_model), intent(in) :: self
+
+   !> Structure type
+   type(structure_type), intent(in) :: mol
+
+   !> Multicharge cache
+   type(mchrg_cache), intent(in) :: cache
+
+   !> Solution vector
+   real(wp), intent(in) :: p(:)
+
+   !> Cartesian gradient
+   real(wp), intent(inout) :: gradient(:, :)
+
+   !> Lattice stress contribution
+   real(wp), intent(inout) :: sigma(:, :)
+
+   !> Optional gradient prefactor
+   real(wp), intent(in), optional :: alphain
+
+   !> Optional electronegativity prefactor
+   real(wp), intent(in), optional :: betain
+
+   integer :: iat, jat, izp, jzp
+   real(wp) :: alpha, beta
+   real(wp) :: vec(3), r2, gam, arg, dtmp, tmp
+   real(wp) :: dG(3), dS(3, 3)
+   real(wp) :: W_ij
+   real(wp), allocatable :: cnacc(:), gradient_local(:, :), sigma_local(:, :)
+
+   real(wp), parameter :: reg = 1.0e-14_wp
+
+   alpha = 1.0_wp
+   if (present(alphain)) alpha = alphain
+   beta = 1.0_wp
+   if (present(betain)) beta = betain
+   allocate(cnacc(mol%nat), source=0.0_wp)
+
+   !$omp parallel default(none) &
+   !$omp shared(cache, mol, self, p, cnacc, gradient, sigma, alpha) &
+   !$omp private(iat, izp, jat, jzp, gam, vec, r2, dtmp, arg, tmp) &
+   !$omp private(W_ij, gradient_local, sigma_local, dG, dS)
+   allocate(gradient_local(3, mol%nat))
+   allocate(sigma_local(3, 3))
+   gradient_local = 0.0_wp
+   sigma_local = 0.0_wp
+
+   !$omp do schedule(runtime)
+   do iat = 1, mol%nat
+      izp = mol%id(iat)
+      do jat = 1, iat - 1
+         jzp = mol%id(jat)
+         vec = mol%xyz(:, jat) - mol%xyz(:, iat)
+         r2 = dot_product(vec, vec)
+         gam = 1.0_wp / sqrt(self%rad(izp)**2 + self%rad(jzp)**2)
+         arg = gam * gam * r2
+         dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) &
+            & - erf(sqrt(arg)) / (r2 * sqrt(r2))
+         dG = dtmp * vec
+         dS = spread(dG, 1, 3) * spread(vec, 2, 3)
+
+         ! Weights for the pair
+         W_ij = p(iat) * cache%vrhs(jat) + p(jat) * cache%vrhs(iat)
+
+         gradient_local(:, iat) = gradient_local(:, iat) - dG * W_ij * alpha
+         gradient_local(:, jat) = gradient_local(:, jat) + dG * W_ij * alpha
+         sigma_local(:, :) = sigma_local(:, :) + dS * W_ij * alpha
+      end do
+
+      tmp = self%kcnchi(izp) * (0.5_wp * cache%cn(iat) + reg) &
+         & / (cache%cn(iat) + reg)**1.5_wp
+      cnacc(iat) = tmp * p(iat)
+
+   end do
+   !$omp end do
+
+   !$omp critical
+   gradient = gradient + gradient_local
+   sigma = sigma + sigma_local
+   !$omp end critical
+
+   deallocate(gradient_local, sigma_local)
+   !$omp end parallel
+
+   allocate(gradient_local(3, mol%nat), source=0.0_wp)
+   allocate(sigma_local(3, 3), source=0.0_wp)
+
+   call self%ncoord%add_coordination_number_derivs(mol, cache%trans, cnacc, &
+      & gradient_local, sigma_local)
+
+   gradient = gradient + beta * gradient_local
+   sigma = sigma + beta * sigma_local
+
+end subroutine get_grad_0d
+
+
+!> Accumulate gradient and stress contributions for a periodic system
+subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
+
+   !> EEQ model type
+   class(eeq_model), intent(in) :: self
+
+   !> Structure type
+   type(structure_type), intent(in) :: mol
+
+   !> Multicharge cache
+   type(mchrg_cache), intent(in) :: cache
+
+   !> Solution vector
+   real(wp), intent(in) :: p(:)
+
+   !> Cartesian gradient
+   real(wp), intent(inout) :: gradient(:, :)
+
+   !> Lattice stress contribution
+   real(wp), intent(inout) :: sigma(:, :)
+
+   !> Optional gradient prefactor
+   real(wp), intent(in), optional :: alphain
+
+   !> Optional electronegativity prefactor
+   real(wp), intent(in), optional :: betain
+
+   integer :: iat, jat, izp, jzp, img
+   real(wp) :: alpha, beta
+   real(wp) :: vec(3), r2, gam, arg, dtmp, tmp
+   real(wp) :: dG(3), dS(3, 3), dGd(3), dSd(3, 3), dGr(3), dSr(3, 3)
+   real(wp) :: W_ij, W_ii, wsw, vol
+   real(wp), allocatable :: cnacc(:), gradient_local(:, :), sigma_local(:, :)
+   real(wp), allocatable :: dtrans(:, :), rtrans(:, :)
+
+   real(wp), parameter :: reg = 1.0e-14_wp
+
+   vol = abs(matdet_3x3(mol%lattice))
+   call get_dir_trans(mol, dtrans)
+   call get_rec_trans(mol, rtrans)
+
+   alpha = 1.0_wp
+   if (present(alphain)) alpha = alphain
+   beta = 1.0_wp
+   if (present(betain)) beta = betain
+   allocate(cnacc(mol%nat), source=0.0_wp)
+
+   !$omp parallel default(none) &
+   !$omp shared(cache, mol, self, p, gradient, sigma, vol, dtrans, rtrans) &
+   !$omp shared(alpha, cnacc) &
+   !$omp private(iat, izp, jat, jzp, gam, vec, r2, dtmp, arg, wsw, tmp) &
+   !$omp private(W_ii, W_ij, gradient_local, sigma_local) &
+   !$omp private(dG, dS, dGd, dSd, dGr, dSr)
+   allocate(gradient_local(3, mol%nat))
+   allocate(sigma_local(3, 3))
+   gradient_local = 0.0_wp
+   sigma_local = 0.0_wp
+
+   !$omp do schedule(runtime)
+   do iat = 1, mol%nat
+      izp = mol%id(iat)
+      do jat = 1, iat - 1
+         jzp = mol%id(jat)
+         dG(:) = 0.0_wp
+         dS(:, :) = 0.0_wp
+         gam = 1.0_wp / sqrt(self%rad(izp)**2 + self%rad(jzp)**2)
+         wsw = 1.0_wp / real(cache%wsc%nimg(jat, iat), wp)
+         do img = 1, cache%wsc%nimg(jat, iat)
+            vec = mol%xyz(:, jat) - mol%xyz(:, iat) &
+               & + cache%wsc%trans(:, cache%wsc%tridx(img, jat, iat))
+            call get_damat_dir_3d(vec, gam, cache%alpha, dtrans, dGd, dSd)
+            call get_damat_rec_3d(vec, vol, cache%alpha, rtrans, dGr, dSr)
+            dG = dG + (dGd + dGr) * wsw
+            dS = dS + (dSd + dSr) * wsw
+         end do
+         ! Weights for the pair
+         W_ij = p(iat) * cache%vrhs(jat) + p(jat) * cache%vrhs(iat)
+
+         gradient_local(:, iat) = gradient_local(:, iat) - dG * W_ij * alpha
+         gradient_local(:, jat) = gradient_local(:, jat) + dG * W_ij * alpha
+         sigma_local(:, :) = sigma_local(:, :) + dS * W_ij * alpha
+      end do
+      dS(:, :) = 0.0_wp
+      W_ii = p(iat) * cache%vrhs(iat)
+      gam = 1.0_wp / sqrt(2.0_wp * self%rad(izp)**2)
+      wsw = 1.0_wp / real(cache%wsc%nimg(iat, iat), wp)
+      do img = 1, cache%wsc%nimg(iat, iat)
+         vec = cache%wsc%trans(:, cache%wsc%tridx(img, iat, iat))
+         call get_damat_dir_3d(vec, gam, cache%alpha, dtrans, dGd, dSd)
+         call get_damat_rec_3d(vec, vol, cache%alpha, rtrans, dGr, dSr)
+         dS = dS + (dSd + dSr) * wsw
+      end do
+      sigma_local(:, :) = sigma_local(:, :) + dS * W_ii * alpha
+
+      tmp = self%kcnchi(izp) * (0.5_wp * cache%cn(iat) + reg) &
+         & / (cache%cn(iat) + reg)**1.5_wp
+      cnacc(iat) = tmp * p(iat)
+
+   end do
+   !$omp end do
+
+   !$omp critical
+   gradient = gradient + gradient_local
+   sigma = sigma + sigma_local
+   !$omp end critical
+
+   deallocate(gradient_local, sigma_local)
+   !$omp end parallel
+
+   allocate(gradient_local(3, mol%nat), source=0.0_wp)
+   allocate(sigma_local(3, 3), source=0.0_wp)
+
+   call self%ncoord%add_coordination_number_derivs(mol, cache%trans, cnacc, &
+      & gradient_local, sigma_local)
+
+   gradient = gradient + beta * gradient_local
+   sigma = sigma + beta * sigma_local
+
+end subroutine get_grad_3d
 
 end module multicharge_model_eeq
