@@ -46,9 +46,9 @@ contains
 !> Add dE/dCN contracted with the Cartesian Hessian of the coordination numbers
 !> to the compressed Hessian, as add_coordination_number_hessian of mctc-lib
 !> for a molecular system with a sorted complete neighborlist and without a
-!> maximum CN cutoff. Each iteration only updates the row of atom iat of the
-!> Hessian, the diagonal block from all pairs of iat and the blocks of the
-!> atoms of higher index in its upper triangle.
+!> maximum CN cutoff. Each pair is evaluated once in the row of the atom of
+!> lower index, which writes the block of the pair in the upper triangle of its
+!> row of the Hessian, only the diagonal blocks are reduced over the threads.
 subroutine add_ncoord_hessian_list(ncoord, mol, list, dEdcn, hessian)
    !> Coordination number container
    class(ncoord_type), intent(in) :: ncoord
@@ -70,15 +70,19 @@ subroutine add_ncoord_hessian_list(ncoord, mol, list, dEdcn, hessian)
    real(wp) :: rij(3), r1, r2, cutoff2, den, dEdcnij, countd, countd2
    real(wp) :: box(3, 3)
    integer(i8), allocatable :: hmap(:)
+   real(wp), allocatable :: diagonal(:, :, :)
 
    cutoff2 = ncoord%cutoff**2
+   allocate(diagonal(3, 3, mol%nat), source=0.0_wp)
 
+   ! The neighbors of higher index lead each row of the sorted complete list,
    ! hmap holds the position of the block of each atom in the upper triangle
    ! of the row of iat of the Hessian
    !$omp parallel default(none) &
    !$omp shared(ncoord, mol, list, dEdcn, hessian, cutoff2) &
    !$omp private(iat, jat, izp, jzp, ic, kat, hat, hoff, rij, r1, r2, den) &
-   !$omp private(dEdcnij, countd, countd2, box, hmap)
+   !$omp private(dEdcnij, countd, countd2, box, hmap) &
+   !$omp reduction(+:diagonal)
    allocate(hmap(mol%nat), source=0_i8)
    !$omp do schedule(runtime)
    do iat = 1, mol%nat
@@ -89,6 +93,7 @@ subroutine add_ncoord_hessian_list(ncoord, mol, list, dEdcn, hessian)
       end do
       do kat = list%inl(iat) + 1, list%inl(iat + 1) - 1
          jat = list%nlat(kat)
+         if (jat < iat) exit
          jzp = mol%id(jat)
          rij = mol%xyz(:, iat) - mol%xyz(:, jat)
          r2 = sum(rij**2)
@@ -105,8 +110,8 @@ subroutine add_ncoord_hessian_list(ncoord, mol, list, dEdcn, hessian)
                & * rij * rij(ic)
             box(ic, ic) = box(ic, ic) + dEdcnij * countd / r1
          end do
-         hat = hessian%hinl(iat)
-         hessian%hesslist(:, :, hat) = hessian%hesslist(:, :, hat) + box
+         diagonal(:, :, iat) = diagonal(:, :, iat) + box
+         diagonal(:, :, jat) = diagonal(:, :, jat) + box
          hat = hmap(jat)
          if (hat > 0) hessian%hesslist(:, :, hat) = hessian%hesslist(:, :, hat) - box
       end do
@@ -117,6 +122,17 @@ subroutine add_ncoord_hessian_list(ncoord, mol, list, dEdcn, hessian)
    !$omp end do
    deallocate(hmap)
    !$omp end parallel
+
+   !$omp parallel do default(none) schedule(static) &
+   !$omp shared(mol, hessian, diagonal) &
+   !$omp private(iat, hat)
+   do iat = 1, mol%nat
+      hat = hessian%hinl(iat)
+      hessian%hesslist(:, :, hat) = hessian%hesslist(:, :, hat) + diagonal(:, :, iat)
+   end do
+   !$omp end parallel do
+
+   deallocate(diagonal)
 
 end subroutine add_ncoord_hessian_list
 
