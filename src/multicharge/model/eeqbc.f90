@@ -28,7 +28,7 @@ module multicharge_model_eeqbc
    use mctc_ncoord, only : cn_count, new_ncoord
    use mctc_wignerseitz, only: wignerseitz_cell, new_wignerseitz_cell
    use multicharge_blas, only : gemm, gemv, symv
-   use multicharge_model_cache, only : mchrg_cache
+   use multicharge_model_cache, only : mchrg_cache, ensure_shape
    use multicharge_model_hessian, only: coulomb_kernel, add_pair_hessian, add_chain_hessian
    use multicharge_model_type, only : get_dir_trans, mchrg_model_type
    implicit none
@@ -204,13 +204,14 @@ subroutine update(self, mol, cache, trans, grad)
    cache%trans = trans
 
    ! Allocate CN and local charge arrays in cache
-   if (.not. allocated(cache%cn)) then
-      allocate(cache%cn(mol%nat))
-   end if
+   call ensure_shape(cache%cn, mol%nat)
+   call ensure_shape(cache%qloc, mol%nat)
 
-   if (.not. allocated(cache%qloc)) then
-      allocate(cache%qloc(mol%nat))
-   end if
+   ! CN and local charge derivatives are evaluated on demand for this geometry
+   if (allocated(cache%dcndr)) deallocate(cache%dcndr)
+   if (allocated(cache%dcndL)) deallocate(cache%dcndL)
+   if (allocated(cache%dqlocdr)) deallocate(cache%dqlocdr)
+   if (allocated(cache%dqlocdL)) deallocate(cache%dqlocdL)
 
    cache%grad = grad
 
@@ -240,11 +241,11 @@ subroutine get_capacitance_matrix(self, mol, ndim, cache)
    !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
 
-   if (.not. allocated(cache%cmat)) allocate(cache%cmat(ndim, ndim))
+   call ensure_shape(cache%cmat, ndim, ndim)
 
    if (cache%grad) then
-      if (.not. allocated(cache%dcdr)) allocate(cache%dcdr(3, mol%nat, ndim))
-      if (.not. allocated(cache%dcdL)) allocate(cache%dcdL(3, 3, ndim))
+      call ensure_shape(cache%dcdr, 3, mol%nat, ndim)
+      call ensure_shape(cache%dcdL, 3, 3, ndim)
    end if
 
    if (any(mol%periodic)) then
@@ -285,13 +286,8 @@ subroutine get_xvec(self, mol, ndim, cache, efield)
    real(wp) :: ctmp, vec(3), rvdw, capi, wsw
    real(wp), allocatable :: dtrans(:, :)
 
-   if (.not. allocated(cache%xtmp)) then
-      allocate(cache%xtmp(ndim))
-   end if
-
-   if (.not. allocated(cache%xvec)) then
-      allocate(cache%xvec(ndim))
-   end if
+   call ensure_shape(cache%xtmp, ndim)
+   call ensure_shape(cache%xvec, ndim)
 
    cache%xvec(:) = 0.0_wp
 
@@ -379,8 +375,8 @@ subroutine get_xvec_derivs(self, mol, ndim, cache)
          & dqlocdr=cache%dqlocdr, dqlocdL=cache%dqlocdL)
    end if
 
-   if (.not. allocated(cache%dxdr)) allocate(cache%dxdr(3, mol%nat, ndim))
-   if (.not. allocated(cache%dxdL)) allocate(cache%dxdL(3, 3, ndim))
+   call ensure_shape(cache%dxdr, 3, mol%nat, ndim)
+   call ensure_shape(cache%dxdL, 3, 3, ndim)
 
    if (any(mol%periodic)) then
       call get_xvec_derivs_3d(self, mol, ndim, cache)
@@ -774,9 +770,7 @@ subroutine get_coulomb_matrix(self, mol, ndim, cache)
    type(mchrg_cache), intent(inout) :: cache
 
    ! Allocate amat
-   if (.not. allocated(cache%amat)) then
-      allocate(cache%amat(ndim, ndim))
-   end if
+   call ensure_shape(cache%amat, ndim, ndim)
    if (any(mol%periodic)) then
       call get_amat_3d(self, mol, cache)
    else
@@ -1001,8 +995,8 @@ subroutine get_coulomb_derivs(self, mol, ndim, cache)
    end if
 
    allocate(atrace(3, mol%nat), source=0.0_wp)
-   if (.not. allocated(cache%dadr)) allocate(cache%dadr(3, mol%nat, ndim))
-   if (.not. allocated(cache%dadL)) allocate(cache%dadL(3, 3, ndim))
+   call ensure_shape(cache%dadr, 3, mol%nat, ndim)
+   call ensure_shape(cache%dadL, 3, 3, ndim)
 
    if (any(mol%periodic)) then
       call get_damat_3d(self, mol, cache, atrace)

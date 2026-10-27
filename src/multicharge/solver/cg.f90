@@ -113,7 +113,7 @@ end subroutine new_cg_solver
 
 
 !> Solve a linear system with a diagonally preconditioned CG method
-subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
+subroutine solve(self, amat, xvec, vrhs, ainv, new_unit, error)
 
    !> Conjugate-gradient solver instance
    class(cg_solver), intent(in) :: self
@@ -127,11 +127,8 @@ subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
    !> On input: initial guess; on output: solution
    real(wp), intent(inout), contiguous :: vrhs(:)
 
-   !> Inverse matrix
+   !> Inverse matrix, not available for the iterative solver
    real(wp), intent(out), optional :: ainv(:, :)
-
-   !> Whether to solve coupled-perturbed equations
-   logical, intent(in), optional :: cpq
 
    !> Output unit
    integer, intent(in), optional :: new_unit
@@ -146,9 +143,19 @@ subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
    type(timer_type) :: timer
 
    ! CG cannot compute the inverse matrix
-   if (present(ainv) .or. present(cpq)) then
+   if (present(ainv)) then
       call fatal_error(error, &
          & "The inverse matrix cannot be calculated using an iterative solver.")
+      return
+   end if
+
+   if (self%cgmiter <= 0) then
+      call fatal_error(error, "Maximal number of CG iterations must be positive.")
+      return
+   end if
+
+   if (.not. self%cgtol > 0.0_wp) then
+      call fatal_error(error, "CG convergence tolerance must be positive.")
       return
    end if
 

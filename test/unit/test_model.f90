@@ -95,7 +95,10 @@ subroutine collect_model(testsuite)
       & new_unittest("eeqbc-dqdL-mb11", test_eeqbc_dqdL_mb11), &
       & new_unittest("eeqbc-dqdL-mb12", test_eeqbc_dqdL_mb12), &
       & new_unittest("eeqbc-dfdr-mb06", test_eeqbc_dfdr_mb06), &
-      & new_unittest("eeqbc-dfdr-mb10", test_eeqbc_dfdr_mb10) &
+      & new_unittest("eeqbc-dfdr-mb10", test_eeqbc_dfdr_mb10), &
+      & new_unittest("cg-solve-errors", test_cg_solve_errors), &
+      & new_unittest("cache-solver-switch", test_cache_solver_switch), &
+      & new_unittest("eeqbc-cache-new-geometry", test_eeqbc_cache_new_geometry) &
       & ]
 
 end subroutine collect_model
@@ -2095,5 +2098,168 @@ subroutine test_eeqbc_dfdr_mb10(error)
    call test_dfdr(error, mol, dfdq, model)
 
 end subroutine test_eeqbc_dfdr_mb10
+
+!> Solver errors reach the caller of the model solve
+subroutine test_cg_solve_errors(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   type(mchrg_cache) :: cache
+   type(cg_input) :: input
+   type(cg_solver) :: solver
+   type(error_type), allocatable :: solve_error
+   real(wp), parameter :: trans(3, 1) = 0.0_wp
+   real(wp), allocatable :: qvec(:), dqdr(:, :, :), dqdL(:, :, :)
+
+   call get_structure(mol, "MB16-43", "01")
+   call new_eeq2019_model(mol, model, error)
+   if (allocated(error)) return
+   allocate(qvec(mol%nat), dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat))
+
+   ! Charge derivatives need the inverse matrix
+   call new_cg_solver(solver, input)
+   call model%update(mol, cache, trans, grad=.true.)
+   call model%solve(mol, solver, cache, solve_error, qvec=qvec, dqdr=dqdr, &
+      & dqdL=dqdL)
+   if (.not. allocated(solve_error)) then
+      call test_failed(error, "CG solver accepted a charge derivative request")
+      return
+   end if
+   deallocate(solve_error)
+
+   ! Missing convergence is reported
+   input%cgmiter = 1
+   call new_cg_solver(solver, input)
+   call model%solve(mol, solver, cache, solve_error, qvec=qvec)
+   if (.not. allocated(solve_error)) then
+      call test_failed(error, "Unconverged CG solve was not reported")
+      return
+   end if
+
+end subroutine test_cg_solve_errors
+
+
+!> One cache can be reused for both solver formulations
+subroutine test_cache_solver_switch(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   type(mchrg_cache) :: cache
+   type(cg_input) :: cg_inp
+   type(cg_solver) :: cg
+   type(direct_input) :: direct_inp
+   type(direct_solver) :: direct
+   type(error_type), allocatable :: grad_error
+   real(wp), parameter :: trans(3, 1) = 0.0_wp
+   real(wp) :: dfdL(3, 3)
+   real(wp), allocatable :: qvec(:), qref(:), dfdr(:, :)
+   real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
+   real(wp), allocatable :: dqdr_ref(:, :, :), dqdL_ref(:, :, :)
+
+   call get_structure(mol, "MB16-43", "01")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   allocate(qvec(mol%nat), qref(mol%nat), dfdr(3, mol%nat), &
+      & dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat), &
+      & dqdr_ref(3, mol%nat, mol%nat), dqdL_ref(3, 3, mol%nat))
+   call new_cg_solver(cg, cg_inp)
+   call new_direct_solver(direct, direct_inp)
+
+   call get_charges(model, mol, error, qref, dqdr_ref, dqdL_ref)
+   if (allocated(error)) return
+
+   call model%update(mol, cache, trans, grad=.true.)
+   call model%solve(mol, cg, cache, error, qvec=qvec)
+   if (allocated(error)) return
+   if (any(abs(qvec - qref) > thr1)) then
+      call test_failed(error, "CG charges do not match the direct solution")
+      return
+   end if
+
+   ! The cached matrix belongs to the CG formulation
+   dfdr(:, :) = 0.0_wp
+   dfdL(:, :) = 0.0_wp
+   call model%get_external_gradient(mol, direct, cache, grad_error, qvec, &
+      & dfdr, dfdL)
+   if (.not. allocated(grad_error)) then
+      call test_failed(error, "Cache formulation mismatch was not reported")
+      return
+   end if
+   deallocate(grad_error)
+   call model%get_external_gradient(mol, cg, cache, grad_error, &
+      & qvec(:mol%nat - 1), dfdr, dfdL)
+   if (.not. allocated(grad_error)) then
+      call test_failed(error, "Too short partial derivative was accepted")
+      return
+   end if
+
+   call model%solve(mol, direct, cache, error, qvec=qvec, dqdr=dqdr, dqdL=dqdL)
+   if (allocated(error)) return
+   if (any(abs(qvec - qref) > thr) .or. any(abs(dqdr - dqdr_ref) > thr) &
+      & .or. any(abs(dqdL - dqdL_ref) > thr)) then
+      call test_failed(error, "Direct solve on a reused cache differs")
+      return
+   end if
+
+   call model%solve(mol, cg, cache, error, qvec=qvec)
+   if (allocated(error)) return
+   if (any(abs(qvec - qref) > thr1)) then
+      call test_failed(error, "CG solve on a reused cache differs")
+   end if
+
+end subroutine test_cache_solver_switch
+
+
+!> CN and local charge derivatives follow a geometry update of the cache
+subroutine test_eeqbc_cache_new_geometry(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   type(mchrg_cache) :: cache
+   type(direct_input) :: input
+   type(direct_solver) :: solver
+   real(wp), parameter :: trans(3, 1) = 0.0_wp
+   real(wp), allocatable :: qvec(:), qref(:)
+   real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
+   real(wp), allocatable :: dqdr_ref(:, :, :), dqdL_ref(:, :, :)
+
+   call get_structure(mol, "MB16-43", "01")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   allocate(qvec(mol%nat), qref(mol%nat), &
+      & dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat), &
+      & dqdr_ref(3, mol%nat, mol%nat), dqdL_ref(3, 3, mol%nat))
+   call new_direct_solver(solver, input)
+
+   call model%update(mol, cache, trans, grad=.true.)
+   call model%solve(mol, solver, cache, error, qvec=qvec, dqdr=dqdr, dqdL=dqdL)
+   if (allocated(error)) return
+
+   mol%xyz(:, 1) = mol%xyz(:, 1) + [0.3_wp, -0.2_wp, 0.1_wp]
+   call get_charges(model, mol, error, qref, dqdr_ref, dqdL_ref)
+   if (allocated(error)) return
+
+   call model%update(mol, cache, trans, grad=.true.)
+   call model%solve(mol, solver, cache, error, qvec=qvec, dqdr=dqdr, dqdL=dqdL)
+   if (allocated(error)) return
+
+   if (any(abs(qvec - qref) > thr) .or. any(abs(dqdr - dqdr_ref) > thr) &
+      & .or. any(abs(dqdL - dqdL_ref) > thr)) then
+      call test_failed(error, "Charge derivatives use a stale cache")
+      print"(a)", "dqdr diff:"
+      print"(3es21.14)", maxval(abs(dqdr - dqdr_ref))
+   end if
+
+end subroutine test_eeqbc_cache_new_geometry
+
 
 end module test_model

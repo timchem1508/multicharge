@@ -30,7 +30,7 @@ Provide the partial charge solver: 'cg' or 'direct' (default)
 Provide the maximal number of CG iterations
 
 *-tol, -tolerance, --tolerance* _real_::
-Provide the tolerance of the solver
+Provide the convergence tolerance of the CG solver
 
 *-g, -eg, -grad, --grad, -egrad, --egrad*::
 Evaluate molecular energy gradient and virial

@@ -40,7 +40,7 @@ module multicharge_solver_type
 
    abstract interface
       !> Solve the linear system of equations
-      subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
+      subroutine solve(self, amat, xvec, vrhs, ainv, new_unit, error)
          import :: mchrg_solver_type, error_type, wp
 
          !> Solver instance
@@ -55,11 +55,8 @@ module multicharge_solver_type
          !> On input: initial guess; on output: solution
          real(wp), intent(inout), contiguous :: vrhs(:)
 
-         !> Inverse matrix
+         !> Inverse matrix, requested by passing the argument
          real(wp), intent(out), optional :: ainv(:, :)
-
-         !> Flag for coupled-perturbed equations
-         logical, intent(in), optional :: cpq
 
          !> Output unit
          integer, intent(in), optional :: new_unit

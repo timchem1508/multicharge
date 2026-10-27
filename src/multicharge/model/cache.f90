@@ -23,7 +23,7 @@ module multicharge_model_cache
    implicit none
    private
 
-   public :: mchrg_cache
+   public :: mchrg_cache, ensure_shape
 
 
    !> Cache for the charge model
@@ -106,5 +106,65 @@ module multicharge_model_cache
 
    end type mchrg_cache
 
+   !> Allocate a cache array with the requested shape, reallocating on mismatch
+   interface ensure_shape
+      module procedure :: ensure_shape_1d
+      module procedure :: ensure_shape_2d
+      module procedure :: ensure_shape_3d
+   end interface ensure_shape
+
+
+contains
+
+
+!> Allocate a rank-1 array, reallocate it if its size differs
+subroutine ensure_shape_1d(array, n1)
+   !> Array to (re)allocate, contents are undefined after reallocation
+   real(wp), allocatable, intent(inout) :: array(:)
+   !> Requested size
+   integer, intent(in) :: n1
+
+   if (allocated(array)) then
+      if (size(array) == n1) return
+      deallocate(array)
+   end if
+   allocate(array(n1))
+end subroutine ensure_shape_1d
+
+
+!> Allocate a rank-2 array, reallocate it if its shape differs
+subroutine ensure_shape_2d(array, n1, n2)
+   !> Array to (re)allocate, contents are undefined after reallocation
+   real(wp), allocatable, intent(inout) :: array(:, :)
+   !> Requested extent of the first dimension
+   integer, intent(in) :: n1
+   !> Requested extent of the second dimension
+   integer, intent(in) :: n2
+
+   if (allocated(array)) then
+      if (all(shape(array) == [n1, n2])) return
+      deallocate(array)
+   end if
+   allocate(array(n1, n2))
+end subroutine ensure_shape_2d
+
+
+!> Allocate a rank-3 array, reallocate it if its shape differs
+subroutine ensure_shape_3d(array, n1, n2, n3)
+   !> Array to (re)allocate, contents are undefined after reallocation
+   real(wp), allocatable, intent(inout) :: array(:, :, :)
+   !> Requested extent of the first dimension
+   integer, intent(in) :: n1
+   !> Requested extent of the second dimension
+   integer, intent(in) :: n2
+   !> Requested extent of the third dimension
+   integer, intent(in) :: n3
+
+   if (allocated(array)) then
+      if (all(shape(array) == [n1, n2, n3])) return
+      deallocate(array)
+   end if
+   allocate(array(n1, n2, n3))
+end subroutine ensure_shape_3d
 
 end module multicharge_model_cache

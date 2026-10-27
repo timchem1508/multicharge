@@ -79,7 +79,7 @@ end subroutine new_direct_solver
 
 
 !> Solve a dense symmetric linear system using LAPACK
-subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
+subroutine solve(self, amat, xvec, vrhs, ainv, new_unit, error)
 
    !> Direct solver instance
    class(direct_solver), intent(in) :: self
@@ -93,11 +93,8 @@ subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
    !> On input: initial guess; on output: solution
    real(wp), intent(inout), contiguous :: vrhs(:)
 
-   !> Inverse coefficient matrix
+   !> Inverse coefficient matrix, requested by passing the argument
    real(wp), intent(out), optional :: ainv(:, :)
-
-   !> Whether to solve coupled-perturbed equations
-   logical, intent(in), optional :: cpq
 
    !> Output unit (optional)
    integer, intent(in), optional :: new_unit
@@ -109,7 +106,6 @@ subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
    integer, allocatable :: ipiv(:)
 
    integer :: local_info, ndim, ic, jc, unit
-   logical :: want_cpq
    type(timer_type) :: timer
 
    if (self%verbosity > 1) call timer%push("total")
@@ -127,17 +123,21 @@ subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
    ! Dimensions match check
    ndim = size(xvec)
 
-   if (size(amat, 1) /= ndim .or. size(amat, 2) /= ndim) then
+   if (size(amat, 1) /= ndim .or. size(amat, 2) /= ndim &
+      & .or. size(vrhs) /= ndim) then
       call fatal_error(error, "solve_direct: dimension mismatch.")
       return
+   end if
+   if (present(ainv)) then
+      if (size(ainv, 1) /= ndim .or. size(ainv, 2) /= ndim) then
+         call fatal_error(error, "solve_direct: dimension mismatch of ainv.")
+         return
+      end if
    end if
 
    allocate(invmat(ndim, ndim))
    invmat = amat
    vrhs = xvec
-
-   want_cpq = .false.
-   if (present(cpq)) want_cpq = cpq
 
    ! Factorize the Coulomb matrix
    allocate(ipiv(ndim))
@@ -147,7 +147,7 @@ subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
       return
    end if
 
-   if (want_cpq) then
+   if (present(ainv)) then
       ! Inverted matrix is needed for coupled-perturbed equations
       call sytri(invmat, ipiv, info=local_info, uplo="l")
       if (local_info /= 0) then
@@ -161,6 +161,7 @@ subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
             invmat(ic, jc) = invmat(jc, ic)
          end do
       end do
+      ainv = invmat
    else
       ! Solve the linear system
       call sytrs(invmat, vrhs, ipiv, info=local_info, uplo="l")
@@ -169,8 +170,6 @@ subroutine solve(self, amat, xvec, vrhs, ainv, cpq, new_unit, error)
          return
       end if
    end if
-
-   if (present(ainv)) ainv = invmat
 
    ! Stop the solve timer
    call timer%pop

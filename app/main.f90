@@ -58,6 +58,10 @@ program main
    end if
 
    call new_mchrg_solver(solver, solver_input, error)
+   if (allocated(error)) then
+      write(error_unit, "(a)") error%message
+      error stop
+   end if
 
    if (input == "-") then
       if (.not. allocated(input_format)) input_format = filetype%xyz
@@ -189,7 +193,8 @@ subroutine help(unit)
       "-solver, --solver <type>", &
       & "Provide the partial charge solver: 'cg' or 'direct' (default)", &
       "-it, -maxiter, --maxiter <int>", "Provide the maximal number of CG iterations", &
-      "-tol, -tolerance, --tolerance <real>", "Provide the tolerance of the solver", &
+      "-tol, -tolerance, --tolerance <real>", &
+      & "Provide the convergence tolerance of the CG solver", &
       "-g, -eg, -grad, --grad, -egrad, --egrad", &
       & "Evaluate molecular energy gradient and virial.", &
       "-qg, -qgrad, --qgrad", "Evaluate molecular charge gradient and virial.", &
@@ -345,48 +350,47 @@ subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
          end if
          iarg = iarg + 1
          call get_argument(iarg, solver_name)
+         if (.not. allocated(solver_name)) then
+            call fatal_error(error, "Missing argument for solver")
+            exit
+         end if
          if (solver_name == "DIRECT" .or. solver_name == "direct") then
             allocate(direct_input :: solver_input)
-         end if
-         if (solver_name == "CG" .or. solver_name == "cg") then
+         else if (solver_name == "CG" .or. solver_name == "cg") then
             allocate(cg_input :: solver_input)
+         else
+            call fatal_error(error, "Invalid solver '"//solver_name//"'")
+            exit
          end if
       case("-it", "-maxiter", "--maxiter")
-         allocate(maxiter)
+         if (.not. allocated(maxiter)) allocate(maxiter)
          iarg = iarg + 1
          call get_argument(iarg, arg)
+         if (.not. allocated(arg)) then
+            call fatal_error(error, "Missing argument for maximal number of iterations")
+            exit
+         end if
          read(arg, *, iostat=iostat) maxiter
-         if (iostat /= 0) then
+         if (iostat /= 0 .or. maxiter <= 0) then
             call fatal_error(error, "Invalid maximal number of iterations")
             exit
          end if
       case("-tol", "-tolerance", "--tolerance")
-         allocate(tol)
+         if (.not. allocated(tol)) allocate(tol)
          iarg = iarg + 1
          call get_argument(iarg, arg)
+         if (.not. allocated(arg)) then
+            call fatal_error(error, "Missing argument for tolerance")
+            exit
+         end if
          read(arg, *, iostat=iostat) tol
-         if (iostat /= 0) then
+         if (iostat /= 0 .or. .not. tol > 0.0_wp) then
             call fatal_error(error, "Invalid tolerance")
             exit
          end if
       end select
    end do
-
-   if (qgrad) then
-      select type (solver_input)
-      type is (cg_input)
-         call fatal_error(error, &
-            & "Charge gradient cannot be evaluated using cg solver.")
-         return
-      end select
-   end if
-
-   if ((allocated(maxiter) .or. allocated(tol)) &
-         & .and. .not. allocated(solver_input)) then
-      call fatal_error(error, "Maximal number of iterations and tolerance "//&
-         & "cannot be used alongside the cg solver.")
-      return
-   end if
+   if (allocated(error)) return
 
    ! Default solver is direct
    if (.not. allocated(solver_input)) then
@@ -395,6 +399,11 @@ subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
 
    select type (solver_input)
    type is (cg_input)
+      if (qgrad) then
+         call fatal_error(error, &
+            & "Charge gradient cannot be evaluated using cg solver.")
+         return
+      end if
       if (allocated(maxiter)) then
          solver_input%cgmiter = maxiter
       end if
@@ -405,6 +414,11 @@ subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
          solver_input%verbosity = verbosity
       end if
    type is (direct_input)
+      if (allocated(maxiter) .or. allocated(tol)) then
+         call fatal_error(error, "Maximal number of iterations and tolerance "//&
+            & "can only be used with the cg solver.")
+         return
+      end if
       if (allocated(verbosity)) then
          solver_input%verbosity = verbosity
       end if

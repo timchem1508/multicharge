@@ -27,7 +27,7 @@ module multicharge_model_type
    use mctc_io_math, only: matinv_3x3
    use mctc_ncoord, only: ncoord_type
    use multicharge_blas, only: gemv, symv, gemm
-   use multicharge_model_cache, only : mchrg_cache
+   use multicharge_model_cache, only : mchrg_cache, ensure_shape
    use multicharge_model_hessian, only : add_symmetric_product
    use multicharge_solver_type, only : mchrg_solver_type
    implicit none
@@ -355,6 +355,11 @@ subroutine solve(self, mol, solver, cache, error, &
 
    ! The CG solver requires a positive-definite system
    if (solver%need_pos_def) then
+      if (cpq) then
+         call fatal_error(error, "Charge derivatives require the inverse "//&
+            & "matrix, which is not available with an iterative solver")
+         return
+      end if
       ndim = mol%nat
       add_lagr = .false.
    else
@@ -369,9 +374,7 @@ subroutine solve(self, mol, solver, cache, error, &
    call self%get_capacitance_matrix(mol, ndim, cache)
    call self%get_coulomb_matrix(mol, ndim, cache)
    call self%get_xvec(mol, ndim, cache, efield)
-   if (.not. allocated(cache%vrhs)) then
-      allocate(cache%vrhs(mol%nat + 1))
-   end if
+   call ensure_shape(cache%vrhs, mol%nat + 1)
 
    ! pop setup timer
    call timer%pop
@@ -380,19 +383,21 @@ subroutine solve(self, mol, solver, cache, error, &
    call print_solve_header(print_unit, verbosity_solve, timer%get("setup"))
 
    if (add_lagr) then
-      if (.not. allocated(cache%ainv)) then
-         allocate(cache%ainv(ndim, ndim))
+      if (cpq) then
+         ! The inverse matrix is needed for the charge derivatives
+         call ensure_shape(cache%ainv, ndim, ndim)
+         call solver%solve(amat=cache%amat, xvec=cache%xvec, &
+            & vrhs=cache%vrhs, ainv=cache%ainv, new_unit=print_unit, &
+            & error=error)
+      else
+         if (allocated(cache%ainv)) deallocate(cache%ainv)
+         call solver%solve(amat=cache%amat, xvec=cache%xvec, &
+            & vrhs=cache%vrhs, new_unit=print_unit, error=error)
       end if
-      cache%vrhs = cache%xvec
-      cache%ainv = cache%amat
-      call solver%solve(amat=cache%amat, xvec=cache%xvec, &
-         & vrhs=cache%vrhs, ainv=cache%ainv, cpq=cpq, &
-         & new_unit=print_unit, error=error)
+      if (allocated(error)) return
 
    else
-      if (.not. allocated(cache%uvec)) then
-         allocate(cache%uvec(mol%nat))
-      end if
+      call ensure_shape(cache%uvec, mol%nat)
       allocate(unitvec(mol%nat))
       allocate(vvec(mol%nat))
       ! Initial guess
@@ -407,11 +412,13 @@ subroutine solve(self, mol, solver, cache, error, &
       ! Constrained response: A*uvec = 1
       call solver%solve(amat=cache%amat, xvec=unitvec, &
          & vrhs=cache%uvec, new_unit=print_unit, error=error)
+      if (allocated(error)) return
       call print_constrained_system_message(print_unit, verbosity_solve, "v")
 
-      ! Unconstrained response: A*uvec = -xvec
+      ! Unconstrained response: A*vvec = -xvec
       call solver%solve(amat=cache%amat, xvec=-cache%xvec, &
          & vrhs=vvec, new_unit=print_unit, error=error)
+      if (allocated(error)) return
       uvecsum = sum(cache%uvec)
       vvecsum = sum(vvec)
       ! Lagrangian multiplier
@@ -552,7 +559,7 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
    print_unit = output_unit
    if (present(unit)) print_unit = unit
 
-   if (size(dfdq) > mol%nat) then
+   if (size(dfdq) /= mol%nat) then
       call fatal_error(error, "External partial derivative is wrong size")
       return
    end if
@@ -577,6 +584,11 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
       call fatal_error(error, "J-matrix is not allocated")
       return
    end if
+   if (any(shape(cache%amat) /= ndim)) then
+      call fatal_error(error, &
+         & "J-matrix in the cache was built for a different solver type")
+      return
+   end if
    if (.not. allocated(cache%uvec) .and. solver%need_pos_def) then
       call fatal_error(error, &
          & "Constrained response J*uvec = 1 is not allocated")
@@ -591,7 +603,8 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
 
       ! Unconstrained response: J*yvec = dfdq
       call print_adjoint_message(print_unit, verbosity_solve)
-      call solver%solve(amat=cache%amat, xvec=dfdq, vrhs=yvec, error=error)
+      call solver%solve(amat=cache%amat, xvec=dfdq, vrhs=yvec, &
+         & new_unit=print_unit, error=error)
       if (allocated(error)) return
 
       ! Projection of uvec on yvec

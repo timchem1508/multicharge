@@ -47,7 +47,10 @@ subroutine collect_solver(testsuite)
       & new_unittest("cg-spd-large", test_cg_spd_large), &
       & new_unittest("cg-ill-conditioned", test_cg_ill_conditioned), &
       & new_unittest("cg-zero-rhs", test_cg_zero_rhs), &
-      & new_unittest("cg-random-spd", test_cg_random_spd) &
+      & new_unittest("cg-random-spd", test_cg_random_spd), &
+      & new_unittest("cg-invalid-input", test_cg_invalid_input), &
+      & new_unittest("cg-not-converged", test_cg_not_converged), &
+      & new_unittest("direct-inverse", test_direct_inverse) &
       & ]
 
 end subroutine collect_solver
@@ -712,6 +715,131 @@ subroutine test_cg_random_spd(error)
    end if
 
 end subroutine test_cg_random_spd
+
+
+!> Test: Invalid CG settings and requests are rejected
+subroutine test_cg_invalid_input(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   integer, parameter :: n = 3
+   real(wp) :: amat(n, n), xvec(n), vrhs(n), ainv(n, n)
+   type(cg_input) :: input
+   type(cg_solver) :: solver
+   type(error_type), allocatable :: solve_error
+
+   amat = reshape([4.0_wp, 1.0_wp, 1.0_wp, &
+      & 1.0_wp, 3.0_wp, 2.0_wp, &
+      & 1.0_wp, 2.0_wp, 4.0_wp], [n, n])
+   xvec = [6.0_wp, 6.0_wp, 7.0_wp]
+
+   input%cgmiter = 0
+   call new_cg_solver(solver, input)
+   vrhs = 0.0_wp
+   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=solve_error)
+   if (.not. allocated(solve_error)) then
+      call test_failed(error, "CG accepted a non-positive iteration limit")
+      return
+   end if
+
+   deallocate(input%cgmiter)
+   input%cgtol = 0.0_wp
+   call new_cg_solver(solver, input)
+   vrhs = 0.0_wp
+   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=solve_error)
+   if (.not. allocated(solve_error)) then
+      call test_failed(error, "CG accepted a non-positive tolerance")
+      return
+   end if
+
+   deallocate(input%cgtol)
+   call new_cg_solver(solver, input)
+   vrhs = 0.0_wp
+   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, ainv=ainv, &
+      & error=solve_error)
+   if (.not. allocated(solve_error)) then
+      call test_failed(error, "CG returned an inverse matrix")
+      return
+   end if
+
+end subroutine test_cg_invalid_input
+
+
+!> Test: CG reports an error when the iteration limit is exhausted
+subroutine test_cg_not_converged(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   integer, parameter :: n = 3
+   real(wp) :: amat(n, n), xvec(n), vrhs(n)
+   type(cg_input) :: input
+   type(cg_solver) :: solver
+   type(error_type), allocatable :: solve_error
+
+   amat = reshape([4.0_wp, 1.0_wp, 1.0_wp, &
+      & 1.0_wp, 3.0_wp, 2.0_wp, &
+      & 1.0_wp, 2.0_wp, 4.0_wp], [n, n])
+   xvec = [6.0_wp, 6.0_wp, 7.0_wp]
+
+   input%cgmiter = 1
+   call new_cg_solver(solver, input)
+   vrhs = 0.0_wp
+   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=solve_error)
+   if (.not. allocated(solve_error)) then
+      call test_failed(error, "CG did not report a missing convergence")
+   end if
+
+end subroutine test_cg_not_converged
+
+
+!> Test: The direct solver returns the inverse only on request
+subroutine test_direct_inverse(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   integer, parameter :: n = 4
+   real(wp) :: amat(n, n), xvec(n), vrhs(n), vref(n), ainv(n, n)
+   real(wp) :: unity(n, n)
+   integer :: i
+   type(direct_input) :: input
+   type(direct_solver) :: solver
+
+   ! Constrained system with a zero diagonal element, symmetric indefinite
+   amat = reshape([4.0_wp, 1.0_wp, 0.5_wp, 1.0_wp, &
+      & 1.0_wp, 3.0_wp, 2.0_wp, 1.0_wp, &
+      & 0.5_wp, 2.0_wp, 4.0_wp, 1.0_wp, &
+      & 1.0_wp, 1.0_wp, 1.0_wp, 0.0_wp], [n, n])
+   xvec = [1.0_wp, -2.0_wp, 0.5_wp, 0.0_wp]
+
+   call new_direct_solver(solver, input)
+   call solver%solve(amat=amat, xvec=xvec, vrhs=vref, error=error)
+   if (allocated(error)) return
+   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, ainv=ainv, error=error)
+   if (allocated(error)) return
+
+   unity = matmul(amat, ainv)
+   do i = 1, n
+      unity(i, i) = unity(i, i) - 1.0_wp
+   end do
+   if (any(abs(unity) > thr)) then
+      call test_failed(error, "Direct solver did not return the inverse matrix")
+      print"(a)", "A * ainv - 1:"
+      print"(4es21.14)", unity
+      return
+   end if
+
+   if (any(abs(vrhs - vref) > thr) .or. any(abs(matmul(amat, vref) - xvec) > thr)) then
+      call test_failed(error, "Direct solutions with and without inverse differ")
+      print"(a)", "Solution:"
+      print"(4es21.14)", vrhs
+      print"(a)", "Reference:"
+      print"(4es21.14)", vref
+   end if
+
+end subroutine test_direct_inverse
 
 
 end module test_solver
