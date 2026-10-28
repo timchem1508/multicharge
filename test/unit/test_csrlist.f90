@@ -20,7 +20,7 @@ module test_csrlist
    use mctc_env_testing, only : new_unittest, unittest_type, error_type, test_failed
    use mctc_cutoff, only : get_lattice_points
    use mctc_io_structure, only : structure_type, new
-   use mctc_csrlist, only : csr_list, new_csr_list
+   use mctc_csrlist, only : csr_list, new_csr_list, distance_screening
    use mctc_wignerseitz, only : wignerseitz_cell
    use mstore, only : get_structure
    use multicharge_atomsort, only : new_sorted_list, sort_neighbors, get_half_offsets, &
@@ -208,6 +208,7 @@ subroutine gen_test_molecular(error, mol, model, qref, eref)
    integer :: verbosity = 0
 
    type(csr_list), allocatable :: list
+   type(distance_screening) :: screen
 
    real(wp) :: trans(3, 1) = 0.0_wp
    real(wp), allocatable :: energy(:)
@@ -235,7 +236,7 @@ subroutine gen_test_molecular(error, mol, model, qref, eref)
 
    ! Build adjacency list
    allocate(list)
-   call new_csr_list(list, mol, error, cutoff=cutoff)
+   call new_csr_list(list, screen, mol, error, cutoff=cutoff)
 
    call model%update(mol, cache, trans, grad=.false., list=list)
    call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, &
@@ -290,6 +291,7 @@ subroutine test_components(error, mol, model, sorted)
    integer :: verbosity = 0
 
    type(csr_list), allocatable :: list
+   type(distance_screening) :: screen
 
    real(wp) :: trans(3, 1) = 0.0_wp
    real(wp), allocatable :: cmat(:, :), amat(:, :)
@@ -320,7 +322,7 @@ subroutine test_components(error, mol, model, sorted)
    if (present(sorted)) then
       if (sorted) call new_sorted_list(list, mol, error, cutoff)
    end if
-   if (.not. allocated(list%inl)) call new_csr_list(list, mol, error, cutoff=cutoff)
+   if (.not. allocated(list%inl)) call new_csr_list(list, screen, mol, error, cutoff=cutoff)
    call model%update(mol, cache2, trans, grad=.true., list=list)
 
    call model%solve(mol, solver, cache2, error, list=list, unit=output_unit)
@@ -392,6 +394,7 @@ subroutine gen_test_periodic(error, mol, model)
 
    type(mchrg_cache), allocatable :: cache
    type(csr_list), allocatable :: list
+   type(distance_screening) :: screen
 
    ! Solver variables
    class(mchrg_solver_type), allocatable :: solver
@@ -440,7 +443,7 @@ subroutine gen_test_periodic(error, mol, model)
    deallocate(cache)
    allocate(cache)
    allocate(list)
-   call new_csr_list(list, mol, error, cache%wsc, 29.0_wp)
+   call new_csr_list(list, screen, mol, error, cache%wsc, 29.0_wp)
    call model%update(mol, cache, trans, grad=.false., list=list)
    call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, &
    & unit=output_unit)
@@ -489,6 +492,7 @@ subroutine test_grad(error, mol, model, sorted)
    integer :: verbosity = 0
 
    type(csr_list), allocatable :: list
+   type(distance_screening) :: screen
 
    integer :: ndim
    real(wp), parameter :: trans(3, 1) = 0.0_wp
@@ -529,7 +533,7 @@ subroutine test_grad(error, mol, model, sorted)
    if (present(sorted)) then
       if (sorted) call new_sorted_list(list, mol, error, cutoff)
    end if
-   if (.not. allocated(list%inl)) call new_csr_list(list, mol, error, cutoff=cutoff)
+   if (.not. allocated(list%inl)) call new_csr_list(list, screen, mol, error, cutoff=cutoff)
    call model%update(mol, cache2, trans, grad=.true., list=list)
 
    call model%solve(mol, solver, cache2, error, &
@@ -583,6 +587,7 @@ subroutine test_grad_periodic(error, mol, model, sorted)
    integer :: verbosity = 0
 
    type(csr_list), allocatable :: list
+   type(distance_screening) :: screen
 
    integer :: iat, ndim
    real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
@@ -631,7 +636,7 @@ subroutine test_grad_periodic(error, mol, model, sorted)
    if (present(sorted)) then
       if (sorted) call new_sorted_list(list, mol, error, 29.0_wp, cache2%wsc)
    end if
-   if (.not. allocated(list%inl)) call new_csr_list(list, mol, error, cache2%wsc, &
+   if (.not. allocated(list%inl)) call new_csr_list(list, screen, mol, error, cache2%wsc, &
       & cutoff=29.0_wp)
    call model%update(mol, cache2, trans, grad=.true., list=list)
 
@@ -676,10 +681,11 @@ subroutine test_api(error, mol, model, qref)
    real(wp), intent(in) :: qref(:)
 
    type(csr_list), allocatable :: list
+   type(distance_screening) :: screen
    real(wp), allocatable :: qvec(:)
 
    allocate(list)
-   call new_csr_list(list, mol, error, cutoff=cutoff)
+   call new_csr_list(list, screen, mol, error, cutoff=cutoff)
 
    ! Check wrapper functions
    allocate (qvec(mol%nat), source=0.0_wp)
@@ -1114,6 +1120,7 @@ subroutine test_sorted_list(error, mol, lcutoff)
    real(wp), intent(in) :: lcutoff
 
    type(csr_list) :: ref, list
+   type(distance_screening) :: screen
    type(wignerseitz_cell) :: wscref, wsc
    integer :: iat, jat, ient, nrow, nimg
    integer(i8) :: kat, lat, nhalf
@@ -1125,9 +1132,9 @@ subroutine test_sorted_list(error, mol, lcutoff)
 
    periodic = any(mol%periodic)
    if (periodic) then
-      call new_csr_list(ref, mol, error, wscref, lcutoff, complete=.true.)
+      call new_csr_list(ref, screen, mol, error, wscref, lcutoff, complete=.true.)
    else
-      call new_csr_list(ref, mol, error, cutoff=lcutoff, complete=.true.)
+      call new_csr_list(ref, screen, mol, error, cutoff=lcutoff, complete=.true.)
    end if
    if (allocated(error)) return
    if (size(ref%nlat) >= mol%nat**2) then
@@ -1488,6 +1495,7 @@ subroutine test_partial_derivs_half_list(error)
    class(mchrg_solver_type), allocatable :: solver
    type(mchrg_cache) :: cache
    type(csr_list) :: list
+   type(distance_screening) :: screen
    real(wp), parameter :: trans(3, 1) = 0.0_wp
    real(wp), allocatable :: dqdL(:, :, :)
 
@@ -1496,7 +1504,7 @@ subroutine test_partial_derivs_half_list(error)
    if (allocated(error)) return
    call solver_maker(solver, cg_input(use_nlist=.true.), error)
    if (allocated(error)) return
-   call new_csr_list(list, mol, error, cutoff=cutoff, complete=.false.)
+   call new_csr_list(list, screen, mol, error, cutoff=cutoff, complete=.false.)
    if (allocated(error)) return
 
    allocate(dqdL(3, 3, mol%nat))

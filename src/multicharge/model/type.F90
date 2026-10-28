@@ -30,7 +30,7 @@ module multicharge_model_type
    use mctc_io_math, only : matinv_3x3
    use mctc_cutoff, only : get_lattice_points
    use mctc_ncoord, only : ncoord_type
-   use mctc_csrlist, only : csr_list, new_csr_list
+   use mctc_csrlist, only : csr_list, new_csr_list, distance_screening
    use multicharge_atomsort, only : get_spatial_order, new_sorted_list, &
       & get_half_offsets, find_neighbor, symv_half
    use multicharge_blas, only : gemv, symv, gemm
@@ -2830,6 +2830,7 @@ subroutine get_displaced_gradient(self, mol, solver, error, gradient, sigma, &
 
    type(mchrg_cache) :: cache
    type(csr_list), allocatable :: list_work
+   type(distance_screening) :: screen
    real(wp), allocatable :: trans(:, :)
 
    gradient(:, :) = 0.0_wp
@@ -2844,10 +2845,10 @@ subroutine get_displaced_gradient(self, mol, solver, error, gradient, sigma, &
       else if (list%complete) then
          call new_sorted_list(list_work, mol, error, list%cutoff)
       else if (any(mol%periodic)) then
-         call new_csr_list(list_work, mol, error, cache%wsc, list%cutoff, &
+         call new_csr_list(list_work, screen, mol, error, cache%wsc, list%cutoff, &
             & complete=.false.)
       else
-         call new_csr_list(list_work, mol, error, cutoff=list%cutoff, &
+         call new_csr_list(list_work, screen, mol, error, cutoff=list%cutoff, &
             & complete=.false.)
       end if
       if (allocated(error)) return

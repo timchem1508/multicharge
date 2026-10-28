@@ -35,7 +35,7 @@
 module multicharge_atomsort
    use mctc_env, only : wp, i8, error_type
    use mctc_io, only : structure_type
-   use mctc_csrlist, only : csr_list, new_csr_list
+   use mctc_csrlist, only : csr_list, new_csr_list, distance_screening
    use mctc_wignerseitz, only : wignerseitz_cell
    implicit none
    private
@@ -185,7 +185,10 @@ subroutine new_sorted_list(list, mol, error, cutoff, wsc)
    !> Wigner-Seitz cell, receives the images of the entries of a periodic list
    type(wignerseitz_cell), intent(inout), optional :: wsc
 
-   call new_csr_list(list, mol, error, wsc, cutoff, complete=.true.)
+   !> Distance screening, the threshold is set from the cutoff by the list
+   type(distance_screening) :: screen
+
+   call new_csr_list(list, screen, mol, error, wsc, cutoff, complete=.true.)
    if (allocated(error)) return
    call sort_neighbors(list, wsc)
 

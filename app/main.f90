@@ -18,7 +18,7 @@ program main
    use mctc_env, only: error_type, fatal_error, get_argument, wp, timer_type, format_time
    use mctc_io, only: structure_type, read_structure, filetype, get_filetype
    use mctc_cutoff, only: get_lattice_points
-   use mctc_csrlist, only: csr_list, new_csr_list
+   use mctc_csrlist, only: csr_list, new_csr_list, distance_screening
    use mctc_wignerseitz, only: wignerseitz_cell
    use multicharge, only: mchrg_model_type, mchrg_model, mchrg_cache, new_eeq2019_model, &
    & new_eeqbc2025_model, get_multicharge_version, &
@@ -40,6 +40,7 @@ program main
    type(error_type), allocatable :: error
    type(structure_type) :: mol
    type(csr_list), allocatable :: list
+   type(distance_screening) :: screen
    type(wignerseitz_cell), allocatable :: wsc
    class(mchrg_model_type), allocatable :: model
    type(mchrg_cache), allocatable :: cache
@@ -131,9 +132,9 @@ program main
       else if (qgrad .or. analytic_hessian) then
          call new_sorted_list(list, mol, error, cutoff)
       else if (any(mol%periodic)) then
-         call new_csr_list(list, mol, error, cache%wsc, cutoff, complete=.false.)
+         call new_csr_list(list, screen, mol, error, cache%wsc, cutoff, complete=.false.)
       else
-         call new_csr_list(list, mol, error, cutoff=cutoff, complete=.false.)
+         call new_csr_list(list, screen, mol, error, cutoff=cutoff, complete=.false.)
       end if
       call timer%pop
       write(output_unit, '(a, 1x, a)') "Neighborlist generation time :", &
