@@ -28,11 +28,12 @@ module multicharge_model_type
    use mctc_io, only : structure_type
    use mctc_io_constants, only : pi
    use mctc_io_math, only : matinv_3x3
+   use mctc_io_structure_atomsort, only : get_spatial_order
    use mctc_cutoff, only : get_lattice_points
    use mctc_ncoord, only : ncoord_type
    use mctc_csrlist, only : csr_list, new_csr_list, distance_screening
-   use multicharge_atomsort, only : get_spatial_order, new_sorted_list, &
-      & get_half_offsets, find_neighbor, symv_half
+   use multicharge_atomsort, only : new_sorted_list, get_half_offsets, &
+      & find_neighbor, symv_half
    use multicharge_blas, only : gemv, symv, gemm
    use multicharge_model_cache, only : mchrg_cache
    use multicharge_solver_type, only : mchrg_solver_type

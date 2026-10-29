@@ -22,7 +22,8 @@ module multicharge_solver_cg
    use iso_fortran_env, only : output_unit
    use mctc_env, only : error_type, fatal_error, format_time, timer_type, wp, i8
    use mctc_csrlist, only : csr_list
-   use multicharge_atomsort, only : get_spatial_order, get_half_offsets, symv_half
+   use mctc_io_structure_atomsort, only : get_spatial_order
+   use multicharge_atomsort, only : get_half_offsets, symv_half
    use multicharge_blas, only : axpy, dot, gemm, scal, symv
    use multicharge_lapack, only : potrf, potrs, syevd
    use multicharge_solver_type, only : mchrg_solver_input, mchrg_solver_type

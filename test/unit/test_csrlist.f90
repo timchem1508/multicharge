@@ -20,10 +20,11 @@ module test_csrlist
    use mctc_env_testing, only : new_unittest, unittest_type, error_type, test_failed
    use mctc_cutoff, only : get_lattice_points
    use mctc_io_structure, only : structure_type, new
-   use mctc_csrlist, only : csr_list, new_csr_list, distance_screening
+   use mctc_csrlist, only : csr_list, new_csr_list, distance_screening, &
+      & sort_neighborlist
    use mctc_wignerseitz, only : wignerseitz_cell
    use mstore, only : get_structure
-   use multicharge_atomsort, only : new_sorted_list, sort_neighbors, get_half_offsets, &
+   use multicharge_atomsort, only : new_sorted_list, get_half_offsets, &
       & find_neighbor, get_pair_positions, symv_half
    use multicharge_blas, only : gemv
    use multicharge_model_type, only : mchrg_model_type, mchrg_hessian, get_dqdr_row, &
@@ -1143,7 +1144,7 @@ subroutine test_sorted_list(error, mol, lcutoff)
    end if
    list = ref
    wsc = wscref
-   call sort_neighbors(list, wsc)
+   call sort_neighborlist(list, wsc)
 
    ! Rows of the sorted list with the same neighbors and images
    do iat = 1, mol%nat
