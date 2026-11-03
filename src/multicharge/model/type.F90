@@ -26,7 +26,7 @@ module multicharge_model_type
    use mctc_io_constants, only: pi
    use mctc_io_math, only: matinv_3x3
    use mctc_ncoord, only: ncoord_type
-   use multicharge_blas, only: symv
+   use multicharge_blas, only: symv, gemm
    use multicharge_model_cache, only : mchrg_cache, ensure_shape
    use multicharge_model_hessian, only : add_symmetric_product
    use multicharge_solver_type, only : mchrg_solver_type
