@@ -23,6 +23,9 @@ Hint for the format of the input file
 *-c, -charge, --charge* _value_::
 Provide the molecular charge
 
+*-e, -efield, --efield* _x_,_y_,_z_::
+Provide the external electric field in atomic units
+
 *-solver, --solver* _type_::
 Provide the partial charge solver: 'cg' or 'direct' (default)
 

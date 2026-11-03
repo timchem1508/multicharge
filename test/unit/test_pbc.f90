@@ -21,6 +21,7 @@ module test_pbc
       & test_failed
    use mctc_io_structure, only: structure_type, new
    use mstore, only: get_structure
+   use multicharge_blas, only : gemv
    use multicharge_model_cache, only : mchrg_cache
    use multicharge_model_eeqbc, only: eeqbc_model
    use multicharge_model_type, only : mchrg_model_type
@@ -56,6 +57,7 @@ subroutine collect_pbc(testsuite)
       & new_unittest("eeq-sigma-ice", test_eeq_s_ice), &
       & new_unittest("eeq-dqdr-urea", test_eeq_dqdr_urea), &
       & new_unittest("eeq-dqdL-oxacb", test_eeq_dqdL_oxacb), &
+      & new_unittest("eeq-dfdr-urea", test_eeq_dfdr_urea), &
       & new_unittest("eeqbc-dbdr-co2", test_eeqbc_dbdr_co2), &
       & new_unittest("eeqbc-dbdL-co2", test_eeqbc_dbdL_co2), &
       & new_unittest("eeqbc-dadr-ice", test_eeqbc_dadr_ice), &
@@ -64,7 +66,8 @@ subroutine collect_pbc(testsuite)
       & new_unittest("eeqbc-gradient-co2", test_eeqbc_g_co2), &
       & new_unittest("eeqbc-sigma-ice", test_eeqbc_s_ice), &
       & new_unittest("eeqbc-dqdr-urea", test_eeqbc_dqdr_urea), &
-      & new_unittest("eeqbc-dqdL-oxacb", test_eeqbc_dqdL_oxacb) &
+      & new_unittest("eeqbc-dqdL-oxacb", test_eeqbc_dqdL_oxacb), &
+      & new_unittest("eeqbc-dfdr-urea", test_eeqbc_dfdr_urea) &
       & ]
 
 end subroutine collect_pbc
@@ -959,6 +962,104 @@ subroutine test_numdqdL(error, mol, model)
 
 end subroutine test_numdqdL
 
+!> Compare the adjoint CG gradient of f(q) with the direct dq/dR contraction
+subroutine test_dfdr(error, mol, dfdq, model)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular structure data
+   type(structure_type), intent(inout) :: mol
+
+   !> Partial f derivatives
+   real(wp), intent(in), contiguous :: dfdq(:)
+
+   !> Electronegativity equilibration model
+   class(mchrg_model_type), intent(in) :: model
+
+   ! Model cache (required for the get_external_gradient)
+   type(mchrg_cache), allocatable :: cache
+
+   ! Solver variables
+   class(mchrg_solver_type), allocatable :: solver_dqdr, solver_dfdr
+   class(mchrg_solver_input), allocatable :: solver_dqdr_input, solver_dfdr_input
+   real(wp), parameter :: tol = 1.0e-15_wp
+   integer, parameter :: maxiter = 1000
+   integer, parameter :: verbosity = 0
+
+   ! Direct product gradient
+   real(wp), allocatable :: dfdr(:, :)
+
+   real(wp), parameter :: cutoff = 25.0_wp
+   real(wp), allocatable :: trans(:, :)
+   real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
+   real(wp), allocatable :: gradient(:, :), sigma(:, :)
+   logical, parameter :: grad = .true.
+
+   if (size(dfdq) /= mol%nat) then
+      call test_failed(error, "Size of dfdq does not match number of atoms")
+      return
+   end if
+
+   ! Direct solver for the charge derivatives
+   allocate(direct_input :: solver_dqdr_input)
+   select type (solver_dqdr_input)
+   type is (direct_input)
+      solver_dqdr_input%verbosity = verbosity
+   end select
+   call new_mchrg_solver(solver_dqdr, solver_dqdr_input, error)
+   if (allocated(error)) return
+
+   ! CG solver for the adjoint gradient
+   allocate(cg_input :: solver_dfdr_input)
+   select type (solver_dfdr_input)
+   type is (cg_input)
+      solver_dfdr_input%cgtol = tol
+      solver_dfdr_input%cgmiter = maxiter
+      solver_dfdr_input%verbosity = verbosity
+   end select
+   call new_mchrg_solver(solver_dfdr, solver_dfdr_input, error)
+   if (allocated(error)) return
+
+   allocate(dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat), &
+      & gradient(3, mol%nat), sigma(3, 3), dfdr(3, mol%nat))
+
+   call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
+
+   ! Solve with the direct solver to get dqdr
+   allocate(cache)
+   call model%update(mol, cache, trans, grad)
+   call model%solve(mol, solver_dqdr, cache, error, &
+      & dqdr=dqdr, dqdL=dqdL, unit=output_unit)
+   if (allocated(error)) return
+
+   ! Direct product: dfdr = dqdr * dfdq
+   call gemv(dqdr(:, :, :mol%nat), dfdq, dfdr, alpha=1.0_wp, beta=0.0_wp)
+
+   ! Solve with the CG solver and evaluate the adjoint gradient
+   deallocate(cache)
+   allocate(cache)
+   call model%update(mol, cache, trans, grad)
+   call model%solve(mol, solver_dfdr, cache, error)
+   if (allocated(error)) return
+   gradient(:, :) = 0.0_wp
+   sigma(:, :) = 0.0_wp
+   call model%get_external_gradient(mol, solver_dfdr, cache, error, dfdq, &
+      & gradient, sigma)
+   if (allocated(error)) return
+
+   if (any(abs(gradient - dfdr) > thr2)) then
+      call test_failed(error, "Gradient from CG solver does not match direct product")
+      print"(a)", "CG gradient:"
+      print"(3es21.14)", gradient
+      print"(a)", "Direct product (dfdr):"
+      print"(3es21.14)", dfdr
+      print"(a)", "Difference:"
+      print"(3es21.14)", gradient - dfdr
+   end if
+
+end subroutine test_dfdr
+
 
 subroutine test_eeq_q_cyanamide(error)
 
@@ -1135,6 +1236,28 @@ subroutine test_eeq_dqdL_oxacb(error)
 
 end subroutine test_eeq_dqdL_oxacb
 
+subroutine test_eeq_dfdr_urea(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   real(wp), allocatable :: dfdq(:)
+
+   integer :: iat
+
+   call get_structure(mol, "X23", "urea")
+   call new_eeq2019_model(mol, model, error)
+   if (allocated(error)) return
+   allocate(dfdq(mol%nat))
+   do iat = 1, mol%nat
+      dfdq(iat) = sum(mol%xyz(:, iat))
+   end do
+   call test_dfdr(error, mol, dfdq, model)
+
+end subroutine test_eeq_dfdr_urea
+
 
 subroutine test_eeqbc_dbdr_co2(error)
 
@@ -1280,5 +1403,27 @@ subroutine test_eeqbc_dqdL_oxacb(error)
    call test_numdqdL(error, mol, model)
 
 end subroutine test_eeqbc_dqdL_oxacb
+
+subroutine test_eeqbc_dfdr_urea(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   real(wp), allocatable :: dfdq(:)
+
+   integer :: iat
+
+   call get_structure(mol, "X23", "urea")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   allocate(dfdq(mol%nat))
+   do iat = 1, mol%nat
+      dfdq(iat) = sum(mol%xyz(:, iat))
+   end do
+   call test_dfdr(error, mol, dfdq, model)
+
+end subroutine test_eeqbc_dfdr_urea
 
 end module test_pbc

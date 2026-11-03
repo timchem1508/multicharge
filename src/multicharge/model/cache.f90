@@ -62,6 +62,9 @@ module multicharge_model_cache
       !> Solution of the ES equation
       real(wp), allocatable :: vrhs(:)
 
+      !> Constrained response of the iterative solver: amat*uvec = 1
+      real(wp), allocatable :: uvec(:)
+
       !> Coordination number gradient w.r.t the positions
       real(wp), allocatable :: dcndr(:, :, :)
 

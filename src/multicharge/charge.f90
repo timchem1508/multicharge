@@ -31,14 +31,16 @@ module multicharge_charge
    implicit none
    private
 
-   public :: get_charges, get_eeq_charges, get_eeqbc_charges, add_charge_hessian
+   public :: get_charges, get_eeq_charges, get_eeqbc_charges, &
+      & add_charge_gradient, add_charge_hessian
 
 
 contains
 
 
 !> Classical electronegativity equilibration charges
-subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, cache)
+subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, cache, &
+   & efield)
 
    !> Multicharge model
    class(mchrg_model_type), intent(in) :: mchrg_model
@@ -62,6 +64,9 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, cache)
    !> Recompute after any change to the geometry, charge, or model.
    type(mchrg_cache), intent(out), optional :: cache
 
+   !> Optional external electric field
+   real(wp), intent(in), contiguous, optional :: efield(:)
+
    type(mchrg_cache), allocatable :: local_cache
    logical :: grad
    real(wp), allocatable :: trans(:, :)
@@ -84,7 +89,8 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, cache)
       allocate(dqdr_resp(3, mol%nat, mol%nat), dqdL_resp(3, 3, mol%nat))
       call mchrg_model%update(mol, cache, trans, .true.)
       call mchrg_model%solve(mol, solver, cache, error, &
-         & qvec=qvec, dqdr=dqdr_resp, dqdL=dqdL_resp, unit=output_unit)
+         & qvec=qvec, dqdr=dqdr_resp, dqdL=dqdL_resp, efield=efield, &
+         & unit=output_unit)
       if (allocated(error)) return
       if (present(dqdr)) dqdr(:, :, :) = dqdr_resp
       if (present(dqdL)) dqdL(:, :, :) = dqdL_resp
@@ -93,10 +99,49 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, cache)
       allocate(local_cache)
       call mchrg_model%update(mol, local_cache, trans, grad)
       call mchrg_model%solve(mol, solver, local_cache, error, &
-         & qvec=qvec, dqdr=dqdr, dqdL=dqdL, unit=output_unit)
+         & qvec=qvec, dqdr=dqdr, dqdL=dqdL, efield=efield, unit=output_unit)
    end if
 
 end subroutine get_charges
+
+
+!> Add sum_i weights(i) dq_i/dR and dq_i/dL, holding the weights fixed.
+!> The cache must come from get_charges with the same structure and model.
+subroutine add_charge_gradient(mchrg_model, mol, error, weights, gradient, &
+   & sigma, cache)
+
+   !> Multicharge model
+   class(mchrg_model_type), intent(in) :: mchrg_model
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Weights of the atomic partial charges
+   real(wp), intent(in) :: weights(:)
+
+   !> Cartesian gradient, the weighted first response is added to it
+   real(wp), intent(inout) :: gradient(:, :)
+
+   !> Strain derivative, the weighted first response is added to it
+   real(wp), intent(inout) :: sigma(:, :)
+
+   !> Response cache retained by get_charges
+   type(mchrg_cache), intent(inout) :: cache
+
+   class(direct_solver), allocatable :: solver
+   class(direct_input), allocatable :: solver_input
+
+   allocate(solver_input)
+   allocate(solver)
+   call new_direct_solver(solver, solver_input)
+
+   call mchrg_model%get_external_gradient(mol, solver, cache, error, &
+      & weights, gradient, sigma)
+
+end subroutine add_charge_gradient
 
 
 !> Add sum_i weights(i) d2q_i/dR2, holding weights and lattice fixed.
@@ -117,7 +162,7 @@ end subroutine add_charge_hessian
 
 
 !> Obtain charges from electronegativity equilibration model
-subroutine get_eeq_charges(mol, error, qvec, dqdr, dqdL)
+subroutine get_eeq_charges(mol, error, qvec, dqdr, dqdL, efield)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
@@ -133,18 +178,21 @@ subroutine get_eeq_charges(mol, error, qvec, dqdr, dqdL)
 
    !> Derivative of the partial charges w.r.t. strain deformations
    real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
+
+   !> Optional external electric field
+   real(wp), intent(in), contiguous, optional :: efield(:)
 
    class(mchrg_model_type), allocatable :: eeq_model
 
    call new_eeq2019_model(mol, eeq_model, error)
 
-   call get_charges(eeq_model, mol, error, qvec, dqdr, dqdL)
+   call get_charges(eeq_model, mol, error, qvec, dqdr, dqdL, efield=efield)
 
 end subroutine get_eeq_charges
 
 
 !> Obtain charges from bond capacity electronegativity equilibration model
-subroutine get_eeqbc_charges(mol, error, qvec, dqdr, dqdL)
+subroutine get_eeqbc_charges(mol, error, qvec, dqdr, dqdL, efield)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
@@ -161,11 +209,14 @@ subroutine get_eeqbc_charges(mol, error, qvec, dqdr, dqdL)
    !> Derivative of the partial charges w.r.t. strain deformations
    real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
 
+   !> Optional external electric field
+   real(wp), intent(in), contiguous, optional :: efield(:)
+
    class(mchrg_model_type), allocatable :: eeqbc_model
 
    call new_eeqbc2025_model(mol, eeqbc_model, error)
 
-   call get_charges(eeqbc_model, mol, error, qvec, dqdr, dqdL)
+   call get_charges(eeqbc_model, mol, error, qvec, dqdr, dqdL, efield=efield)
 
 end subroutine get_eeqbc_charges
 

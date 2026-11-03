@@ -19,6 +19,7 @@ module test_model
    use mctc_env_testing, only: new_unittest, unittest_type, error_type, test_failed
    use mctc_io_structure, only: structure_type, new
    use mstore, only: get_structure
+   use multicharge_blas, only : gemv
    use multicharge_charge, only: get_charges, get_eeq_charges, get_eeqbc_charges
    use multicharge_model_cache, only : mchrg_cache
    use multicharge_model_eeqbc, only: eeqbc_model
@@ -53,6 +54,7 @@ subroutine collect_model(testsuite)
       & new_unittest("eeq-dbdL-mb01", test_eeq_dbdL_mb01), &
       & new_unittest("eeq-charges-mb01", test_eeq_q_mb01), &
       & new_unittest("eeq-charges-mb02", test_eeq_q_mb02), &
+      & new_unittest("eeq-charges-efield-mb03", test_eeq_q_efield_mb03), &
       & new_unittest("eeq-charges-actinides", test_eeq_q_actinides), &
       & new_unittest("eeq-energy-mb03", test_eeq_e_mb03), &
       & new_unittest("eeq-energy-mb04", test_eeq_e_mb04), &
@@ -64,6 +66,8 @@ subroutine collect_model(testsuite)
       & new_unittest("eeq-dqdr-mb10", test_eeq_dqdr_mb10), &
       & new_unittest("eeq-dqdL-mb11", test_eeq_dqdL_mb11), &
       & new_unittest("eeq-dqdL-mb12", test_eeq_dqdL_mb12), &
+      & new_unittest("eeq-dfdr-mb06", test_eeq_dfdr_mb06), &
+      & new_unittest("eeq-dfdr-mb10", test_eeq_dfdr_mb10), &
       & new_unittest("gradient-h2plus", test_g_h2plus), &
       & new_unittest("eeq-dadr-znooh", test_eeq_dadr_znooh), &
       & new_unittest("eeq-dbdr-znooh", test_eeq_dbdr_znooh), &
@@ -79,6 +83,7 @@ subroutine collect_model(testsuite)
       & new_unittest("eeqbc-dbdr-mb05", test_eeqbc_dbdr_mb05), &
       & new_unittest("eeqbc-charges-mb01", test_eeqbc_q_mb01), &
       & new_unittest("eeqbc-charges-mb02", test_eeqbc_q_mb02), &
+      & new_unittest("eeqbc-charges-efield-mb03", test_eeqbc_q_efield_mb03), &
       & new_unittest("eeqbc-charges-actinides", test_eeqbc_q_actinides), &
       & new_unittest("eeqbc-energy-mb03", test_eeqbc_e_mb03), &
       & new_unittest("eeqbc-energy-mb04", test_eeqbc_e_mb04), &
@@ -90,6 +95,8 @@ subroutine collect_model(testsuite)
       & new_unittest("eeqbc-dqdr-mb10", test_eeqbc_dqdr_mb10), &
       & new_unittest("eeqbc-dqdL-mb11", test_eeqbc_dqdL_mb11), &
       & new_unittest("eeqbc-dqdL-mb12", test_eeqbc_dqdL_mb12), &
+      & new_unittest("eeqbc-dfdr-mb06", test_eeqbc_dfdr_mb06), &
+      & new_unittest("eeqbc-dfdr-mb10", test_eeqbc_dfdr_mb10), &
       & new_unittest("cg-solve-errors", test_cg_solve_errors), &
       & new_unittest("cache-solver-switch", test_cache_solver_switch), &
       & new_unittest("eeqbc-cache-new-geometry", test_eeqbc_cache_new_geometry) &
@@ -508,7 +515,7 @@ subroutine test_dbdL(error, mol, model)
 
 end subroutine test_dbdL
 
-subroutine gen_test(error, mol, model, qref, eref)
+subroutine gen_test(error, mol, model, qref, eref, efield)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -524,6 +531,9 @@ subroutine gen_test(error, mol, model, qref, eref)
 
    !> Reference energies
    real(wp), intent(in), optional :: eref(:)
+
+   !> Optional external electric field
+   real(wp), intent(in), contiguous, optional :: efield(:)
 
    type(mchrg_cache), allocatable :: cache
 
@@ -560,7 +570,7 @@ subroutine gen_test(error, mol, model, qref, eref)
 
    call model%update(mol, cache, trans, grad=.false.)
    call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, &
-      & unit=output_unit)
+      & efield=efield, unit=output_unit)
    if (allocated(error)) return
 
    if (present(qref)) then
@@ -927,6 +937,101 @@ subroutine test_numdqdL(error, mol, model)
 
 end subroutine test_numdqdL
 
+!> Compare the adjoint CG gradient of f(q) with the direct dq/dR contraction
+subroutine test_dfdr(error, mol, dfdq, model)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular structure data
+   type(structure_type), intent(inout) :: mol
+
+   !> Partial f derivatives
+   real(wp), intent(in), contiguous :: dfdq(:)
+
+   !> Electronegativity equilibration model
+   class(mchrg_model_type), intent(in) :: model
+
+   ! Model cache (required for the get_external_gradient)
+   type(mchrg_cache), allocatable :: cache
+
+   ! Solver variables
+   class(mchrg_solver_type), allocatable :: solver_dqdr, solver_dfdr
+   class(mchrg_solver_input), allocatable :: solver_dqdr_input, solver_dfdr_input
+   real(wp), parameter :: tol = 1.0e-15_wp
+   integer, parameter :: maxiter = 1000
+   integer, parameter :: verbosity = 0
+
+   ! Direct product gradient
+   real(wp), allocatable :: dfdr(:, :)
+
+   real(wp), parameter :: trans(3, 1) = 0.0_wp
+   real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
+   real(wp), allocatable :: gradient(:, :), sigma(:, :)
+   logical, parameter :: grad = .true.
+
+   if (size(dfdq) /= mol%nat) then
+      call test_failed(error, "Size of dfdq does not match number of atoms")
+      return
+   end if
+
+   ! Direct solver for the charge derivatives
+   allocate(direct_input :: solver_dqdr_input)
+   select type (solver_dqdr_input)
+   type is (direct_input)
+      solver_dqdr_input%verbosity = verbosity
+   end select
+   call new_mchrg_solver(solver_dqdr, solver_dqdr_input, error)
+   if (allocated(error)) return
+
+   ! CG solver for the adjoint gradient
+   allocate(cg_input :: solver_dfdr_input)
+   select type (solver_dfdr_input)
+   type is (cg_input)
+      solver_dfdr_input%cgtol = tol
+      solver_dfdr_input%cgmiter = maxiter
+      solver_dfdr_input%verbosity = verbosity
+   end select
+   call new_mchrg_solver(solver_dfdr, solver_dfdr_input, error)
+   if (allocated(error)) return
+
+   allocate(dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat), &
+      & gradient(3, mol%nat), sigma(3, 3), dfdr(3, mol%nat))
+
+   ! Solve with the direct solver to get dqdr
+   allocate(cache)
+   call model%update(mol, cache, trans, grad)
+   call model%solve(mol, solver_dqdr, cache, error, &
+      & dqdr=dqdr, dqdL=dqdL, unit=output_unit)
+   if (allocated(error)) return
+
+   ! Direct product: dfdr = dqdr * dfdq
+   call gemv(dqdr(:, :, :mol%nat), dfdq, dfdr, alpha=1.0_wp, beta=0.0_wp)
+
+   ! Solve with the CG solver and evaluate the adjoint gradient
+   deallocate(cache)
+   allocate(cache)
+   call model%update(mol, cache, trans, grad)
+   call model%solve(mol, solver_dfdr, cache, error)
+   if (allocated(error)) return
+   gradient(:, :) = 0.0_wp
+   sigma(:, :) = 0.0_wp
+   call model%get_external_gradient(mol, solver_dfdr, cache, error, dfdq, &
+      & gradient, sigma)
+   if (allocated(error)) return
+
+   if (any(abs(gradient - dfdr) > thr2)) then
+      call test_failed(error, "Gradient from CG solver does not match direct product")
+      print"(a)", "CG gradient:"
+      print"(3es21.14)", gradient
+      print"(a)", "Direct product (dfdr):"
+      print"(3es21.14)", dfdr
+      print"(a)", "Difference:"
+      print"(3es21.14)", gradient - dfdr
+   end if
+
+end subroutine test_dfdr
+
 
 subroutine test_eeq_dadr_mb01(error)
 
@@ -1062,6 +1167,32 @@ subroutine test_eeq_q_mb02(error)
    call gen_test(error, mol, model, qref=ref)
 
 end subroutine test_eeq_q_mb02
+
+subroutine test_eeq_q_efield_mb03(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular structure data
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   real(wp), parameter :: ref(16) = [&
+   &-4.64683071797936E-2_wp, -5.88362906740707E-1_wp, -2.43193732528000E-1_wp, &
+   & 3.51507795107742E-1_wp,  1.07024670739935E+0_wp, -1.33168464005268E+0_wp, &
+   &-3.16175726821207E-1_wp,  1.00361461209188E-1_wp, -4.01096542813355E-1_wp, &
+   & 1.92924990021589E-1_wp,  5.17680704422172E-1_wp, -7.08449332513941E-1_wp, &
+   &-6.26659781146154E-1_wp,  2.23247991084403E-1_wp,  1.68482074733023E+0_wp, &
+   & 1.21300573221157E-1_wp]
+
+   !> External electric field
+   real(wp), parameter :: efield(3) = [0.2_wp, 0.0_wp, 0.0_wp]
+
+   call get_structure(mol, "MB16-43", "03")
+   call new_eeq2019_model(mol, model, error)
+   if (allocated(error)) return
+   call gen_test(error, mol, model, qref=ref, efield=efield)
+
+end subroutine test_eeq_q_efield_mb03
 
 subroutine test_eeq_q_actinides(error)
 
@@ -1287,6 +1418,50 @@ subroutine test_eeq_dqdL_mb12(error)
    call test_numdqdL(error, mol, model)
 
 end subroutine test_eeq_dqdL_mb12
+
+subroutine test_eeq_dfdr_mb06(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   real(wp), allocatable :: dfdq(:)
+
+   integer :: iat
+
+   call get_structure(mol, "MB16-43", "06")
+   call new_eeq2019_model(mol, model, error)
+   if (allocated(error)) return
+   allocate(dfdq(mol%nat))
+   do iat = 1, mol%nat
+      dfdq(iat) = sum(mol%xyz(:, iat))
+   end do
+   call test_dfdr(error, mol, dfdq, model)
+
+end subroutine test_eeq_dfdr_mb06
+
+subroutine test_eeq_dfdr_mb10(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   real(wp), allocatable :: dfdq(:)
+
+   integer :: iat
+
+   call get_structure(mol, "MB16-43", "10")
+   call new_eeq2019_model(mol, model, error)
+   if (allocated(error)) return
+   allocate(dfdq(mol%nat))
+   do iat = 1, mol%nat
+      dfdq(iat) = sum(mol%xyz(:, iat))
+   end do
+   call test_dfdr(error, mol, dfdq, model)
+
+end subroutine test_eeq_dfdr_mb10
 
 subroutine test_g_h2plus(error)
 
@@ -1610,6 +1785,32 @@ subroutine test_eeqbc_q_mb02(error)
 
 end subroutine test_eeqbc_q_mb02
 
+subroutine test_eeqbc_q_efield_mb03(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular structure data
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   real(wp), parameter :: ref(16) = [&
+   &-4.28277800567498E-3_wp, -2.70490782936609E-1_wp, -5.08680343096443E-1_wp, &
+   &-1.87384666291912E-1_wp,  1.36541310890821E+0_wp, -2.60606218495392E+0_wp, &
+   &-3.64782532576783E-1_wp,  1.59545634972394E-1_wp, -8.14114159163079E-1_wp, &
+   & 3.47368288325200E-1_wp,  1.18972825588504E+0_wp, -6.68988148668005E-1_wp, &
+   &-9.90207762515528E-1_wp, -3.03114653320752E-3_wp,  3.07535497173940E+0_wp, &
+   & 2.80614244910914E-1_wp]
+
+   !> External electric field
+   real(wp), parameter :: efield(3) = [0.2_wp, 0.0_wp, 0.0_wp]
+
+   call get_structure(mol, "MB16-43", "03")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call gen_test(error, mol, model, qref=ref, efield=efield)
+
+end subroutine test_eeqbc_q_efield_mb03
+
 subroutine test_eeqbc_q_actinides(error)
 
    !> Error handling
@@ -1822,6 +2023,50 @@ subroutine test_eeqbc_dqdL_mb12(error)
    call test_numdqdL(error, mol, model)
 
 end subroutine test_eeqbc_dqdL_mb12
+
+subroutine test_eeqbc_dfdr_mb06(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   real(wp), allocatable :: dfdq(:)
+
+   integer :: iat
+
+   call get_structure(mol, "MB16-43", "06")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   allocate(dfdq(mol%nat))
+   do iat = 1, mol%nat
+      dfdq(iat) = sum(mol%xyz(:, iat))
+   end do
+   call test_dfdr(error, mol, dfdq, model)
+
+end subroutine test_eeqbc_dfdr_mb06
+
+subroutine test_eeqbc_dfdr_mb10(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   real(wp), allocatable :: dfdq(:)
+
+   integer :: iat
+
+   call get_structure(mol, "MB16-43", "10")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   allocate(dfdq(mol%nat))
+   do iat = 1, mol%nat
+      dfdq(iat) = sum(mol%xyz(:, iat))
+   end do
+   call test_dfdr(error, mol, dfdq, model)
+
+end subroutine test_eeqbc_dfdr_mb10
 
 
 !> Solver errors reach the caller of the model solve

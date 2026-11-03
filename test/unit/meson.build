@@ -29,6 +29,7 @@ if not mstore_dep.found()
 endif
 
 tests = [
+  'charge-gradient',
   'hessian',
   'model',
   'pbc',

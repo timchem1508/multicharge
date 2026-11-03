@@ -51,6 +51,8 @@ module multicharge_model_type
       real(wp), allocatable :: kqeta(:)
       !> CN scaling factor for charge width
       real(wp), allocatable :: kcnrad
+      !> Scaling factor for the external electric field
+      real(wp) :: efield_scale = 1.0_wp
       !> Coordination number
       class(ncoord_type), allocatable :: ncoord
       !> Electronegativity weighted CN for local charge
@@ -58,6 +60,8 @@ module multicharge_model_type
    contains
       !> Solve linear equations for the charge model
       procedure :: solve
+      !> Adjoint gradient of an external function of the charges
+      procedure :: get_external_gradient
       !> Contract the second charge response with fixed atomic weights
       procedure :: add_charge_hessian
       !> Model-specific curvature u^T (x_ab - A_ab q)
@@ -76,6 +80,8 @@ module multicharge_model_type
       procedure(get_coulomb_matrix), deferred :: get_coulomb_matrix
       !> Calculate Coulomb matrix derivatives
       procedure(get_coulomb_derivs), deferred :: get_coulomb_derivs
+      !> Contract the explicit system derivatives with a charge-like vector
+      procedure(get_grad), deferred :: get_grad
 
    end type mchrg_model_type
 
@@ -154,8 +160,8 @@ module multicharge_model_type
       end subroutine get_coulomb_derivs
 
       !> Electronegativity vector construction
-      subroutine get_xvec(self, mol, ndim, cache)
-         import :: mchrg_model_type, mchrg_cache, structure_type
+      subroutine get_xvec(self, mol, ndim, cache, efield)
+         import :: mchrg_model_type, mchrg_cache, structure_type, wp
 
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
@@ -168,6 +174,9 @@ module multicharge_model_type
 
          !> Multicharge cache holding the electronegativity vector
          type(mchrg_cache), intent(inout) :: cache
+
+         !> External electric field
+         real(wp), intent(in), optional :: efield(:)
       end subroutine get_xvec
 
       !> Derivatives of electronegativity vector
@@ -186,6 +195,35 @@ module multicharge_model_type
          !> Multicharge cache holding electronegativity-vector derivatives
          type(mchrg_cache), intent(inout) :: cache
       end subroutine get_xvec_derivs
+
+      !> Contract the explicit Coulomb matrix and electronegativity derivatives
+      subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta)
+         import :: mchrg_model_type, structure_type, mchrg_cache, wp
+
+         !> Multicharge model type
+         class(mchrg_model_type), intent(in) :: self
+
+         !> Structure type
+         type(structure_type), intent(in) :: mol
+
+         !> Multicharge cache
+         type(mchrg_cache), intent(in) :: cache
+
+         !> Charge-like contraction vector
+         real(wp), intent(in) :: p(:)
+
+         !> Cartesian gradient
+         real(wp), intent(inout) :: gradient(:, :)
+
+         !> Strain derivative
+         real(wp), intent(inout) :: sigma(:, :)
+
+         !> Scaling factor of the Coulomb matrix derivatives
+         real(wp), intent(in), optional :: alpha
+
+         !> Scaling factor of the electronegativity derivatives
+         real(wp), intent(in), optional :: beta
+      end subroutine get_grad
 
    end interface
 
@@ -248,7 +286,7 @@ end subroutine get_rec_trans
 
 !> Top-level solve routine with optional persistent cache
 subroutine solve(self, mol, solver, cache, error, &
-   & energy, gradient, sigma, qvec, dqdr, dqdL, verbosity, unit)
+   & energy, gradient, sigma, qvec, dqdr, dqdL, efield, verbosity, unit)
 
    !> Electronegativity-equilibration model
    class(mchrg_model_type), intent(in) :: self
@@ -275,6 +313,9 @@ subroutine solve(self, mol, solver, cache, error, &
    !> Optional derivative of the atomic partial charges w.r.t. lattice vectors
    real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
 
+   !> Optional external electric field
+   real(wp), intent(in), contiguous, optional :: efield(:)
+
    !> Optional print verbosity level
    integer, intent(in), optional :: verbosity
 
@@ -284,7 +325,6 @@ subroutine solve(self, mol, solver, cache, error, &
    integer :: iat, ndim
 
    real(wp), allocatable :: unitvec(:)
-   real(wp), allocatable :: uvec(:)
    real(wp), allocatable :: vvec(:)
    real(wp) :: uvecsum
    real(wp) :: vvecsum
@@ -333,7 +373,7 @@ subroutine solve(self, mol, solver, cache, error, &
    ! Setup the system matrices and vectors
    call self%get_capacitance_matrix(mol, ndim, cache)
    call self%get_coulomb_matrix(mol, ndim, cache)
-   call self%get_xvec(mol, ndim, cache)
+   call self%get_xvec(mol, ndim, cache, efield)
    call ensure_shape(cache%vrhs, mol%nat + 1)
 
    ! pop setup timer
@@ -357,12 +397,12 @@ subroutine solve(self, mol, solver, cache, error, &
       if (allocated(error)) return
 
    else
+      call ensure_shape(cache%uvec, mol%nat)
       allocate(unitvec(mol%nat))
-      allocate(uvec(mol%nat))
       allocate(vvec(mol%nat))
       ! Initial guess
       do iat = 1, mol%nat
-         uvec(iat) = 1.0_wp / (cache%amat(iat, iat) + eps)
+         cache%uvec(iat) = 1.0_wp / (cache%amat(iat, iat) + eps)
          vvec(iat) = - cache%xvec(iat) / (cache%amat(iat, iat) + eps)
       end do
 
@@ -371,7 +411,7 @@ subroutine solve(self, mol, solver, cache, error, &
       call print_constrained_system_message(print_unit, verbosity_solve, "u")
       ! Constrained response: A*uvec = 1
       call solver%solve(amat=cache%amat, xvec=unitvec, &
-         & vrhs=uvec, new_unit=print_unit, error=error)
+         & vrhs=cache%uvec, new_unit=print_unit, error=error)
       if (allocated(error)) return
       call print_constrained_system_message(print_unit, verbosity_solve, "v")
 
@@ -379,13 +419,13 @@ subroutine solve(self, mol, solver, cache, error, &
       call solver%solve(amat=cache%amat, xvec=-cache%xvec, &
          & vrhs=vvec, new_unit=print_unit, error=error)
       if (allocated(error)) return
-      uvecsum = sum(uvec)
+      uvecsum = sum(cache%uvec)
       vvecsum = sum(vvec)
       ! Lagrangian multiplier
       lambda = - (mol%charge + vvecsum) / (uvecsum + eps)
 
       ! Projection of uvec on vvec
-      cache%vrhs(:mol%nat) = -vvec - lambda * uvec
+      cache%vrhs(:mol%nat) = -vvec - lambda * cache%uvec
       cache%vrhs(mol%nat + 1) = lambda
 
    end if
@@ -477,6 +517,133 @@ subroutine solve(self, mol, solver, cache, error, &
    call print_total_time(print_unit, verbosity_solve, timer%get("total"))
 
 end subroutine solve
+
+
+!> Adjoint gradient of an external function f(q) using the cached response.
+!> Solves A p = df/dq and adds p^T (dx/dR - dA/dR q) to the gradient.
+subroutine get_external_gradient(self, mol, solver, cache, error, &
+   & dfdq, dfdr, dfdL, verbosity, unit)
+
+   !> Electronegativity-equilibration model
+   class(mchrg_model_type), intent(in) :: self
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Solver instance, must match the one used to build the cache
+   class(mchrg_solver_type), intent(in) :: solver
+
+   !> Response cache from a previous solve
+   type(mchrg_cache), intent(inout) :: cache
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Derivative of the external function w.r.t. the atomic partial charges
+   real(wp), intent(in) :: dfdq(:)
+
+   !> Cartesian gradient, the external contribution is added to it
+   real(wp), intent(inout) :: dfdr(:, :)
+
+   !> Strain derivative, the external contribution is added to it
+   real(wp), intent(inout) :: dfdL(:, :)
+
+   !> Optional print verbosity level
+   integer, intent(in), optional :: verbosity
+
+   !> Output unit
+   integer, intent(in), optional :: unit
+
+   integer :: iat, ndim
+   real(wp), allocatable :: yvec(:), padj(:), rhs(:)
+   real(wp) :: uvecsum, yvecsum
+   type(timer_type) :: timer
+   integer :: print_unit, verbosity_solve
+
+   if (.not. present(verbosity)) then
+      verbosity_solve = 0
+   else
+      verbosity_solve = verbosity
+   end if
+
+   if (present(unit)) then
+      print_unit = unit
+   else
+      print_unit = output_unit
+   end if
+
+   if (size(dfdq) /= mol%nat) then
+      call fatal_error(error, "External partial derivative is wrong size")
+      return
+   end if
+
+   if (solver%need_pos_def) then
+      ndim = mol%nat
+   else
+      ndim = mol%nat + 1
+   end if
+
+   if (.not. allocated(cache%amat) .or. .not. allocated(cache%vrhs)) then
+      call fatal_error(error, "External gradient requires a response cache "//&
+         & "from a previous solve")
+      return
+   end if
+   if (any(shape(cache%amat) /= ndim)) then
+      call fatal_error(error, &
+         & "Coulomb matrix in the cache was built for a different solver type")
+      return
+   end if
+   if (solver%need_pos_def) then
+      if (.not. allocated(cache%uvec)) then
+         call fatal_error(error, &
+            & "Constrained response J*uvec = 1 is not allocated")
+         return
+      end if
+   end if
+
+   call print_gradient_header(print_unit, verbosity_solve, 0.0_wp)
+   call timer%push("external_gradient")
+
+   allocate(padj(mol%nat))
+   if (solver%need_pos_def) then
+      ! Initial guess
+      allocate(yvec(mol%nat))
+      do iat = 1, mol%nat
+         yvec(iat) = dfdq(iat) / (cache%amat(iat, iat) + eps)
+      end do
+
+      ! Unconstrained response: A*yvec = dfdq
+      call print_adjoint_message(print_unit, verbosity_solve)
+      call solver%solve(amat=cache%amat, xvec=dfdq, vrhs=yvec, &
+         & new_unit=print_unit, error=error)
+      if (allocated(error)) return
+
+      ! Project out the total charge constraint
+      yvecsum = sum(yvec)
+      uvecsum = sum(cache%uvec)
+      padj(:) = yvec - yvecsum / (uvecsum + eps) * cache%uvec
+   else
+      allocate(rhs(ndim), yvec(ndim))
+      rhs(:mol%nat) = dfdq
+      rhs(ndim) = 0.0_wp
+
+      ! Bordered system: A*yvec = (dfdq, 0)
+      call print_adjoint_message(print_unit, verbosity_solve)
+      call solver%solve(amat=cache%amat, xvec=rhs, vrhs=yvec, &
+         & new_unit=print_unit, error=error)
+      if (allocated(error)) return
+      padj(:) = yvec(:mol%nat)
+   end if
+
+   ! Adjoint contraction: p^T (dx/dR - dA/dR q)
+   call self%get_grad(mol, cache, padj, dfdr, dfdL, alpha=-1.0_wp, beta=1.0_wp)
+
+   ! pop external gradient timer
+   call timer%pop
+   call print_gradient_time(print_unit, verbosity_solve, &
+      & timer%get("external_gradient"))
+
+end subroutine get_external_gradient
 
 !> Add the Cartesian charge Hessian contracted with fixed weights and lattice.
 !> Ay=x, A^T u=(weights,0): H_ab=u^T(x_ab-A_ab y-A_a y_b-A_b y_a).
@@ -652,6 +819,22 @@ subroutine print_constrained_system_message(unit, verbosity, vector)
       write(unit, "(a)") ""
    end if
 end subroutine print_constrained_system_message
+
+
+!> Print message for the adjoint system solve
+subroutine print_adjoint_message(unit, verbosity)
+
+   !> Output unit
+   integer, intent(in) :: unit
+
+   !> Verbosity level
+   integer, intent(in) :: verbosity
+
+   if (verbosity > 0) then
+      write(unit, "(a)") "Solving adjoint system: J*y = df/dq"
+      write(unit, "(a)") ""
+   end if
+end subroutine print_adjoint_message
 
 
 !> Print gradient calculation time

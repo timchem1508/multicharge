@@ -16,6 +16,7 @@
 # Unit testing
 set(
   tests
+  "charge-gradient"
   "hessian"
   "model"
   "pbc"
