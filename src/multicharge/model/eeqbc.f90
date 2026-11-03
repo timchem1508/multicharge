@@ -85,14 +85,11 @@ module multicharge_model_eeqbc
    !> Default exponent of error function in bond capacitance
    real(wp), parameter :: default_kbc = 0.65_wp
 
-   !> Default scaling factor for the external electric field
-   real(wp), parameter :: default_efield_scale = 10.0_wp
-
 contains
 
 subroutine new_eeqbc_model(self, mol, error, chi, rad, &
    & eta, kcnchi, kqchi, kqeta, kcnrad, cap, avg_cn, rvdw, &
-   & kbc, cutoff, cn_exp, rcov, en, cn_max, norm_exp, efield_scale)
+   & kbc, cutoff, cn_exp, rcov, en, cn_max, norm_exp)
    !> Bond capacitor electronegativity equilibration model
    type(eeqbc_model), intent(out) :: self
    !> Molecular structure data
@@ -133,8 +130,6 @@ subroutine new_eeqbc_model(self, mol, error, chi, rad, &
    real(wp), intent(in), optional :: cn_max
    !> Pauling electronegativities normalized to fluorine
    real(wp), intent(in), optional :: en(:)
-   !> Scaling factor for the external electric field
-   real(wp), intent(in), optional :: efield_scale
 
    self%chi = chi
    self%rad = rad
@@ -157,12 +152,6 @@ subroutine new_eeqbc_model(self, mol, error, chi, rad, &
       self%norm_exp = norm_exp
    else
       self%norm_exp = default_norm_exp
-   end if
-
-   if (present(efield_scale)) then
-      self%efield_scale = efield_scale
-   else
-      self%efield_scale = default_efield_scale
    end if
 
    ! Coordination number
@@ -261,13 +250,11 @@ subroutine get_capacitance_matrix(self, mol, ndim, cache)
 
 end subroutine get_capacitance_matrix
 
-subroutine get_xvec(self, mol, ndim, cache, efield)
+subroutine get_xvec(self, mol, ndim, cache)
    class(eeqbc_model), intent(in) :: self
    type(structure_type), intent(in) :: mol
    integer, intent(in) :: ndim
    type(mchrg_cache), intent(inout) :: cache
-   !> External electric field
-   real(wp), intent(in), optional :: efield(:)
 
    integer :: iat, izp, img
    real(wp) :: ctmp, vec(3), rvdw, capi, wsw
@@ -288,16 +275,6 @@ subroutine get_xvec(self, mol, ndim, cache, efield)
       cache%xtmp(iat) = -self%chi(izp) + self%kcnchi(izp) * cache%cn(iat) &
          & + self%kqchi(izp) * cache%qloc(iat)
    end do
-
-   ! Add external electric field to the RHS if present
-   if (present(efield)) then
-      !$omp parallel do default(none) schedule(runtime) &
-      !$omp shared(mol, self, cache, efield) private(iat)
-      do iat = 1, mol%nat
-         cache%xtmp(iat) = cache%xtmp(iat) + self%efield_scale &
-            & * dot_product(mol%xyz(:, iat), efield)
-      end do
-   end if
 
    if (ndim == mol%nat + 1) cache%xtmp(mol%nat + 1) = mol%charge
 
