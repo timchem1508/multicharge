@@ -26,7 +26,7 @@ module multicharge_model_type
    use mctc_io_constants, only: pi
    use mctc_io_math, only: matinv_3x3
    use mctc_ncoord, only: ncoord_type
-   use multicharge_blas, only: gemv, symv, gemm
+   use multicharge_blas, only: symv
    use multicharge_model_cache, only : mchrg_cache, ensure_shape
    use multicharge_model_hessian, only : add_symmetric_product
    use multicharge_solver_type, only : mchrg_solver_type
@@ -481,14 +481,8 @@ subroutine solve(self, mol, solver, cache, error, &
    ! Calculate gradients if requested
    if (grad) then
       call timer%push("gradient")
-      call gemv(cache%dadr(:, :, :mol%nat), cache%vrhs(:mol%nat), gradient, &
-         & beta=1.0_wp, alpha=0.5_wp)
-      call gemv(cache%dxdr(:, :, :mol%nat), cache%vrhs(:mol%nat), gradient, &
-         & beta=1.0_wp, alpha=-1.0_wp)
-      call gemv(cache%dadL(:, :, :mol%nat), cache%vrhs(:mol%nat), sigma, &
-         & beta=1.0_wp, alpha=0.5_wp)
-      call gemv(cache%dxdL(:, :, :mol%nat), cache%vrhs(:mol%nat), sigma, &
-         & beta=1.0_wp, alpha=-1.0_wp)
+      call self%get_grad(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, &
+         & alpha=0.5_wp, beta=-1.0_wp)
       ! pop gradient timer
       call timer%pop
       call print_gradient_time(print_unit, verbosity_solve, &
