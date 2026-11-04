@@ -673,7 +673,7 @@ end subroutine get_rec_weights
 
 
 !> Accumulate the gradient and stress contributions of the EEQ model
-subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta)
+subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta, error)
 
    !> EEQ model type
    class(eeq_model), intent(in) :: self
@@ -698,6 +698,9 @@ subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta)
 
    !> Scaling factor of the electronegativity derivatives
    real(wp), intent(in), optional :: beta
+
+   !> Error type
+   type(error_type), allocatable, intent(out) :: error
 
    if (any(mol%periodic)) then
       call get_grad_3d(self, mol, cache, p, gradient, sigma, &

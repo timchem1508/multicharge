@@ -192,8 +192,8 @@ module multicharge_model_type
       end subroutine get_xvec_derivs
 
       !> Contract the explicit Coulomb matrix and electronegativity derivatives
-      subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta)
-         import :: mchrg_model_type, structure_type, mchrg_cache, wp
+      subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta, error)
+         import :: mchrg_model_type, structure_type, mchrg_cache, wp, error_type
 
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
@@ -218,6 +218,9 @@ module multicharge_model_type
 
          !> Scaling factor of the electronegativity derivatives
          real(wp), intent(in), optional :: beta
+
+         !> Error type
+         type(error_type), allocatable, intent(out) :: error
       end subroutine get_grad
 
    end interface
@@ -474,7 +477,7 @@ subroutine solve(self, mol, solver, cache, error, &
    if (grad) then
       call timer%push("gradient")
       call self%get_grad(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, &
-         & alpha=0.5_wp, beta=-1.0_wp)
+         & alpha=0.5_wp, beta=-1.0_wp, error=error)
       ! pop gradient timer
       call timer%pop
       call print_gradient_time(print_unit, verbosity_solve, &
@@ -568,9 +571,11 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
    allocate(padj(mol%nat))
    call get_adjoint(self, mol, solver, cache, error, dfdq, padj, &
       & verbosity_solve, print_unit)
+   if (allocated(error)) return
 
    ! Adjoint contraction: p^T (dx/dR - dA/dR q)
-   call self%get_grad(mol, cache, padj, dfdr, dfdL, alpha=-1.0_wp, beta=1.0_wp)
+   call self%get_grad(mol, cache, padj, dfdr, dfdL, &
+      & alpha=-1.0_wp, beta=1.0_wp, error=error)
 
    ! pop external gradient timer
    call timer%pop

@@ -80,9 +80,6 @@ module multicharge_model_cache
       !> Derivative of Maxwell capacitance matrix w.r.t positions
       real(wp), allocatable :: dcdr(:, :, :)
 
-      !> Derivative of Maxwell capacitance matrix w.r.t positions, compressed
-      real(wp), allocatable :: dcdrdiag(:, :)
-
       !> Derivative of Maxwell capacitance matrix w.r.t lattice vectors
       real(wp), allocatable :: dcdL(:, :, :)
 

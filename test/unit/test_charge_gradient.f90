@@ -15,12 +15,14 @@
 
 !> Tests for the weighted first charge response from the get_charges cache
 module test_charge_gradient
+   use mctc_cutoff, only : get_lattice_points
    use mctc_env, only : wp
    use mctc_env_testing, only : new_unittest, unittest_type, error_type, test_failed
    use mctc_io_structure, only : structure_type, new
    use mstore, only : get_structure
    use multicharge, only : get_charges, add_charge_gradient, add_charge_hessian, &
       & mchrg_cache, mchrg_model_type, new_eeq2019_model, new_eeqbc2025_model
+   use multicharge_solver_cg, only : cg_solver, new_cg_solver, cg_input
    use multicharge_solver_direct, only : direct_solver, new_direct_solver, &
       & direct_input
    implicit none
@@ -60,10 +62,17 @@ subroutine collect_charge_gradient(testsuite)
       & new_unittest("eeqbc-periodic", test_eeqbc_periodic), &
       & new_unittest("eeq-numerical", test_eeq_numerical), &
       & new_unittest("eeqbc-numerical", test_eeqbc_numerical), &
+      & new_unittest("eeq-numerical-periodic", test_eeq_numerical_periodic), &
+      & new_unittest("eeqbc-numerical-periodic", &
+      & test_eeqbc_numerical_periodic), &
       & new_unittest("accumulate", test_accumulate), &
       & new_unittest("charge-conservation", test_conservation), &
       & new_unittest("cache-reuse", test_cache_reuse), &
-      & new_unittest("external-gradient", test_external_gradient) &
+      & new_unittest("external-gradient", test_external_gradient), &
+      & new_unittest("dcdr-error", test_dcdr_error, .true.), &
+      & new_unittest("weights-size-error", test_weights_size_error, .true.), &
+      & new_unittest("empty-cache-error", test_empty_cache_error, .true.), &
+      & new_unittest("cg-cache-error", test_cg_cache_error, .true.) &
       & ]
 
 end subroutine collect_charge_gradient
@@ -124,11 +133,21 @@ subroutine test_contraction_gen(error, mol, model)
 
    if (any(abs(gradient - gradient_ref) > thr1)) then
       call test_failed(error, "Weighted charge gradient does not match dq/dR")
+      print "(a)", "Gradient:"
+      print "(3es21.12)", gradient
+      print "(a)", "Reference:"
+      print "(3es21.12)", gradient_ref
+      print "(a)", "Difference:"
       print "(3es21.12)", gradient - gradient_ref
       return
    end if
    if (any(abs(sigma - sigma_ref) > thr1)) then
       call test_failed(error, "Weighted charge strain derivative does not match dq/dL")
+      print "(a)", "Sigma:"
+      print "(3es21.12)", sigma
+      print "(a)", "Reference:"
+      print "(3es21.12)", sigma_ref
+      print "(a)", "Difference:"
       print "(3es21.12)", sigma - sigma_ref
    end if
 
@@ -147,14 +166,20 @@ subroutine test_numerical_gen(error, mol, model)
    class(mchrg_model_type), intent(in) :: model
 
    real(wp), parameter :: step = 1.0e-5_wp
+   real(wp), parameter :: unity(3, 3) = reshape([ &
+      & 1.0_wp, 0.0_wp, 0.0_wp, 0.0_wp, 1.0_wp, 0.0_wp, &
+      & 0.0_wp, 0.0_wp, 1.0_wp], [3, 3])
 
-   integer :: iat, ic
+   integer :: iat, ic, jc
    type(mchrg_cache) :: cache
-   real(wp) :: sigma(3, 3), qr, ql
+   real(wp) :: sigma(3, 3), numsigma(3, 3), eps(3, 3), lattice(3, 3), qr, ql
    real(wp), allocatable :: qvec(:), weights(:), gradient(:, :), numgrad(:, :)
+   real(wp), allocatable :: trans(:, :), xyz(:, :)
 
    allocate(qvec(mol%nat), gradient(3, mol%nat), numgrad(3, mol%nat))
    weights = get_weights(mol%nat)
+   call get_lattice_points(mol%periodic, mol%lattice, model%ncoord%cutoff, &
+      & trans)
 
    do iat = 1, mol%nat
       do ic = 1, 3
@@ -173,6 +198,33 @@ subroutine test_numerical_gen(error, mol, model)
       end do
    end do
 
+   ! Strain the lattice translations instead of regenerating them
+   xyz = mol%xyz
+   if (any(mol%periodic)) lattice(:, :) = mol%lattice
+   eps(:, :) = unity
+   do ic = 1, 3
+      do jc = 1, 3
+         eps(jc, ic) = eps(jc, ic) + step
+         mol%xyz(:, :) = matmul(eps, xyz)
+         if (any(mol%periodic)) mol%lattice(:, :) = matmul(eps, lattice)
+         call get_weighted_charge(error, mol, model, matmul(eps, trans), &
+            & weights, qr)
+         if (allocated(error)) return
+
+         eps(jc, ic) = eps(jc, ic) - 2 * step
+         mol%xyz(:, :) = matmul(eps, xyz)
+         if (any(mol%periodic)) mol%lattice(:, :) = matmul(eps, lattice)
+         call get_weighted_charge(error, mol, model, matmul(eps, trans), &
+            & weights, ql)
+         if (allocated(error)) return
+
+         eps(jc, ic) = eps(jc, ic) + step
+         mol%xyz(:, :) = xyz
+         if (any(mol%periodic)) mol%lattice(:, :) = lattice
+         numsigma(jc, ic) = 0.5_wp * (qr - ql) / step
+      end do
+   end do
+
    call get_charges(model, mol, error, qvec, cache=cache)
    if (allocated(error)) return
    gradient(:, :) = 0.0_wp
@@ -183,10 +235,63 @@ subroutine test_numerical_gen(error, mol, model)
    if (any(abs(gradient - numgrad) > thr2)) then
       call test_failed(error, &
          & "Weighted charge gradient differs from finite differences")
+      print "(a)", "Gradient:"
+      print "(3es21.12)", gradient
+      print "(a)", "Reference:"
+      print "(3es21.12)", numgrad
+      print "(a)", "Difference:"
       print "(3es21.12)", gradient - numgrad
+      return
+   end if
+   if (any(abs(sigma - numsigma) > thr2)) then
+      call test_failed(error, &
+         & "Weighted charge strain derivative differs from finite differences")
+      print "(a)", "Sigma:"
+      print "(3es21.12)", sigma
+      print "(a)", "Reference:"
+      print "(3es21.12)", numsigma
+      print "(a)", "Difference:"
+      print "(3es21.12)", sigma - numsigma
    end if
 
 end subroutine test_numerical_gen
+
+
+!> Weighted sum of the charges with fixed lattice translations
+subroutine get_weighted_charge(error, mol, model, trans, weights, wq)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Charge model
+   class(mchrg_model_type), intent(in) :: model
+
+   !> Lattice translations
+   real(wp), intent(in) :: trans(:, :)
+
+   !> Weights of the atomic partial charges
+   real(wp), intent(in) :: weights(:)
+
+   !> Weighted sum of the atomic partial charges
+   real(wp), intent(out) :: wq
+
+   type(mchrg_cache) :: cache
+   type(direct_input) :: solver_input
+   type(direct_solver) :: solver
+   real(wp), allocatable :: qvec(:)
+
+   allocate(qvec(mol%nat))
+   call new_direct_solver(solver, solver_input)
+
+   call model%update(mol, cache, trans, .false.)
+   call model%solve(mol, solver, cache, error, qvec=qvec)
+   if (allocated(error)) return
+   wq = dot_product(weights, qvec)
+
+end subroutine get_weighted_charge
 
 subroutine test_eeq_molecule(error)
 
@@ -322,6 +427,41 @@ subroutine test_eeqbc_numerical(error)
 
 end subroutine test_eeqbc_numerical
 
+
+subroutine test_eeq_numerical_periodic(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call new(mol, [30, 8, 1], znoh_xyz, charge=1.0_wp, lattice=skew_lattice, &
+      & periodic=[.true., .true., .true.])
+   call new_eeq2019_model(mol, model, error)
+   if (allocated(error)) return
+   call test_numerical_gen(error, mol, model)
+
+end subroutine test_eeq_numerical_periodic
+
+
+subroutine test_eeqbc_numerical_periodic(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call new(mol, [30, 8, 1], znoh_xyz, charge=1.0_wp, lattice=skew_lattice, &
+      & periodic=[.true., .true., .true.])
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_numerical_gen(error, mol, model)
+
+end subroutine test_eeqbc_numerical_periodic
+
+
 !> The response is added to existing gradient and strain derivative arrays
 subroutine test_accumulate(error)
 
@@ -357,6 +497,18 @@ subroutine test_accumulate(error)
    if (any(abs(gradient - 0.25_wp - gradient0) > thr1) &
       & .or. any(abs(sigma - offset - sigma0) > thr1)) then
       call test_failed(error, "Charge gradient does not accumulate")
+      print "(a)", "Gradient:"
+      print "(3es21.12)", gradient - 0.25_wp
+      print "(a)", "Reference:"
+      print "(3es21.12)", gradient0
+      print "(a)", "Difference:"
+      print "(3es21.12)", gradient - 0.25_wp - gradient0
+      print "(a)", "Sigma:"
+      print "(3es21.12)", sigma - offset
+      print "(a)", "Reference:"
+      print "(3es21.12)", sigma0
+      print "(a)", "Difference:"
+      print "(3es21.12)", sigma - offset - sigma0
    end if
 
 end subroutine test_accumulate
@@ -389,6 +541,10 @@ subroutine test_conservation(error)
 
    if (any(abs(gradient) > thr1) .or. any(abs(sigma) > thr1)) then
       call test_failed(error, "First response violates total charge conservation")
+      print "(a)", "Gradient:"
+      print "(3es21.12)", gradient
+      print "(a)", "Sigma:"
+      print "(3es21.12)", sigma
    end if
 
 end subroutine test_conservation
@@ -432,6 +588,18 @@ subroutine test_cache_reuse(error)
    if (any(abs(gradient - gradient0) > thr1) &
       & .or. any(abs(sigma - sigma0) > thr1)) then
       call test_failed(error, "Charge Hessian changed the response cache")
+      print "(a)", "Gradient:"
+      print "(3es21.12)", gradient
+      print "(a)", "Reference:"
+      print "(3es21.12)", gradient0
+      print "(a)", "Difference:"
+      print "(3es21.12)", gradient - gradient0
+      print "(a)", "Sigma:"
+      print "(3es21.12)", sigma
+      print "(a)", "Reference:"
+      print "(3es21.12)", sigma0
+      print "(a)", "Difference:"
+      print "(3es21.12)", sigma - sigma0
    end if
 
 end subroutine test_cache_reuse
@@ -475,8 +643,139 @@ subroutine test_external_gradient(error)
       & .or. any(abs(sigma - sigma_ref) > thr1)) then
       call test_failed(error, &
          & "Cached charge gradient differs from the adjoint external gradient")
+      print "(a)", "Gradient:"
+      print "(3es21.12)", gradient
+      print "(a)", "Reference:"
+      print "(3es21.12)", gradient_ref
+      print "(a)", "Difference:"
+      print "(3es21.12)", gradient - gradient_ref
+      print "(a)", "Sigma:"
+      print "(3es21.12)", sigma
+      print "(a)", "Reference:"
+      print "(3es21.12)", sigma_ref
+      print "(a)", "Difference:"
+      print "(3es21.12)", sigma - sigma_ref
    end if
 
 end subroutine test_external_gradient
+
+!> Test error call if the capacitance derivatives are not present in cache
+subroutine test_dcdr_error(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   type(mchrg_cache) :: cache
+   type(direct_input) :: solver_input
+   type(direct_solver) :: solver
+   real(wp) :: sigma(3, 3), sigma_ref(3, 3)
+   real(wp), allocatable :: qvec(:), weights(:), gradient(:, :)
+   real(wp), allocatable :: gradient_ref(:, :)
+
+   call get_structure(mol, "X23", "urea")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   allocate(qvec(mol%nat), gradient(3, mol%nat), gradient_ref(3, mol%nat))
+   weights = get_weights(mol%nat)
+   call new_direct_solver(solver, solver_input)
+
+   call get_charges(model, mol, error, qvec, cache=cache)
+   if (allocated(error)) return
+   gradient(:, :) = 0.0_wp
+   sigma(:, :) = 0.0_wp
+   if (allocated(cache%dcdr)) deallocate(cache%dcdr)
+   if (allocated(cache%dcdL)) deallocate(cache%dcdL)
+   call add_charge_gradient(model, mol, error, weights, gradient, sigma, cache)
+   if (allocated(error)) return
+
+end subroutine test_dcdr_error
+
+
+!> Test error call if the weights do not match the number of atoms
+subroutine test_weights_size_error(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   type(mchrg_cache) :: cache
+   real(wp) :: sigma(3, 3)
+   real(wp), allocatable :: qvec(:), weights(:), gradient(:, :)
+
+   call new(mol, [30, 8, 1], znoh_xyz, charge=1.0_wp)
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   allocate(qvec(mol%nat), gradient(3, mol%nat))
+   weights = get_weights(mol%nat - 1)
+
+   call get_charges(model, mol, error, qvec, cache=cache)
+   if (allocated(error)) return
+   gradient(:, :) = 0.0_wp
+   sigma(:, :) = 0.0_wp
+   call add_charge_gradient(model, mol, error, weights, gradient, sigma, cache)
+
+end subroutine test_weights_size_error
+
+
+!> Test error call if the cache was never filled by get_charges
+subroutine test_empty_cache_error(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   type(mchrg_cache) :: cache
+   real(wp) :: sigma(3, 3)
+   real(wp), allocatable :: weights(:), gradient(:, :)
+
+   call new(mol, [30, 8, 1], znoh_xyz, charge=1.0_wp)
+   call new_eeq2019_model(mol, model, error)
+   if (allocated(error)) return
+   allocate(gradient(3, mol%nat))
+   weights = get_weights(mol%nat)
+
+   gradient(:, :) = 0.0_wp
+   sigma(:, :) = 0.0_wp
+   call add_charge_gradient(model, mol, error, weights, gradient, sigma, cache)
+
+end subroutine test_empty_cache_error
+
+
+!> Test error call if the cache was solved without the charge constraint row
+subroutine test_cg_cache_error(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   type(mchrg_cache) :: cache
+   type(cg_input) :: solver_input
+   type(cg_solver) :: solver
+   real(wp) :: sigma(3, 3)
+   real(wp), allocatable :: qvec(:), weights(:), gradient(:, :), trans(:, :)
+
+   call new(mol, [30, 8, 1], znoh_xyz, charge=1.0_wp)
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   allocate(qvec(mol%nat), gradient(3, mol%nat))
+   weights = get_weights(mol%nat)
+   call new_cg_solver(solver, solver_input)
+
+   call get_lattice_points(mol%periodic, mol%lattice, model%ncoord%cutoff, &
+      & trans)
+   call model%update(mol, cache, trans, .true.)
+   call model%solve(mol, solver, cache, error, qvec=qvec)
+   if (allocated(error)) return
+   gradient(:, :) = 0.0_wp
+   sigma(:, :) = 0.0_wp
+   call add_charge_gradient(model, mol, error, weights, gradient, sigma, cache)
+
+end subroutine test_cg_cache_error
+
 
 end module test_charge_gradient

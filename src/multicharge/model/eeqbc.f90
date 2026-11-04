@@ -1467,7 +1467,7 @@ subroutine get_dcpair_dir(kbc, rij, trans, rvdw, capi, capj, dgpair, dspair)
 end subroutine get_dcpair_dir
 
 !> Accumulate the gradient and stress contributions of the EEQBC model
-subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta)
+subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta, error)
 
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
@@ -1493,6 +1493,14 @@ subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta)
    !> Scaling factor of the electronegativity derivatives
    real(wp), optional, intent(in) :: beta
 
+   !> Error type
+   type(error_type), allocatable, intent(out) :: error
+
+   if (.not. allocated(cache%dcdr) .or. .not. allocated(cache%dcdL)) then
+      call fatal_error(error, "cache%dcdr or cache%dcdL is not allocated. &
+      & The gradient calculation cannot proceed without them.")
+      return
+   end if
    if (any(mol%periodic)) then
       call get_grad_3d(self, mol, cache, p, gradient, sigma, alphain=alpha, &
          & betain=beta)
