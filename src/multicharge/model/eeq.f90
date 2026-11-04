@@ -26,7 +26,7 @@ module multicharge_model_eeq
    use mctc_env, only: error_type, fatal_error, wp
    use mctc_io, only: structure_type
    use mctc_io_constants, only: pi
-   use mctc_io_math, only: matdet_3x3
+   use mctc_io_math, only: matdet_3x3, outerprod
    use mctc_ncoord, only: new_ncoord, cn_count
    use mctc_wignerseitz, only: wignerseitz_cell, new_wignerseitz_cell
    use multicharge_blas, only: gemm
@@ -325,7 +325,7 @@ subroutine add_periodic_hessian(self, mol, wsc, alpha, qvec, adj, hessian, diago
          do itr = 1, size(rtrans, 2)
             vec = rtrans(:, itr)
             box = box-wsw*rec_weight(itr)*cos(dot_product(rij, vec)) &
-               & *spread(vec, 1, 3)*spread(vec, 2, 3)
+               & *outerprod(vec, vec)
          end do
       end do
       call add_pair_block(iat, jat, weight*box, hessian, diagonal)
@@ -527,7 +527,7 @@ subroutine get_damat_0d(self, mol, qvec, dadr, dadL, atrace)
       arg = gam * gam * r2
       dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) - erf(sqrt(arg)) / (r2 * sqrt(r2))
       dG = dtmp * vec
-      dS = spread(dG, 1, 3) * spread(vec, 2, 3)
+      dS = outerprod(vec, dG)
       atrace(:, iat) = atrace(:, iat) - dG * qvec(jat)
       atrace(:, jat) = atrace(:, jat) + dG * qvec(iat)
       dadr(:, iat, jat) = -dG * qvec(iat)
@@ -625,7 +625,7 @@ subroutine get_damat_dir_3d(rij, gam, alp, trans, dg, ds)
       gtmp = +2 * gam * exp(-r2 * gam2) / (sqrtpi * r2) - erf(r1 * gam) / (r2 * r1)
       atmp = -2 * alp * exp(-r2 * alp2) / (sqrtpi * r2) + erf(r1 * alp) / (r2 * r1)
       dg(:) = dg + (gtmp + atmp) * vec
-      ds(:, :) = ds + (gtmp + atmp) * spread(vec, 1, 3) * spread(vec, 2, 3)
+      ds(:, :) = ds + (gtmp + atmp) * outerprod(vec, vec)
    end do
 
 end subroutine get_damat_dir_3d
@@ -666,7 +666,7 @@ subroutine get_rec_weights(vol, alpha, trans, weight, strain)
       weight(itr) = fac * exp(-0.25_wp * g2 / alpha**2) / g2
       if (present(strain)) then
          strain(:, :, itr) = weight(itr) * ((2.0_wp / g2 + 0.5_wp / alpha**2) &
-            & * spread(vec, 1, 3) * spread(vec, 2, 3) - unity)
+            & * outerprod(vec, vec) - unity)
       end if
    end do
 end subroutine get_rec_weights
@@ -774,7 +774,7 @@ subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
          dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) &
             & - erf(sqrt(arg)) / (r2 * sqrt(r2))
          dG = dtmp * vec
-         dS = spread(dG, 1, 3) * spread(vec, 2, 3)
+         dS = outerprod(vec, dG)
 
          ! Weights for the pair
          W_ij = p(iat) * cache%vrhs(jat) + p(jat) * cache%vrhs(iat)

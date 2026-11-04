@@ -26,6 +26,7 @@ module multicharge_model_eeqbc
    use mctc_env, only: error_type, fatal_error, wp
    use mctc_io, only: structure_type
    use mctc_io_constants, only: pi
+   use mctc_io_math, only: outerprod
    use mctc_ncoord, only: new_ncoord, cn_count
    use mctc_wignerseitz, only: wignerseitz_cell, new_wignerseitz_cell
    use multicharge_blas, only: gemv, gemm, symv
@@ -437,9 +438,9 @@ subroutine get_xvec_derivs(self, mol, ndim, cache)
 
             vec = mol%xyz(:, iat) - mol%xyz(:, jat)
             dxdL_local(:, :, iat) = dxdL_local(:, :, iat) + cache%xtmp(jat) &
-               & * spread(cache%dcdr(:, iat, jat), 1, 3) * spread(vec, 2, 3)
+               & * outerprod(vec, cache%dcdr(:, iat, jat))
             dxdL_local(:, :, jat) = dxdL_local(:, :, jat) + cache%xtmp(iat) &
-               & * spread(cache%dcdr(:, jat, iat), 1, 3) * spread(-vec, 2, 3)
+               & * outerprod(-vec, cache%dcdr(:, jat, iat))
          end do
          dxdr_local(:, iat, iat) = dxdr_local(:, iat, iat) + cache%xtmp(iat) * cache%dcdr(:, iat, iat)
          dxdL_local(:, :, iat) = dxdL_local(:, :, iat) + cache%xtmp(iat) * cache%dcdL(:, :, iat)
@@ -859,7 +860,7 @@ subroutine get_damat_0d(self, mol, cn, qloc, qvec, dcndr, dcndL, &
          dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) &
             & - erf(sqrt(arg)) / (r2 * sqrt(r2))
          dG(:) = dtmp * vec
-         dS(:, :) = spread(dG, 1, 3) * spread(vec, 2, 3)
+         dS(:, :) = outerprod(vec, dG)
          atrace_local(:, iat) = -dG * qvec(jat) * cmat(jat, iat) + atrace_local(:, iat)
          atrace_local(:, jat) = +dG * qvec(iat) * cmat(iat, jat) + atrace_local(:, jat)
          dadr_local(:, iat, jat) = -dG * qvec(iat) * cmat(iat, jat) + dadr_local(:, iat, jat)
@@ -881,9 +882,9 @@ subroutine get_damat_0d(self, mol, cn, qloc, qvec, dcndr, dcndL, &
          atrace_local(:, jat) = -dtmp * qvec(iat) * dcdr(:, iat, jat) + atrace_local(:, jat)
          dadr_local(:, iat, jat) = +dtmp * qvec(iat) * dcdr(:, iat, jat) + dadr_local(:, iat, jat)
          dadr_local(:, jat, iat) = +dtmp * qvec(jat) * dcdr(:, jat, iat) + dadr_local(:, jat, iat)
-         dadL_local(:, :, iat) = -dtmp * qvec(jat) * spread(dcdr(:, iat, jat), 2, 3) * spread(vec, 1, 3) &
+         dadL_local(:, :, iat) = -dtmp * qvec(jat) * outerprod(dcdr(:, iat, jat), vec) &
                & + dadL_local(:, :, iat)
-         dadL_local(:, :, jat) = -dtmp * qvec(iat) * spread(dcdr(:, iat, jat), 2, 3) * spread(vec, 1, 3) &
+         dadL_local(:, :, jat) = -dtmp * qvec(iat) * outerprod(dcdr(:, iat, jat), vec) &
                & + dadL_local(:, :, jat)
 
          ! Capacitance derivative diagonal
@@ -1114,7 +1115,7 @@ subroutine get_damat_dir(rij, trans, capi, capj, rvdw, kbc, gam, dG, dS, dgam)
       call get_cpair(kbc, cmat, r1, rvdw, capi, capj)
       gtmp = 2.0_wp * gam * exp(-r2 * gam2) / (sqrtpi * r2) - erf(r1 * gam) / (r2 * r1)
       dG(:) = dG - cmat * gtmp * vec
-      dS(:, :) = dS - cmat * gtmp * spread(vec, 1, 3) * spread(vec, 2, 3)
+      dS(:, :) = dS - cmat * gtmp * outerprod(vec, vec)
       dgam = dgam + cmat * 2.0_wp * exp(-gam2 * r2) / sqrtpi
    end do
 
@@ -1317,7 +1318,7 @@ subroutine get_dcpair(kbc, vec, rvdw, capi, capj, dgpair, dspair)
    arg = -(kbc * (r1 - rvdw) / rvdw)**2
    dtmp = -sqrt(capi * capj) * kbc * exp(arg) / (sqrtpi * rvdw)
    dgpair = dtmp * vec / r1
-   dspair = spread(dgpair, 1, 3) * spread(vec, 2, 3)
+   dspair = outerprod(vec, dgpair)
 end subroutine get_dcpair
 
 subroutine get_dcmat_0d(self, mol, dcdr, dcdL)
@@ -1605,7 +1606,7 @@ subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
          dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) - erf(sqrt(arg)) &
             & / (r2 * sqrt(r2))
          dG = dtmp * vec
-         dS = spread(dG, 1, 3) * spread(vec, 2, 3)
+         dS = outerprod(vec, dG)
 
          gradient_local(:, iat) = gradient_local(:, iat) - dG &
             & * cache%cmat(iat, jat) * W_ij * alpha
