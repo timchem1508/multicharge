@@ -540,11 +540,9 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
    !> Output unit
    integer, intent(in), optional :: unit
 
-   integer :: iat, ndim
-   real(wp), allocatable :: yvec(:), padj(:), rhs(:)
-   real(wp) :: uvecsum, yvecsum
    type(timer_type) :: timer
    integer :: print_unit, verbosity_solve
+   real(wp), allocatable :: padj(:)
 
    if (.not. present(verbosity)) then
       verbosity_solve = 0
@@ -562,6 +560,59 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
       call fatal_error(error, "External partial derivative is wrong size")
       return
    end if
+
+   call print_gradient_header(print_unit, verbosity_solve, 0.0_wp)
+   call timer%push("external_gradient")
+
+   ! Solve the adjoint state equation A^T padj = dfdq (A^T = A for this model)
+   allocate(padj(mol%nat))
+   call get_adjoint(self, mol, solver, cache, error, dfdq, padj, &
+      & verbosity_solve, print_unit)
+
+   ! Adjoint contraction: p^T (dx/dR - dA/dR q)
+   call self%get_grad(mol, cache, padj, dfdr, dfdL, alpha=-1.0_wp, beta=1.0_wp)
+
+   ! pop external gradient timer
+   call timer%pop
+   call print_gradient_time(print_unit, verbosity_solve, &
+      & timer%get("external_gradient"))
+
+end subroutine get_external_gradient
+
+!> Solve the Adjoint equation A^T padj = dfdq
+subroutine get_adjoint(self, mol, solver, cache, error, &
+   & dfdq, padj, verbosity, unit)
+
+   !> Electronegativity-equilibration model
+   class(mchrg_model_type), intent(in) :: self
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Solver instance, must match the one used to build the cache
+   class(mchrg_solver_type), intent(in) :: solver
+
+   !> Response cache from a previous solve
+   type(mchrg_cache), intent(inout) :: cache
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Derivative of the external function w.r.t. the atomic partial charges
+   real(wp), intent(in) :: dfdq(:)
+
+   !> Cartesian gradient, the external contribution is added to it
+   real(wp), intent(inout) :: padj(:)
+
+   !> Optional print verbosity level
+   integer, intent(in), optional :: verbosity
+
+   !> Output unit
+   integer, intent(in), optional :: unit
+
+   integer :: iat, ndim
+   real(wp), allocatable :: yvec(:), rhs(:)
+   real(wp) :: uvecsum, yvecsum
 
    if (solver%need_pos_def) then
       ndim = mol%nat
@@ -587,10 +638,6 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
       end if
    end if
 
-   call print_gradient_header(print_unit, verbosity_solve, 0.0_wp)
-   call timer%push("external_gradient")
-
-   allocate(padj(mol%nat))
    if (solver%need_pos_def) then
       ! Initial guess
       allocate(yvec(mol%nat))
@@ -599,9 +646,9 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
       end do
 
       ! Unconstrained response: A*yvec = dfdq
-      call print_adjoint_message(print_unit, verbosity_solve)
+      call print_adjoint_message(unit, verbosity)
       call solver%solve(amat=cache%amat, xvec=dfdq, vrhs=yvec, &
-         & new_unit=print_unit, error=error)
+         & new_unit=unit, error=error)
       if (allocated(error)) return
 
       ! Project out the total charge constraint
@@ -614,22 +661,14 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
       rhs(ndim) = 0.0_wp
 
       ! Bordered system: A*yvec = (dfdq, 0)
-      call print_adjoint_message(print_unit, verbosity_solve)
+      call print_adjoint_message(unit, verbosity)
       call solver%solve(amat=cache%amat, xvec=rhs, vrhs=yvec, &
-         & new_unit=print_unit, error=error)
+         & new_unit=unit, error=error)
       if (allocated(error)) return
       padj(:) = yvec(:mol%nat)
    end if
 
-   ! Adjoint contraction: p^T (dx/dR - dA/dR q)
-   call self%get_grad(mol, cache, padj, dfdr, dfdL, alpha=-1.0_wp, beta=1.0_wp)
-
-   ! pop external gradient timer
-   call timer%pop
-   call print_gradient_time(print_unit, verbosity_solve, &
-      & timer%get("external_gradient"))
-
-end subroutine get_external_gradient
+end subroutine get_adjoint
 
 !> Add the Cartesian charge Hessian contracted with fixed weights and lattice.
 !> Ay=x, A^T u=(weights,0): H_ab=u^T(x_ab-A_ab y-A_a y_b-A_b y_a).
