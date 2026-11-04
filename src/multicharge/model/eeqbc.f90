@@ -1985,7 +1985,6 @@ subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta, error, li
 
 end subroutine get_grad
 
-
 !> Accumulate gradient and stress contributions for a non-periodic system
 subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
 
@@ -2151,7 +2150,6 @@ subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
 
    deallocate(gradient_local, sigma_local, qlocacc, cnacc, dtrans, v)
 end subroutine get_grad_0d
-
 
 !> Accumulate gradient and stress contributions for a periodic system
 subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
@@ -2348,7 +2346,6 @@ subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
    deallocate(gradient_local, sigma_local, qlocacc, cnacc, dtrans, v)
 end subroutine get_grad_3d
 
-
 !> Accumulate gradient and stress contributions for a non-periodic system
 !> using the CSR neighbour list
 subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain, betain)
@@ -2518,7 +2515,6 @@ subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain,
 
    deallocate(gradient_local, sigma_local, qlocacc, cnacc, v)
 end subroutine get_grad_0d_list
-
 
 !> Accumulate gradient and stress contributions for a periodic system using
 !> the CSR neighbour list and its Wigner-Seitz images
