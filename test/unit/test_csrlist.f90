@@ -160,16 +160,16 @@ subroutine solve_model(error, mol, model, cache, energy, qvec, gradient, sigma, 
    type(mchrg_cache), intent(inout) :: cache
 
    !> Atom-resolved energy
-   real(wp), intent(inout), optional :: energy(:)
+   real(wp), intent(inout), contiguous, optional :: energy(:)
 
    !> Atomic partial charges
-   real(wp), intent(out), optional :: qvec(:)
+   real(wp), intent(out), contiguous, optional :: qvec(:)
 
    !> Energy gradient
-   real(wp), intent(inout), optional :: gradient(:, :)
+   real(wp), intent(inout), contiguous, optional :: gradient(:, :)
 
    !> Strain derivative
-   real(wp), intent(inout), optional :: sigma(:, :)
+   real(wp), intent(inout), contiguous, optional :: sigma(:, :)
 
    !> Optional CSR neighbour list
    type(csr_list), intent(in), optional :: list
