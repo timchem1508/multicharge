@@ -27,14 +27,14 @@ module multicharge_model_eeq
    use mctc_env, only: error_type, fatal_error, wp
    use mctc_io, only: structure_type
    use mctc_io_constants, only: pi
-   use mctc_io_math, only: matdet_3x3, outerprod
+   use mctc_io_math, only: matdet_3x3, matinv_3x3, outerprod
    use mctc_ncoord, only: new_ncoord, cn_count
    use mctc_wignerseitz, only: wignerseitz_cell, new_wignerseitz_cell
    use multicharge_blas, only: gemm
-   use multicharge_ewald, only: get_alpha
+   use multicharge_ewald, only: get_alpha, get_dir_cutoff, get_rec_cutoff
    use multicharge_model_cache, only: mchrg_cache, ensure_shape
    use multicharge_model_hessian, only: coulomb_kernel, radial_hessian, add_pair_hessian, add_pair_block
-   use multicharge_model_type, only: mchrg_model_type, get_dir_trans, get_rec_trans
+   use multicharge_model_type, only: mchrg_model_type, get_rec_trans
    implicit none
    private
 
@@ -63,6 +63,9 @@ module multicharge_model_eeq
    real(wp), parameter :: sqrtpi = sqrt(pi)
    real(wp), parameter :: sqrt2pi = sqrt(2.0_wp/pi)
    real(wp), parameter :: eps = sqrt(epsilon(0.0_wp))
+
+   !> Tolerance for a single term of the real and reciprocal Ewald sums
+   real(wp), parameter :: conv = epsilon(0.0_wp)
 
 contains
 
@@ -298,8 +301,7 @@ subroutine add_periodic_hessian(self, mol, wsc, alpha, qvec, adj, hessian, diago
    real(wp) :: val, dr, drr, ar, arr
    real(wp), allocatable :: dtrans(:, :), rtrans(:, :), rec_weight(:)
 
-   call get_dir_trans(mol, dtrans)
-   call get_rec_trans(mol, rtrans)
+   call get_ewald_trans(self, mol, wsc, alpha, dtrans, rtrans)
    call get_rec_weights(abs(matdet_3x3(mol%lattice)), alpha, rtrans, rec_weight)
 
    ! Each pair owns its off-diagonal blocks. Only the diagonal blocks are
@@ -408,8 +410,7 @@ subroutine get_amat_3d(self, mol, wsc, alpha, amat)
    real(wp) :: vec(3), gam, wsw, dtmp, rtmp, tmp
    real(wp), allocatable :: dtrans(:, :), rtrans(:, :), rec_weight(:)
 
-   call get_dir_trans(mol, dtrans)
-   call get_rec_trans(mol, rtrans)
+   call get_ewald_trans(self, mol, wsc, alpha, dtrans, rtrans)
    call get_rec_weights(abs(matdet_3x3(mol%lattice)), alpha, rtrans, rec_weight)
 
    npair = mol%nat*(mol%nat+1)/2
@@ -562,8 +563,7 @@ subroutine get_damat_3d(self, mol, wsc, alpha, qvec, dadr, dadL, atrace)
 
    atrace(:, :) = 0.0_wp
    dadL(:, :, :) = 0.0_wp
-   call get_dir_trans(mol, dtrans)
-   call get_rec_trans(mol, rtrans)
+   call get_ewald_trans(self, mol, wsc, alpha, dtrans, rtrans)
    call get_rec_weights(abs(matdet_3x3(mol%lattice)), alpha, rtrans, rec_weight, rec_strain)
 
    npair = mol%nat*(mol%nat+1)/2
@@ -653,6 +653,58 @@ subroutine get_damat_rec_3d(rij, trans, weight, strain, dg, ds)
       ds(:, :) = ds + cos(gv) * strain(:, :, itr)
    end do
 end subroutine get_damat_rec_3d
+
+!> Real-space and reciprocal lattice translations converging the Ewald sums
+!> for all Wigner-Seitz pair vectors up to the tolerance of a single term
+subroutine get_ewald_trans(self, mol, wsc, alpha, dtrans, rtrans)
+   !> EEQ model type
+   class(eeq_model), intent(in) :: self
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+   !> Wigner-Seitz cell
+   type(wignerseitz_cell), intent(in) :: wsc
+   !> Parameter of the Ewald summation
+   real(wp), intent(in) :: alpha
+   !> Real-space lattice translations
+   real(wp), allocatable, intent(out) :: dtrans(:, :)
+   !> Reciprocal lattice translations
+   real(wp), allocatable, intent(out) :: rtrans(:, :)
+
+   integer :: iat, jat, img, itr, rep(3)
+   real(wp) :: inv_lat(3, 3), vec(3), smax(3), gam, rcut, gcut
+
+   ! The real-space kernel (erfc(alpha*r) - erfc(gam*r))/r decays with the
+   ! smaller of the Ewald parameter and the widest charge distribution
+   gam = 1.0_wp / (sqrt(2.0_wp) * maxval(self%rad))
+   rcut = get_dir_cutoff(min(alpha, gam), conv)
+   gcut = get_rec_cutoff(alpha, abs(matdet_3x3(mol%lattice)), conv)
+
+   ! Largest fractional components of the Wigner-Seitz pair vectors, which
+   ! shift the real-space sum away from the origin
+   inv_lat = matinv_3x3(mol%lattice)
+   smax(:) = 0.0_wp
+   do iat = 1, mol%nat
+      do jat = 1, mol%nat
+         do img = 1, wsc%nimg(jat, iat)
+            vec = mol%xyz(:, jat) - mol%xyz(:, iat) &
+               & + wsc%trans(:, wsc%tridx(img, jat, iat))
+            smax(:) = max(smax, abs(matmul(inv_lat, vec)))
+         end do
+      end do
+   end do
+
+   ! Include every translation T with |r_ij + T| <= rcut. The rows of the
+   ! inverse lattice are the normals of the lattice planes with a length of
+   ! one over the plane spacing.
+   rep(:) = floor(rcut * norm2(inv_lat, dim=2) + smax)
+   call get_lattice_points(mol%lattice, rep, .true., dtrans)
+
+   ! Only reciprocal vectors within the cutoff sphere contribute
+   call get_rec_trans(mol, rtrans, gcut)
+   rtrans = rtrans(:, pack([(itr, itr = 1, size(rtrans, 2))], &
+      & norm2(rtrans, dim=1) <= gcut))
+
+end subroutine get_ewald_trans
 
 !> Reciprocal-space factors independent of the atom pair.
 !> Prepare once for each matrix/response evaluation, including strain when needed.
@@ -865,8 +917,7 @@ subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
 
    real(wp), parameter :: reg = 1.0e-14_wp
 
-   call get_dir_trans(mol, dtrans)
-   call get_rec_trans(mol, rtrans)
+   call get_ewald_trans(self, mol, cache%wsc, cache%alpha, dtrans, rtrans)
    call get_rec_weights(abs(matdet_3x3(mol%lattice)), cache%alpha, rtrans, &
       & rec_weight, rec_strain)
 

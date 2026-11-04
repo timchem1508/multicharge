@@ -22,6 +22,7 @@ module test_pbc
    use mctc_io_structure, only: structure_type, new
    use mstore, only: get_structure
    use multicharge_blas, only : gemv
+   use multicharge_charge, only : get_charges
    use multicharge_model_cache, only : mchrg_cache
    use multicharge_model_eeqbc, only: eeqbc_model
    use multicharge_model_type, only : mchrg_model_type
@@ -49,6 +50,8 @@ subroutine collect_pbc(testsuite)
    testsuite = [ &
       & new_unittest("eeq-charges-cyanamide", test_eeq_q_cyanamide), &
       & new_unittest("eeq-energy-formamide", test_eeq_e_formamide), &
+      & new_unittest("eeq-supercell-urea", test_eeq_supercell_urea), &
+      & new_unittest("eeq-supercell-formamide", test_eeq_supercell_formamide), &
       & new_unittest("eeq-dbdr-co2", test_eeq_dbdr_co2), &
       & new_unittest("eeq-dbdL-co2", test_eeq_dbdL_co2), &
       & new_unittest("eeq-dadr-ice", test_eeq_dadr_ice), &
@@ -154,6 +157,51 @@ subroutine gen_test(error, mol, model, qref, eref)
    end if
 
 end subroutine gen_test
+
+
+!> Partial charges of a supercell must reproduce the ones of its unit cell
+subroutine gen_supercell_test(error, mol, rep)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular structure data of the unit cell
+   type(structure_type), intent(in) :: mol
+
+   !> Repetitions of the unit cell along each lattice vector
+   integer, intent(in) :: rep(3)
+
+   type(structure_type) :: sup
+   class(mchrg_model_type), allocatable :: model
+   real(wp), allocatable :: qvec(:), xyz(:, :)
+   integer :: ix, iy, iz, img, nimg
+
+   call new_eeq2019_model(mol, model, error)
+   if (allocated(error)) return
+   allocate(qvec(mol%nat))
+   call get_charges(model, mol, error, qvec)
+   if (allocated(error)) return
+
+   nimg = product(rep)
+   allocate(xyz(3, mol%nat * nimg))
+   img = 0
+   do iz = 0, rep(3) - 1
+      do iy = 0, rep(2) - 1
+         do ix = 0, rep(1) - 1
+            xyz(:, img*mol%nat+1:(img+1)*mol%nat) = mol%xyz &
+               & + spread(matmul(mol%lattice, real([ix, iy, iz], wp)), 2, mol%nat)
+            img = img + 1
+         end do
+      end do
+   end do
+   call new(sup, [(mol%num(mol%id), img = 1, nimg)], xyz, &
+      & lattice=mol%lattice * spread(real(rep, wp), 1, 3))
+
+   call new_eeq2019_model(sup, model, error)
+   if (allocated(error)) return
+   call gen_test(error, sup, model, qref=[(qvec, img = 1, nimg)])
+
+end subroutine gen_supercell_test
 
 subroutine test_numgrad(error, mol, model)
 
@@ -1069,20 +1117,20 @@ subroutine test_eeq_q_cyanamide(error)
    type(structure_type) :: mol
    class(mchrg_model_type), allocatable :: model
    real(wp), parameter :: ref(40) = [&
-      & 3.47274007973765E-1_wp, 3.47273017259661E-1_wp, 3.47276806231462E-1_wp, &
-      & 3.47267235121650E-1_wp, 3.47288751410308E-1_wp, 3.47296840650318E-1_wp, &
-      & 3.47299868243747E-1_wp, 3.47299359754750E-1_wp, 3.45885710186856E-1_wp, &
-      & 3.45874246032015E-1_wp, 3.45888242047875E-1_wp, 3.45877451600398E-1_wp, &
-      & 3.45902365123333E-1_wp, 3.45902162041418E-1_wp, 3.45900336974539E-1_wp, &
-      & 3.45903770121699E-1_wp, 3.58996736955583E-1_wp, 3.58987991603151E-1_wp, &
-      & 3.59000859720791E-1_wp, 3.58990960169615E-1_wp, 3.58990422147650E-1_wp, &
-      & 3.58997842028106E-1_wp, 3.58997124263551E-1_wp, 3.59001728635141E-1_wp, &
-      &-5.86637659146611E-1_wp, -5.86601835343945E-1_wp, -5.86625078062709E-1_wp, &
-      &-5.86579999312624E-1_wp, -5.86654394920376E-1_wp, -5.86669360667441E-1_wp, &
-      &-5.86667481028248E-1_wp, -5.86674873278027E-1_wp, -4.65529092171338E-1_wp, &
-      &-4.65527713392387E-1_wp, -4.65546450764424E-1_wp, -4.65540905286785E-1_wp, &
-      &-4.65529860758785E-1_wp, -4.65533757413217E-1_wp, -4.65527683275370E-1_wp, &
-      &-4.65527691475100E-1_wp]
+      & 3.47273696479019E-1_wp, 3.47272705640270E-1_wp, 3.47276492903752E-1_wp, &
+      & 3.47266922178364E-1_wp, 3.47288439460212E-1_wp, 3.47296528581099E-1_wp, &
+      & 3.47299555433950E-1_wp, 3.47299047247052E-1_wp, 3.45885448217331E-1_wp, &
+      & 3.45873984082480E-1_wp, 3.45887979518337E-1_wp, 3.45877189683492E-1_wp, &
+      & 3.45902103370696E-1_wp, 3.45901899732039E-1_wp, 3.45900074770711E-1_wp, &
+      & 3.45903507923249E-1_wp, 3.58994427905593E-1_wp, 3.58985684782718E-1_wp, &
+      & 3.58998551488414E-1_wp, 3.58988652945654E-1_wp, 3.58988114752444E-1_wp, &
+      & 3.58995533629605E-1_wp, 3.58994816857993E-1_wp, 3.58999419102338E-1_wp, &
+      &-5.86636852376091E-1_wp, -5.86601030236719E-1_wp, -5.86624269538226E-1_wp, &
+      &-5.86579192001318E-1_wp, -5.86653588719830E-1_wp, -5.86668553721608E-1_wp, &
+      &-5.86666673919383E-1_wp, -5.86674064898702E-1_wp, -4.65527015747554E-1_wp, &
+      &-4.65525637708547E-1_wp, -4.65544375954497E-1_wp, -4.65538830945939E-1_wp, &
+      &-4.65527785578439E-1_wp, -4.65531681382049E-1_wp, -4.65525608429865E-1_wp, &
+      &-4.65525615528052E-1_wp]
 
    call get_structure(mol, "X23", "cyanamide")
    call new_eeq2019_model(mol, model, error)
@@ -1098,16 +1146,15 @@ subroutine test_eeq_e_formamide(error)
 
    type(structure_type) :: mol
    class(mchrg_model_type), allocatable :: model
-   ! Updated for the mctc-lib Wigner-Seitz image tolerance in the finite Ewald sum.
    real(wp), parameter :: ref(24) = [&
-      & 4.01878374787191E-1_wp, 4.01885037899597E-1_wp, 4.01836688390911E-1_wp, &
-      & 4.01859670984182E-1_wp, 4.30132953804280E-1_wp, 4.30105983229582E-1_wp, &
-      & 4.30085942904623E-1_wp, 4.30109219580760E-1_wp, 1.90400205083764E-1_wp, &
-      & 1.90401834703106E-1_wp, 1.90404142905890E-1_wp, 1.90407459232625E-1_wp, &
-      & 3.33868772086876E-1_wp, 3.33849119518316E-1_wp, 3.33876414218980E-1_wp, &
-      & 3.33893467423880E-1_wp, -8.35636285533486E-1_wp, -8.35615627485463E-1_wp, &
-      &-8.35543385304371E-1_wp, -8.35590189215555E-1_wp, -6.31079470991667E-1_wp, &
-      &-6.31060026823144E-1_wp, -6.31085555821538E-1_wp, -6.31082095933280E-1_wp]
+      & 4.01820317641649E-1_wp, 4.01826970293718E-1_wp, 4.01778618929470E-1_wp, &
+      & 4.01801620737466E-1_wp, 4.30133215169719E-1_wp, 4.30106241841598E-1_wp, &
+      & 4.30086201257568E-1_wp, 4.30109482177692E-1_wp, 1.90391275024120E-1_wp, &
+      & 1.90392904370211E-1_wp, 1.90395221896775E-1_wp, 1.90398527506007E-1_wp, &
+      & 3.33798778194690E-1_wp, 3.33779134873330E-1_wp, 3.33806406791093E-1_wp, &
+      & 3.33823483957307E-1_wp, -8.35501801552074E-1_wp, -8.35481140201098E-1_wp, &
+      &-8.35408885793255E-1_wp, -8.35455735270738E-1_wp, -6.31069087329019E-1_wp, &
+      &-6.31049654240396E-1_wp, -6.31075181828642E-1_wp, -6.31071707101106E-1_wp]
 
    call get_structure(mol, "X23", "formamide")
    call new_eeq2019_model(mol, model, error)
@@ -1115,6 +1162,33 @@ subroutine test_eeq_e_formamide(error)
    call gen_test(error, mol, model, eref=ref)
 
 end subroutine test_eeq_e_formamide
+
+
+subroutine test_eeq_supercell_urea(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+
+   call get_structure(mol, "X23", "urea")
+   call gen_supercell_test(error, mol, [1, 1, 6])
+
+end subroutine test_eeq_supercell_urea
+
+
+subroutine test_eeq_supercell_formamide(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+
+   call get_structure(mol, "X23", "formamide")
+   call gen_supercell_test(error, mol, [1, 3, 1])
+
+end subroutine test_eeq_supercell_formamide
+
 
 subroutine test_eeq_dbdr_co2(error)
 
