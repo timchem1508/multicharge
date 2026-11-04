@@ -20,6 +20,7 @@
 !> Direct linear system solver
 module multicharge_solver_direct
    use, intrinsic :: iso_fortran_env, only : output_unit
+   use mctc_csrlist, only : csr_list
    use mctc_env, only : error_type, fatal_error, timer_type, wp
    use multicharge_blas, only : symv
    use multicharge_lapack, only : sytrf, sytri, sytrs
@@ -76,13 +77,13 @@ end subroutine new_direct_solver
 
 
 !> Solve a dense symmetric linear system using LAPACK
-subroutine solve(self, amat, xvec, vrhs, ainv, new_unit, error)
+subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, new_unit, error)
 
    !> Direct solver instance
    class(direct_solver), intent(in) :: self
 
    !> Dense coefficient matrix of the linear system
-   real(wp), intent(in) :: amat(:, :)
+   real(wp), intent(in), optional :: amat(:, :)
 
    !> Right-hand side vector
    real(wp), intent(in) :: xvec(:)
@@ -92,6 +93,12 @@ subroutine solve(self, amat, xvec, vrhs, ainv, new_unit, error)
 
    !> Inverse coefficient matrix, requested by passing the argument
    real(wp), intent(out), optional :: ainv(:, :)
+
+   !> Coefficient matrix values in the CSR list, not supported by this solver
+   real(wp), intent(in), optional :: alist(:)
+
+   !> CSR neighbour list, not supported by this solver
+   type(csr_list), intent(in), optional :: list
 
    !> Output unit (optional)
    integer, intent(in), optional :: new_unit
@@ -104,6 +111,17 @@ subroutine solve(self, amat, xvec, vrhs, ainv, new_unit, error)
 
    integer :: local_info, ndim, ic, jc, unit
    type(timer_type) :: timer
+
+   if (present(list) .or. present(alist)) then
+      call fatal_error(error, "The direct solver requires a dense coefficient "//&
+         & "matrix, use the CG solver for the neighbour list representation.")
+      return
+   end if
+
+   if (.not. present(amat)) then
+      call fatal_error(error, "solve_direct: coefficient matrix is missing.")
+      return
+   end if
 
    if (self%verbosity > 1) call timer%push("total")
 

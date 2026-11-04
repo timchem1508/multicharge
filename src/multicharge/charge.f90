@@ -20,12 +20,14 @@
 !> Interface to the charge models
 module multicharge_charge
    use, intrinsic :: iso_fortran_env, only : output_unit
+   use mctc_csrlist, only : csr_list
    use mctc_cutoff, only : get_lattice_points
-   use mctc_env, only : error_type, wp
+   use mctc_env, only : error_type, fatal_error, wp
    use mctc_io, only : structure_type
    use multicharge_model_cache, only : mchrg_cache
    use multicharge_model_type, only : mchrg_model_type
    use multicharge_param, only : new_eeq2019_model, new_eeqbc2025_model
+   use multicharge_solver_cg, only : cg_solver, new_cg_solver, cg_input
    use multicharge_solver_direct, only : direct_solver, new_direct_solver, &
       & direct_input
    implicit none
@@ -39,7 +41,7 @@ contains
 
 
 !> Classical electronegativity equilibration charges
-subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, cache)
+subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, cache, list)
 
    !> Multicharge model
    class(mchrg_model_type), intent(in) :: mchrg_model
@@ -63,6 +65,11 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, cache)
    !> Recompute after any change to the geometry, charge, or model.
    type(mchrg_cache), intent(out), optional :: cache
 
+   !> Optional upper triangular CSR neighbour list of a molecular system.
+   !> The charges are obtained with the iterative CG solver in the sparse
+   !> representation, which does not provide the charge derivatives.
+   type(csr_list), intent(in), optional :: list
+
    type(mchrg_cache), allocatable :: local_cache
    logical :: grad
    real(wp), allocatable :: trans(:, :)
@@ -71,14 +78,24 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, cache)
    class(direct_solver), allocatable :: solver
    class(direct_input), allocatable :: solver_input
 
-   allocate(solver_input)
-   allocate(solver)
-   call new_direct_solver(solver, solver_input)
-
    grad = present(dqdr) .and. present(dqdL)
 
    call get_lattice_points(mol%periodic, mol%lattice, &
       & mchrg_model%ncoord%cutoff, trans)
+
+   if (present(list)) then
+      if (present(dqdr) .or. present(dqdL) .or. present(cache)) then
+         call fatal_error(error, "Charge derivatives and the response cache are "//&
+            & "not available with the neighbour list representation")
+         return
+      end if
+      call get_list_charges(mchrg_model, mol, trans, list, error, qvec)
+      return
+   end if
+
+   allocate(solver_input)
+   allocate(solver)
+   call new_direct_solver(solver, solver_input)
 
    if (present(cache)) then
       ! The charge Hessian needs the full inverse and the Cartesian response
@@ -99,6 +116,43 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, cache)
    end if
 
 end subroutine get_charges
+
+
+!> Charges from the sparse CSR neighbour list representation of the model
+subroutine get_list_charges(mchrg_model, mol, trans, list, error, qvec)
+
+   !> Multicharge model
+   class(mchrg_model_type), intent(in) :: mchrg_model
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Lattice points for the coordination number
+   real(wp), intent(in) :: trans(:, :)
+
+   !> Upper triangular CSR neighbour list
+   type(csr_list), intent(in) :: list
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Atomic partial charges
+   real(wp), intent(out), contiguous :: qvec(:)
+
+   type(mchrg_cache), allocatable :: cache
+   class(cg_solver), allocatable :: solver
+   class(cg_input), allocatable :: solver_input
+
+   allocate(solver_input)
+   allocate(solver)
+   call new_cg_solver(solver, solver_input)
+
+   allocate(cache)
+   call mchrg_model%update(mol, cache, trans, .false., list=list)
+   call mchrg_model%solve(mol, solver, cache, error, qvec=qvec, list=list, &
+      & unit=output_unit)
+
+end subroutine get_list_charges
 
 
 !> Add sum_i weights(i) dq_i/dR and dq_i/dL, holding the weights fixed.
@@ -185,7 +239,7 @@ end subroutine get_eeq_charges
 
 
 !> Obtain charges from bond capacity electronegativity equilibration model
-subroutine get_eeqbc_charges(mol, error, qvec, dqdr, dqdL)
+subroutine get_eeqbc_charges(mol, error, qvec, dqdr, dqdL, list)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
@@ -202,11 +256,14 @@ subroutine get_eeqbc_charges(mol, error, qvec, dqdr, dqdL)
    !> Derivative of the partial charges w.r.t. strain deformations
    real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
 
+   !> Optional upper triangular CSR neighbour list of a molecular system
+   type(csr_list), intent(in), optional :: list
+
    class(mchrg_model_type), allocatable :: eeqbc_model
 
    call new_eeqbc2025_model(mol, eeqbc_model, error)
 
-   call get_charges(eeqbc_model, mol, error, qvec, dqdr, dqdL)
+   call get_charges(eeqbc_model, mol, error, qvec, dqdr, dqdL, list=list)
 
 end subroutine get_eeqbc_charges
 

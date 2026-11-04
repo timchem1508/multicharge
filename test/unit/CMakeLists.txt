@@ -17,6 +17,7 @@
 set(
   tests
   "charge-gradient"
+  "csrlist"
   "hessian"
   "model"
   "pbc"

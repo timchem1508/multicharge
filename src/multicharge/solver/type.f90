@@ -18,6 +18,7 @@
 
 !> Base types for the linear system solvers
 module multicharge_solver_type
+   use mctc_csrlist, only : csr_list
    use mctc_env, only : error_type, wp
    implicit none
    private
@@ -40,14 +41,14 @@ module multicharge_solver_type
 
    abstract interface
       !> Solve the linear system of equations
-      subroutine solve(self, amat, xvec, vrhs, ainv, new_unit, error)
-         import :: mchrg_solver_type, error_type, wp
+      subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, new_unit, error)
+         import :: mchrg_solver_type, error_type, wp, csr_list
 
          !> Solver instance
          class(mchrg_solver_type), intent(in) :: self
 
          !> Dense coefficient matrix of the linear system
-         real(wp), intent(in) :: amat(:, :)
+         real(wp), intent(in), optional :: amat(:, :)
 
          !> Right-hand side vector
          real(wp), intent(in) :: xvec(:)
@@ -57,6 +58,12 @@ module multicharge_solver_type
 
          !> Inverse matrix, requested by passing the argument
          real(wp), intent(out), optional :: ainv(:, :)
+
+         !> Coefficient matrix values in the sparsity pattern of the CSR list
+         real(wp), intent(in), optional :: alist(:)
+
+         !> CSR neighbour list, selects the sparse representation of the matrix
+         type(csr_list), intent(in), optional :: list
 
          !> Output unit
          integer, intent(in), optional :: new_unit

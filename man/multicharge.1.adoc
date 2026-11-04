@@ -38,6 +38,12 @@ Evaluate molecular energy gradient and virial
 *-qg, -qgrad, --qgrad*::
 Evaluate molecular charge gradient and virial
 
+*-nlist, --nlist*::
+Use the CSR neighbour list with the cg solver (eeqbc only, not compatible with the charge gradient)
+
+*-cutoff, --cutoff* _real_::
+Neighbour list cutoff in Bohr (default: 29.0)
+
 *-v, -verbose, --verbose*::
 Show more output
 

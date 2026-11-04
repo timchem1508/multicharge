@@ -22,6 +22,7 @@
 !> and S. Grimme, *J. Chem. Phys.*, **2019**, 150, 154122.
 !> DOI: [10.1063/1.5090222](https://dx.doi.org/10.1063/1.5090222)
 module multicharge_model_eeq
+   use mctc_csrlist, only: csr_list
    use mctc_cutoff, only: get_lattice_points
    use mctc_env, only: error_type, fatal_error, wp
    use mctc_io, only: structure_type
@@ -101,7 +102,7 @@ subroutine new_eeq_model(self, mol, error, chi, rad, eta, kcnchi, &
 end subroutine new_eeq_model
 
 !> Update coordination numbers and, if needed, the Wigner-Seitz cell and alpha
-subroutine update(self, mol, cache, trans, grad)
+subroutine update(self, mol, cache, trans, grad, list)
 
    !> EEQ model type
    class(eeq_model), intent(in) :: self
@@ -117,6 +118,9 @@ subroutine update(self, mol, cache, trans, grad)
 
    !> Flag to compute derivatives
    logical, intent(in) :: grad
+
+   !> CSR neighbour list, not supported by the long-range EEQ model
+   type(csr_list), intent(in), optional :: list
 
    call ensure_shape(cache%cn, mol%nat)
 
@@ -142,7 +146,7 @@ end subroutine update
 
 
 !> No-op override: the EEQ model does not use a capacitance matrix.
-subroutine get_capacitance_matrix(self, mol, ndim, cache)
+subroutine get_capacitance_matrix(self, mol, ndim, cache, list)
 
    !> EEQ model type
    class(eeq_model), intent(in) :: self
@@ -155,13 +159,17 @@ subroutine get_capacitance_matrix(self, mol, ndim, cache)
 
    !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
+
+   !> CSR neighbour list, not supported by the long-range EEQ model
+   type(csr_list), intent(in), optional :: list
 end subroutine get_capacitance_matrix
 
-subroutine get_xvec(self, mol, ndim, cache)
+subroutine get_xvec(self, mol, ndim, cache, list)
    class(eeq_model), intent(in) :: self
    type(structure_type), intent(in) :: mol
    integer, intent(in) :: ndim
    type(mchrg_cache), intent(inout) :: cache
+   type(csr_list), intent(in), optional :: list
    real(wp), parameter :: reg = 1.0e-14_wp
 
    integer :: iat, izp
@@ -334,11 +342,12 @@ subroutine add_periodic_hessian(self, mol, wsc, alpha, qvec, adj, hessian, diago
 end subroutine add_periodic_hessian
 
 
-subroutine get_coulomb_matrix(self, mol, ndim, cache)
+subroutine get_coulomb_matrix(self, mol, ndim, cache, list)
    class(eeq_model), intent(in) :: self
    type(structure_type), intent(in) :: mol
    integer, intent(in) :: ndim
    type(mchrg_cache), intent(inout) :: cache
+   type(csr_list), intent(in), optional :: list
 
    call ensure_shape(cache%amat, ndim, ndim)
 
@@ -673,7 +682,7 @@ end subroutine get_rec_weights
 
 
 !> Accumulate the gradient and stress contributions of the EEQ model
-subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta, error)
+subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta, error, list)
 
    !> EEQ model type
    class(eeq_model), intent(in) :: self
@@ -701,6 +710,15 @@ subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta, error)
 
    !> Error type
    type(error_type), allocatable, intent(out) :: error
+
+   !> CSR neighbour list, not supported by the long-range EEQ model
+   type(csr_list), intent(in), optional :: list
+
+   if (present(list)) then
+      call fatal_error(error, "The neighbour list representation is not "//&
+         & "supported by the EEQ model")
+      return
+   end if
 
    if (any(mol%periodic)) then
       call get_grad_3d(self, mol, cache, p, gradient, sigma, &

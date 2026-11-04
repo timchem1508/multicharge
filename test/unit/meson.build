@@ -30,6 +30,7 @@ endif
 
 tests = [
   'charge-gradient',
+  'csrlist',
   'hessian',
   'model',
   'pbc',

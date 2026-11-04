@@ -15,6 +15,7 @@
 
 program main
    use, intrinsic :: iso_fortran_env, only: output_unit, error_unit, input_unit
+   use mctc_csrlist, only: csr_list, new_csr_list
    use mctc_cutoff, only: get_lattice_points
    use mctc_env, only : error_type, fatal_error, get_argument, wp, timer_type, &
       & format_time
@@ -38,19 +39,21 @@ program main
    type(mchrg_cache), allocatable :: cache
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
-   logical :: grad, egrad, qgrad, json, exist
+   type(csr_list), allocatable :: list
+   logical :: grad, egrad, qgrad, json, exist, use_nlist
    real(wp), allocatable :: trans(:, :)
    real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
    real(wp), allocatable :: qvec(:)
    real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: charge
+   real(wp) :: cutoff
    integer, allocatable :: verbosity
    type(timer_type) :: timer
 
    call timer%push("total")
 
    call get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
-      & json, solver_input, verbosity, error)
+      & json, solver_input, use_nlist, cutoff, verbosity, error)
    if (allocated(error)) then
       write(error_unit, "(a)") error%message
       error stop
@@ -135,15 +138,35 @@ program main
 
    grad = egrad .or. qgrad
 
+   if (use_nlist) then
+      call timer%push("nlist")
+      allocate(list)
+      if (any(mol%periodic)) then
+         ! Periodic images are resolved with the Wigner-Seitz cell of the cache
+         call new_csr_list(list, mol, error, cache%wsc, cutoff)
+      else
+         call new_csr_list(list, mol, error, cutoff=cutoff)
+      end if
+      call timer%pop
+      if (allocated(error)) then
+         write(error_unit, "(a)") error%message
+         error stop
+      end if
+      if (verbosity > 1) then
+         write(output_unit, "(a, 1x, a)") "Neighbour list generation time : ", &
+            & format_time(timer%get("nlist"))
+      end if
+   end if
+
    call timer%push("update")
-   call model%update(mol, cache, trans, grad)
+   call model%update(mol, cache, trans, grad, list)
    call timer%pop
    if (verbosity > 1) then
       write(output_unit, "(a, 1x, a)") "Get coordination number time : ", &
          & format_time(timer%get("update"))
    end if
    call model%solve(mol, solver, cache, error, &
-      & energy, gradient, sigma, qvec, dqdr, dqdL, &
+      & energy, gradient, sigma, qvec, dqdr, dqdL, list, &
       & verbosity=verbosity, unit=output_unit)
 
    if (allocated(error)) then
@@ -195,6 +218,10 @@ subroutine help(unit)
       "-g, -eg, -grad, --grad, -egrad, --egrad", &
       & "Evaluate molecular energy gradient and virial.", &
       "-qg, -qgrad, --qgrad", "Evaluate molecular charge gradient and virial.", &
+      "-nlist, --nlist", &
+      & "Use the CSR neighbour list with the cg solver (eeqbc only)", &
+      "-cutoff, --cutoff <real>", &
+      & "Neighbour list cutoff in Bohr (default: 29.0)", &
       "-v, -verbose, --verbose", "Show more", &
       "-s, -silent, --silent", "Show less", &
       "-j, -json, --json", &
@@ -217,7 +244,7 @@ subroutine version(unit)
 end subroutine version
 
 subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
-   & json, solver_input, verbosity, error)
+   & json, solver_input, use_nlist, cutoff, verbosity, error)
 
    !> Input file name
    character(len=:), allocatable, intent(out) :: input
@@ -243,21 +270,32 @@ subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
    !> Solver input configuration
    class(mchrg_solver_input), allocatable, intent(out) :: solver_input
 
+   !> Use the CSR neighbour list representation
+   logical, intent(out) :: use_nlist
+
+   !> Neighbour list cutoff
+   real(wp), intent(out) :: cutoff
+
    !> Verbosity level
    integer, allocatable, intent(out) :: verbosity
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
+   !> Default neighbour list cutoff
+   real(wp), parameter :: cutoff_def = 29.0_wp
+
    integer :: iarg, narg, iostat
    character(len=:), allocatable :: arg, solver_name
    integer, allocatable :: maxiter
-   real(wp), allocatable :: tol
+   real(wp), allocatable :: tol, nlist_cutoff
 
    model_id = mchrg_model%eeq2019
    egrad = .false.
    qgrad = .false.
    json = .false.
+   use_nlist = .false.
+   cutoff = cutoff_def
    iarg = 0
    verbosity = 1
    narg = command_argument_count()
@@ -373,13 +411,41 @@ subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
             call fatal_error(error, "Invalid tolerance")
             exit
          end if
+      case("-nlist", "--nlist")
+         use_nlist = .true.
+      case("-cutoff", "--cutoff")
+         if (.not. allocated(nlist_cutoff)) allocate(nlist_cutoff)
+         iarg = iarg + 1
+         call get_argument(iarg, arg)
+         if (.not. allocated(arg)) then
+            call fatal_error(error, "Missing argument for neighbour list cutoff")
+            exit
+         end if
+         read(arg, *, iostat=iostat) nlist_cutoff
+         if (iostat /= 0 .or. .not. nlist_cutoff > 0.0_wp) then
+            call fatal_error(error, "Invalid neighbour list cutoff")
+            exit
+         end if
       end select
    end do
    if (allocated(error)) return
 
-   ! Default solver is direct
+   if (allocated(nlist_cutoff)) then
+      if (.not. use_nlist) then
+         call fatal_error(error, "Neighbour list cutoff can only be used "//&
+            & "together with the neighbour list.")
+         return
+      end if
+      cutoff = nlist_cutoff
+   end if
+
+   ! Default solver is direct, the neighbour list requires the cg solver
    if (.not. allocated(solver_input)) then
-      allocate(direct_input :: solver_input)
+      if (use_nlist) then
+         allocate(cg_input :: solver_input)
+      else
+         allocate(direct_input :: solver_input)
+      end if
    end if
 
    select type (solver_input)
@@ -402,6 +468,11 @@ subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
       if (allocated(maxiter) .or. allocated(tol)) then
          call fatal_error(error, "Maximal number of iterations and tolerance "//&
             & "can only be used with the cg solver.")
+         return
+      end if
+      if (use_nlist) then
+         call fatal_error(error, &
+            & "The neighbour list can only be used with the cg solver.")
          return
       end if
       if (allocated(verbosity)) then

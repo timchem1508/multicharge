@@ -47,6 +47,9 @@ module multicharge_model_cache
       !> Full Maxwell capacitance matrix
       real(wp), allocatable :: cmat(:, :)
 
+      !> Maxwell capacitance matrix in the sparsity pattern of the CSR list
+      real(wp), allocatable :: clist(:)
+
       !> Store tmp array from xvec calculation for reuse
       real(wp), allocatable :: xtmp(:)
 
@@ -55,6 +58,9 @@ module multicharge_model_cache
 
       !> Coulomb matrix
       real(wp), allocatable :: amat(:, :)
+
+      !> Coulomb matrix in the sparsity pattern of the CSR list
+      real(wp), allocatable :: alist(:)
 
       !> Inverse of amat
       real(wp), allocatable :: ainv(:, :)
@@ -79,6 +85,9 @@ module multicharge_model_cache
 
       !> Derivative of Maxwell capacitance matrix w.r.t positions
       real(wp), allocatable :: dcdr(:, :, :)
+
+      !> Diagonal of the capacitance derivative w.r.t positions, d(C_ii)/d(r_i)
+      real(wp), allocatable :: dcdrdiag(:, :)
 
       !> Derivative of Maxwell capacitance matrix w.r.t lattice vectors
       real(wp), allocatable :: dcdL(:, :, :)
