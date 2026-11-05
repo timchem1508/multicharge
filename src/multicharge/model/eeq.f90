@@ -69,6 +69,7 @@ module multicharge_model_eeq
 
 contains
 
+!> Construct an EEQ model from element-wise parameters
 subroutine new_eeq_model(self, mol, error, chi, rad, eta, kcnchi, &
    & cutoff, cn_exp, rcov, cn_max)
    !> Electronegativity equilibration model
@@ -167,11 +168,17 @@ subroutine get_capacitance_matrix(self, mol, ndim, cache, list)
    type(csr_list), intent(in), optional :: list
 end subroutine get_capacitance_matrix
 
+!> Electronegativity vector with the CN-dependent correction
 subroutine get_xvec(self, mol, ndim, cache, list)
+   !> Instance of the EEQ model
    class(eeq_model), intent(in) :: self
+   !> Molecular structure data
    type(structure_type), intent(in) :: mol
+   !> Dimension of the linear system
    integer, intent(in) :: ndim
+   !> Reusable data container
    type(mchrg_cache), intent(inout) :: cache
+   !> CSR neighbour list, absent selects the dense representation
    type(csr_list), intent(in), optional :: list
    real(wp), parameter :: reg = 1.0e-14_wp
 
@@ -192,10 +199,15 @@ subroutine get_xvec(self, mol, ndim, cache, list)
 
 end subroutine get_xvec
 
+!> Derivatives of the electronegativity vector w.r.t. positions and lattice
 subroutine get_xvec_derivs(self, mol, ndim, cache)
+   !> Instance of the EEQ model
    class(eeq_model), intent(in) :: self
+   !> Molecular structure data
    type(structure_type), intent(in) :: mol
+   !> Dimension of the linear system
    integer, intent(in) :: ndim
+   !> Reusable data container
    type(mchrg_cache), intent(inout) :: cache
    real(wp), parameter :: reg = 1.0e-14_wp
 
@@ -222,11 +234,17 @@ end subroutine get_xvec_derivs
 
 !> u^T(x_ab-A_ab q), with u and q held fixed.
 subroutine add_model_hessian(self, mol, error, cache, adj, hessian)
+   !> Instance of the EEQ model
    class(eeq_model), intent(in) :: self
+   !> Molecular structure data
    type(structure_type), intent(in) :: mol
+   !> Error handling
    type(error_type), allocatable, intent(out) :: error
+   !> Reusable data container
    type(mchrg_cache), intent(inout) :: cache
+   !> Adjoint vector contracted with the model derivatives
    real(wp), intent(in) :: adj(:)
+   !> Hessian matrix
    real(wp), intent(inout) :: hessian(:, :)
 
    integer :: iat, jat, izp, jzp, nat, ipair, npair, ii
@@ -290,11 +308,21 @@ end subroutine add_model_hessian
 !> Curvature of the same finite Ewald sums and WS average used for A.
 !> The lattice, Ewald parameter, and self-image distances are fixed here.
 subroutine add_periodic_hessian(self, mol, wsc, alpha, qvec, adj, hessian, diagonal)
+   !> Instance of the EEQ model
    class(eeq_model), intent(in) :: self
+   !> Molecular structure data
    type(structure_type), intent(in) :: mol
+   !> Wigner-Seitz cell
    type(wignerseitz_cell), intent(in) :: wsc
-   real(wp), intent(in) :: alpha, qvec(:), adj(:)
+   !> Ewald splitting parameter
+   real(wp), intent(in) :: alpha
+   !> Atomic charges
+   real(wp), intent(in) :: qvec(:)
+   !> Adjoint vector contracted with the model derivatives
+   real(wp), intent(in) :: adj(:)
+   !> Hessian matrix
    real(wp), intent(inout) :: hessian(:, :)
+   !> Diagonal 3x3 blocks accumulated per atom
    real(wp), intent(inout) :: diagonal(:, :, :)
    integer :: iat, jat, izp, jzp, img, itr, ipair, npair
    real(wp) :: rij(3), vec(3), box(3, 3), gam, r, weight, wsw
@@ -344,11 +372,17 @@ subroutine add_periodic_hessian(self, mol, wsc, alpha, qvec, adj, hessian, diago
 end subroutine add_periodic_hessian
 
 
+!> Coulomb matrix of a molecular or periodic system
 subroutine get_coulomb_matrix(self, mol, ndim, cache, list)
+   !> Instance of the EEQ model
    class(eeq_model), intent(in) :: self
+   !> Molecular structure data
    type(structure_type), intent(in) :: mol
+   !> Dimension of the linear system
    integer, intent(in) :: ndim
+   !> Reusable data container
    type(mchrg_cache), intent(inout) :: cache
+   !> CSR neighbour list, absent selects the dense representation
    type(csr_list), intent(in), optional :: list
 
    call ensure_shape(cache%amat, ndim, ndim)
@@ -360,9 +394,13 @@ subroutine get_coulomb_matrix(self, mol, ndim, cache, list)
    end if
 end subroutine get_coulomb_matrix
 
+!> Coulomb matrix of a molecular system
 subroutine get_amat_0d(self, mol, amat)
+   !> Instance of the EEQ model
    class(eeq_model), intent(in) :: self
+   !> Molecular structure data
    type(structure_type), intent(in) :: mol
+   !> Coulomb matrix
    real(wp), intent(out) :: amat(:, :)
 
    integer :: iat, jat, izp, jzp, ipair, npair
@@ -399,11 +437,17 @@ subroutine get_amat_0d(self, mol, amat)
    end if
 end subroutine get_amat_0d
 
+!> Coulomb matrix of a periodic system from the Ewald summation
 subroutine get_amat_3d(self, mol, wsc, alpha, amat)
+   !> Instance of the EEQ model
    class(eeq_model), intent(in) :: self
+   !> Molecular structure data
    type(structure_type), intent(in) :: mol
+   !> Wigner-Seitz cell
    type(wignerseitz_cell), intent(in) :: wsc
+   !> Ewald splitting parameter
    real(wp), intent(in) :: alpha
+   !> Coulomb matrix
    real(wp), intent(out) :: amat(:, :)
 
    integer :: iat, jat, izp, jzp, img, ipair, npair
@@ -445,11 +489,17 @@ subroutine get_amat_3d(self, mol, wsc, alpha, amat)
    end if
 end subroutine get_amat_3d
 
+!> Real-space Ewald contribution to a Coulomb matrix element
 subroutine get_amat_dir_3d(rij, gam, alp, trans, amat)
+   !> Distance vector between the two atoms
    real(wp), intent(in) :: rij(3)
+   !> Gaussian width parameter of the pair
    real(wp), intent(in) :: gam
+   !> Ewald splitting parameter
    real(wp), intent(in) :: alp
+   !> Lattice translation vectors
    real(wp), intent(in) :: trans(:, :)
+   !> Coulomb matrix element
    real(wp), intent(out) :: amat
 
    integer :: itr
@@ -467,8 +517,15 @@ subroutine get_amat_dir_3d(rij, gam, alp, trans, amat)
 
 end subroutine get_amat_dir_3d
 
+!> Reciprocal-space Ewald contribution to a Coulomb matrix element
 subroutine get_amat_rec_3d(rij, trans, weight, amat)
-   real(wp), intent(in) :: rij(3), trans(:, :), weight(:)
+   !> Distance vector between the two atoms
+   real(wp), intent(in) :: rij(3)
+   !> Lattice translation vectors
+   real(wp), intent(in) :: trans(:, :)
+   !> Reciprocal-space weights
+   real(wp), intent(in) :: weight(:)
+   !> Coulomb matrix element
    real(wp), intent(out) :: amat
    integer :: itr
 
@@ -478,10 +535,15 @@ subroutine get_amat_rec_3d(rij, trans, weight, amat)
    end do
 end subroutine get_amat_rec_3d
 
+!> Derivatives of the Coulomb matrix contracted with the charges
 subroutine get_coulomb_derivs(self, mol, ndim, cache)
+   !> Instance of the EEQ model
    class(eeq_model), intent(in) :: self
+   !> Molecular structure data
    type(structure_type), intent(in) :: mol
+   !> Dimension of the linear system
    integer, intent(in) :: ndim
+   !> Reusable data container
    type(mchrg_cache), intent(inout) :: cache
 
    integer :: iat
@@ -501,11 +563,20 @@ subroutine get_coulomb_derivs(self, mol, ndim, cache)
    end do
 end subroutine get_coulomb_derivs
 
+!> Charge-contracted Coulomb matrix derivatives of a molecular system
 subroutine get_damat_0d(self, mol, qvec, dadr, dadL, atrace)
+   !> Instance of the EEQ model
    class(eeq_model), intent(in) :: self
+   !> Molecular structure data
    type(structure_type), intent(in) :: mol
+   !> Atomic charges
    real(wp), intent(in) :: qvec(:)
-   real(wp), intent(out) :: dadr(:, :, :), dadL(:, :, :), atrace(:, :)
+   !> Coulomb matrix derivative w.r.t. positions
+   real(wp), intent(out) :: dadr(:, :, :)
+   !> Coulomb matrix derivative w.r.t. lattice vectors
+   real(wp), intent(out) :: dadL(:, :, :)
+   !> Trace of the Coulomb matrix derivative per atom
+   real(wp), intent(out) :: atrace(:, :)
 
    integer :: iat, jat, izp, jzp, ipair, npair
    real(wp) :: vec(3), r2, gam, arg, dtmp, dG(3), dS(3, 3)
@@ -549,12 +620,24 @@ subroutine get_damat_0d(self, mol, qvec, dadr, dadL, atrace)
    !$omp end parallel
 end subroutine get_damat_0d
 
+!> Charge-contracted Coulomb matrix derivatives of a periodic system
 subroutine get_damat_3d(self, mol, wsc, alpha, qvec, dadr, dadL, atrace)
+   !> Instance of the EEQ model
    class(eeq_model), intent(in) :: self
+   !> Molecular structure data
    type(structure_type), intent(in) :: mol
+   !> Wigner-Seitz cell
    type(wignerseitz_cell), intent(in) :: wsc
-   real(wp), intent(in) :: alpha, qvec(:)
-   real(wp), intent(out) :: dadr(:, :, :), dadL(:, :, :), atrace(:, :)
+   !> Ewald splitting parameter
+   real(wp), intent(in) :: alpha
+   !> Atomic charges
+   real(wp), intent(in) :: qvec(:)
+   !> Coulomb matrix derivative w.r.t. positions
+   real(wp), intent(out) :: dadr(:, :, :)
+   !> Coulomb matrix derivative w.r.t. lattice vectors
+   real(wp), intent(out) :: dadL(:, :, :)
+   !> Trace of the Coulomb matrix derivative per atom
+   real(wp), intent(out) :: atrace(:, :)
 
    integer :: iat, jat, izp, jzp, img, ipair, npair
    real(wp) :: gam, wsw, vec(3), dG(3), dS(3, 3)
@@ -609,12 +692,19 @@ subroutine get_damat_3d(self, mol, wsc, alpha, qvec, dadr, dadL, atrace)
    !$omp end parallel
 end subroutine get_damat_3d
 
+!> Real-space Ewald derivatives of a Coulomb matrix element
 subroutine get_damat_dir_3d(rij, gam, alp, trans, dg, ds)
+   !> Distance vector between the two atoms
    real(wp), intent(in) :: rij(3)
+   !> Gaussian width parameter of the pair
    real(wp), intent(in) :: gam
+   !> Ewald splitting parameter
    real(wp), intent(in) :: alp
+   !> Lattice translation vectors
    real(wp), intent(in) :: trans(:, :)
+   !> Gradient of the pair term
    real(wp), intent(out) :: dg(3)
+   !> Strain derivative of the pair term
    real(wp), intent(out) :: ds(3, 3)
 
    integer :: itr
@@ -639,9 +729,20 @@ subroutine get_damat_dir_3d(rij, gam, alp, trans, dg, ds)
 
 end subroutine get_damat_dir_3d
 
+!> Reciprocal-space Ewald derivatives of a Coulomb matrix element
 subroutine get_damat_rec_3d(rij, trans, weight, strain, dg, ds)
-   real(wp), intent(in) :: rij(3), trans(:, :), weight(:), strain(:, :, :)
-   real(wp), intent(out) :: dg(3), ds(3, 3)
+   !> Distance vector between the two atoms
+   real(wp), intent(in) :: rij(3)
+   !> Lattice translation vectors
+   real(wp), intent(in) :: trans(:, :)
+   !> Reciprocal-space weights
+   real(wp), intent(in) :: weight(:)
+   !> Strain derivatives of the reciprocal-space weights
+   real(wp), intent(in) :: strain(:, :, :)
+   !> Gradient of the pair term
+   real(wp), intent(out) :: dg(3)
+   !> Strain derivative of the pair term
+   real(wp), intent(out) :: ds(3, 3)
    integer :: itr
    real(wp) :: gv
 
@@ -709,8 +810,15 @@ end subroutine get_ewald_trans
 !> Reciprocal-space factors independent of the atom pair.
 !> Prepare once for each matrix/response evaluation, including strain when needed.
 subroutine get_rec_weights(vol, alpha, trans, weight, strain)
-   real(wp), intent(in) :: vol, alpha, trans(:, :)
+   !> Volume of the unit cell
+   real(wp), intent(in) :: vol
+   !> Ewald splitting parameter
+   real(wp), intent(in) :: alpha
+   !> Lattice translation vectors
+   real(wp), intent(in) :: trans(:, :)
+   !> Reciprocal-space weights
    real(wp), allocatable, intent(out) :: weight(:)
+   !> Strain derivatives of the reciprocal-space weights
    real(wp), allocatable, intent(out), optional :: strain(:, :, :)
    integer :: itr
    real(wp) :: g2, fac, vec(3)
