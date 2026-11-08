@@ -253,6 +253,9 @@ subroutine add_model_hessian(self, mol, error, cache, adj, hessian)
    real(wp), allocatable :: dEdcn(:), dcndr(:, :), work(:, :), trans(:, :)
    real(wp), allocatable :: diagonal(:, :, :)
 
+   ! Thread-private array for reduction
+   real(wp), allocatable :: diagonal_local(:, :, :)
+
    if (.not. allocated(cache%dcndr)) then
       call fatal_error(error, "Incompatible EEQ response cache")
       return
@@ -276,10 +279,13 @@ subroutine add_model_hessian(self, mol, error, cache, adj, hessian)
       call add_periodic_hessian(self, mol, cache%wsc, cache%alpha, cache%vrhs, adj, hessian, diagonal)
    else
       npair = nat*(nat+1)/2
-      !$omp parallel do default(none) schedule(runtime) &
-      !$omp shared(self, mol, cache, adj, hessian, npair) &
+      !$omp parallel default(none) &
+      !$omp shared(self, mol, cache, adj, hessian, npair, nat) &
       !$omp private(iat, jat, izp, jzp, vec, r, gam, val, dr, drr, weight) &
-      !$omp reduction(+:diagonal)
+      !$omp shared(diagonal) &
+      !$omp private(diagonal_local)
+      allocate(diagonal_local(3, 3, nat), source=0.0_wp)
+      !$omp do schedule(runtime)
       do ipair = 1, npair
          iat = int(0.5_wp*(sqrt(8.0_wp*real(ipair, wp)+1.0_wp)-1.0_wp))
          if (iat*(iat+1)/2 < ipair) iat = iat+1
@@ -292,9 +298,15 @@ subroutine add_model_hessian(self, mol, error, cache, adj, hessian)
          gam = 1.0_wp/sqrt(self%rad(izp)**2+self%rad(jzp)**2)
          call coulomb_kernel(r, gam, val, dr, drr)
          weight = -(adj(iat)*cache%vrhs(jat)+adj(jat)*cache%vrhs(iat))
-         call add_pair_hessian(iat, jat, vec, weight*dr, weight*drr, hessian, diagonal)
+         call add_pair_hessian(iat, jat, vec, weight*dr, weight*drr, hessian, &
+            & diagonal_local)
       end do
-      !$omp end parallel do
+      !$omp end do
+      !$omp critical (add_model_hessian_)
+      diagonal(:, :, :) = diagonal(:, :, :) + diagonal_local(:, :, :)
+      !$omp end critical (add_model_hessian_)
+      deallocate(diagonal_local)
+      !$omp end parallel
    end if
 
    !$omp parallel do default(none) schedule(static) shared(nat, hessian, diagonal) private(ii)
@@ -329,16 +341,23 @@ subroutine add_periodic_hessian(self, mol, wsc, alpha, qvec, adj, hessian, diago
    real(wp) :: val, dr, drr, ar, arr
    real(wp), allocatable :: dtrans(:, :), rtrans(:, :), rec_weight(:)
 
+   ! Thread-private array for reduction
+   real(wp), allocatable :: diagonal_local(:, :, :)
+
    call get_ewald_trans(self, mol, wsc, alpha, dtrans, rtrans)
    call get_rec_weights(abs(matdet_3x3(mol%lattice)), alpha, rtrans, rec_weight)
 
    ! Each pair owns its off-diagonal blocks. Only the diagonal blocks are
    ! reduced, avoiding a full (3N, 3N) Hessian copy for every OpenMP thread.
    npair = mol%nat*(mol%nat+1)/2
-   !$omp parallel do default(none) schedule(runtime) &
+   !$omp parallel default(none) &
    !$omp shared(self, mol, wsc, alpha, qvec, adj, hessian, dtrans, rtrans, rec_weight, npair) &
    !$omp private(iat, jat, izp, jzp, img, itr, rij, vec, box, gam, r, weight, wsw, val, dr, drr, ar, arr) &
-   !$omp reduction(+:diagonal)
+   !$omp shared(diagonal) &
+   !$omp private(diagonal_local)
+   allocate(diagonal_local, mold=diagonal)
+   diagonal_local(:, :, :) = 0.0_wp
+   !$omp do schedule(runtime)
    do ipair = 1, npair
       iat = int(0.5_wp*(sqrt(8.0_wp*real(ipair, wp)+1.0_wp)-1.0_wp))
       if (iat*(iat+1)/2 < ipair) iat = iat+1
@@ -366,9 +385,14 @@ subroutine add_periodic_hessian(self, mol, wsc, alpha, qvec, adj, hessian, diago
                & *outerprod(vec, vec)
          end do
       end do
-      call add_pair_block(iat, jat, weight*box, hessian, diagonal)
+      call add_pair_block(iat, jat, weight*box, hessian, diagonal_local)
    end do
-   !$omp end parallel do
+   !$omp end do
+   !$omp critical (add_periodic_hessian_)
+   diagonal(:, :, :) = diagonal(:, :, :) + diagonal_local(:, :, :)
+   !$omp end critical (add_periodic_hessian_)
+   deallocate(diagonal_local)
+   !$omp end parallel
 end subroutine add_periodic_hessian
 
 
@@ -581,6 +605,9 @@ subroutine get_damat_0d(self, mol, qvec, dadr, dadL, atrace)
    integer :: iat, jat, izp, jzp, ipair, npair
    real(wp) :: vec(3), r2, gam, arg, dtmp, dG(3), dS(3, 3)
 
+   ! Thread-private arrays for reduction
+   real(wp), allocatable :: atrace_local(:, :), dadL_local(:, :, :)
+
    atrace(:, :) = 0.0_wp
    dadL(:, :, :) = 0.0_wp
    npair = mol%nat*(mol%nat+1)/2
@@ -588,7 +615,12 @@ subroutine get_damat_0d(self, mol, qvec, dadr, dadL, atrace)
    ! derivatives need reduction, with O(N) storage per thread.
    !$omp parallel default(none) shared(dadr, mol, self, qvec, npair) &
    !$omp private(iat, jat, izp, jzp, ipair, gam, r2, vec, dG, dS, dtmp, arg) &
-   !$omp reduction(+:atrace, dadL)
+   !$omp shared(atrace, dadL) &
+   !$omp private(atrace_local, dadL_local)
+   allocate(atrace_local, mold=atrace)
+   allocate(dadL_local, mold=dadL)
+   atrace_local(:, :) = 0.0_wp
+   dadL_local(:, :, :) = 0.0_wp
    !$omp do schedule(static)
    do iat = 1, size(dadr, 3)
       dadr(:, :, iat) = 0.0_wp
@@ -609,14 +641,19 @@ subroutine get_damat_0d(self, mol, qvec, dadr, dadL, atrace)
       dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) - erf(sqrt(arg)) / (r2 * sqrt(r2))
       dG = dtmp * vec
       dS = outerprod(vec, dG)
-      atrace(:, iat) = atrace(:, iat) - dG * qvec(jat)
-      atrace(:, jat) = atrace(:, jat) + dG * qvec(iat)
+      atrace_local(:, iat) = atrace_local(:, iat) - dG * qvec(jat)
+      atrace_local(:, jat) = atrace_local(:, jat) + dG * qvec(iat)
       dadr(:, iat, jat) = -dG * qvec(iat)
       dadr(:, jat, iat) = +dG * qvec(jat)
-      dadL(:, :, jat) = dadL(:, :, jat) + dS * qvec(iat)
-      dadL(:, :, iat) = dadL(:, :, iat) + dS * qvec(jat)
+      dadL_local(:, :, jat) = dadL_local(:, :, jat) + dS * qvec(iat)
+      dadL_local(:, :, iat) = dadL_local(:, :, iat) + dS * qvec(jat)
    end do
    !$omp end do
+   !$omp critical (get_damat_0d_)
+   atrace(:, :) = atrace(:, :) + atrace_local(:, :)
+   dadL(:, :, :) = dadL(:, :, :) + dadL_local(:, :, :)
+   !$omp end critical (get_damat_0d_)
+   deallocate(atrace_local, dadL_local)
    !$omp end parallel
 end subroutine get_damat_0d
 
@@ -644,6 +681,9 @@ subroutine get_damat_3d(self, mol, wsc, alpha, qvec, dadr, dadL, atrace)
    real(wp) :: dGd(3), dSd(3, 3), dGr(3), dSr(3, 3)
    real(wp), allocatable :: dtrans(:, :), rtrans(:, :), rec_weight(:), rec_strain(:, :, :)
 
+   ! Thread-private arrays for reduction
+   real(wp), allocatable :: atrace_local(:, :), dadL_local(:, :, :)
+
    atrace(:, :) = 0.0_wp
    dadL(:, :, :) = 0.0_wp
    call get_ewald_trans(self, mol, wsc, alpha, dtrans, rtrans)
@@ -653,7 +693,12 @@ subroutine get_damat_3d(self, mol, wsc, alpha, qvec, dadr, dadL, atrace)
    !$omp parallel default(none) &
    !$omp shared(mol, self, wsc, alpha, dtrans, rtrans, rec_weight, rec_strain, qvec, dadr, npair) &
    !$omp private(iat, jat, izp, jzp, img, ipair, gam, wsw, vec, dG, dS, dGr, dSr, dGd, dSd) &
-   !$omp reduction(+:atrace, dadL)
+   !$omp shared(atrace, dadL) &
+   !$omp private(atrace_local, dadL_local)
+   allocate(atrace_local, mold=atrace)
+   allocate(dadL_local, mold=dadL)
+   atrace_local(:, :) = 0.0_wp
+   dadL_local(:, :, :) = 0.0_wp
    !$omp do schedule(static)
    do iat = 1, size(dadr, 3)
       dadr(:, :, iat) = 0.0_wp
@@ -678,17 +723,22 @@ subroutine get_damat_3d(self, mol, wsc, alpha, qvec, dadr, dadL, atrace)
          dS = dS + (dSd + dSr) * wsw
       end do
       if (iat == jat) then
-         dadL(:, :, iat) = dadL(:, :, iat) + dS * qvec(iat)
+         dadL_local(:, :, iat) = dadL_local(:, :, iat) + dS * qvec(iat)
       else
-         atrace(:, iat) = atrace(:, iat) - dG * qvec(jat)
-         atrace(:, jat) = atrace(:, jat) + dG * qvec(iat)
+         atrace_local(:, iat) = atrace_local(:, iat) - dG * qvec(jat)
+         atrace_local(:, jat) = atrace_local(:, jat) + dG * qvec(iat)
          dadr(:, iat, jat) = -dG * qvec(iat)
          dadr(:, jat, iat) = +dG * qvec(jat)
-         dadL(:, :, jat) = dadL(:, :, jat) + dS * qvec(iat)
-         dadL(:, :, iat) = dadL(:, :, iat) + dS * qvec(jat)
+         dadL_local(:, :, jat) = dadL_local(:, :, jat) + dS * qvec(iat)
+         dadL_local(:, :, iat) = dadL_local(:, :, iat) + dS * qvec(jat)
       end if
    end do
    !$omp end do
+   !$omp critical (get_damat_3d_)
+   atrace(:, :) = atrace(:, :) + atrace_local(:, :)
+   dadL(:, :, :) = dadL(:, :, :) + dadL_local(:, :, :)
+   !$omp end critical (get_damat_3d_)
+   deallocate(atrace_local, dadL_local)
    !$omp end parallel
 end subroutine get_damat_3d
 

@@ -1627,13 +1627,19 @@ subroutine get_cmat_0d_list(self, mol, list, clist)
    real(wp) :: vec(3), rvdw, tmp, capi, capj, r1
    real(wp), allocatable :: diag(:)
 
+   ! Thread-private array for reduction
+   real(wp), allocatable :: diag_local(:)
+
    allocate(diag(mol%nat), source=0.0_wp)
 
-   !$omp parallel do default(none) schedule(runtime) &
+   !$omp parallel default(none) &
    !$omp shared(clist, mol, self, list) &
    !$omp private(iat, izp, jat, jzp, kat) &
    !$omp private(vec, r1, rvdw, tmp, capi, capj) &
-   !$omp reduction(+:diag)
+   !$omp shared(diag) &
+   !$omp private(diag_local)
+   allocate(diag_local(mol%nat), source=0.0_wp)
+   !$omp do schedule(runtime)
    do iat = 1, mol%nat
       izp = mol%id(iat)
       capi = self%cap(izp)
@@ -1650,11 +1656,16 @@ subroutine get_cmat_0d_list(self, mol, list, clist)
          ! Off-diagonal elements
          clist(kat) = -tmp
          ! Diagonal elements
-         diag(iat) = diag(iat) + tmp
-         diag(jat) = diag(jat) + tmp
+         diag_local(iat) = diag_local(iat) + tmp
+         diag_local(jat) = diag_local(jat) + tmp
       end do
    end do
-   !$omp end parallel do
+   !$omp end do
+   !$omp critical (get_cmat_0d_list_)
+   diag(:) = diag(:) + diag_local(:)
+   !$omp end critical (get_cmat_0d_list_)
+   deallocate(diag_local)
+   !$omp end parallel
 
    do iat = 1, mol%nat
       clist(list%inl(iat)) = diag(iat)
@@ -1680,14 +1691,20 @@ subroutine get_cmat_3d_list(self, mol, list, wsc, clist)
    real(wp) :: vec(3), rvdw, tmp, ctmp, capi, capj, wsw
    real(wp), allocatable :: dtrans(:, :), diag(:)
 
+   ! Thread-private array for reduction
+   real(wp), allocatable :: diag_local(:)
+
    call get_dir_trans(mol, dtrans, self%ncoord%cutoff)
    allocate(diag(mol%nat), source=0.0_wp)
 
-   !$omp parallel do default(none) schedule(runtime) &
+   !$omp parallel default(none) &
    !$omp shared(clist, mol, self, list, wsc, dtrans) &
    !$omp private(iat, izp, jat, jzp, kat, kimg, kself) &
    !$omp private(vec, rvdw, tmp, ctmp, capi, capj, wsw) &
-   !$omp reduction(+:diag)
+   !$omp shared(diag) &
+   !$omp private(diag_local)
+   allocate(diag_local(mol%nat), source=0.0_wp)
+   !$omp do schedule(runtime)
    do iat = 1, mol%nat
       izp = mol%id(iat)
       capi = self%cap(izp)
@@ -1710,8 +1727,8 @@ subroutine get_cmat_3d_list(self, mol, list, wsc, clist)
          ! Off-diagonal elements
          clist(kat) = -ctmp
          ! Diagonal elements
-         diag(iat) = diag(iat) + ctmp
-         diag(jat) = diag(jat) + ctmp
+         diag_local(iat) = diag_local(iat) + ctmp
+         diag_local(jat) = diag_local(jat) + ctmp
       end do
 
       ! diagonal capacitance (interaction with images)
@@ -1722,11 +1739,16 @@ subroutine get_cmat_3d_list(self, mol, list, wsc, clist)
          do kimg = wsc%itr_list(kself), wsc%itr_list(kself + 1) - 1
             vec = wsc%trans(:, wsc%tridx_list(kimg))
             call get_cpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, tmp)
-            diag(iat) = diag(iat) + tmp * wsw
+            diag_local(iat) = diag_local(iat) + tmp * wsw
          end do
       end if
    end do
-   !$omp end parallel do
+   !$omp end do
+   !$omp critical (get_cmat_3d_list_)
+   diag(:) = diag(:) + diag_local(:)
+   !$omp end critical (get_cmat_3d_list_)
+   deallocate(diag_local)
+   !$omp end parallel
 
    do iat = 1, mol%nat
       clist(list%inl(iat)) = diag(iat)
@@ -1972,14 +1994,23 @@ subroutine get_dcmat_0d_list(self, mol, list, dcdrdiag, dcdL)
    integer(i8) :: kat
    real(wp) :: vec(3), rvdw, dG(3), dS(3, 3), capi, capj
 
+   ! Thread-private arrays for reduction
+   real(wp), allocatable :: dcdrdiag_local(:, :), dcdL_local(:, :, :)
+
    dcdrdiag(:, :) = 0.0_wp
    dcdL(:, :, :) = 0.0_wp
 
-   !$omp parallel do default(none) schedule(runtime) &
+   !$omp parallel default(none) &
    !$omp shared(mol, self, list) &
    !$omp private(iat, izp, jat, jzp, kat, vec, rvdw) &
    !$omp private(dG, dS, capi, capj) &
-   !$omp reduction(+:dcdrdiag, dcdL)
+   !$omp shared(dcdrdiag, dcdL) &
+   !$omp private(dcdrdiag_local, dcdL_local)
+   allocate(dcdrdiag_local, mold=dcdrdiag)
+   allocate(dcdL_local, mold=dcdL)
+   dcdrdiag_local(:, :) = 0.0_wp
+   dcdL_local(:, :, :) = 0.0_wp
+   !$omp do schedule(runtime)
    do iat = 1, mol%nat
       izp = mol%id(iat)
       capi = self%cap(izp)
@@ -1993,13 +2024,19 @@ subroutine get_dcmat_0d_list(self, mol, list, dcdrdiag, dcdL)
          call get_dcpair(self%kbc, vec, rvdw, capi, capj, dG, dS)
 
          ! Diagonal elements
-         dcdrdiag(:, iat) = -dG + dcdrdiag(:, iat)
-         dcdrdiag(:, jat) = +dG + dcdrdiag(:, jat)
-         dcdL(:, :, iat) = +dS + dcdL(:, :, iat)
-         dcdL(:, :, jat) = +dS + dcdL(:, :, jat)
+         dcdrdiag_local(:, iat) = -dG + dcdrdiag_local(:, iat)
+         dcdrdiag_local(:, jat) = +dG + dcdrdiag_local(:, jat)
+         dcdL_local(:, :, iat) = +dS + dcdL_local(:, :, iat)
+         dcdL_local(:, :, jat) = +dS + dcdL_local(:, :, jat)
       end do
    end do
-   !$omp end parallel do
+   !$omp end do
+   !$omp critical (get_dcmat_0d_list_)
+   dcdrdiag(:, :) = dcdrdiag(:, :) + dcdrdiag_local(:, :)
+   dcdL(:, :, :) = dcdL(:, :, :) + dcdL_local(:, :, :)
+   !$omp end critical (get_dcmat_0d_list_)
+   deallocate(dcdrdiag_local, dcdL_local)
+   !$omp end parallel
 
 end subroutine get_dcmat_0d_list
 
@@ -2024,16 +2061,25 @@ subroutine get_dcmat_3d_list(self, mol, list, wsc, dcdrdiag, dcdL)
    real(wp) :: vec(3), rvdw, dG(3), dS(3, 3), capi, capj, wsw
    real(wp), allocatable :: dtrans(:, :)
 
+   ! Thread-private arrays for reduction
+   real(wp), allocatable :: dcdrdiag_local(:, :), dcdL_local(:, :, :)
+
    call get_dir_trans(mol, dtrans, self%ncoord%cutoff)
 
    dcdrdiag(:, :) = 0.0_wp
    dcdL(:, :, :) = 0.0_wp
 
-   !$omp parallel do default(none) schedule(runtime) &
+   !$omp parallel default(none) &
    !$omp shared(mol, self, list, wsc, dtrans) &
    !$omp private(iat, izp, jat, jzp, kat, kimg, kself, vec, rvdw) &
    !$omp private(dG, dS, capi, capj, wsw) &
-   !$omp reduction(+:dcdrdiag, dcdL)
+   !$omp shared(dcdrdiag, dcdL) &
+   !$omp private(dcdrdiag_local, dcdL_local)
+   allocate(dcdrdiag_local, mold=dcdrdiag)
+   allocate(dcdL_local, mold=dcdL)
+   dcdrdiag_local(:, :) = 0.0_wp
+   dcdL_local(:, :, :) = 0.0_wp
+   !$omp do schedule(runtime)
    do iat = 1, mol%nat
       izp = mol%id(iat)
       capi = self%cap(izp)
@@ -2050,10 +2096,10 @@ subroutine get_dcmat_3d_list(self, mol, list, wsc, dcdrdiag, dcdL)
             call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capj, dG, dS)
 
             ! Diagonal elements
-            dcdrdiag(:, iat) = -dG * wsw + dcdrdiag(:, iat)
-            dcdrdiag(:, jat) = +dG * wsw + dcdrdiag(:, jat)
-            dcdL(:, :, jat) = +dS * wsw + dcdL(:, :, jat)
-            dcdL(:, :, iat) = +dS * wsw + dcdL(:, :, iat)
+            dcdrdiag_local(:, iat) = -dG * wsw + dcdrdiag_local(:, iat)
+            dcdrdiag_local(:, jat) = +dG * wsw + dcdrdiag_local(:, jat)
+            dcdL_local(:, :, jat) = +dS * wsw + dcdL_local(:, :, jat)
+            dcdL_local(:, :, iat) = +dS * wsw + dcdL_local(:, :, iat)
          end do
       end do
 
@@ -2067,11 +2113,17 @@ subroutine get_dcmat_3d_list(self, mol, list, wsc, dcdrdiag, dcdL)
             call get_dcpair_dir(self%kbc, vec, dtrans, rvdw, capi, capi, dG, dS)
 
             ! Positive diagonal elements
-            dcdL(:, :, iat) = +dS * wsw + dcdL(:, :, iat)
+            dcdL_local(:, :, iat) = +dS * wsw + dcdL_local(:, :, iat)
          end do
       end if
    end do
-   !$omp end parallel do
+   !$omp end do
+   !$omp critical (get_dcmat_3d_list_)
+   dcdrdiag(:, :) = dcdrdiag(:, :) + dcdrdiag_local(:, :)
+   dcdL(:, :, :) = dcdL(:, :, :) + dcdL_local(:, :, :)
+   !$omp end critical (get_dcmat_3d_list_)
+   deallocate(dcdrdiag_local, dcdL_local)
+   !$omp end parallel
 
 end subroutine get_dcmat_3d_list
 
@@ -2206,9 +2258,12 @@ subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
    real(wp) :: vec(3), r2, gam, arg, dtmp, norm_cn
    real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3)
    real(wp) :: W_ii, W_jj, W_ij
-   real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
    real(wp), allocatable :: v(:), qlocacc(:), cnacc(:)
    real(wp), allocatable :: dtrans(:, :)
+
+   ! Thread-private arrays for reduction
+   real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
+   real(wp), allocatable :: cnacc_local(:), qlocacc_local(:)
 
    alpha = 1.0_wp
    if (present(alphain)) alpha = alphain
@@ -2224,15 +2279,15 @@ subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
    call symv(cache%cmat(:mol%nat, :mol%nat), p, v, alpha=1.0_wp, beta=0.0_wp, &
       & uplo="l")
 
-   allocate(gradient_local(3, mol%nat), source=0.0_wp)
-   allocate(sigma_local(3, 3), source=0.0_wp)
-
-   !$omp parallel do default(none) schedule(runtime) &
+   !$omp parallel default(none) &
    !$omp shared(cache, mol, self, p, v, alpha, beta) &
    !$omp private(iat, jat, izp, jzp, gam, vec, r2, dtmp, norm_cn, arg) &
    !$omp private(radi, radj, dradi, dradj, dG, dS, W_ii, W_jj, W_ij) &
-   !$omp reduction(+:cnacc, qlocacc, gradient_local, sigma_local)
-
+   !$omp shared(gradient, sigma, cnacc, qlocacc) &
+   !$omp private(gradient_local, sigma_local, cnacc_local, qlocacc_local)
+   allocate(gradient_local(3, mol%nat), sigma_local(3, 3), source=0.0_wp)
+   allocate(cnacc_local(mol%nat), qlocacc_local(mol%nat), source=0.0_wp)
+   !$omp do schedule(runtime)
    do iat = 1, mol%nat
       izp = mol%id(iat)
       norm_cn = 1.0_wp / self%avg_cn(izp)**self%norm_exp
@@ -2258,9 +2313,9 @@ subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
          dtmp = 2.0_wp * exp(-arg) / (sqrtpi)
 
          ! Accumulate scalar weights for CN derivatives
-         cnacc(iat) = cnacc(iat) - (dtmp * radi * dradi * gam**3.0_wp) &
+         cnacc_local(iat) = cnacc_local(iat) - (dtmp * radi * dradi * gam**3.0_wp) &
             & * cache%cmat(iat, jat) * W_ij * alpha
-         cnacc(jat) = cnacc(jat) - (dtmp * radj * dradj * gam**3.0_wp) &
+         cnacc_local(jat) = cnacc_local(jat) - (dtmp * radj * dradj * gam**3.0_wp) &
             & * cache%cmat(iat, jat) * W_ij * alpha
 
          ! 1. Explicit geometry derivative
@@ -2303,10 +2358,10 @@ subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
       end do
 
       ! 3. Diagonal weight accumulation
-      qlocacc(iat) = qlocacc(iat) + self%kqeta(izp) &
+      qlocacc_local(iat) = qlocacc_local(iat) + self%kqeta(izp) &
          & * W_ii * cache%cmat(iat, iat) * alpha &
          & + v(iat) * self%kqchi(mol%id(iat)) * beta
-      cnacc(iat) = cnacc(iat) - sqrt2pi * dradi / (radi**2) * W_ii &
+      cnacc_local(iat) = cnacc_local(iat) - sqrt2pi * dradi / (radi**2) * W_ii &
          & * cache%cmat(iat, iat) * alpha &
          & + v(iat) * self%kcnchi(mol%id(iat)) * beta
 
@@ -2321,23 +2376,22 @@ subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
          & * alpha &
          & + p(iat) * cache%xtmp(iat) * cache%dcdL(:, :, iat) * beta
    end do
-   !$omp end parallel do
-
-   gradient = gradient + gradient_local
-   sigma = sigma + sigma_local
-
-   gradient_local = 0.0_wp
-   sigma_local = 0.0_wp
+   !$omp end do
+   !$omp critical (get_grad_0d_)
+   gradient(:, :) = gradient(:, :) + gradient_local(:, :)
+   sigma(:, :) = sigma(:, :) + sigma_local(:, :)
+   cnacc(:) = cnacc(:) + cnacc_local(:)
+   qlocacc(:) = qlocacc(:) + qlocacc_local(:)
+   !$omp end critical (get_grad_0d_)
+   deallocate(gradient_local, sigma_local, cnacc_local, qlocacc_local)
+   !$omp end parallel
 
    call self%ncoord%add_coordination_number_derivs(mol, dtrans, cnacc, &
-      & gradient_local, sigma_local)
+      & gradient, sigma)
    call self%ncoord_en%add_coordination_number_derivs(mol, dtrans, qlocacc, &
-      & gradient_local, sigma_local)
+      & gradient, sigma)
 
-   gradient = gradient + gradient_local
-   sigma = sigma + sigma_local
-
-   deallocate(gradient_local, sigma_local, qlocacc, cnacc, dtrans, v)
+   deallocate(qlocacc, cnacc, dtrans, v)
 end subroutine get_grad_0d
 
 !> Accumulate gradient and stress contributions for a periodic system
@@ -2372,8 +2426,11 @@ subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
    real(wp) :: vec(3), gam, dtmp, capi, capj, dgam, rvdw, wsw, ctmp
    real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), norm_cn
    real(wp) :: W_ii, W_jj, W_ij
-   real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
    real(wp), allocatable :: qlocacc(:), cnacc(:), dtrans(:, :), v(:)
+
+   ! Thread-private arrays for reduction
+   real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
+   real(wp), allocatable :: cnacc_local(:), qlocacc_local(:)
 
    alpha = 1.0_wp
    if (present(alphain)) alpha = alphain
@@ -2390,15 +2447,16 @@ subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
    call symv(cache%cmat(:mol%nat, :mol%nat), p, v, alpha=1.0_wp, beta=0.0_wp, &
       & uplo="l")
 
-   allocate(gradient_local(3, mol%nat), source=0.0_wp)
-   allocate(sigma_local(3, 3), source=0.0_wp)
-
-   !$omp parallel do default(none) schedule(runtime) &
+   !$omp parallel default(none) &
    !$omp shared(cache, mol, self, p, dtrans, v, alpha, beta) &
    !$omp private(iat, izp, jat, jzp, gam, vec, dtmp, radi, radj, dradi, dradj, dG) &
    !$omp private(dS, norm_cn) &
    !$omp private(W_ii, W_jj, W_ij, wsw, capi, capj, rvdw, img, dgam, ctmp) &
-   !$omp reduction(+:cnacc, qlocacc, gradient_local, sigma_local)
+   !$omp shared(gradient, sigma, cnacc, qlocacc) &
+   !$omp private(gradient_local, sigma_local, cnacc_local, qlocacc_local)
+   allocate(gradient_local(3, mol%nat), sigma_local(3, 3), source=0.0_wp)
+   allocate(cnacc_local(mol%nat), qlocacc_local(mol%nat), source=0.0_wp)
+   !$omp do schedule(runtime)
    do iat = 1, mol%nat
       izp = mol%id(iat)
       norm_cn = 1.0_wp / self%avg_cn(izp)**self%norm_exp
@@ -2428,9 +2486,11 @@ subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
             call get_damat_dir(vec, dtrans, capi, capj, rvdw, self%kbc, gam, &
                & dG, dS, dgam)
 
-            cnacc(iat) = cnacc(iat) + (dgam * wsw * radi * dradi * gam**3.0_wp) &
+            cnacc_local(iat) = cnacc_local(iat) &
+               & + (dgam * wsw * radi * dradi * gam**3.0_wp) &
                & * W_ij * alpha
-            cnacc(jat) = cnacc(jat) + (dgam * wsw * radj * dradj * gam**3.0_wp) &
+            cnacc_local(jat) = cnacc_local(jat) &
+               & + (dgam * wsw * radj * dradj * gam**3.0_wp) &
                & * W_ij * alpha
 
             gradient_local(:, iat) = gradient_local(:, iat) - dG * wsw * W_ij &
@@ -2482,7 +2542,7 @@ subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
          call get_damat_dir(vec, dtrans, capi, capi, rvdw, self%kbc, gam, dG, &
             & dS, dgam)
          sigma_local(:, :) = sigma_local(:, :) + dS * wsw * W_ii * alpha
-         cnacc(iat) = cnacc(iat) + (dgam * wsw * 2.0_wp * radi * dradi &
+         cnacc_local(iat) = cnacc_local(iat) + (dgam * wsw * 2.0_wp * radi * dradi &
             & * gam**3.0_wp) * W_ii * alpha
 
          call get_damat_dc_dir(vec, dtrans, capi, capi, rvdw, self%kbc, gam, dG, dS)
@@ -2498,10 +2558,10 @@ subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
       end do
 
       ! Diagonal contributions to weights
-      qlocacc(iat) = qlocacc(iat) + self%kqeta(izp) * W_ii &
+      qlocacc_local(iat) = qlocacc_local(iat) + self%kqeta(izp) * W_ii &
          & * cache%cmat(iat, iat) * alpha &
          & + v(iat) * self%kqchi(izp) * beta
-      cnacc(iat) = cnacc(iat) - sqrt2pi * dradi / (radi**2) * W_ii &
+      cnacc_local(iat) = cnacc_local(iat) - sqrt2pi * dradi / (radi**2) * W_ii &
          & * cache%cmat(iat, iat) * alpha &
          & + v(iat) * self%kcnchi(izp) * beta
 
@@ -2516,23 +2576,22 @@ subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
          & * alpha &
          & + p(iat) * cache%xtmp(iat) * cache%dcdL(:, :, iat) * beta
    end do
-   !$omp end parallel do
-
-   gradient = gradient + gradient_local
-   sigma = sigma + sigma_local
-
-   gradient_local = 0.0_wp
-   sigma_local = 0.0_wp
+   !$omp end do
+   !$omp critical (get_grad_3d_)
+   gradient(:, :) = gradient(:, :) + gradient_local(:, :)
+   sigma(:, :) = sigma(:, :) + sigma_local(:, :)
+   cnacc(:) = cnacc(:) + cnacc_local(:)
+   qlocacc(:) = qlocacc(:) + qlocacc_local(:)
+   !$omp end critical (get_grad_3d_)
+   deallocate(gradient_local, sigma_local, cnacc_local, qlocacc_local)
+   !$omp end parallel
 
    call self%ncoord%add_coordination_number_derivs(mol, dtrans, cnacc, &
-      & gradient_local, sigma_local)
+      & gradient, sigma)
    call self%ncoord_en%add_coordination_number_derivs(mol, dtrans, qlocacc, &
-      & gradient_local, sigma_local)
+      & gradient, sigma)
 
-   gradient = gradient + gradient_local
-   sigma = sigma + sigma_local
-
-   deallocate(gradient_local, sigma_local, qlocacc, cnacc, dtrans, v)
+   deallocate(qlocacc, cnacc, dtrans, v)
 end subroutine get_grad_3d
 
 !> Accumulate gradient and stress contributions for a non-periodic system
@@ -2572,8 +2631,11 @@ subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain,
    real(wp) :: vec(3), r2, gam, arg, dtmp, norm_cn
    real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3)
    real(wp) :: W_ii, W_jj, W_ij
-   real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
    real(wp), allocatable :: v(:), qlocacc(:), cnacc(:)
+
+   ! Thread-private arrays for reduction
+   real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
+   real(wp), allocatable :: cnacc_local(:), qlocacc_local(:)
 
    alpha = 1.0_wp
    if (present(alphain)) alpha = alphain
@@ -2587,15 +2649,15 @@ subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain,
    allocate(v(mol%nat))
    call csr_matvec(mol%nat, cache%clist, list, p, v)
 
-   allocate(gradient_local(3, mol%nat), source=0.0_wp)
-   allocate(sigma_local(3, 3), source=0.0_wp)
-
-   !$omp parallel do default(none) schedule(runtime) &
+   !$omp parallel default(none) &
    !$omp shared(cache, mol, self, list, p, v, alpha, beta) &
    !$omp private(iat, jat, izp, jzp, kat, kself, gam, vec, r2, dtmp, norm_cn, arg) &
    !$omp private(radi, radj, dradi, dradj, dG, dS, W_ii, W_jj, W_ij) &
-   !$omp reduction(+:cnacc, qlocacc, gradient_local, sigma_local)
-
+   !$omp shared(gradient, sigma, cnacc, qlocacc) &
+   !$omp private(gradient_local, sigma_local, cnacc_local, qlocacc_local)
+   allocate(gradient_local(3, mol%nat), sigma_local(3, 3), source=0.0_wp)
+   allocate(cnacc_local(mol%nat), qlocacc_local(mol%nat), source=0.0_wp)
+   !$omp do schedule(runtime)
    do iat = 1, mol%nat
       izp = mol%id(iat)
       norm_cn = 1.0_wp / self%avg_cn(izp)**self%norm_exp
@@ -2622,9 +2684,9 @@ subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain,
          dtmp = 2.0_wp * exp(-arg) / (sqrtpi)
 
          ! Accumulate scalar weights for CN derivatives
-         cnacc(iat) = cnacc(iat) - (dtmp * radi * dradi * gam**3.0_wp) &
+         cnacc_local(iat) = cnacc_local(iat) - (dtmp * radi * dradi * gam**3.0_wp) &
             & * cache%clist(kat) * W_ij * alpha
-         cnacc(jat) = cnacc(jat) - (dtmp * radj * dradj * gam**3.0_wp) &
+         cnacc_local(jat) = cnacc_local(jat) - (dtmp * radj * dradj * gam**3.0_wp) &
             & * cache%clist(kat) * W_ij * alpha
 
          ! 1. Explicit geometry derivative
@@ -2668,10 +2730,10 @@ subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain,
 
       ! 3. Diagonal weight accumulation
       kself = list%inl(iat)
-      qlocacc(iat) = qlocacc(iat) + self%kqeta(izp) &
+      qlocacc_local(iat) = qlocacc_local(iat) + self%kqeta(izp) &
          & * W_ii * cache%clist(kself) * alpha &
          & + v(iat) * self%kqchi(izp) * beta
-      cnacc(iat) = cnacc(iat) - sqrt2pi * dradi / (radi**2) * W_ii &
+      cnacc_local(iat) = cnacc_local(iat) - sqrt2pi * dradi / (radi**2) * W_ii &
          & * cache%clist(kself) * alpha &
          & + v(iat) * self%kcnchi(izp) * beta
 
@@ -2686,23 +2748,22 @@ subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain,
          & * alpha &
          & + p(iat) * cache%xtmp(iat) * cache%dcdL(:, :, iat) * beta
    end do
-   !$omp end parallel do
-
-   gradient = gradient + gradient_local
-   sigma = sigma + sigma_local
-
-   gradient_local = 0.0_wp
-   sigma_local = 0.0_wp
+   !$omp end do
+   !$omp critical (get_grad_0d_list_)
+   gradient(:, :) = gradient(:, :) + gradient_local(:, :)
+   sigma(:, :) = sigma(:, :) + sigma_local(:, :)
+   cnacc(:) = cnacc(:) + cnacc_local(:)
+   qlocacc(:) = qlocacc(:) + qlocacc_local(:)
+   !$omp end critical (get_grad_0d_list_)
+   deallocate(gradient_local, sigma_local, cnacc_local, qlocacc_local)
+   !$omp end parallel
 
    call self%ncoord%add_coordination_number_derivs_list(mol, cache%trans, cnacc, &
-      & gradient_local, sigma_local, list)
+      & gradient, sigma, list)
    call self%ncoord_en%add_coordination_number_derivs_list(mol, cache%trans, qlocacc, &
-      & gradient_local, sigma_local, list)
+      & gradient, sigma, list)
 
-   gradient = gradient + gradient_local
-   sigma = sigma + sigma_local
-
-   deallocate(gradient_local, sigma_local, qlocacc, cnacc, v)
+   deallocate(qlocacc, cnacc, v)
 end subroutine get_grad_0d_list
 
 !> Accumulate gradient and stress contributions for a periodic system using
@@ -2742,8 +2803,11 @@ subroutine get_grad_3d_list(self, mol, list, cache, p, gradient, sigma, alphain,
    real(wp) :: vec(3), gam, dtmp, capi, capj, dgam, rvdw, wsw, ctmp
    real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), norm_cn
    real(wp) :: W_ii, W_jj, W_ij
-   real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
    real(wp), allocatable :: qlocacc(:), cnacc(:), dtrans(:, :), v(:)
+
+   ! Thread-private arrays for reduction
+   real(wp), allocatable :: gradient_local(:, :), sigma_local(:, :)
+   real(wp), allocatable :: cnacc_local(:), qlocacc_local(:)
 
    alpha = 1.0_wp
    if (present(alphain)) alpha = alphain
@@ -2759,15 +2823,16 @@ subroutine get_grad_3d_list(self, mol, list, cache, p, gradient, sigma, alphain,
    allocate(v(mol%nat))
    call csr_matvec(mol%nat, cache%clist, list, p, v)
 
-   allocate(gradient_local(3, mol%nat), source=0.0_wp)
-   allocate(sigma_local(3, 3), source=0.0_wp)
-
-   !$omp parallel do default(none) schedule(runtime) &
+   !$omp parallel default(none) &
    !$omp shared(cache, mol, self, list, p, dtrans, v, alpha, beta) &
    !$omp private(iat, izp, jat, jzp, kat, kimg, kself, gam, vec, dtmp) &
    !$omp private(radi, radj, dradi, dradj, dG, dS, norm_cn) &
    !$omp private(W_ii, W_jj, W_ij, wsw, capi, capj, rvdw, dgam, ctmp) &
-   !$omp reduction(+:cnacc, qlocacc, gradient_local, sigma_local)
+   !$omp shared(gradient, sigma, cnacc, qlocacc) &
+   !$omp private(gradient_local, sigma_local, cnacc_local, qlocacc_local)
+   allocate(gradient_local(3, mol%nat), sigma_local(3, 3), source=0.0_wp)
+   allocate(cnacc_local(mol%nat), qlocacc_local(mol%nat), source=0.0_wp)
+   !$omp do schedule(runtime)
    do iat = 1, mol%nat
       izp = mol%id(iat)
       norm_cn = 1.0_wp / self%avg_cn(izp)**self%norm_exp
@@ -2799,9 +2864,11 @@ subroutine get_grad_3d_list(self, mol, list, cache, p, gradient, sigma, alphain,
             call get_damat_dir(vec, dtrans, capi, capj, rvdw, self%kbc, gam, &
                & dG, dS, dgam)
 
-            cnacc(iat) = cnacc(iat) + (dgam * wsw * radi * dradi * gam**3.0_wp) &
+            cnacc_local(iat) = cnacc_local(iat) &
+               & + (dgam * wsw * radi * dradi * gam**3.0_wp) &
                & * W_ij * alpha
-            cnacc(jat) = cnacc(jat) + (dgam * wsw * radj * dradj * gam**3.0_wp) &
+            cnacc_local(jat) = cnacc_local(jat) &
+               & + (dgam * wsw * radj * dradj * gam**3.0_wp) &
                & * W_ij * alpha
 
             gradient_local(:, iat) = gradient_local(:, iat) - dG * wsw * W_ij &
@@ -2855,7 +2922,7 @@ subroutine get_grad_3d_list(self, mol, list, cache, p, gradient, sigma, alphain,
             call get_damat_dir(vec, dtrans, capi, capi, rvdw, self%kbc, gam, dG, &
                & dS, dgam)
             sigma_local(:, :) = sigma_local(:, :) + dS * wsw * W_ii * alpha
-            cnacc(iat) = cnacc(iat) + (dgam * wsw * 2.0_wp * radi * dradi &
+            cnacc_local(iat) = cnacc_local(iat) + (dgam * wsw * 2.0_wp * radi * dradi &
                & * gam**3.0_wp) * W_ii * alpha
 
             call get_damat_dc_dir(vec, dtrans, capi, capi, rvdw, self%kbc, gam, dG, dS)
@@ -2872,10 +2939,10 @@ subroutine get_grad_3d_list(self, mol, list, cache, p, gradient, sigma, alphain,
       end if
 
       ! Diagonal contributions to weights
-      qlocacc(iat) = qlocacc(iat) + self%kqeta(izp) * W_ii &
+      qlocacc_local(iat) = qlocacc_local(iat) + self%kqeta(izp) * W_ii &
          & * cache%clist(kself) * alpha &
          & + v(iat) * self%kqchi(izp) * beta
-      cnacc(iat) = cnacc(iat) - sqrt2pi * dradi / (radi**2) * W_ii &
+      cnacc_local(iat) = cnacc_local(iat) - sqrt2pi * dradi / (radi**2) * W_ii &
          & * cache%clist(kself) * alpha &
          & + v(iat) * self%kcnchi(izp) * beta
 
@@ -2890,23 +2957,22 @@ subroutine get_grad_3d_list(self, mol, list, cache, p, gradient, sigma, alphain,
          & * alpha &
          & + p(iat) * cache%xtmp(iat) * cache%dcdL(:, :, iat) * beta
    end do
-   !$omp end parallel do
-
-   gradient = gradient + gradient_local
-   sigma = sigma + sigma_local
-
-   gradient_local = 0.0_wp
-   sigma_local = 0.0_wp
+   !$omp end do
+   !$omp critical (get_grad_3d_list_)
+   gradient(:, :) = gradient(:, :) + gradient_local(:, :)
+   sigma(:, :) = sigma(:, :) + sigma_local(:, :)
+   cnacc(:) = cnacc(:) + cnacc_local(:)
+   qlocacc(:) = qlocacc(:) + qlocacc_local(:)
+   !$omp end critical (get_grad_3d_list_)
+   deallocate(gradient_local, sigma_local, cnacc_local, qlocacc_local)
+   !$omp end parallel
 
    call self%ncoord%add_coordination_number_derivs_list(mol, dtrans, cnacc, &
-      & gradient_local, sigma_local, list)
+      & gradient, sigma, list)
    call self%ncoord_en%add_coordination_number_derivs_list(mol, dtrans, qlocacc, &
-      & gradient_local, sigma_local, list)
+      & gradient, sigma, list)
 
-   gradient = gradient + gradient_local
-   sigma = sigma + sigma_local
-
-   deallocate(gradient_local, sigma_local, qlocacc, cnacc, dtrans, v)
+   deallocate(qlocacc, cnacc, dtrans, v)
 end subroutine get_grad_3d_list
 
 end module multicharge_model_eeqbc
