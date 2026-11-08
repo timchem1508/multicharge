@@ -25,7 +25,6 @@
 !> dqloc_i/dR_j = dqloc_j/dR_i.
 module multicharge_ncoord
    use mctc_csrlist, only : csr_list
-   use multicharge_atomsort, only : get_pair_positions
    use multicharge_model_cache, only : mchrg_cache
    use multicharge_model_type, only : mchrg_hessian
    use mctc_env, only : wp, i8
@@ -141,7 +140,7 @@ end subroutine add_ncoord_hessian_list
 !> the neighbor atoms in cnat and the positions of the pairs in the half
 !> storage in cnpos. Apart from the diagonal, the entry of a pair holds the
 !> derivatives of the CN of the atom with the higher index.
-subroutine get_cn_entries_list(mol, list, cache, cninl, cnpos, cnat)
+subroutine get_cn_entries_list(mol, list, cache, hpos, cninl, cnpos, cnat)
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
 
@@ -150,6 +149,9 @@ subroutine get_cn_entries_list(mol, list, cache, cninl, cnpos, cnat)
 
    !> Cache with the CN and local charge derivatives in the half storage
    type(mchrg_cache), intent(in) :: cache
+
+   !> Position of the pair of each entry in the half storage
+   integer(i8), intent(in) :: hpos(:)
 
    !> Offsets of the rows of the entries
    integer(i8), allocatable, intent(out) :: cninl(:)
@@ -160,59 +162,45 @@ subroutine get_cn_entries_list(mol, list, cache, cninl, cnpos, cnat)
    !> Neighbor atoms of the entries
    integer, allocatable, intent(out) :: cnat(:)
 
-   integer :: iat, ient, nrow, kmax
-   integer(i8) :: cnt
-   integer(i8), allocatable :: hpos(:)
+   integer :: iat
+   integer(i8) :: kat, cnt
 
-   kmax = int(maxval(list%inl(2:mol%nat + 1) - list%inl(:mol%nat)))
    allocate(cninl(mol%nat + 1))
    cninl(1) = 1
 
-   !$omp parallel default(none) &
-   !$omp shared(mol, list, cache, cninl, kmax) private(iat, ient, nrow, cnt, hpos)
-   allocate(hpos(kmax))
-   !$omp do schedule(runtime)
+   !$omp parallel do default(none) schedule(runtime) &
+   !$omp shared(mol, list, cache, hpos, cninl) private(iat, kat, cnt)
    do iat = 1, mol%nat
-      nrow = int(list%inl(iat + 1) - list%inl(iat))
-      call get_pair_positions(list, cache%hinl, iat, hpos(:nrow))
       cnt = 1
-      do ient = 2, nrow
-         if (any(abs(cache%dcndrlist(:, hpos(ient))) > cnthr) &
-            & .or. any(abs(cache%dqlocdrlist(:, hpos(ient))) > cnthr)) cnt = cnt + 1
+      do kat = list%inl(iat) + 1, list%inl(iat + 1) - 1
+         if (any(abs(cache%dcndrlist(:, hpos(kat))) > cnthr) &
+            & .or. any(abs(cache%dqlocdrlist(:, hpos(kat))) > cnthr)) cnt = cnt + 1
       end do
       cninl(iat + 1) = cnt
    end do
-   !$omp end do
-   deallocate(hpos)
-   !$omp end parallel
+   !$omp end parallel do
    do iat = 1, mol%nat
       cninl(iat + 1) = cninl(iat) + cninl(iat + 1)
    end do
 
    allocate(cnpos(cninl(mol%nat + 1) - 1), cnat(cninl(mol%nat + 1) - 1))
-   !$omp parallel default(none) &
-   !$omp shared(mol, list, cache, cninl, cnpos, cnat, kmax) &
-   !$omp private(iat, ient, nrow, cnt, hpos)
-   allocate(hpos(kmax))
-   !$omp do schedule(runtime)
+   !$omp parallel do default(none) schedule(runtime) &
+   !$omp shared(mol, list, cache, hpos, cninl, cnpos, cnat) &
+   !$omp private(iat, kat, cnt)
    do iat = 1, mol%nat
-      nrow = int(list%inl(iat + 1) - list%inl(iat))
-      call get_pair_positions(list, cache%hinl, iat, hpos(:nrow))
       cnt = cninl(iat)
-      cnpos(cnt) = hpos(1)
+      cnpos(cnt) = hpos(list%inl(iat))
       cnat(cnt) = iat
-      do ient = 2, nrow
-         if (any(abs(cache%dcndrlist(:, hpos(ient))) > cnthr) &
-            & .or. any(abs(cache%dqlocdrlist(:, hpos(ient))) > cnthr)) then
+      do kat = list%inl(iat) + 1, list%inl(iat + 1) - 1
+         if (any(abs(cache%dcndrlist(:, hpos(kat))) > cnthr) &
+            & .or. any(abs(cache%dqlocdrlist(:, hpos(kat))) > cnthr)) then
             cnt = cnt + 1
-            cnpos(cnt) = hpos(ient)
-            cnat(cnt) = list%nlat(list%inl(iat) + ient - 1)
+            cnpos(cnt) = hpos(kat)
+            cnat(cnt) = list%nlat(kat)
          end if
       end do
    end do
-   !$omp end do
-   deallocate(hpos)
-   !$omp end parallel
+   !$omp end parallel do
 
 end subroutine get_cn_entries_list
 

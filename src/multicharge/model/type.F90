@@ -32,8 +32,7 @@ module multicharge_model_type
    use mctc_cutoff, only : get_lattice_points
    use mctc_ncoord, only : ncoord_type
    use mctc_csrlist, only : csr_list, new_csr_list, distance_screening
-   use multicharge_atomsort, only : new_sorted_list, get_half_offsets, &
-      & find_neighbor, symv_half
+   use multicharge_atomsort, only : new_sorted_list, get_half_offsets, symv_half
    use multicharge_blas, only : gemv, symv, gemm
    use multicharge_model_cache, only : mchrg_cache
    use multicharge_solver_type, only : mchrg_solver_type
@@ -1550,8 +1549,12 @@ subroutine get_dqdr_row(cache, list, jat, dqdr)
    ! dq_j/dR_i is held at the entry of jat in the row of each neighbor iat
    do kat = list%inl(jat), list%inl(jat + 1) - 1
       iat = list%nlat(kat)
-      pos = find_neighbor(list, iat, jat)
-      if (pos > 0) dqdr(:, iat) = dqdr(:, iat) + cache%dqdrlist(:, pos)
+      do pos = list%inl(iat), list%inl(iat + 1) - 1
+         if (list%nlat(pos) == jat) then
+            dqdr(:, iat) = dqdr(:, iat) + cache%dqdrlist(:, pos)
+            exit
+         end if
+      end do
    end do
 
 end subroutine get_dqdr_row

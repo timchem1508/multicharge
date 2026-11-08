@@ -26,12 +26,10 @@
 !> the upper triangle of the list. Arrays of symmetric or antisymmetric pair
 !> quantities only keep the upper triangle in the half storage, the upper
 !> triangle of row i is held at hinl(i):hinl(i+1)-1 in the order of the row.
-!> The pair of an atom with a neighbor of lower index is found in the upper
-!> triangle of the row of the neighbor by a binary search. Arrays of
-!> non-symmetric pair quantities keep both entries of a pair on the complete
-!> list. The rows of a half list are its upper triangles, so the routines of
-!> the half storage also take a half list, which suffices for the charges and
-!> their energy gradient.
+!> Arrays of non-symmetric pair quantities keep both entries of a pair on the
+!> complete list. The rows of a half list are its upper triangles, so the
+!> routines of the half storage also take a half list, which suffices for the
+!> charges and their energy gradient.
 module multicharge_atomsort
    use mctc_env, only : wp, i8, error_type
    use mctc_io, only : structure_type
@@ -41,7 +39,7 @@ module multicharge_atomsort
    implicit none
    private
 
-   public :: new_sorted_list, get_half_offsets, get_half_list, find_neighbor, &
+   public :: new_sorted_list, get_half_offsets, get_half_list, &
       & get_pair_positions, symv_half
 
    !> Product of a symmetric matrix in the half storage of a sorted complete
@@ -161,53 +159,13 @@ subroutine get_half_list(list, hinl, half)
 end subroutine get_half_list
 
 
-!> Position of an atom in the row of another atom of a sorted complete
-!> neighborlist by a binary search, zero if the atoms are not neighbors
-pure function find_neighbor(list, iat, jat) result(kat)
-
-   !> Sorted complete neighborlist
-   type(csr_list), intent(in) :: list
-
-   !> Atom of the row
-   integer, intent(in) :: iat
-
-   !> Atom to find in the row
-   integer, intent(in) :: jat
-
-   !> Position of the entry of jat in the row of iat
-   integer(i8) :: kat
-
-   integer(i8) :: base, hi, len, half
-
-   kat = list%inl(iat)
-   if (jat == iat) return
-
-   ! First neighbor not above jat, the neighbors are in descending order. The
-   ! search keeps the range [base, base + len] of this position and halves it
-   ! without branches on the comparison.
-   base = kat + 1
-   hi = list%inl(iat + 1) - 1
-   len = hi - base + 1
-   kat = 0_i8
-   if (len < 1) return
-   do while (len > 1)
-      half = len / 2
-      if (list%nlat(base + half - 1) > jat) base = base + half
-      len = len - half
-   end do
-   if (list%nlat(base) > jat) base = base + 1
-   if (base <= hi) then
-      if (list%nlat(base) == jat) kat = base
-   end if
-
-end function find_neighbor
-
-
-!> Positions of the pairs of an atom with the entries of its row in a sorted
-!> complete neighborlist, in the half storage of symmetric pair arrays and, if
-!> requested, as the positions of the atom in the rows of its neighbors. The
-!> pairs with neighbors of lower index are found by a binary search.
-pure subroutine get_pair_positions(list, hinl, iat, hpos, tpos)
+!> Positions of the pairs of the entries of a sorted complete neighborlist in
+!> the half storage of symmetric pair arrays and, if requested, the transposed
+!> positions of the atoms in the rows of their neighbors. Iterating over the
+!> rows in descending order visits the upper-triangle pairs (i, j) with j > i
+!> in descending order of i, which matches the descending order of the lower
+!> triangle of row j.
+pure subroutine get_pair_positions(list, hinl, hpos, tpos)
 
    !> Sorted complete neighborlist
    type(csr_list), intent(in) :: list
@@ -215,29 +173,43 @@ pure subroutine get_pair_positions(list, hinl, iat, hpos, tpos)
    !> Offset of the upper triangle of each row in the half storage
    integer(i8), intent(in) :: hinl(:)
 
-   !> Atom of the row
-   integer, intent(in) :: iat
+   !> Position of the pair of each entry in the half storage
+   integer(i8), allocatable, intent(out) :: hpos(:)
 
-   !> Position of the pair of each entry of the row in the half storage
-   integer(i8), intent(out) :: hpos(:)
+   !> Position of the atom in the row of the neighbor for each entry
+   integer(i8), allocatable, intent(out), optional :: tpos(:)
 
-   !> Position of the atom in the row of each entry of the row
-   integer(i8), intent(out), optional :: tpos(:)
+   integer :: iat, jat, nat
+   integer(i8) :: ist, koff, hat, kat, tat
+   integer(i8), allocatable :: next_low(:)
 
-   integer :: jat, ient
-   integer(i8) :: ist, kat
+   nat = size(list%inl) - 1
+   allocate(hpos(list%inl(nat + 1) - 1))
+   if (present(tpos)) allocate(tpos(list%inl(nat + 1) - 1))
+   allocate(next_low(nat))
 
-   ist = list%inl(iat)
-   do ient = 1, int(list%inl(iat + 1) - ist)
-      jat = list%nlat(ist + ient - 1)
-      if (jat >= iat) then
-         hpos(ient) = hinl(iat) + ient - 1
-         if (present(tpos)) tpos(ient) = find_neighbor(list, jat, iat)
-      else
-         kat = find_neighbor(list, jat, iat)
-         hpos(ient) = hinl(jat) + kat - list%inl(jat)
-         if (present(tpos)) tpos(ient) = kat
-      end if
+   do iat = 1, nat
+      next_low(iat) = list%inl(iat) + hinl(iat + 1) - hinl(iat)
+   end do
+
+   do iat = nat, 1, -1
+      ist = list%inl(iat)
+      hat = hinl(iat)
+      koff = ist - hat
+      hpos(ist) = hat
+      if (present(tpos)) tpos(ist) = ist
+      do hat = hinl(iat) + 1, hinl(iat + 1) - 1
+         kat = hat + koff
+         jat = list%nlat(kat)
+         tat = next_low(jat)
+         next_low(jat) = tat + 1
+         hpos(kat) = hat
+         hpos(tat) = hat
+         if (present(tpos)) then
+            tpos(kat) = tat
+            tpos(tat) = kat
+         end if
+      end do
    end do
 
 end subroutine get_pair_positions

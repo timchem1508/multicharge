@@ -25,7 +25,7 @@ module test_csrlist
    use mctc_wignerseitz, only : wignerseitz_cell
    use mstore, only : get_structure
    use multicharge_atomsort, only : new_sorted_list, get_half_offsets, &
-      & find_neighbor, get_pair_positions, symv_half
+      & get_pair_positions, symv_half
    use multicharge_blas, only : gemv
    use multicharge_model_type, only : mchrg_model_type, mchrg_hessian, get_dqdr_row, &
       & new_partial_derivs, new_hessian_blocks
@@ -1123,7 +1123,7 @@ subroutine test_sorted_list(error, mol, lcutoff)
    type(csr_list) :: ref, list
    type(distance_screening) :: screen
    type(wignerseitz_cell) :: wscref, wsc
-   integer :: iat, jat, ient, nrow, nimg
+   integer :: iat, jat, nimg
    integer(i8) :: kat, lat, nhalf
    logical :: periodic
    integer, allocatable :: nuse(:)
@@ -1209,23 +1209,17 @@ subroutine test_sorted_list(error, mol, lcutoff)
    ! holds each pair once, and the transposed positions point to the atom
    allocate(pairpos(mol%nat, mol%nat), source=0_i8)
    allocate(nuse(nhalf), source=0)
-   allocate(hpos(size(list%nlat)), tpos(size(list%nlat)))
+   call get_pair_positions(list, hinl, hpos, tpos)
    do iat = 1, mol%nat
-      nrow = int(list%inl(iat + 1) - list%inl(iat))
-      call get_pair_positions(list, hinl, iat, hpos(:nrow), tpos(:nrow))
-      do ient = 1, nrow
-         jat = list%nlat(list%inl(iat) + ient - 1)
-         if (tpos(ient) < list%inl(jat) .or. tpos(ient) >= list%inl(jat + 1) &
-            & .or. list%nlat(max(tpos(ient), 1_i8)) /= iat) then
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         jat = list%nlat(kat)
+         if (tpos(kat) < list%inl(jat) .or. tpos(kat) >= list%inl(jat + 1) &
+            & .or. list%nlat(max(tpos(kat), 1_i8)) /= iat) then
             call test_failed(error, "Transposed position does not point to the atom")
             return
          end if
-         if (find_neighbor(list, jat, iat) /= tpos(ient)) then
-            call test_failed(error, "Binary search does not find the atom")
-            return
-         end if
-         pairpos(jat, iat) = hpos(ient)
-         nuse(hpos(ient)) = nuse(hpos(ient)) + merge(2, 1, iat == jat)
+         pairpos(jat, iat) = hpos(kat)
+         nuse(hpos(kat)) = nuse(hpos(kat)) + merge(2, 1, iat == jat)
       end do
    end do
    if (any(pairpos /= transpose(pairpos)) .or. any(nuse /= 2)) then
@@ -2195,12 +2189,13 @@ subroutine test_hessian_pattern(error, mol, model, nlcutoff, hcutoff)
       hoff = sphess%list%inl(xat) - sphess%hinl(xat)
       do hat = sphess%hinl(xat), sphess%hinl(xat + 1) - 1
          yat = sphess%list%nlat(hat + hoff)
-         kat = find_neighbor(refhess%list, xat, yat)
+         kat = findloc(refhess%list%nlat(refhess%list%inl(xat): &
+            & refhess%list%inl(xat + 1) - 1), yat, 1)
          if (kat == 0) then
             call test_failed(error, "Pair of the short list missing in the full list")
             return
          end if
-         kat = refhess%hinl(xat) + kat - refhess%list%inl(xat)
+         kat = refhess%hinl(xat) + kat - 1
          if (any(abs(sphess%hesslist(:, :, hat) - refhess%hesslist(:, :, kat)) &
             & > thr1)) then
             call test_failed(error, "Hessian block does not match the full list")
