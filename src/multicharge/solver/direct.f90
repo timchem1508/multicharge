@@ -25,7 +25,8 @@ module multicharge_solver_direct
    use multicharge_blas, only : symv
    use multicharge_lapack, only : sytrf, sytri, sytrs
    use multicharge_output, only : print_direct_final, write_direct_solver
-   use multicharge_solver_type, only : mchrg_solver_input, mchrg_solver_type
+   use multicharge_solver_type, only : mchrg_operator_type, mchrg_solver_input, &
+      & mchrg_solver_type
    implicit none
    private
 
@@ -77,7 +78,8 @@ end subroutine new_direct_solver
 
 
 !> Solve a dense symmetric linear system using LAPACK
-subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, new_unit, error)
+subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, op, qtot, lambda, &
+   & new_unit, error)
 
    !> Direct solver instance
    class(direct_solver), intent(in) :: self
@@ -100,6 +102,15 @@ subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, new_unit, error)
    !> CSR neighbour list, not supported by this solver
    type(csr_list), intent(in), optional :: list
 
+   !> Matrix-free linear operator, not supported by the direct solver
+   class(mchrg_operator_type), intent(in), optional :: op
+
+   !> Total sum of the solution, not supported by the direct solver
+   real(wp), intent(in), optional :: qtot
+
+   !> Lagrange multiplier of the projected system, not supported
+   real(wp), intent(out), optional :: lambda
+
    !> Output unit (optional)
    integer, intent(in), optional :: new_unit
 
@@ -111,6 +122,18 @@ subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, new_unit, error)
 
    integer :: local_info, ndim, ic, jc, unit
    type(timer_type) :: timer
+
+   if (present(op)) then
+      call fatal_error(error, "The direct solver requires a dense coefficient "//&
+         & "matrix, use the CG solver for a matrix-free operator.")
+      return
+   end if
+
+   if (present(qtot) .or. present(lambda)) then
+      call fatal_error(error, "The direct solver handles the total charge "//&
+         & "constraint in the bordered matrix, projection is not supported.")
+      return
+   end if
 
    if (present(list) .or. present(alist)) then
       call fatal_error(error, "The direct solver requires a dense coefficient "//&

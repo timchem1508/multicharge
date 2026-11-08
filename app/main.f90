@@ -22,7 +22,8 @@ program main
    use mctc_io, only: structure_type, read_structure, filetype, get_filetype
    use multicharge, only : mchrg_model_type, mchrg_model, mchrg_cache, &
       & new_eeq2019_model, new_eeqbc2025_model, get_multicharge_version, &
-      & write_ascii_model, write_ascii_properties, write_ascii_results
+      & write_ascii_model, write_ascii_properties, write_ascii_results, &
+      & coulomb_input, coulomb_method
    use multicharge_output, only: json_results
    use multicharge_solver, only : new_mchrg_solver, mchrg_solver_type, &
       & mchrg_solver_input, cg_input, direct_input
@@ -48,12 +49,13 @@ program main
    real(wp), allocatable :: charge
    real(wp) :: cutoff
    integer, allocatable :: verbosity
+   type(coulomb_input), allocatable :: coulomb
    type(timer_type) :: timer
 
    call timer%push("total")
 
    call get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
-      & json, solver_input, use_nlist, cutoff, verbosity, error)
+      & json, solver_input, use_nlist, cutoff, verbosity, coulomb, error)
    if (allocated(error)) then
       write(error_unit, "(a)") error%message
       error stop
@@ -102,9 +104,14 @@ program main
    call timer%push("model_setup")
 
    if (model_id == mchrg_model%eeq2019) then
-      call new_eeq2019_model(mol, model, error)
+      call new_eeq2019_model(mol, model, error, coulomb=coulomb)
    else if (model_id == mchrg_model%eeqbc2025) then
-      call new_eeqbc2025_model(mol, model, error)
+      if (allocated(coulomb)) then
+         call fatal_error(error, "The matrix-free Coulomb operators are only "//&
+            & "available for the EEQ model.")
+      else
+         call new_eeqbc2025_model(mol, model, error)
+      end if
    else
       call fatal_error(error, "Invalid model was chosen.")
    end if
@@ -174,6 +181,11 @@ program main
       error stop
    end if
 
+   if (allocated(cache%coulomb) .and. verbosity > 1) then
+      call cache%coulomb%write_info(output_unit)
+      write(output_unit, "(a)") ""
+   end if
+
    call write_ascii_properties(output_unit, mol, model, cache%cn, qvec)
    call write_ascii_results(output_unit, mol, energy, gradient, sigma, dqdr, dqdL)
 
@@ -222,6 +234,12 @@ subroutine help(unit)
       & "Use the CSR neighbour list with the cg solver (eeqbc only)", &
       "-cutoff, --cutoff <real>", &
       & "Neighbour list cutoff in Bohr (default: 29.0)", &
+      "-coulomb, --coulomb <method>", &
+      & "Coulomb matrix of the eeq model: 'dense' (default) or 'pme'", &
+      "-coulomb-acc, --coulomb-accuracy <real>", &
+      & "Target accuracy of the PME operator (default: 1.0e-7)", &
+      "-projected, --projected", &
+      & "Enforce the total charge by projection in a single CG solve", &
       "-v, -verbose, --verbose", "Show more", &
       "-s, -silent, --silent", "Show less", &
       "-j, -json, --json", &
@@ -244,7 +262,7 @@ subroutine version(unit)
 end subroutine version
 
 subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
-   & json, solver_input, use_nlist, cutoff, verbosity, error)
+   & json, solver_input, use_nlist, cutoff, verbosity, coulomb, error)
 
    !> Input file name
    character(len=:), allocatable, intent(out) :: input
@@ -279,6 +297,9 @@ subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
    !> Verbosity level
    integer, allocatable, intent(out) :: verbosity
 
+   !> Matrix-free representation of the Coulomb matrix
+   type(coulomb_input), allocatable, intent(out) :: coulomb
+
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
@@ -288,13 +309,15 @@ subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
    integer :: iarg, narg, iostat
    character(len=:), allocatable :: arg, solver_name
    integer, allocatable :: maxiter
-   real(wp), allocatable :: tol, nlist_cutoff
+   real(wp), allocatable :: tol, nlist_cutoff, coulomb_acc
+   logical :: projected
 
    model_id = mchrg_model%eeq2019
    egrad = .false.
    qgrad = .false.
    json = .false.
    use_nlist = .false.
+   projected = .false.
    cutoff = cutoff_def
    iarg = 0
    verbosity = 1
@@ -426,6 +449,38 @@ subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
             call fatal_error(error, "Invalid neighbour list cutoff")
             exit
          end if
+      case("-coulomb", "--coulomb")
+         iarg = iarg + 1
+         call get_argument(iarg, arg)
+         if (.not. allocated(arg)) then
+            call fatal_error(error, "Missing argument for the Coulomb method")
+            exit
+         end if
+         select case(arg)
+         case("dense")
+            if (allocated(coulomb)) deallocate(coulomb)
+         case("pme")
+            if (.not. allocated(coulomb)) allocate(coulomb)
+            coulomb%method = coulomb_method%pme
+         case default
+            call fatal_error(error, "Unknown Coulomb method '"//arg//"' requested")
+            exit
+         end select
+      case("-coulomb-acc", "--coulomb-accuracy")
+         if (.not. allocated(coulomb_acc)) allocate(coulomb_acc)
+         iarg = iarg + 1
+         call get_argument(iarg, arg)
+         if (.not. allocated(arg)) then
+            call fatal_error(error, "Missing argument for the Coulomb accuracy")
+            exit
+         end if
+         read(arg, *, iostat=iostat) coulomb_acc
+         if (iostat /= 0 .or. .not. coulomb_acc > 0.0_wp) then
+            call fatal_error(error, "Invalid Coulomb accuracy")
+            exit
+         end if
+      case("-projected", "--projected")
+         projected = .true.
       end select
    end do
    if (allocated(error)) return
@@ -439,9 +494,24 @@ subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
       cutoff = nlist_cutoff
    end if
 
-   ! Default solver is direct, the neighbour list requires the cg solver
+   if (allocated(coulomb_acc)) then
+      if (.not. allocated(coulomb)) then
+         call fatal_error(error, "Coulomb accuracy can only be used together "//&
+            & "with the 'pme' Coulomb method.")
+         return
+      end if
+      coulomb%accuracy = coulomb_acc
+   end if
+   if (allocated(coulomb) .and. use_nlist) then
+      call fatal_error(error, "The neighbour list cannot be combined with the "//&
+         & "'pme' Coulomb method.")
+      return
+   end if
+
+   ! Default solver is direct, the neighbour list and the matrix-free Coulomb
+   ! operators require the cg solver
    if (.not. allocated(solver_input)) then
-      if (use_nlist) then
+      if (use_nlist .or. allocated(coulomb)) then
          allocate(cg_input :: solver_input)
       else
          allocate(direct_input :: solver_input)
@@ -464,7 +534,18 @@ subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
       if (allocated(verbosity)) then
          solver_input%verbosity = verbosity
       end if
+      solver_input%projected = projected
    type is (direct_input)
+      if (projected) then
+         call fatal_error(error, "Projection of the total charge can only be "//&
+            & "used with the cg solver.")
+         return
+      end if
+      if (allocated(coulomb)) then
+         call fatal_error(error, &
+            & "The 'pme' Coulomb method requires the cg solver.")
+         return
+      end if
       if (allocated(maxiter) .or. allocated(tol)) then
          call fatal_error(error, "Maximal number of iterations and tolerance "//&
             & "can only be used with the cg solver.")

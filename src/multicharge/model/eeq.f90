@@ -22,7 +22,7 @@
 !> and S. Grimme, *J. Chem. Phys.*, **2019**, 150, 154122.
 !> DOI: [10.1063/1.5090222](https://dx.doi.org/10.1063/1.5090222)
 module multicharge_model_eeq
-   use mctc_csrlist, only: csr_list
+   use mctc_csrlist, only: csr_list, new_csr_list
    use mctc_cutoff, only: get_lattice_points
    use mctc_env, only: error_type, fatal_error, wp
    use mctc_io, only: structure_type
@@ -31,6 +31,7 @@ module multicharge_model_eeq
    use mctc_ncoord, only: new_ncoord, cn_count
    use mctc_wignerseitz, only: wignerseitz_cell, new_wignerseitz_cell
    use multicharge_blas, only: gemm
+   use multicharge_coulomb, only: coulomb_input, coulomb_method, new_coulomb_operator
    use multicharge_ewald, only: get_alpha, get_dir_cutoff, get_rec_cutoff
    use multicharge_model_cache, only: mchrg_cache, ensure_shape
    use multicharge_model_hessian, only: coulomb_kernel, radial_hessian, add_pair_hessian, add_pair_block
@@ -41,9 +42,13 @@ module multicharge_model_eeq
    public :: eeq_model, new_eeq_model
 
    type, extends(mchrg_model_type) :: eeq_model
+      !> Representation of the Coulomb matrix, absent selects the dense matrix
+      type(coulomb_input), allocatable :: coulomb
    contains
       !> Update and allocate cache
       procedure :: update
+      !> Matrix-free Coulomb operator replacing the dense Coulomb matrix
+      procedure :: get_coulomb_operator
       !> Calculate capacitance matrix
       procedure :: get_capacitance_matrix
       !> Calculate Coulomb matrix
@@ -71,7 +76,7 @@ contains
 
 !> Construct an EEQ model from element-wise parameters
 subroutine new_eeq_model(self, mol, error, chi, rad, eta, kcnchi, &
-   & cutoff, cn_exp, rcov, cn_max)
+   & cutoff, cn_exp, rcov, cn_max, coulomb)
    !> Electronegativity equilibration model
    type(eeq_model), intent(out) :: self
    !> Molecular structure data
@@ -94,6 +99,18 @@ subroutine new_eeq_model(self, mol, error, chi, rad, eta, kcnchi, &
    real(wp), intent(in), optional :: rcov(:)
    !> Maximum CN cutoff for CN
    real(wp), intent(in), optional :: cn_max
+   !> Representation of the Coulomb matrix
+   type(coulomb_input), intent(in), optional :: coulomb
+
+   if (present(coulomb)) then
+      if (coulomb%method /= coulomb_method%dense) then
+         if (.not. coulomb%accuracy > 0.0_wp) then
+            call fatal_error(error, "Accuracy of the Coulomb operator must be positive")
+            return
+         end if
+         self%coulomb = coulomb
+      end if
+   end if
 
    self%chi = chi
    self%rad = rad
@@ -126,9 +143,25 @@ subroutine update(self, mol, cache, trans, grad, list)
    !> CSR neighbour list, not supported by the long-range EEQ model
    type(csr_list), intent(in), optional :: list
 
+   type(error_type), allocatable :: error
+
    call ensure_shape(cache%cn, mol%nat)
 
    cache%trans = trans
+
+   ! The matrix-free operator contracts the CN derivatives directly with a
+   ! neighbour list, the dense derivatives and the Wigner-Seitz cell are skipped
+   if (allocated(self%coulomb)) then
+      if (.not. allocated(cache%cnlist)) allocate(cache%cnlist)
+      call new_csr_list(cache%cnlist, mol, error, cutoff=self%ncoord%cutoff)
+      if (.not. allocated(error)) then
+         call self%ncoord%get_coordination_number(mol, trans, cache%cn, &
+            & list=cache%cnlist)
+         if (any(mol%periodic)) call get_alpha(mol%lattice, cache%alpha)
+         return
+      end if
+      deallocate(cache%cnlist)
+   end if
 
    ! Refer CN arrays in cache
    if (grad) then
@@ -147,6 +180,35 @@ subroutine update(self, mol, cache, trans, grad, list)
    end if
 
 end subroutine update
+
+
+!> Matrix-free Coulomb operator replacing the dense Coulomb matrix
+subroutine get_coulomb_operator(self, mol, cache, error)
+   !> EEQ model type
+   class(eeq_model), intent(in) :: self
+   !> Structure type
+   type(structure_type), intent(in) :: mol
+   !> Multicharge cache
+   type(mchrg_cache), intent(inout) :: cache
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   real(wp) :: alpha_ref
+
+   if (allocated(cache%coulomb)) deallocate(cache%coulomb)
+   if (.not. allocated(self%coulomb)) return
+   if (.not. allocated(cache%cnlist)) then
+      call fatal_error(error, "Matrix-free Coulomb operator requires a cache "//&
+         & "updated by the model with the same Coulomb representation")
+      return
+   end if
+
+   alpha_ref = 0.0_wp
+   if (any(mol%periodic)) alpha_ref = cache%alpha
+   call new_coulomb_operator(cache%coulomb, mol, error, self%coulomb, &
+      & self%rad, self%eta, alpha_ref)
+
+end subroutine get_coulomb_operator
 
 
 !> No-op override: the EEQ model does not use a capacitance matrix.
@@ -880,6 +942,12 @@ subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta, error, li
       return
    end if
 
+   if (allocated(cache%coulomb)) then
+      call get_grad_op(self, mol, cache, p, gradient, sigma, error, &
+         & alphain=alpha, betain=beta)
+      return
+   end if
+
    if (any(mol%periodic)) then
       call get_grad_3d(self, mol, cache, p, gradient, sigma, &
          & alphain=alpha, betain=beta)
@@ -889,6 +957,70 @@ subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta, error, li
    end if
 
 end subroutine get_grad
+
+
+!> Accumulate gradient and stress contributions with the matrix-free operator
+subroutine get_grad_op(self, mol, cache, p, gradient, sigma, error, alphain, betain)
+
+   !> EEQ model type
+   class(eeq_model), intent(in) :: self
+
+   !> Structure type
+   type(structure_type), intent(in) :: mol
+
+   !> Multicharge cache
+   type(mchrg_cache), intent(in) :: cache
+
+   !> Charge-like contraction vector
+   real(wp), intent(in) :: p(:)
+
+   !> Cartesian gradient
+   real(wp), intent(inout) :: gradient(:, :)
+
+   !> Strain derivative
+   real(wp), intent(inout) :: sigma(:, :)
+
+   !> Error type
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Scaling factor of the Coulomb matrix derivatives
+   real(wp), intent(in), optional :: alphain
+
+   !> Scaling factor of the electronegativity derivatives
+   real(wp), intent(in), optional :: betain
+
+   integer :: iat, izp
+   real(wp) :: alpha, beta
+   real(wp), allocatable :: cnacc(:), gradient_local(:, :), sigma_local(:, :)
+
+   real(wp), parameter :: reg = 1.0e-14_wp
+
+   alpha = 1.0_wp
+   if (present(alphain)) alpha = alphain
+   beta = 1.0_wp
+   if (present(betain)) beta = betain
+
+   ! Coulomb matrix derivatives contracted with the charges and the vector p
+   call cache%coulomb%add_gradient(p, cache%vrhs(:mol%nat), gradient, sigma, &
+      & alpha, error)
+   if (allocated(error)) return
+
+   ! Electronegativity derivatives via the coordination number
+   allocate(cnacc(mol%nat))
+   do iat = 1, mol%nat
+      izp = mol%id(iat)
+      cnacc(iat) = p(iat) * self%kcnchi(izp) * (0.5_wp * cache%cn(iat) + reg) &
+         & / (cache%cn(iat) + reg)**1.5_wp
+   end do
+   allocate(gradient_local(3, mol%nat), source=0.0_wp)
+   allocate(sigma_local(3, 3), source=0.0_wp)
+   call self%ncoord%add_coordination_number_derivs_list(mol, cache%trans, cnacc, &
+      & gradient_local, sigma_local, cache%cnlist)
+
+   gradient = gradient + beta * gradient_local
+   sigma = sigma + beta * sigma_local
+
+end subroutine get_grad_op
 
 
 !> Accumulate gradient and stress contributions for a non-periodic system

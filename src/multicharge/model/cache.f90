@@ -18,8 +18,10 @@
 
 !> Cache for charge models
 module multicharge_model_cache
+   use mctc_csrlist, only : csr_list
    use mctc_env, only : wp
    use mctc_wignerseitz, only : wignerseitz_cell
+   use multicharge_coulomb_type, only : coulomb_operator
    implicit none
    private
 
@@ -106,6 +108,12 @@ module multicharge_model_cache
 
       !> Charge derivatives w.r.t positions retained for the charge Hessian
       real(wp), allocatable :: dqdr(:, :, :)
+
+      !> Matrix-free Coulomb operator replacing the dense Coulomb matrix
+      class(coulomb_operator), allocatable :: coulomb
+
+      !> Neighbour list of the coordination number for the matrix-free operator
+      type(csr_list), allocatable :: cnlist
 
       !> Logical flag for gradient calculation
       logical :: grad

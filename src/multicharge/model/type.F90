@@ -69,6 +69,8 @@ module multicharge_model_type
       procedure :: local_charge
       !> Whether the model supports the CSR neighbour list representation
       procedure :: supports_list
+      !> Matrix-free Coulomb operator replacing the dense Coulomb matrix
+      procedure :: get_coulomb_operator
       !> Update cache
       procedure(update), deferred :: update
       !> Calculate capacitance matrix
@@ -353,7 +355,7 @@ subroutine solve(self, mol, solver, cache, error, &
    real(wp), allocatable :: daqxdL(:, :, :)
 
    logical :: grad, cpq
-   logical :: add_lagr
+   logical :: add_lagr, use_op
    type(timer_type) :: timer
    integer :: print_unit, verbosity_solve
 
@@ -395,9 +397,26 @@ subroutine solve(self, mol, solver, cache, error, &
    call timer%push("total")
    call timer%push("setup")
 
+   ! A matrix-free Coulomb operator replaces the dense Coulomb matrix
+   call self%get_coulomb_operator(mol, cache, error)
+   if (allocated(error)) return
+   use_op = allocated(cache%coulomb)
+   if (use_op) then
+      if (.not. solver%need_pos_def) then
+         call fatal_error(error, "The matrix-free Coulomb operator requires "//&
+            & "the iterative CG solver")
+         return
+      end if
+      if (present(list)) then
+         call fatal_error(error, "The matrix-free Coulomb operator cannot be "//&
+            & "combined with the neighbour list representation")
+         return
+      end if
+   end if
+
    ! Setup the system matrices and vectors
    call self%get_capacitance_matrix(mol, ndim, cache, list)
-   call self%get_coulomb_matrix(mol, ndim, cache, list)
+   if (.not. use_op) call self%get_coulomb_matrix(mol, ndim, cache, list)
    call self%get_xvec(mol, ndim, cache, list)
    call ensure_shape(cache%vrhs, mol%nat + 1)
 
@@ -421,6 +440,16 @@ subroutine solve(self, mol, solver, cache, error, &
       end if
       if (allocated(error)) return
 
+   else if (solver%projected) then
+      ! Single solve on the constraint plane: A*q + lambda*1 = xvec, sum(q) = Q
+      call get_amat_diagonal(mol, cache, adiag, list)
+      cache%vrhs(:mol%nat) = cache%xvec(:mol%nat) / (adiag + eps)
+      call print_constrained_system_message(print_unit, verbosity_solve, "q")
+      call solve_linear(solver, cache, cache%xvec(:mol%nat), cache%vrhs(:mol%nat), &
+         & print_unit, error, list, qtot=mol%charge, lambda=lambda)
+      if (allocated(error)) return
+      cache%vrhs(mol%nat + 1) = lambda
+
    else
       call ensure_shape(cache%uvec, mol%nat)
       allocate(unitvec(mol%nat))
@@ -436,24 +465,13 @@ subroutine solve(self, mol, solver, cache, error, &
 
       call print_constrained_system_message(print_unit, verbosity_solve, "u")
       ! Constrained response: A*uvec = 1
-      if (present(list)) then
-         call solver%solve(alist=cache%alist, list=list, xvec=unitvec, &
-            & vrhs=cache%uvec, new_unit=print_unit, error=error)
-      else
-         call solver%solve(amat=cache%amat, xvec=unitvec, &
-            & vrhs=cache%uvec, new_unit=print_unit, error=error)
-      end if
+      call solve_linear(solver, cache, unitvec, cache%uvec, print_unit, error, list)
       if (allocated(error)) return
       call print_constrained_system_message(print_unit, verbosity_solve, "v")
 
       ! Unconstrained response: A*vvec = -xvec
-      if (present(list)) then
-         call solver%solve(alist=cache%alist, list=list, xvec=-cache%xvec, &
-            & vrhs=vvec, new_unit=print_unit, error=error)
-      else
-         call solver%solve(amat=cache%amat, xvec=-cache%xvec, &
-            & vrhs=vvec, new_unit=print_unit, error=error)
-      end if
+      call solve_linear(solver, cache, -cache%xvec(:mol%nat), vvec, print_unit, &
+         & error, list)
       if (allocated(error)) return
       uvecsum = sum(cache%uvec)
       vvecsum = sum(vvec)
@@ -474,7 +492,11 @@ subroutine solve(self, mol, solver, cache, error, &
    ! Electrostatic energy if present
    if (present(energy)) then
       call timer%push("energy")
-      if (present(list)) then
+      if (use_op) then
+         allocate(avec(mol%nat))
+         call cache%coulomb%apply(cache%vrhs(:mol%nat), avec)
+         cache%xvec(:mol%nat) = 0.5_wp * avec - cache%xvec(:mol%nat)
+      else if (present(list)) then
          allocate(avec(mol%nat))
          call csr_matvec(mol%nat, cache%alist, list, cache%vrhs, avec)
          cache%xvec(:mol%nat) = 0.5_wp * avec - cache%xvec(:mol%nat)
@@ -492,9 +514,9 @@ subroutine solve(self, mol, solver, cache, error, &
       call print_energy_time(print_unit, verbosity_solve, timer%get("energy"))
    end if
 
-   ! Allocate and get amat and xvec derivatives, the neighbour list gradient
-   ! is contracted directly and does not require the dense derivatives
-   if (cpq .or. (grad .and. .not. present(list))) then
+   ! Allocate and get amat and xvec derivatives, the neighbour list and the
+   ! matrix-free gradients are contracted directly without dense derivatives
+   if (cpq .or. (grad .and. .not. (present(list) .or. use_op))) then
       call timer%push("setup_gradient")
       call timer%push("dxdr_setup")
       call self%get_xvec_derivs(mol, ndim, cache)
@@ -686,7 +708,18 @@ subroutine get_adjoint(self, mol, solver, cache, error, &
       ndim = mol%nat + 1
    end if
 
-   if (present(list)) then
+   if (allocated(cache%coulomb)) then
+      if (.not. allocated(cache%vrhs)) then
+         call fatal_error(error, "External gradient requires a response cache "//&
+            & "from a previous solve")
+         return
+      end if
+      if (.not. solver%need_pos_def) then
+         call fatal_error(error, "The matrix-free Coulomb operator requires "//&
+            & "the iterative CG solver")
+         return
+      end if
+   else if (present(list)) then
       if (.not. allocated(cache%alist) .or. .not. allocated(cache%vrhs)) then
          call fatal_error(error, "External gradient requires a response cache "//&
             & "from a previous solve with the neighbour list")
@@ -709,7 +742,7 @@ subroutine get_adjoint(self, mol, solver, cache, error, &
          return
       end if
    end if
-   if (solver%need_pos_def) then
+   if (solver%need_pos_def .and. .not. solver%projected) then
       if (.not. allocated(cache%uvec)) then
          call fatal_error(error, &
             & "Constrained response J*uvec = 1 is not allocated")
@@ -725,21 +758,23 @@ subroutine get_adjoint(self, mol, solver, cache, error, &
          yvec(iat) = dfdq(iat) / (adiag(iat) + eps)
       end do
 
-      ! Unconstrained response: A*yvec = dfdq
       call print_adjoint_message(unit, verbosity)
-      if (present(list)) then
-         call solver%solve(alist=cache%alist, list=list, xvec=dfdq, vrhs=yvec, &
-            & new_unit=unit, error=error)
+      if (solver%projected) then
+         ! Projected response: A*padj + mu*1 = dfdq with sum(padj) = 0
+         call solve_linear(solver, cache, dfdq, yvec, unit, error, list, &
+            & qtot=0.0_wp)
+         if (allocated(error)) return
+         padj(:) = yvec
       else
-         call solver%solve(amat=cache%amat, xvec=dfdq, vrhs=yvec, &
-            & new_unit=unit, error=error)
-      end if
-      if (allocated(error)) return
+         ! Unconstrained response: A*yvec = dfdq
+         call solve_linear(solver, cache, dfdq, yvec, unit, error, list)
+         if (allocated(error)) return
 
-      ! Project out the total charge constraint
-      yvecsum = sum(yvec)
-      uvecsum = sum(cache%uvec)
-      padj(:) = yvec - yvecsum / (uvecsum + eps) * cache%uvec
+         ! Project out the total charge constraint
+         yvecsum = sum(yvec)
+         uvecsum = sum(cache%uvec)
+         padj(:) = yvec - yvecsum / (uvecsum + eps) * cache%uvec
+      end if
    else
       allocate(rhs(ndim), yvec(ndim))
       rhs(:mol%nat) = dfdq
@@ -945,7 +980,9 @@ subroutine get_amat_diagonal(mol, cache, adiag, list)
    integer :: iat
 
    allocate(adiag(mol%nat))
-   if (present(list)) then
+   if (allocated(cache%coulomb)) then
+      call cache%coulomb%get_diagonal(adiag)
+   else if (present(list)) then
       do iat = 1, mol%nat
          adiag(iat) = cache%alist(list%inl(iat))
       end do
@@ -956,6 +993,59 @@ subroutine get_amat_diagonal(mol, cache, adiag, list)
    end if
 
 end subroutine get_amat_diagonal
+
+
+!> Matrix-free Coulomb operator replacing the dense Coulomb matrix, models
+!> without such an operator release any operator left in the cache
+subroutine get_coulomb_operator(self, mol, cache, error)
+   !> Electronegativity equilibration model
+   class(mchrg_model_type), intent(in) :: self
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+   !> Multicharge cache
+   type(mchrg_cache), intent(inout) :: cache
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   if (allocated(cache%coulomb)) deallocate(cache%coulomb)
+
+end subroutine get_coulomb_operator
+
+
+!> Solve a linear system with the Coulomb matrix in the representation
+!> held by the cache
+subroutine solve_linear(solver, cache, rhs, sol, unit, error, list, qtot, lambda)
+   !> Solver instance
+   class(mchrg_solver_type), intent(in) :: solver
+   !> Multicharge cache holding the Coulomb matrix
+   type(mchrg_cache), intent(in) :: cache
+   !> Right-hand side vector
+   real(wp), intent(in) :: rhs(:)
+   !> On input: initial guess; on output: solution
+   real(wp), intent(inout), contiguous :: sol(:)
+   !> Output unit
+   integer, intent(in), optional :: unit
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+   !> Optional CSR neighbour list, selects the sparse matrix representation
+   type(csr_list), intent(in), optional :: list
+   !> Total sum of the solution, enforced by projection
+   real(wp), intent(in), optional :: qtot
+   !> Lagrange multiplier of the projected system
+   real(wp), intent(out), optional :: lambda
+
+   if (allocated(cache%coulomb)) then
+      call solver%solve(op=cache%coulomb, xvec=rhs, vrhs=sol, qtot=qtot, &
+         & lambda=lambda, new_unit=unit, error=error)
+   else if (present(list)) then
+      call solver%solve(alist=cache%alist, list=list, xvec=rhs, vrhs=sol, &
+         & qtot=qtot, lambda=lambda, new_unit=unit, error=error)
+   else
+      call solver%solve(amat=cache%amat, xvec=rhs, vrhs=sol, qtot=qtot, &
+         & lambda=lambda, new_unit=unit, error=error)
+   end if
+
+end subroutine solve_linear
 
 
 !> Product of a symmetric matrix in the CSR list layout with a vector
@@ -1047,6 +1137,8 @@ subroutine print_constrained_system_message(unit, verbosity, vector)
          write(unit, "(a)") "Solving constrained system: J*u = 1"
       else if (vector == "v") then
          write(unit, "(a)") "Solving unconstrained system: J*v = chi"
+      else if (vector == "q") then
+         write(unit, "(a)") "Solving projected system: J*q + lambda = chi"
       end if
       write(unit, "(a)") ""
    end if

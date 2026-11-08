@@ -20,6 +20,7 @@ program tester
    use mctc_env_testing, only : run_testsuite, new_testsuite, testsuite_type, &
       & select_suite, run_selected
    use test_charge_gradient, only : collect_charge_gradient
+   use test_coulomb, only : collect_coulomb
    use test_csrlist, only : collect_csrlist
    use test_hessian, only : collect_hessian
    use test_model, only : collect_model
@@ -36,6 +37,7 @@ program tester
 
    testsuites = [ &
       & new_testsuite("charge-gradient", collect_charge_gradient), &
+      & new_testsuite("coulomb", collect_coulomb), &
       & new_testsuite("csrlist", collect_csrlist), &
       & new_testsuite("hessian", collect_hessian), &
       & new_testsuite("model", collect_model), &

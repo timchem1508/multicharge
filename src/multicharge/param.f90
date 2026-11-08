@@ -18,6 +18,7 @@ module multicharge_param
    use mctc_env, only: error_type, wp
    use mctc_io, only: structure_type
    use mctc_io_convert, only: autoaa
+   use multicharge_coulomb, only: coulomb_input
    use multicharge_model, only: mchrg_model_type, &
       & new_eeq_model, eeq_model, new_eeqbc_model, eeqbc_model
    use multicharge_param_eeq2019, only: get_eeq_chi, get_eeq_eta, &
@@ -43,13 +44,15 @@ module multicharge_param
 
 contains
 
-subroutine new_eeq2019_model(mol, model, error)
+subroutine new_eeq2019_model(mol, model, error, coulomb)
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
    !> Electronegativity equilibration model
    class(mchrg_model_type), allocatable, intent(out) :: model
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
+   !> Representation of the Coulomb matrix, absent selects the dense matrix
+   type(coulomb_input), intent(in), optional :: coulomb
 
    real(wp), parameter :: cutoff = 25.0_wp
    real(wp), parameter :: cn_exp = 7.5_wp
@@ -67,7 +70,8 @@ subroutine new_eeq2019_model(mol, model, error)
    allocate(eeq)
    call new_eeq_model(eeq, mol=mol, error=error, chi=chi, &
       & rad=rad, eta=eta, kcnchi=kcnchi, cutoff=cutoff, &
-      & cn_exp=cn_exp, rcov=rcov, cn_max=cn_max)
+      & cn_exp=cn_exp, rcov=rcov, cn_max=cn_max, coulomb=coulomb)
+   if (allocated(error)) return
    call move_alloc(eeq, model)
 
 end subroutine new_eeq2019_model

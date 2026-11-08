@@ -25,7 +25,8 @@ module multicharge_solver_cg
    use multicharge_blas, only : axpy, dot, scal, symv
    use multicharge_output, only : print_cg_convergence, print_cg_final, &
       & print_cg_header, print_cg_iteration
-   use multicharge_solver_type, only : mchrg_solver_input, mchrg_solver_type
+   use multicharge_solver_type, only : mchrg_operator_type, mchrg_solver_input, &
+      & mchrg_solver_type
    implicit none
    private
 
@@ -43,6 +44,9 @@ module multicharge_solver_cg
 
       !> Output verbosity
       integer, allocatable :: verbosity
+
+      !> Enforce the total charge by projection in a single CG solve
+      logical, allocatable :: projected
 
    end type cg_input
 
@@ -106,12 +110,20 @@ subroutine new_cg_solver(self, input)
    else
       self%verbosity = verbosity_def
    end if
+   if (allocated(input%projected)) self%projected = input%projected
 
 end subroutine new_cg_solver
 
 
-!> Solve a linear system with a diagonally preconditioned CG method
-subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, new_unit, error)
+!> Solve a linear system with a diagonally preconditioned CG method.
+!>
+!> With the total sum of the solution given, the system A v + lambda 1 = b with
+!> sum(v) = qtot is solved instead. The iterates are kept on the constraint
+!> plane and the preconditioner is projected onto it. The constant part of the
+!> residual is irrelevant for the projected iteration, it is removed after each
+!> update to avoid cancellation and accumulated into the Lagrange multiplier.
+subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, op, qtot, lambda, &
+   & new_unit, error)
 
    !> Conjugate-gradient solver instance
    class(cg_solver), intent(in) :: self
@@ -134,6 +146,15 @@ subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, new_unit, error)
    !> CSR neighbour list, selects the sparse representation of the matrix
    type(csr_list), intent(in), optional :: list
 
+   !> Matrix-free linear operator, selects the operator representation
+   class(mchrg_operator_type), intent(in), optional :: op
+
+   !> Total sum of the solution, enforced by projection
+   real(wp), intent(in), optional :: qtot
+
+   !> Lagrange multiplier of the projected system
+   real(wp), intent(out), optional :: lambda
+
    !> Output unit
    integer, intent(in), optional :: new_unit
 
@@ -141,9 +162,9 @@ subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, new_unit, error)
    type(error_type), allocatable, intent(out) :: error
 
    integer :: maxit, it, iat, ndim, unit
-   logical :: converged, sparse
+   logical :: converged, sparse, matfree, projected
    real(wp) :: tol, tol_square, xvecnorm, resnorm, rel_resnorm
-   real(wp) :: denom, step, updfact, resdot_old, resdot_new
+   real(wp) :: denom, step, updfact, resdot_old, resdot_new, precsum, lamacc
    real(wp), allocatable :: dir(:), res(:), prec(:), precres(:), adir(:)
    type(timer_type) :: timer
 
@@ -178,6 +199,13 @@ subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, new_unit, error)
    end if
 
    sparse = present(list)
+   matfree = present(op)
+   projected = present(qtot)
+   if (sparse .and. matfree) then
+      call fatal_error(error, "Either the CSR list or the matrix-free operator "//&
+         & "can represent the coefficient matrix, not both.")
+      return
+   end if
    if (sparse) then
       if (.not. present(alist)) then
          call fatal_error(error, "Coefficient matrix values of the CSR list are missing.")
@@ -187,7 +215,7 @@ subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, new_unit, error)
          call fatal_error(error, "Dimension mismatch of the CSR coefficient matrix.")
          return
       end if
-   else
+   else if (.not. matfree) then
       if (.not. present(amat)) then
          call fatal_error(error, "Coefficient matrix is missing.")
          return
@@ -212,18 +240,29 @@ subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, new_unit, error)
       do iat = 1, ndim
          prec(iat) = 1.0_wp / (alist(list%inl(iat)) + eps)
       end do
+   else if (matfree) then
+      call op%get_diagonal(prec)
+      prec(:) = 1.0_wp / (prec + eps)
    else
       do iat = 1, ndim
          prec(iat) = 1.0_wp / (amat(iat, iat) + eps)
       end do
    end if
+   precsum = sum(prec)
+
+   ! Move the initial guess onto the constraint plane along the preconditioner
+   if (projected) then
+      vrhs(:) = vrhs + (qtot - sum(vrhs)) / precsum * prec
+   end if
 
    ! Initial residual
    call matvec(vrhs, adir)
    res(:) = xvec(:) - adir(:)
+   lamacc = 0.0_wp
+   call remove_constant(res)
 
    ! Initial preconditioned residual precres = M^-1 * res
-   precres(:) = res(:) * prec(:)
+   call precondition(res, precres)
    dir(:) = precres(:)
 
    ! Initial norm
@@ -231,7 +270,7 @@ subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, new_unit, error)
    if (xvecnorm < tol_square) xvecnorm = 1.0_wp
 
    ! Initial resnorm and res^T * precres
-   resnorm = dot(res, res)
+   resnorm = residual_norm(res)
    resdot_old = dot(res, precres)
    converged = resnorm / xvecnorm <= tol_square
 
@@ -241,60 +280,64 @@ subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, new_unit, error)
    call print_cg_header(unit, self%verbosity, maxit, tol, timer)
 
    ! Main CG iteration loop
-   do it = 1, maxit
+   it = 0
+   if (.not. converged) then
+      do it = 1, maxit
 
-      if (self%verbosity > 1) call timer%push("iteration")
+         if (self%verbosity > 1) call timer%push("iteration")
 
-      ! Matrix-vector product
-      call matvec(dir, adir)
+         ! Matrix-vector product
+         call matvec(dir, adir)
 
-      ! Non-positive curvature breaks down the iteration, unless the
-      ! search direction vanished for an already converged residual
-      denom = dot(dir, adir)
-      if (.not. denom > 0.0_wp) then
+         ! Non-positive curvature breaks down the iteration, unless the
+         ! search direction vanished for an already converged residual
+         denom = dot(dir, adir)
+         if (.not. denom > 0.0_wp) then
+            if (self%verbosity > 1) call timer%pop
+            exit
+         end if
+
+         ! Step length step = (res^T * precres) / (dir^T * amat * dir)
+         step = resdot_old / (denom + eps)
+
+         ! Update solution vrhs = vrhs + step * dir
+         call axpy(xvec=dir, yvec=vrhs, alpha=step)
+         ! Update residual res = res - step * amat * dir
+         call axpy(xvec=adir, yvec=res, alpha=-step)
+         call remove_constant(res)
+
+         ! Compute the new residual norm
+         resnorm = residual_norm(res)
+
+         ! Relative residual norm to check convergence
+         rel_resnorm = resnorm / xvecnorm
+
+         converged = rel_resnorm <= tol_square
+         if (converged) then
+            if (self%verbosity > 1) call timer%pop
+            call print_cg_convergence(unit, it, sqrt(resnorm), self%verbosity)
+            exit
+         end if
+
+         ! Updated preconditioned residual
+         call precondition(res, precres)
+
+         ! Update search direction
+         resdot_new = dot(res, precres)
+         updfact = resdot_new / (resdot_old + eps)
+         resdot_old = resdot_new
+         call scal(alpha=updfact, xvec=dir)
+         call axpy(xvec=precres, yvec=dir, alpha=1.0_wp)
+
+         ! Stop the iteration timer
          if (self%verbosity > 1) call timer%pop
-         exit
-      end if
 
-      ! Step length step = (res^T * precres) / (dir^T * amat * dir)
-      step = resdot_old / (denom + eps)
+         ! Print iteration progress
+         call print_cg_iteration(unit, it, sqrt(resnorm), step, sqrt(rel_resnorm), &
+            & self%verbosity, timer)
 
-      ! Update solution vrhs = vrhs + step * dir
-      call axpy(xvec=dir, yvec=vrhs, alpha=step)
-      ! Update residual res = res - step * amat * dir
-      call axpy(xvec=adir, yvec=res, alpha=-step)
-
-      ! Compute the new residual norm
-      resnorm = dot(res, res)
-
-      ! Relative residual norm to check convergence
-      rel_resnorm = resnorm / xvecnorm
-
-      converged = rel_resnorm <= tol_square
-      if (converged) then
-         if (self%verbosity > 1) call timer%pop
-         call print_cg_convergence(unit, it, sqrt(resnorm), self%verbosity)
-         exit
-      end if
-
-      ! Updated preconditioned residual
-      precres(:) = prec(:) * res(:)
-
-      ! Update search direction
-      resdot_new = dot(res, precres)
-      updfact = resdot_new / (resdot_old + eps)
-      resdot_old = resdot_new
-      call scal(alpha=updfact, xvec=dir)
-      call axpy(xvec=precres, yvec=dir, alpha=1.0_wp)
-
-      ! Stop the iteration timer
-      if (self%verbosity > 1) call timer%pop
-
-      ! Print iteration progress
-      call print_cg_iteration(unit, it, sqrt(resnorm), step, sqrt(rel_resnorm), &
-         & self%verbosity, timer)
-
-   end do
+      end do
+   end if
 
    ! Stop the total timer
    if (self%verbosity > 1) call timer%pop
@@ -308,6 +351,9 @@ subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, new_unit, error)
       end if
       return
    end if
+
+   ! The converged residual is the Lagrange multiplier times the unit vector
+   if (present(lambda)) lambda = lamacc
 
    ! Print final summary
    call print_cg_final(unit, timer, self%verbosity)
@@ -327,10 +373,46 @@ contains
          else
             call spsymv_csr(ndim, alist, list%inl, list%nlat, xv, yv)
          end if
+      else if (matfree) then
+         call op%apply(xv, yv)
       else
          call symv(amat, xv, yv, alpha=1.0_wp, beta=0.0_wp)
       end if
    end subroutine matvec
+
+   !> Diagonal preconditioner, projected onto the constraint plane if requested
+   subroutine precondition(rv, zv)
+      !> Residual vector
+      real(wp), intent(in) :: rv(:)
+      !> Preconditioned residual
+      real(wp), intent(out) :: zv(:)
+
+      zv(:) = prec * rv
+      if (projected) zv(:) = zv - sum(zv) / precsum * prec
+   end subroutine precondition
+
+   !> Squared norm of the residual
+   function residual_norm(rv) result(rnorm)
+      !> Residual vector
+      real(wp), intent(in) :: rv(:)
+      !> Squared residual norm
+      real(wp) :: rnorm
+
+      rnorm = dot(rv, rv)
+   end function residual_norm
+
+   !> Move the constant part of the residual into the Lagrange multiplier
+   subroutine remove_constant(rv)
+      !> Residual vector
+      real(wp), intent(inout) :: rv(:)
+
+      real(wp) :: shift
+
+      if (.not. projected) return
+      shift = sum(rv) / real(ndim, wp)
+      rv(:) = rv - shift
+      lamacc = lamacc + shift
+   end subroutine remove_constant
 
 end subroutine solve
 

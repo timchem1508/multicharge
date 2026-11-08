@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+subdir('coulomb')
 subdir('model')
 subdir('param')
 subdir('solver')
@@ -20,7 +21,9 @@ subdir('solver')
 srcs += files(
   'blas.F90',
   'charge.f90',
+  'coulomb.f90',
   'ewald.f90',
+  'fft.f90',
   'lapack.F90',
   'model.f90',
   'output.f90',

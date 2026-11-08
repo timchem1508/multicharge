@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+add_subdirectory("coulomb")
 add_subdirectory("model")
 add_subdirectory("param")
 add_subdirectory("solver")
@@ -23,7 +24,9 @@ list(
   APPEND srcs
   "${dir}/blas.F90"
   "${dir}/charge.f90"
+  "${dir}/coulomb.f90"
   "${dir}/ewald.f90"
+  "${dir}/fft.f90"
   "${dir}/lapack.F90"
   "${dir}/model.f90"
   "${dir}/output.f90"

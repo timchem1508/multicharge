@@ -17,6 +17,7 @@
 set(
   tests
   "charge-gradient"
+  "coulomb"
   "csrlist"
   "hessian"
   "model"
