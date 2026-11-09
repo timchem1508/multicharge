@@ -24,7 +24,7 @@ module multicharge_charge
    use mctc_io, only : structure_type
    use mctc_cutoff, only : get_lattice_points
    use mctc_csrlist, only : csr_list
-   use multicharge_model_type, only : mchrg_model_type
+   use multicharge_model_type, only : mchrg_model_type, mchrg_hessian
    use multicharge_model_cache, only : mchrg_cache
    use multicharge_solver_type, only : mchrg_solver_type, mchrg_solver_input
    use multicharge_solver_cg, only : cg_solver, new_cg_solver, cg_input
@@ -117,8 +117,11 @@ end subroutine get_charges
 
 !> Add the Hessian of the charges contracted with fixed atomic weights,
 !> sum_i weights(i) d2q_i/dR2, at a fixed lattice. The cache has to come from
-!> get_charges with the same structure and model and without a neighborlist.
-subroutine add_charge_hessian(mchrg_model, mol, error, weights, hessian, cache)
+!> get_charges with the same structure, model and neighborlist. With a
+!> neighborlist the contraction replaces the compressed Hessian on the list
+!> and the dense Hessian is left unchanged.
+subroutine add_charge_hessian(mchrg_model, mol, error, weights, hessian, cache, &
+   & list, hesslist)
 
    !> Multicharge model
    class(mchrg_model_type), intent(in) :: mchrg_model
@@ -132,32 +135,61 @@ subroutine add_charge_hessian(mchrg_model, mol, error, weights, hessian, cache)
    !> Weights of the atomic partial charges
    real(wp), intent(in) :: weights(:)
 
-   !> Nuclear Hessian of shape (3*nat, 3*nat), the contraction is added
+   !> Nuclear Hessian of shape (3*nat, 3*nat), the contraction is added,
+   !> unchanged with a neighborlist
    real(wp), intent(inout) :: hessian(:, :)
 
    !> Cache retained by get_charges, holds partial derivatives afterwards
    type(mchrg_cache), intent(inout) :: cache
 
-   real(wp), allocatable :: whess(:, :)
+   !> Sorted complete neighborlist of get_charges, see sort_neighborlist
+   type(csr_list), intent(in), optional :: list
+
+   !> Nuclear Hessian in compressed storage on the neighborlist, required and
+   !> replaced with a neighborlist
+   type(mchrg_hessian), intent(inout), optional :: hesslist
+
+   real(wp), allocatable :: whess(:, :), d2fdq2(:, :), dfdrdq(:, :, :)
+   real(wp), allocatable :: qval(:), rval(:, :)
    class(cg_solver), allocatable :: solver
    class(cg_input), allocatable :: solver_input
+
+   ! Same solver as in get_charges, the constraint response of its solve is
+   ! kept in the cache
+   allocate(solver_input)
+   solver_input%use_nlist = present(list)
+   allocate(solver)
+   call new_cg_solver(solver, solver_input)
+
+   ! The weighted sum of the charges is linear in the charges, its Hessian is
+   ! the external Hessian with df/dq = weights and vanishing second and mixed
+   ! derivatives, on the neighborlist itself if present
+   if (present(list)) then
+      if (.not. present(hesslist)) then
+         call fatal_error(error, "Charge Hessian on a neighborlist requires "// &
+            & "the compressed Hessian")
+         return
+      end if
+      if (list%complete = .false.) then
+         call fatal_error(error, "Hessian calculation requires a complete neighborlist")
+         return
+      end if
+      allocate(qval(size(list%nlat)), source=0.0_wp)
+      allocate(rval(3, size(list%nlat)), source=0.0_wp)
+      call mchrg_model%get_external_hessian(mol, solver, cache, error, weights, &
+         & qval, list, rval, list, hesslist, list)
+      return
+   end if
 
    if (any(shape(hessian) /= 3 * mol%nat)) then
       call fatal_error(error, "Invalid dimensions for charge Hessian contraction")
       return
    end if
-
-   ! Same solver as in get_charges, the constraint response of its solve is
-   ! kept in the cache
-   allocate(solver_input)
-   allocate(solver)
-   call new_cg_solver(solver, solver_input)
-
-   ! The weighted sum of the charges is linear in the charges, its Hessian is
-   ! the external Hessian with df/dq = weights and no further derivatives
    allocate(whess(3 * mol%nat, 3 * mol%nat))
+   allocate(d2fdq2(mol%nat, mol%nat), source=0.0_wp)
+   allocate(dfdrdq(3, mol%nat, mol%nat), source=0.0_wp)
    call mchrg_model%get_external_hessian(mol, solver, cache, error, weights, &
-      & hessian=whess)
+      & d2fdq2, dfdrdq, whess)
    if (allocated(error)) return
    hessian(:, :) = hessian + whess
 

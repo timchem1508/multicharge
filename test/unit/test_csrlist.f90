@@ -31,7 +31,8 @@ module test_csrlist
    use multicharge_param, only : new_eeq2019_model, new_eeqbc2025_model
    use multicharge_model_cache, only : mchrg_cache
    use mctc_ncoord, only : ncoord_type
-   use multicharge_charge, only : get_charges, get_eeq_charges, get_eeqbc_charges
+   use multicharge_charge, only : get_charges, get_eeq_charges, get_eeqbc_charges, &
+      & add_charge_hessian
    use multicharge_solver_type, only : mchrg_solver_type, mchrg_solver_input
    use multicharge_solver_direct, only : direct_solver, new_direct_solver, direct_input
    use multicharge_solver_cg, only : cg_solver, new_cg_solver, cg_input
@@ -101,7 +102,8 @@ subroutine collect_csrlist(testsuite)
    & new_unittest("hessian-list-znooh", test_hess_list_znooh), &
    & new_unittest("external-hessian-list-mb05", test_hext_list_mb05), &
    & new_unittest("external-hessian-list-znooh", test_hext_list_znooh), &
-   & new_unittest("external-hessian-sparse-list-upu23", test_hext_sparse_list_upu23) &
+   & new_unittest("external-hessian-sparse-list-upu23", test_hext_sparse_list_upu23), &
+   & new_unittest("charge-hessian-list-mb05", test_qhess_list_mb05) &
    & ]
 
 end subroutine collect_csrlist
@@ -2120,6 +2122,73 @@ subroutine test_external_hessian(error, mol, model)
 end subroutine test_external_hessian
 
 
+!> Check the weighted charge Hessian of add_charge_hessian on a sorted complete
+!> neighbour list holding all pairs against the dense contraction, and that the
+!> dense Hessian is left unchanged with a list
+subroutine test_charge_hessian(error, mol, model)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular structure data
+   type(structure_type), intent(inout) :: mol
+
+   !> Electronegativity equilibration model
+   class(mchrg_model_type), intent(in) :: model
+
+   type(mchrg_cache), allocatable :: cache
+   type(csr_list), allocatable :: list
+   type(mchrg_hessian), allocatable :: sphess
+   integer :: iat, ndim
+   real(wp), allocatable :: qvec(:), weights(:), hessian(:, :), refhess(:, :)
+
+   allocate(list)
+   call get_sorted_list(list, mol, error, cutoff)
+   if (allocated(error)) return
+   if (size(list%nlat) /= mol%nat**2) then
+      call test_failed(error, "Neighbour list does not hold all pairs")
+      return
+   end if
+
+   ndim = 3*mol%nat
+   allocate(qvec(mol%nat), weights(mol%nat), hessian(ndim, ndim), &
+      & refhess(ndim, ndim))
+   do iat = 1, mol%nat
+      weights(iat) = 0.7_wp - 0.3_wp * real(mod(3*iat, 5), wp) / 4.0_wp
+   end do
+
+   refhess(:, :) = 0.0_wp
+   allocate(cache)
+   call get_charges(model, mol, error, qvec, cache=cache)
+   if (allocated(error)) return
+   call add_charge_hessian(model, mol, error, weights, refhess, cache)
+   if (allocated(error)) return
+
+   ! Compressed Hessian on the neighbour list
+   hessian(:, :) = 1.0_wp
+   deallocate(cache)
+   allocate(cache, sphess)
+   call get_charges(model, mol, error, qvec, list=list, cache=cache)
+   if (allocated(error)) return
+   call add_charge_hessian(model, mol, error, weights, hessian, cache, list, &
+      & sphess)
+   if (allocated(error)) return
+
+   if (any(hessian /= 1.0_wp)) then
+      call test_failed(error, "Dense Hessian changed on the neighbour list")
+      return
+   end if
+
+   call expand_hessian(mol, list, sphess, hessian)
+   if (.not. all(abs(hessian - refhess) <= thr2)) then
+      call test_failed(error, "Charge Hessian does not match the dense one")
+      print'(a)', "diff:"
+      print'(3es21.12)', hessian - refhess
+   end if
+
+end subroutine test_charge_hessian
+
+
 !> Check the Hessian of an external function with a sorted complete neighbour
 !> list holding part of the pairs against its evaluation from the inverse, the
 !> partial
@@ -2712,6 +2781,22 @@ subroutine test_hext_list_mb05(error)
    call test_external_hessian(error, mol, model)
 
 end subroutine test_hext_list_mb05
+
+
+subroutine test_qhess_list_mb05(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "MB16-43", "05")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_charge_hessian(error, mol, model)
+
+end subroutine test_qhess_list_mb05
 
 
 subroutine test_hext_list_znooh(error)

@@ -2152,9 +2152,8 @@ end subroutine add_column_products
 !> p^T (d2X/dR2 - d2A/dR2*q) at fixed charges and the implicit part
 !> G^T dq/dR + (dq/dR)^T G + (dq/dR)^T d2f/dq2 dq/dR from the response of the
 !> charges with G = d2f/dRdq - dA/dR*p. The derivatives of f are taken at the
-!> charges of the structure, absent second derivatives of f w.r.t. the charges
-!> vanish, and the second derivative d2f/dR2 at fixed charges is added by the
-!> caller. Periodic systems are supported if the explicit Hessian of the
+!> charges of the structure, the second derivative d2f/dR2 at fixed charges is
+!> added by the caller. Periodic systems are supported if the explicit Hessian of the
 !> model is. The cache has to hold the solve and the CN derivatives,
 !> update it with hess and solve first. The direct solver keeps the inverse of
 !> the augmented matrix only if the solve requested the charge derivatives.
@@ -2180,11 +2179,11 @@ subroutine get_external_hessian_dense(self, mol, solver, cache, error, dfdq, &
    real(wp), intent(in) :: dfdq(:)
 
    !> Second derivative of the external function w.r.t. atomic charges
-   real(wp), intent(in), optional :: d2fdq2(:, :)
+   real(wp), intent(in) :: d2fdq2(:, :)
 
    !> Mixed derivative of the external function w.r.t. positions and charges,
    !> dfdrdq(:, x, b) = d2f/dR_x dq_b
-   real(wp), intent(in), optional :: dfdrdq(:, :, :)
+   real(wp), intent(in) :: dfdrdq(:, :, :)
 
    !> Nuclear Hessian of the external function without d2f/dR2
    real(wp), intent(out) :: hessian(:, :)
@@ -2199,21 +2198,11 @@ subroutine get_external_hessian_dense(self, mol, solver, cache, error, dfdq, &
    integer :: ndim
 
    ndim = 3 * mol%nat
-   if (size(dfdq) /= mol%nat .or. any(shape(hessian) /= [ndim, ndim])) then
+   if (size(dfdq) /= mol%nat .or. any(shape(d2fdq2) /= [mol%nat, mol%nat]) &
+      & .or. any(shape(dfdrdq) /= [3, mol%nat, mol%nat]) &
+      & .or. any(shape(hessian) /= [ndim, ndim])) then
       call fatal_error(error, "External partial derivatives are wrong size")
       return
-   end if
-   if (present(d2fdq2)) then
-      if (any(shape(d2fdq2) /= [mol%nat, mol%nat])) then
-         call fatal_error(error, "External partial derivatives are wrong size")
-         return
-      end if
-   end if
-   if (present(dfdrdq)) then
-      if (any(shape(dfdrdq) /= [3, mol%nat, mol%nat])) then
-         call fatal_error(error, "External partial derivatives are wrong size")
-         return
-      end if
    end if
 
    ! Get variables from the model cache
@@ -2241,21 +2230,16 @@ subroutine get_external_hessian_dense(self, mol, solver, cache, error, dfdq, &
    call new_partial_derivs(mol, size(padj), cache, dafdr=.true.)
    call self%get_coulomb_derivs(mol, size(padj), cache, alpha=-1.0_wp, &
       & p=padj(:mol%nat), dafdr=.true.)
-   if (present(dfdrdq)) cache%dafdr = cache%dafdr + dfdrdq
+   cache%dafdr = cache%dafdr + dfdrdq
 
    ! Implicit part G^T dq/dR + (dq/dR)^T (G + d2f/dq2 dq/dR), the second
    ! factor replaces G in place
    call gemm(reshape(cache%dafdr, [ndim, mol%nat]), &
       & reshape(dqdr, [ndim, mol%nat]), hessian, transb='t')
-   if (present(d2fdq2)) then
-      call gemm(dqdr, d2fdq2, cache%dafdr, beta=1.0_wp)
-      call gemm(reshape(dqdr, [ndim, mol%nat]), &
-         & reshape(cache%dafdr, [ndim, mol%nat]), hessian, transb='t', &
-         & beta=1.0_wp)
-   else
-      ! Without d2f/dq2 the second product is the transpose of the first
-      hessian(:, :) = hessian + transpose(hessian)
-   end if
+   call gemm(dqdr, d2fdq2, cache%dafdr, beta=1.0_wp)
+   call gemm(reshape(dqdr, [ndim, mol%nat]), &
+      & reshape(cache%dafdr, [ndim, mol%nat]), hessian, transb='t', &
+      & beta=1.0_wp)
    deallocate(cache%dafdr)
 
    ! Second derivatives of p^T (X - A*q) at fixed charges and adjoint vector

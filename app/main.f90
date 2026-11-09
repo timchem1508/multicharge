@@ -86,12 +86,13 @@ program main
 
    if (qgrad) full_list = .true.
 
-   ! The analytical Hessian is only implemented for the EEQBC model of molecules
+   ! The analytical Hessian is only implemented for molecules, for the EEQ
+   ! model only in dense storage
    if (analytic_hessian) then
       full_list = .true.
-      if (model_id /= mchrg_model%eeqbc2025) then
+      if (model_id == mchrg_model%eeq2019 .and. use_nlist) then
          call fatal_error(error, &
-         & "Analytical Hessian is only available for the EEQBC model")
+         & "Analytical Hessian of the EEQ model is not available on a neighborlist")
       else if (any(mol%periodic)) then
          call fatal_error(error, &
          & "Analytical Hessian is not available for periodic systems")
