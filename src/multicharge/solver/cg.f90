@@ -14,9 +14,7 @@
 ! limitations under the License.
 
 !> @file multicharge/solver/cg.f90
-!> Provides implementation of the conjugate gradient solver for linear systems
-!> of equations, including a block variant for multiple right-hand sides and
-!> the block-wise inversion of the coefficient matrix.
+!> Provides implementation of the (block) conjugate gradient solver
 
 module multicharge_solver_cg
    use iso_fortran_env, only : output_unit
@@ -39,9 +37,7 @@ module multicharge_solver_cg
       !> Convergence tolerance
       real(wp), allocatable :: cgtol
 
-      !> Convergence tolerance of the block CG for the inverse on a
-      !> neighborlist, whose truncation to the pattern of the list is a much
-      !> larger error than the default tolerance of the CG solver
+      !> Convergence tolerance of the block CG for the inverse on a neighborlist
       real(wp), allocatable :: invtol
 
       !> Output verbosity
@@ -59,9 +55,7 @@ module multicharge_solver_cg
       !> Convergence tolerance
       real(wp), allocatable :: cgtol
 
-      !> Convergence tolerance of the block CG for the inverse on a
-      !> neighborlist, whose truncation to the pattern of the list is a much
-      !> larger error than the default tolerance of the CG solver
+      !> Convergence tolerance of the block CG for the inverse on a neighborlist
       real(wp), allocatable :: invtol
 
       !> Output verbosity
@@ -104,8 +98,7 @@ module multicharge_solver_cg
    !> Default number of columns per block of right-hand sides
    integer, parameter :: block_size_def = 16
 
-   !> Relative eigenvalue threshold of the Gram matrix for dropping linearly
-   !> dependent search directions
+   !> Relative eigenvalue threshold of the Gram matrix
    real(wp), parameter :: orth_thr = 1.0e3_wp * epsilon(1.0_wp)
 
 
@@ -378,12 +371,7 @@ subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error
 end subroutine solve
 
 
-!> Solve a linear system with multiple right-hand sides using the
-!> breakdown-free block conjugate gradient method with a Jacobi
-!> preconditioner (Ji, Sosonkina, Li, Co-HPC 2014). New search directions are
-!> orthonormalized by an eigendecomposition of their Gram matrix. With a
-!> subsystem, the system is restricted to the rows and columns of its atoms in
-!> the neighborlist, the vectors hold the subsystem atoms only.
+!> Solve a linear system with multiple right-hand sides by block CG
 subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
    & niter, sidx, loc)
    !> Conjugate-gradient solver instance
@@ -673,11 +661,7 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
 end subroutine solve_block
 
 
-!> Invert a dense symmetric positive definite matrix with the block CG solver.
-!> The columns of the inverse are solved in blocks. Since the inverse is
-!> symmetric, the rows K of a block that belong to earlier columns are already
-!> known and only the trailing rows U are solved from A_UU X_U = I_U - A_UK X_K,
-!> which shrinks with every block.
+!> Invert a dense symmetric positive definite matrix by block CG
 subroutine invert(self, amat, ainv, new_unit, error)
    !> Conjugate-gradient solver instance
    class(cg_solver), intent(in) :: self
@@ -767,15 +751,7 @@ subroutine invert(self, amat, ainv, new_unit, error)
 end subroutine invert
 
 
-!> Invert a symmetric positive definite matrix on the upper triangle of a
-!> sorted complete neighborlist with the block CG solver and keep only the
-!> elements on the pattern of the matrix. The columns are solved in blocks of
-!> spatially close atoms, each from A_SS X_S = I_S on the subsystem S of the
-!> neighbors of the block atoms. The inverse decays fast with the distance,
-!> the error of the subsystem is of the order of the elements outside of the
-!> pattern, which are dropped. The column of an atom is stored in the upper
-!> triangle of its row, which keeps the elements of the atoms of higher index.
-!> The blocks are independent and solved in parallel.
+!> Invert a symmetric positive definite matrix on a neighborlist
 subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    !> Conjugate-gradient solver instance
    class(cg_solver), intent(in) :: self
@@ -786,12 +762,10 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    !> Sorted complete neighborlist representation of the matrix
    type(csr_list), intent(in) :: list
 
-   !> Inverse of the coefficient matrix on the upper triangle of the list, the
-   !> lower triangles are zero
+   !> Inverse on the upper triangle of the list
    real(wp), intent(out) :: ainvlist(:)
 
-   !> Cartesian coordinates for spatially compact blocks, the blocks follow the
-   !> atom order if absent
+   !> Cartesian coordinates for spatially compact blocks
    real(wp), intent(in), optional :: xyz(:, :)
 
    !> Output unit
@@ -809,8 +783,6 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    ! Size of the subsystem and number of iterations of a block
    integer :: nsub, niter, maxsub, maxiter
    integer(i8) :: sumsub, sumiter
-   ! Time of the subsystem selection, the block CG and the storage of the
-   ! columns, summed over the blocks
    real(wp) :: tblk(3), sumtime(3)
    ! Solver for the blocks without output
    type(cg_solver) :: blksolver
@@ -821,8 +793,6 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
       call fatal_error(error, "Inversion on a neighborlist requires use_nlist.")
       return
    end if
-   ! The columns of the inverse are stored in the upper triangles of the rows,
-   ! periodic lists with translation indices hold a pair once per image
    if (.not. list%complete) then
       call fatal_error(error, &
          & "Inversion on a neighborlist requires a sorted complete list.")
@@ -914,11 +884,7 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
 end subroutine invert_list
 
 
-!> Solve a block of columns of the inverse on its subsystem of the neighbors
-!> of the block atoms. The subsystem matrix is applied on the upper triangles
-!> of the rows of the list, skipping the elements outside of the subsystem.
-!> The columns are stored in the upper triangles of the rows of the block
-!> atoms.
+!> Solve a block of columns of the inverse on its subsystem
 subroutine invert_block(solver, alist, list, cols, loc, sidx, ainvlist, nsub, &
    & niter, times, error, failed)
    !> Conjugate-gradient solver for the block
@@ -948,8 +914,7 @@ subroutine invert_block(solver, alist, list, cols, loc, sidx, ainvlist, nsub, &
    !> Number of block CG iterations
    integer, intent(out) :: niter
 
-   !> Time of the subsystem selection, the block CG and the storage of the
-   !> columns in seconds
+   !> Times of the subsystem selection, block CG and storage
    real(wp), intent(out) :: times(3)
 
    !> Error handling, shared by all blocks
@@ -1000,8 +965,6 @@ subroutine invert_block(solver, alist, list, cols, loc, sidx, ainvlist, nsub, &
       !$omp atomic write
       failed = .true.
    else
-      ! Columns of the symmetric inverse in the upper triangles of the rows of
-      ! the block atoms
       do ivec = 1, ncol
          iat = cols(ivec)
          nfin = list%inl(iat + 1) - 1
@@ -1020,8 +983,7 @@ subroutine invert_block(solver, alist, list, cols, loc, sidx, ainvlist, nsub, &
 end subroutine invert_block
 
 
-!> Multiply the coefficient matrix with a block of vectors, avec = A vec,
-!> using either the dense matrix or its upper triangle on a neighborlist
+!> Multiply the coefficient matrix with a block of vectors
 subroutine block_matmul(nlist, vec, avec, amat, alist, list)
    !> Whether to use the compressed-row representation
    logical, intent(in) :: nlist
@@ -1055,9 +1017,7 @@ subroutine block_matmul(nlist, vec, avec, amat, alist, list)
 end subroutine block_matmul
 
 
-!> Extract the upper-triangle CSR representation of the subsystem block A_SS
-!> from a matrix on the upper triangle of a sorted complete neighborlist,
-!> skipping entries outside of the subsystem.
+!> Extract the subsystem block A_SS from a matrix on a neighborlist
 subroutine get_sub_matrix(alist, list, sidx, loc, subdiag, subinl, subjat, &
    & subval)
    !> Matrix values on the upper triangle of the list
@@ -1118,8 +1078,7 @@ subroutine get_sub_matrix(alist, list, sidx, loc, subdiag, subinl, subjat, &
 end subroutine get_sub_matrix
 
 
-!> Multiply the extracted subsystem matrix A_SS with a block of vectors on the
-!> subsystem, avec = A_SS vec, using preallocated transposed buffers.
+!> Multiply the subsystem matrix with a block of vectors
 subroutine sub_block_matmul(subdiag, subinl, subjat, subval, vec, avec, vect, &
    & avect)
    !> Diagonal elements of the subsystem matrix
@@ -1164,10 +1123,7 @@ subroutine sub_block_matmul(subdiag, subinl, subjat, subval, vec, avec, vect, &
 end subroutine sub_block_matmul
 
 
-!> Compute an orthonormal basis of the column space of vec into outvec.
-!> The basis is obtained from the eigendecomposition of the Gram matrix
-!> vec^T vec, eigenvectors with negligible eigenvalues are dropped and the
-!> remaining columns of outvec are zeroed.
+!> Orthonormal basis of the column space of vec
 subroutine orthonormalize(vec, outvec, nrank, error)
    !> Input block of vectors
    real(wp), contiguous, intent(in) :: vec(:, :)

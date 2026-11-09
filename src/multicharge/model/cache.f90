@@ -39,8 +39,7 @@ module multicharge_model_cache
       !> Coordination number derivatives w.r.t. lattice vectors
       real(wp), allocatable :: dcndL(:, :, :)
 
-      !> Coordination number derivatives w.r.t. positions on the sorted complete
-      !> neighborlist, the entry of atom j in the row of atom i holds dCN_j/dR_i
+      !> Coordination number derivatives on the sorted complete neighborlist
       real(wp), allocatable :: dcndrlist(:, :)
 
       !> Ewald separation parameter
@@ -61,9 +60,7 @@ module multicharge_model_cache
       !> Local charge derivatives w.r.t. lattice vectors
       real(wp), allocatable :: dqlocdL(:, :, :)
 
-      !> Local charge derivatives w.r.t. positions on the sorted complete
-      !> neighborlist, the entry of atom j in the row of atom i holds
-      !> dqloc_j/dR_i
+      !> Local charge derivatives on the sorted complete neighborlist
       real(wp), allocatable :: dqlocdrlist(:, :)
 
       !> Full Maxwell capacitance matrix
@@ -87,8 +84,7 @@ module multicharge_model_cache
       !> Inversed amat
       real(wp), allocatable :: ainv(:, :)
 
-      !> Inverse of amat on the upper triangle of the neighborlist,
-      !> the charge constraint part -uvec*uvec^T/sum(uvec) is not stored
+      !> Inverse of amat on the upper triangle of the neighborlist
       real(wp), allocatable :: ainvlist(:)
 
       !> Solution of the ES equation
@@ -106,42 +102,31 @@ module multicharge_model_cache
       !> Derivative of Maxwell capacitance matrix w.r.t lattice vectors
       real(wp), allocatable :: dcdL(:, :, :)
 
-      !> Linear combination alpha * dA/dR*q + beta * dX/dR w.r.t. positions,
-      !> dabdr(:, x, b) is the derivative of component b w.r.t. atom x
+      !> Partial derivatives alpha * dA/dR*q + beta * dX/dR
       real(wp), allocatable :: dabdr(:, :, :)
 
       !> Linear combination alpha * dA/dL*q + beta * dX/dL w.r.t. strain
       real(wp), allocatable :: dabdL(:, :, :)
 
-      !> Partial derivatives dabdr on the sorted complete neighborlist, the entry
-      !> of atom b in the row of atom x holds the derivative of component b
-      !> w.r.t. atom x, so row x holds the column dabdr(:, x, :)
+      !> Partial derivatives dabdr on the sorted complete neighborlist
       real(wp), allocatable :: dabdrlist(:, :)
 
-      !> Coulomb matrix derivatives contracted with an external vector,
-      !> alpha * dA/dR*p w.r.t. positions, dafdr(:, x, b) is the derivative of
-      !> component b w.r.t. atom x
+      !> Coulomb matrix derivatives contracted with an external vector
       real(wp), allocatable :: dafdr(:, :, :)
 
-      !> Derivatives dafdr on the sorted complete neighborlist in the layout of
-      !> dabdrlist
+      !> Derivatives dafdr on the sorted complete neighborlist
       real(wp), allocatable :: dafdrlist(:, :)
 
-      !> Position derivatives of the charges on the pattern of the sorted
-      !> complete neighborlist of the solve without the charge constraint term,
-      !> the entry of atom b in the row of atom x holds dq_b/dR_x
+      !> Position derivatives of the charges on the neighborlist
       real(wp), allocatable :: dqdrlist(:, :)
 
-      !> Factors of the charge constraint term of the position derivatives,
-      !> dq_b/dR_x = dqdrlist(:, (x, b)) - dlambdadr(:, x) * uvec(b)
+      !> Charge constraint factors of the position derivatives
       real(wp), allocatable :: dlambdadr(:, :)
 
-      !> Diagonal part of the second derivative of the Maxwell capacitance
-      !> matrix w.r.t. positions of (3, 3, mol%nat) size.
+      !> Diagonal blocks of the second derivative of the capacitance matrix
       real(wp), allocatable :: d2cdr2diag(:, :, :)
 
-      !> External electric field of the last solve, reused when a Hessian
-      !> routine repeats the solve on a rebuilt neighborlist
+      !> External electric field of the last solve
       real(wp), allocatable :: efield(:)
 
       !> Logical flag for gradient calculation

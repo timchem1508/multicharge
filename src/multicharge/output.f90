@@ -140,24 +140,19 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, h
    !> Derivative of the partial charges w.r.t. strain deformations
    real(wp), intent(in), optional :: dqdL(:, :, :)
 
-   !> Second derivative of the energy w.r.t. the Cartesian coordinates in
-   !> packed lower-triangle storage
+   !> Hessian in packed lower-triangle storage
    real(wp), intent(in), optional :: hess(:)
 
    !> Derivative of the virial w.r.t. positions (3, 3, 3, nat) or strain (3, 3, 3, 3)
    real(wp), intent(in), optional :: press(:, :, :, :)
 
-   !> Cache with the derivatives of the partial charges w.r.t. the Cartesian
-   !> coordinates in compressed storage, used if dqdr is absent
+   !> Cache with the compressed charge derivatives
    type(mchrg_cache), intent(in), optional :: cache
 
-   !> Second derivative of the energy w.r.t. the Cartesian coordinates in
-   !> compressed storage on the neighborlist with the factored charge
-   !> constraint term, used if hess is absent
+   !> Hessian in compressed storage on the neighborlist
    type(mchrg_hessian), intent(in), optional :: hessian
 
-   !> Neighborlist of the compressed derivatives of the partial charges in the
-   !> cache and of the compressed Hessian
+   !> Neighborlist of the compressed charge derivatives and Hessian
    type(csr_list), intent(in), optional :: list
 
    integer :: iat, jat, isp, jsp, ic, jc
@@ -318,13 +313,7 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, h
 end subroutine write_ascii_results
 
 
-!> Write the Hessian in compressed storage, the blocks on the pattern of the list
-!> including the charge constraint term and the factors of this term, which
-!> give the blocks outside of the pattern. The rows follow the order of the
-!> upper triangles of the list, which only hold the blocks of the atoms y >= x
-!> of each row x.
-!> The lines of each row are formatted in parallel, as the format of the dense
-!> Hessian, and the rows are written in order.
+!> Write the Hessian in compressed storage
 subroutine write_ascii_hessian_list(unit, mol, hessian, list)
 
    !> Unit for output
@@ -333,8 +322,7 @@ subroutine write_ascii_hessian_list(unit, mol, hessian, list)
    !> Molecular structure data
    class(structure_type), intent(in) :: mol
 
-   !> Second derivative of the energy w.r.t. the Cartesian coordinates in
-   !> compressed storage with the factored charge constraint term
+   !> Hessian in compressed storage
    type(mchrg_hessian), intent(in) :: hessian
 
    !> Sorted complete neighborlist of the Hessian
@@ -349,10 +337,6 @@ subroutine write_ascii_hessian_list(unit, mol, hessian, list)
    ! Length of a line of the block table
    integer, parameter :: hlen = 81
 
-   ! Frobenius norm from the blocks on the pattern, the charge constraint term
-   ! of all other blocks is sum(u)^2 |dlambda|^4 without its blocks on the
-   ! pattern. The upper triangles hold the block of y and x as the transpose of
-   ! the block of x and y.
    usum = hessian%weight
    dnorm2 = sum(hessian%dlambda**2)
    hnorm = usum**2 * dnorm2**2
@@ -448,9 +432,7 @@ subroutine write_ascii_hessian_list(unit, mol, hessian, list)
 end subroutine write_ascii_hessian_list
 
 
-!> Format a real number as the ES11.3 edit descriptor, without the overhead of
-!> formatted I/O. Values at an exact decimal tie of the last digit may round to
-!> the other side.
+!> Format a real number as the ES11.3 edit descriptor
 function format_es(val) result(str)
 
    !> Value to format
@@ -608,12 +590,10 @@ subroutine json_results(unit, indentation, energy, gradient, dqdr, charges, cn, 
    !> Coordination numbers
    real(wp), intent(in), optional :: cn(:)
 
-   !> Cache with the derivatives of the partial charges w.r.t. the Cartesian
-   !> coordinates in compressed storage, used if dqdr is absent
+   !> Cache with the compressed charge derivatives
    type(mchrg_cache), intent(in), optional :: cache
 
-   !> Neighborlist of the compressed derivatives of the partial charges in the
-   !> cache
+   !> Neighborlist of the compressed charge derivatives
    type(csr_list), intent(in), optional :: list
 
    character(len=:), allocatable :: indent, version_string
@@ -703,9 +683,7 @@ subroutine write_json_array(unit, array, indent)
 end subroutine write_json_array
 
 
-!> Write the derivatives of the partial charges w.r.t. the Cartesian coordinates
-!> as a JSON array in the order of a dense dqdr, expanded from the compressed
-!> storage one charge at a time
+!> Write the charge derivatives as a JSON array
 subroutine write_json_dqdr(unit, cache, list, indent)
 
    !> Unit for output

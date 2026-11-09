@@ -679,8 +679,7 @@ subroutine test_block_cg_dense(error)
 end subroutine test_block_cg_dense
 
 
-!> Test: Block CG with a matrix on the upper triangle of a sorted complete list
-!> against the dense solve
+!> Test: Block CG with a matrix on a sorted complete list
 subroutine test_block_cg_sparse(error)
 
    !> Error handling
@@ -754,8 +753,7 @@ subroutine test_cg_invert_dense(error)
 end subroutine test_cg_invert_dense
 
 
-!> Test: Block-CG inversion on a sorted complete list keeps the upper triangle
-!> of the inverse
+!> Test: Block-CG inversion on a sorted complete list
 subroutine test_cg_invert_list_half(error)
 
    !> Error handling
@@ -791,8 +789,7 @@ subroutine test_cg_invert_list_half(error)
 end subroutine test_cg_invert_list_half
 
 
-!> Test: Block-CG inversion on the subsystems of spatial blocks for a chain
-!> whose atom order is shuffled
+!> Test: Block-CG inversion on spatial blocks of a shuffled chain
 subroutine test_cg_invert_list_local(error)
 
    !> Error handling
@@ -800,8 +797,6 @@ subroutine test_cg_invert_list_local(error)
 
    integer, parameter :: n = 300
    real(wp), parameter :: cutoff = 3.0_wp
-   ! Deviation of the subsystems, the elements of the inverse decay to 1e-5
-   ! within the cutoff
    real(wp), parameter :: thr_sub = 1.0e-4_wp
    real(wp), allocatable :: xyz(:, :), amat(:, :), alist(:), adense(:, :), &
       & ainvlist(:)
@@ -833,8 +828,7 @@ subroutine test_cg_invert_list_local(error)
 end subroutine test_cg_invert_list_local
 
 
-!> Largest deviation of the inverse on the upper triangle of a sorted complete
-!> list from the dense inverse, relative to its largest element
+!> Largest relative deviation of the inverse on the list
 function list_deviation(list, ainvlist, adense) result(dev)
 
    !> Sorted complete neighborlist
@@ -901,9 +895,7 @@ end subroutine check_inverse
 
 
 
-!> Generate an SPD matrix for a chain of atoms with unit spacing, coupling
-!> atoms within the cutoff by exp(-r). The atom order is shuffled along the
-!> chain.
+!> SPD matrix for a shuffled chain of atoms
 subroutine chain_spd(n, cutoff, xyz, amat)
 
    !> Number of atoms
@@ -939,8 +931,7 @@ subroutine chain_spd(n, cutoff, xyz, amat)
 end subroutine chain_spd
 
 
-!> Generate an SPD matrix coupling only atoms of the same group, the groups
-!> interleave as the remainder of the atom index
+!> SPD matrix coupling only atoms of the same group
 subroutine grouped_spd(n, ngroup, amat)
 
    !> Dimension of the matrix
@@ -966,10 +957,7 @@ subroutine grouped_spd(n, ngroup, amat)
 end subroutine grouped_spd
 
 
-!> Sorted complete compressed-row storage of the nonzero pattern of a symmetric
-!> matrix with a nonzero diagonal, the diagonal element first in each row and
-!> the other elements in descending order, and the upper triangle of the
-!> matrix on the list, the lower triangles are zero
+!> Sorted complete CSR storage of a symmetric matrix
 subroutine dense_to_csr(amat, alist, list)
 
    !> Dense symmetric matrix

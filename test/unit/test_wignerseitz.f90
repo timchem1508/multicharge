@@ -149,8 +149,7 @@ subroutine test_wsc_3d(error)
 
 end subroutine test_wsc_3d
 
-!> Check that the Wigner-Seitz images are the nearest images of each pair,
-!> exclude the atom itself, and that the self-images are inversion symmetric
+!> Check the Wigner-Seitz images of each pair
 subroutine test_wsc_images_3d(error)
 
    !> Error handling

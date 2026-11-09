@@ -750,8 +750,7 @@ subroutine test_numgrad(error, mol, model)
 
 end subroutine test_numgrad
 
-!> Check the semi-numerical Hessian against central differences of the
-!> analytical gradient and verify that both storage layouts are equivalent
+!> Check the semi-numerical Hessian in both storage layouts
 subroutine test_numhess(error, mol, model)
 
    !> Error handling
@@ -832,8 +831,6 @@ subroutine test_numhess(error, mol, model)
    & hess_dense, press, unit=output_unit, verbosity=verbosity)
    if (allocated(error)) return
 
-   ! Both layouts are evaluated in separate runs, so they agree only up to the
-   ! reproducibility of the threaded solver
    ij = 0
    do i = 1, ndim
       do j = 1, i
@@ -1044,8 +1041,6 @@ subroutine test_numdqdr(error, mol, model, cg)
    end do lp
    if (allocated(error)) return
 
-   ! Analytic derivatives from the CG solver, while the finite-difference
-   ! reference above keeps the direct solver to avoid iterative noise
    use_cg = .false.
    if (present(cg)) use_cg = cg
    if (use_cg) then
@@ -1150,8 +1145,6 @@ subroutine test_numdqdL(error, mol, model, cg)
    end do lp
    if (allocated(error)) return
 
-   ! Analytic derivatives from the CG solver, while the finite-difference
-   ! reference above keeps the direct solver to avoid iterative noise
    use_cg = .false.
    if (present(cg)) use_cg = cg
    if (use_cg) then
@@ -1282,8 +1275,7 @@ subroutine test_dfdr(error, mol, dfdq, model)
 end subroutine test_dfdr
 
 
-!> Check the diagonal blocks of the second derivative of the capacitance matrix
-!> against finite differences of the diagonal of its first derivative
+!> Check the capacitance second derivatives by finite differences
 subroutine test_d2cdr2(error, mol, model)
 
    !> Error handling
@@ -1363,10 +1355,7 @@ subroutine test_d2cdr2(error, mol, model)
 end subroutine test_d2cdr2
 
 
-!> Check the explicit Hessian, the second derivative of alpha * p^T A q
-!> + beta * p^T X at fixed p and charges q, against central differences of the
-!> analytical gradient of the same expression, and its symmetry and
-!> translational invariance
+!> Check the explicit Hessian against finite differences
 subroutine test_explicit_hessian(error, mol, model, alpha, beta, pvec)
 
    !> Error handling
@@ -1483,8 +1472,7 @@ subroutine test_explicit_hessian(error, mol, model, alpha, beta, pvec)
 end subroutine test_explicit_hessian
 
 
-!> Analytical gradient of alpha * p^T A q + beta * p^T X at fixed p and charges
-!> q for a displaced structure using a fresh cache
+!> Gradient at fixed p and charges for a displaced structure
 subroutine fixed_charge_gradient(mol, model, qvec, p, alpha, beta, gradient)
 
    !> Molecular structure data
@@ -1525,10 +1513,7 @@ subroutine fixed_charge_gradient(mol, model, qvec, p, alpha, beta, gradient)
 end subroutine fixed_charge_gradient
 
 
-!> Check the implicit Hessian, the response of the charges contracted with the
-!> partial derivatives, against central differences of the gradient of the
-!> reference structure with the charges of the displaced structures, and its
-!> symmetry and translational invariance
+!> Check the implicit Hessian against finite differences
 subroutine test_implicit_hessian(error, mol, model)
 
    !> Error handling
@@ -1563,8 +1548,6 @@ subroutine test_implicit_hessian(error, mol, model)
    allocate(dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat), hessian(ndim, ndim), &
       & numhess(ndim, ndim))
 
-   ! The implicit part is the derivative of the gradient at fixed structure
-   ! along the response of the charges
    allocate(cache)
    do iat = 1, mol%nat
       do ic = 1, 3
@@ -1630,9 +1613,7 @@ subroutine test_implicit_hessian(error, mol, model)
 end subroutine test_implicit_hessian
 
 
-!> Check the analytical Hessian of the electrostatic energy against central
-!> differences of the analytical gradient, and its symmetry and translational
-!> invariance
+!> Check the electrostatic Hessian against finite differences
 subroutine test_hessian(error, mol, model, cg)
 
    !> Error handling
@@ -1683,8 +1664,6 @@ subroutine test_hessian(error, mol, model, cg)
       end do
    end do
 
-   ! Analytic Hessian from the CG solver, while the finite-difference
-   ! reference above keeps the direct solver to avoid iterative noise
    use_cg = .false.
    if (present(cg)) use_cg = cg
    if (use_cg) then
@@ -1740,8 +1719,6 @@ end subroutine test_hessian
 
 
 !> Partial derivatives of the external test function
-!> f(q, R) = sum_i q_i (e.R_i + 0.5 k |R_i|^2) + 0.5 q^T F q with the constant
-!> coupling F_ij = 0.1 / (1 + |i - j|)
 subroutine external_function_derivs(mol, qvec, dfdq, d2fdq2, dfdrdq, dfdr, d2fdr2)
 
    !> Molecular structure data
@@ -1791,8 +1768,7 @@ subroutine external_function_derivs(mol, qvec, dfdq, d2fdq2, dfdrdq, dfdr, d2fdr
 end subroutine external_function_derivs
 
 
-!> Total gradient df/dR of the external test function for a displaced
-!> structure using a fresh cache
+!> Gradient of the external test function for a displaced structure
 subroutine displaced_external_gradient(mol, model, solver, error, gradient)
 
    !> Molecular structure data
@@ -1834,8 +1810,7 @@ subroutine displaced_external_gradient(mol, model, solver, error, gradient)
 end subroutine displaced_external_gradient
 
 
-!> Check the analytical Hessian of an external function of the charges against
-!> central differences of its analytical gradient, and its symmetry
+!> Check the external Hessian against finite differences
 subroutine test_external_hessian(error, mol, model, cg)
 
    !> Error handling
@@ -1898,8 +1873,6 @@ subroutine test_external_hessian(error, mol, model, cg)
    call external_function_derivs(mol, qvec, dfdq, d2fdq2, dfdrdq, dfdr, d2fdr2)
    deallocate(cache)
 
-   ! Analytic Hessian from the CG solver, while the finite-difference
-   ! reference above keeps the direct solver to avoid iterative noise
    use_cg = .false.
    if (present(cg)) use_cg = cg
    if (use_cg) then
@@ -1946,9 +1919,7 @@ subroutine test_external_hessian(error, mol, model, cg)
 end subroutine test_external_hessian
 
 
-!> Check the Hessian of the charges contracted with fixed weights from
-!> add_charge_hessian against central differences of the weighted charge
-!> derivatives, and its symmetry
+!> Check add_charge_hessian against finite differences
 subroutine test_charge_hessian(error, mol, model)
 
    !> Error handling
@@ -2023,8 +1994,7 @@ subroutine test_charge_hessian(error, mol, model)
 end subroutine test_charge_hessian
 
 
-!> Weighted charge derivatives sum_i weights(i) dq_i/dR for a displaced
-!> structure
+!> Weighted charge derivatives for a displaced structure
 subroutine weighted_charge_derivs(mol, model, weights, error, gradient)
 
    !> Molecular structure data

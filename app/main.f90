@@ -86,8 +86,6 @@ program main
 
    if (qgrad) full_list = .true.
 
-   ! The analytical Hessian is only implemented for molecules, for the EEQ
-   ! model only in dense storage
    if (analytic_hessian) then
       full_list = .true.
       if (model_id == mchrg_model%eeq2019 .and. use_nlist) then
@@ -126,8 +124,6 @@ program main
 
    allocate(cache)
 
-   ! Create a sorted complete neighborlist if requested, the symmetric matrices
-   ! keep the upper triangles of its rows
    if (use_nlist) then
       call timer%push("nlist")
       allocate(list)
@@ -173,8 +169,6 @@ program main
       sigma(:, :) = 0.0_wp
    end if
 
-   ! With a neighborlist the position derivatives of the charges stay in
-   ! compressed storage in the cache instead of a dense dqdr
    if (qgrad) then
       allocate(dqdL(3, 3, mol%nat), source=0.0_wp)
       if (.not. use_nlist) allocate(dqdr(3, mol%nat, mol%nat), source=0.0_wp)
@@ -208,8 +202,6 @@ program main
          call fatal_error(error, "Neighborlist must be complete for analytical Hessian")
          return
       end if
-      ! Compressed Hessian on the pattern of the neighborlist with the factored
-      ! charge constraint term, only expanded for the output
       allocate(hesslist)
       call timer%push("hess")
       call model%solve(mol, solver, cache, error, energy, gradient, sigma, &
@@ -555,8 +547,6 @@ subroutine get_arguments(input, model_id, use_nlist, cutoff,  &
       call fatal_error(error, "Numerical and analytical Hessian cannot be combined.")
    end if
 
-   ! The inverse in the charge derivatives is kept on the pattern of the list,
-   ! the larger default cutoff keeps its error near 1e-14
    if (use_nlist .and. (qgrad .or. analytic_hessian) .and. .not. cutoff_set) then
       cutoff = 33.0_wp
    end if

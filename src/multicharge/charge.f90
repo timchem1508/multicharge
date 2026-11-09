@@ -73,8 +73,7 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, list, efield, 
    !> Optional external electric field
    real(wp), intent(in), contiguous, optional :: efield(:)
 
-   !> Optional cache retaining the solve and the CN derivatives for
-   !> add_charge_hessian, recompute after any change of the structure or model
+   !> Optional cache retaining the solve for add_charge_hessian
    type(mchrg_cache), intent(inout), optional :: cache
 
    type(mchrg_cache), allocatable :: local_cache
@@ -121,10 +120,7 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, list, efield, 
 end subroutine get_charges
 
 
-!> Add the Hessian of an external function f(q, R) of the charges without
-!> d2f/dR2 at a fixed lattice, with the weights df/dq, for f = weights^T q the
-!> contraction sum_i weights(i) d2q_i/dR2. The cache has to come from
-!> get_charges with the same structure and model and without a neighborlist.
+!> Add the Hessian of an external function of the charges (dense)
 subroutine add_charge_hessian_dense(mchrg_model, mol, error, weights, d2fdq2, &
    & dfdrdq, hessian, cache)
 
@@ -143,8 +139,7 @@ subroutine add_charge_hessian_dense(mchrg_model, mol, error, weights, d2fdq2, &
    !> Second derivative of the external function w.r.t. atomic charges
    real(wp), intent(in) :: d2fdq2(:, :)
 
-   !> Mixed derivative of the external function w.r.t. positions and charges,
-   !> dfdrdq(:, x, b) = d2f/dR_x dq_b
+   !> Mixed derivative of the external function w.r.t. positions and charges
    real(wp), intent(in) :: dfdrdq(:, :, :)
 
    !> Nuclear Hessian of shape (3*nat, 3*nat), the contraction is added
@@ -162,8 +157,6 @@ subroutine add_charge_hessian_dense(mchrg_model, mol, error, weights, d2fdq2, &
       return
    end if
 
-   ! Same solver as in get_charges, the constraint response of its solve is
-   ! kept in the cache
    allocate(solver_input)
    allocate(solver)
    call new_cg_solver(solver, solver_input)
@@ -177,11 +170,7 @@ subroutine add_charge_hessian_dense(mchrg_model, mol, error, weights, d2fdq2, &
 end subroutine add_charge_hessian_dense
 
 
-!> Hessian of an external function f(q, R) of the charges without d2f/dR2 on a
-!> sorted complete neighborlist in compressed storage, for f = weights^T q the
-!> contraction sum_i weights(i) d2q_i/dR2. Only available for the EEQBC model,
-!> the cache has to come from get_charges with the same structure, model and
-!> neighborlist.
+!> Add the Hessian of an external function of the charges on a list
 subroutine add_charge_hessian_list(mchrg_model, mol, error, weights, d2fdq2, &
    & d2fdq2_list, dfdrdq, dfdrdq_list, hessian, cache, list)
 
@@ -197,15 +186,13 @@ subroutine add_charge_hessian_list(mchrg_model, mol, error, weights, d2fdq2, &
    !> Weights of the atomic partial charges, df/dq
    real(wp), intent(in) :: weights(:)
 
-   !> Second derivative of the external function w.r.t. atomic charges, the
-   !> symmetric matrix on the upper triangle of its list
+   !> Second derivative of the external function w.r.t. atomic charges
    real(wp), intent(in), contiguous :: d2fdq2(:)
 
    !> Sorted complete list of the second derivative w.r.t. atomic charges
    type(csr_list), intent(in) :: d2fdq2_list
 
    !> Mixed derivative of the external function w.r.t. positions and charges
-   !> on its list, the entry of atom b in the row of atom x holds d2f/dR_x dq_b
    real(wp), intent(in) :: dfdrdq(:, :)
 
    !> Sorted complete list of the mixed derivative w.r.t. positions and charges
@@ -231,8 +218,6 @@ subroutine add_charge_hessian_list(mchrg_model, mol, error, weights, d2fdq2, &
       return
    end select
 
-   ! Same solver as in get_charges, the constraint response of its solve is
-   ! kept in the cache
    allocate(solver_input)
    solver_input%use_nlist = .true.
    allocate(solver)

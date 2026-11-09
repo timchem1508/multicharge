@@ -123,8 +123,7 @@ subroutine new_eeq_model(self, mol, error, chi, rad, eta, kcnchi, &
 end subroutine new_eeq_model
 
 
-!> Update coordination numbers, their derivatives if the charge derivatives or
-!> the Hessian are requested, and, if needed, the Wigner–Seitz cell and Ewald alpha.
+!> Update coordination numbers and their derivatives
 subroutine update(self, mol, cache, trans, grad, list, dqdr, hess)
    !> EEQ model type
    class(eeq_model), intent(in) :: self
@@ -145,8 +144,6 @@ subroutine update(self, mol, cache, trans, grad, list, dqdr, hess)
 
    logical :: deriv
 
-   ! The charge derivatives and the Hessian need the position and strain
-   ! derivatives of the CN
    deriv = .false.
    if (present(dqdr)) deriv = dqdr
    if (present(hess)) deriv = deriv .or. hess
@@ -454,8 +451,7 @@ subroutine get_amat_rec_3d(rij, vol, alp, trans, amat)
 end subroutine get_amat_rec_3d
 
 
-!> Add the electronegativity vector derivatives, beta * dX/dR, w.r.t. positions
-!> and strain to the partial derivatives in the cache
+!> Add the electronegativity vector derivatives, beta * dX/dR
 subroutine get_xvec_derivs(self, mol, ndim, cache, beta, list)
    !> EEQ model type
    class(eeq_model), intent(in) :: self
@@ -490,9 +486,7 @@ subroutine get_xvec_derivs(self, mol, ndim, cache, beta, list)
 end subroutine get_xvec_derivs
 
 
-!> Add the Coulomb matrix derivatives contracted with a vector, alpha * dA/dR*p,
-!> w.r.t. positions and strain to the partial derivatives in the cache, or
-!> w.r.t. positions to dafdr for an external vector
+!> Add the Coulomb matrix derivatives contracted with a vector
 subroutine get_coulomb_derivs(self, mol, ndim, cache, alpha, p, list, dafdr)
    !> EEQ model type
    class(eeq_model), intent(in) :: self
@@ -517,9 +511,6 @@ subroutine get_coulomb_derivs(self, mol, ndim, cache, alpha, p, list, dafdr)
    ext = .false.
    if (present(dafdr)) ext = dafdr
 
-   ! The kernels read the cache and add to the destination, which is moved out
-   ! of the cache for the call. The strain derivatives of dA/dR*p for an
-   ! external vector are not kept.
    if (ext) then
       call move_alloc(cache%dafdr, dadr)
       allocate(dadL(3, 3, ndim), source=0.0_wp)
@@ -798,11 +789,7 @@ subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta, list)
 end subroutine get_grad
 
 
-!> Compute the explicit part of the nuclear Hessian at a fixed lattice,
-!> alpha * p^T d2A/dR2 q + beta * p^T d2X/dR2 at fixed p and charges q. The
-!> cache has to hold the charges and the CN derivatives of the update for the
-!> Hessian. The off-diagonal blocks of a pair are written by the thread of the
-!> pair, only the diagonal blocks are reduced over the threads.
+!> Explicit part of the nuclear Hessian at fixed p and charges q
 subroutine get_explicit_hessian_dense(self, mol, cache, p, hessian, error, alpha, &
    & beta)
    !> EEQ model type
@@ -840,10 +827,6 @@ subroutine get_explicit_hessian_dense(self, mol, cache, p, hessian, error, alpha
       return
    end if
 
-   ! X_i = -chi_i + kcnchi_i * CN_i / sqrt(CN_i + reg) with the first derivative
-   ! 0.5 * kcnchi_i / sqrt(CN_i + reg) of get_xvec_derivs, the CN Hessian is
-   ! contracted with the first and the products of the CN derivatives with the
-   ! second derivative w.r.t. the CN
    allocate(dEdcn(nat), work(3 * nat, nat))
    !$omp parallel do default(none) schedule(runtime) &
    !$omp shared(self, mol, cache, p, bet, dEdcn, work, nat) private(iat, izp, sqcn)
@@ -861,8 +844,6 @@ subroutine get_explicit_hessian_dense(self, mol, cache, p, hessian, error, alpha
       & beta=1.0_wp)
    deallocate(work, dEdcn)
 
-   ! Pair terms of the Coulomb matrix, the self terms do not depend on the
-   ! positions at a fixed lattice
    allocate(diagonal(3, 3, nat), source=0.0_wp)
    if (any(mol%periodic)) then
       call get_d2amat_3d(self, mol, cache, alp, p, hessian, diagonal)
@@ -882,8 +863,7 @@ subroutine get_explicit_hessian_dense(self, mol, cache, p, hessian, error, alpha
 end subroutine get_explicit_hessian_dense
 
 
-!> Add alpha * p^T d2A/dR2 q of the pair terms for a non-periodic system, the
-!> diagonal blocks are added to a separate array
+!> Add alpha * p^T d2A/dR2 q of the pair terms (molecular)
 subroutine get_d2amat_0d(self, mol, cache, alpha, p, hessian, diagonal)
    !> EEQ model type
    class(eeq_model), intent(in) :: self
@@ -925,9 +905,7 @@ subroutine get_d2amat_0d(self, mol, cache, alpha, p, hessian, diagonal)
 end subroutine get_d2amat_0d
 
 
-!> Add alpha * p^T d2A/dR2 q of the pair terms for a periodic system at a
-!> fixed lattice with the Ewald sums and Wigner-Seitz images of get_amat_3d,
-!> the diagonal blocks are added to a separate array
+!> Add alpha * p^T d2A/dR2 q of the pair terms (periodic)
 subroutine get_d2amat_3d(self, mol, cache, alpha, p, hessian, diagonal)
    !> EEQ model type
    class(eeq_model), intent(in) :: self
@@ -999,8 +977,7 @@ subroutine get_d2amat_3d(self, mol, cache, alpha, p, hessian, diagonal)
 end subroutine get_d2amat_3d
 
 
-!> First and second derivative of the Gaussian Coulomb kernel erf(gam*r)/r
-!> w.r.t. the distance
+!> First and second derivative of the Gaussian Coulomb kernel
 pure subroutine get_coulomb_kernel(r1, gam, dr, drr)
    !> Distance
    real(wp), intent(in) :: r1
@@ -1021,8 +998,7 @@ pure subroutine get_coulomb_kernel(r1, gam, dr, drr)
 end subroutine get_coulomb_kernel
 
 
-!> Cartesian Hessian of a radial function from its first and second derivative
-!> w.r.t. the distance
+!> Cartesian Hessian of a radial function
 pure function radial_hessian(vec, dr, drr) result(box)
    !> Distance vector
    real(wp), intent(in) :: vec(3)
@@ -1046,9 +1022,7 @@ pure function radial_hessian(vec, dr, drr) result(box)
 end function radial_hessian
 
 
-!> Add the Hessian blocks of a pair term depending on R_j - R_i, the
-!> off-diagonal blocks to the Hessian and the diagonal blocks to a separate
-!> array, the box of the pair is symmetric
+!> Add the Hessian blocks of a pair term
 pure subroutine add_pair_block(iat, jat, box, hessian, diagonal)
    !> First atom of the pair
    integer, intent(in) :: iat

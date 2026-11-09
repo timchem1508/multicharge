@@ -143,8 +143,7 @@ subroutine solver_maker(solver, input, error)
 end subroutine solver_maker
 
 
-!> Sorted complete neighbour list, the atom itself first in each row followed by
-!> its neighbours in descending order
+!> Sorted complete neighbour list
 subroutine get_sorted_list(list, mol, error, lcutoff, wsc)
 
    !> Sorted complete neighbour list
@@ -1052,11 +1051,7 @@ subroutine test_eeqbc_api_actinides(error)
 
 end subroutine test_eeqbc_api_actinides
 
-!> Check the sorted complete neighbour list against the unsorted complete list:
-!> the atom itself first in each row followed by its neighbors in descending
-!> order, the same neighbors and Wigner-Seitz images of each entry, the upper
-!> triangles of the rows and the product of a symmetric matrix on the upper
-!> triangle with the dense product
+!> Check the sorted complete neighbour list against the complete list
 subroutine test_sorted_list(error, mol, lcutoff)
 
    !> Error handling
@@ -1205,9 +1200,7 @@ subroutine test_sorted_list_ice(error)
 end subroutine test_sorted_list_ice
 
 
-!> Expand partial derivatives on a sorted complete neighbour list, the entry of
-!> atom b in the row of atom x holds the derivative of component b w.r.t. atom
-!> x, dabdr(:, x, b)
+!> Expand partial derivatives on a sorted complete neighbour list
 subroutine expand_partial_derivs(mol, list, dlist, dabdr)
 
    !> Molecular structure data
@@ -1235,9 +1228,7 @@ subroutine expand_partial_derivs(mol, list, dlist, dabdr)
 end subroutine expand_partial_derivs
 
 
-!> Compare the partial derivatives and charge derivatives obtained with the
-!> sorted complete neighbour list against the dense evaluation with the block
-!> CG and the direct solver
+!> Compare partial and charge derivatives on a list with the dense ones
 subroutine test_partial_derivs(error, mol, model)
 
    !> Error handling
@@ -1327,8 +1318,6 @@ subroutine test_partial_derivs(error, mol, model)
       return
    end if
 
-   ! Position derivatives only in compressed storage, without a dense dqdr,
-   ! fresh cache keeps the Wigner-Seitz cell of the neighbour list
    allocate(cache4)
    cache4%wsc = cache2%wsc
    call move_alloc(cache4, cache2)
@@ -1351,8 +1340,6 @@ subroutine test_partial_derivs(error, mol, model)
       return
    end if
 
-   ! Coulomb matrix and electronegativity parts separately and added to the
-   ! same partial derivatives, same charges
    cache2%vrhs(:) = cache1%vrhs
    do iscale = 1, 3
       call new_partial_derivs(mol, ndim, cache1)
@@ -1377,8 +1364,6 @@ subroutine test_partial_derivs(error, mol, model)
       end if
    end do
 
-   ! Coulomb matrix derivatives contracted with an external vector, the partial
-   ! derivatives of the last combination stay as they are
    allocate(pvec(mol%nat))
    do jat = 1, mol%nat
       pvec(jat) = cos(real(jat, wp)) - 0.3_wp
@@ -1404,8 +1389,7 @@ subroutine test_partial_derivs(error, mol, model)
 end subroutine test_partial_derivs
 
 
-!> Charge derivatives on a half neighbour list are rejected, they need all
-!> neighbours of each atom in its row of a sorted complete list
+!> Charge derivatives on a half neighbour list are rejected
 subroutine test_partial_derivs_half_list(error)
 
    !> Error handling
@@ -1484,9 +1468,7 @@ subroutine test_partial_derivs_ice(error)
 end subroutine test_partial_derivs_ice
 
 
-!> Check the diagonal blocks of the second derivative of the capacitance matrix
-!> from the neighbour list against finite differences of the diagonal of its
-!> first derivative
+!> Check the capacitance second derivatives on a list by finite differences
 subroutine test_d2cdr2(error, mol, model)
 
    !> Error handling
@@ -1602,12 +1584,7 @@ subroutine test_d2cdr2_mb05(error)
 end subroutine test_d2cdr2_mb05
 
 
-!> Check the explicit Hessian, the second derivative of alpha * p^T A q
-!> + beta * p^T X at fixed p and charges q, with a sorted complete neighbour
-!> list against
-!> central differences of the gradient with the same list, against the dense
-!> evaluation if the list holds all pairs, and its symmetry and translational
-!> invariance
+!> Check the explicit Hessian on a sorted complete neighbour list
 subroutine test_explicit_hessian(error, mol, model, alpha, beta, nlcutoff, pvec)
 
    !> Error handling
@@ -1682,8 +1659,6 @@ subroutine test_explicit_hessian(error, mol, model, alpha, beta, nlcutoff, pvec)
          & alpha=alpha, beta=beta)
       if (allocated(error)) return
 
-      ! Neighbour list evaluation at the same charges, the Hessian keeps the
-      ! blocks of the pairs of the list
       call fixed_charge_cache(mol, model, list, qvec, cache)
       call new_list_hessian(list, sphess)
       call model%get_explicit_hessian(mol, cache, p, sphess, error, &
@@ -1745,8 +1720,6 @@ subroutine test_explicit_hessian(error, mol, model, alpha, beta, nlcutoff, pvec)
       return
    end if
 
-   ! A rigid translation of all atoms leaves the expression unchanged, which
-   ! requires the blocks of the second neighbours
    if (size(list%nlat) == mol%nat**2) then
       do ic = 1, 3
          if (any(abs(sum(hessian(ic::3, :), dim=1)) > thr1)) then
@@ -1762,8 +1735,7 @@ subroutine test_explicit_hessian(error, mol, model, alpha, beta, nlcutoff, pvec)
 end subroutine test_explicit_hessian
 
 
-!> Cache for the neighbour list evaluation at fixed charges, including the CN
-!> and local charge derivatives of the Hessian
+!> Cache for the neighbour list evaluation at fixed charges
 subroutine fixed_charge_cache(mol, model, list, qvec, cache)
 
    !> Molecular structure data
@@ -1791,8 +1763,7 @@ subroutine fixed_charge_cache(mol, model, list, qvec, cache)
 end subroutine fixed_charge_cache
 
 
-!> Analytical gradient of alpha * p^T A q + beta * p^T X at fixed p and charges
-!> q for a displaced structure using a fresh cache and the given neighbour list
+!> Gradient at fixed p and charges for a displaced structure
 subroutine fixed_charge_gradient(mol, model, list, qvec, p, alpha, beta, gradient)
 
    !> Molecular structure data
@@ -1833,9 +1804,7 @@ subroutine fixed_charge_gradient(mol, model, list, qvec, p, alpha, beta, gradien
 end subroutine fixed_charge_gradient
 
 
-!> Check the implicit Hessian with a sorted complete neighbour list against the
-!> dense product of the expanded partial and charge derivatives of the same list,
-!> and against the dense evaluation if the list holds all pairs
+!> Check the implicit Hessian on a sorted complete neighbour list
 subroutine test_implicit_hessian(error, mol, model, nlcutoff)
 
    !> Error handling
@@ -1894,8 +1863,6 @@ subroutine test_implicit_hessian(error, mol, model, nlcutoff)
    end select
    call expand_hessian(mol, list, sphess, hessian)
 
-   ! The list stores the rows of each atom in its columns, so the reference is
-   ! formed in the same order, -(dq/dR)^T (dX/dR - dA/dR*q)
    call expand_partial_derivs(mol, list, cache%dabdrlist, dabdr)
    do jat = 1, mol%nat
       call get_dqdr_row(cache, list, jat, dqdr(:, :, jat))
@@ -1903,9 +1870,6 @@ subroutine test_implicit_hessian(error, mol, model, nlcutoff)
    refhess(:, :) = -matmul(reshape(dqdr, [ndim, mol%nat]), &
       & transpose(reshape(dabdr, [ndim, mol%nat])))
 
-   ! With the cutoff the product is not symmetric. The Hessian holds its blocks
-   ! in the rows of atom x and the columns of the atoms y > x, their transposes
-   ! below the diagonal and the symmetrized diagonal blocks.
    do xat = 1, mol%nat
       ii = 3 * (xat - 1)
       blk(:, :) = refhess(ii+1:ii+3, ii+1:ii+3)
@@ -1916,8 +1880,6 @@ subroutine test_implicit_hessian(error, mol, model, nlcutoff)
       end do
    end do
 
-   ! The blocks of the second neighbours are dropped, only the dense charge
-   ! constraint term reaches them
    call mask_hessian(mol, list, refhess)
    sparse = hessian
    call mask_hessian(mol, list, sparse)
@@ -1953,8 +1915,7 @@ subroutine test_implicit_hessian(error, mol, model, nlcutoff)
 end subroutine test_implicit_hessian
 
 
-!> Check the analytical Hessian with a sorted complete neighbour list holding
-!> all pairs against the dense evaluation, and its symmetry
+!> Check the Hessian on a complete neighbour list against the dense one
 subroutine test_hessian(error, mol, model)
 
    !> Error handling
@@ -2037,10 +1998,7 @@ subroutine test_hessian(error, mol, model)
 end subroutine test_hessian
 
 
-!> Check the Hessian of an external function with a sorted complete neighbour
-!> list holding all pairs against the dense evaluation. The second and the
-!> mixed derivatives of the external function are given on shorter sorted
-!> complete lists of their own.
+!> Check the external Hessian on a complete list against the dense one
 subroutine test_external_hessian(error, mol, model)
 
    !> Error handling
@@ -2122,8 +2080,7 @@ subroutine test_external_hessian(error, mol, model)
 end subroutine test_external_hessian
 
 
-!> Check the weighted charge Hessian of add_charge_hessian on a sorted complete
-!> neighbour list holding all pairs against the dense contraction
+!> Check add_charge_hessian on a complete list against the dense one
 subroutine test_charge_hessian(error, mol, model)
 
    !> Error handling
@@ -2157,8 +2114,6 @@ subroutine test_charge_hessian(error, mol, model)
       weights(iat) = 0.7_wp - 0.3_wp * real(mod(3*iat, 5), wp) / 4.0_wp
    end do
 
-   ! f = weights^T q without second and mixed derivatives, on the neighbour
-   ! list itself for the compressed Hessian
    allocate(d2fdq2(mol%nat, mol%nat), dfdrdq(3, mol%nat, mol%nat), &
       & qval(size(list%nlat)), rval(3, size(list%nlat)), source=0.0_wp)
 
@@ -2189,15 +2144,7 @@ subroutine test_charge_hessian(error, mol, model)
 end subroutine test_charge_hessian
 
 
-!> Check the Hessian of an external function with a sorted complete neighbour
-!> list holding part of the pairs against its evaluation from the inverse, the
-!> partial
-!> derivatives and the charge derivatives on the same list. Each atom x only
-!> couples through its neighbours b, c and d,
-!> dp_b/dR_x = sum_c S_bc (G_cx + sum_d F_cd dq_d/dR_x), and the mixed
-!> derivatives G of the pairs outside of the list are dropped. Without df/dq the
-!> adjoint vector vanishes and with it the explicit part, so the blocks only
-!> hold the response to the derivatives of the external function.
+!> Check the external Hessian on a partial neighbour list
 subroutine test_external_hessian_sparse(error, mol, model, nlcutoff, ecutoff)
 
    !> Error handling
@@ -2269,8 +2216,6 @@ subroutine test_external_hessian_sparse(error, mol, model, nlcutoff, ecutoff)
       return
    end select
 
-   ! Inverse, partial derivatives and charge derivatives without the charge
-   ! constraint term on the list
    deallocate(cache)
    allocate(cache)
    allocate(dqdL(3, 3, mol%nat))
@@ -2370,10 +2315,7 @@ subroutine test_external_hessian_sparse(error, mol, model, nlcutoff, ecutoff)
 end subroutine test_external_hessian_sparse
 
 
-!> Partial derivatives of an external function on sorted complete lists of
-!> their own and in dense storage: df/dq, the second derivatives
-!> d2f/dq2 = 0.1 / (1 + r_ab) on the pairs of qlist and the mixed derivatives
-!> d2f/dR_x dq_b on the pairs of rlist, which are not symmetric in x and b
+!> Partial derivatives of an external test function
 subroutine get_external_derivs(mol, qlist, rlist, dfdq, d2fdq2, dfdrdq, qval, rval)
 
    !> Molecular structure data
@@ -2397,8 +2339,7 @@ subroutine get_external_derivs(mol, qlist, rlist, dfdq, d2fdq2, dfdrdq, qval, rv
    !> Second derivative w.r.t. the charges on the upper triangle of qlist
    real(wp), allocatable, intent(out) :: qval(:)
 
-   !> Mixed derivative on rlist, the entry of atom b in the row of atom x holds
-   !> d2f/dR_x dq_b
+   !> Mixed derivative on rlist
    real(wp), allocatable, intent(out) :: rval(:, :)
 
    real(wp), parameter :: efield(3) = [0.1_wp, -0.2_wp, 0.3_wp]
@@ -2466,8 +2407,7 @@ subroutine new_list_hessian(list, hessian)
 end subroutine new_list_hessian
 
 
-!> Zero the blocks of a dense Hessian of the atom pairs outside of a sorted
-!> complete neighbour list, the pattern of the compressed Hessian
+!> Zero the dense Hessian blocks of pairs outside of the list
 subroutine mask_hessian(mol, list, dense)
 
    !> Molecular structure data
@@ -2501,8 +2441,7 @@ subroutine mask_hessian(mol, list, dense)
 end subroutine mask_hessian
 
 
-!> Expand the compressed Hessian and its factored charge constraint term, if
-!> present, into dense storage
+!> Expand the compressed Hessian into dense storage
 subroutine expand_hessian(mol, list, hessian, dense)
 
    !> Molecular structure data

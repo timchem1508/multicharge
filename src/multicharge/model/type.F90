@@ -46,37 +46,19 @@ module multicharge_model_type
       & hess_index, get_dqdr_row, new_partial_derivs, new_hessian_blocks
 
 
-   !> Molecular nuclear Hessian in compressed-row storage on the upper triangle of
-   !> the sorted complete neighborlist of the charges, which keeps the blocks of
-   !> the atoms y >= x in the upper triangle of the row of x, the block of y and
-   !> x is the transpose. The list itself is not kept, it is passed along with
-   !> the Hessian. Blocks of atoms outside of the list of each other, the second
-   !> neighbors, are dropped. The charge constraint couples all atoms by a dense term,
-   !> which is kept in its factors, the block of the atoms x and y in the layout
-   !> of hesslist is hesslist(:, :, (x, y))
-   !> + weight * dlambda(:, y) dlambda(:, x)^T - wvec(:, y) dlambda(:, x)^T
-   !> - dlambda(:, y) wvec(:, x)^T. The term is of rank one for the
-   !> electrostatic energy, without wvec, and of rank two for an external
-   !> function of the charges.
+   !> Molecular nuclear Hessian in compressed storage on a sorted complete list
    type :: mchrg_hessian
 
-      !> Blocks without the charge constraint term on the list, the entry of atom
-      !> y >= x in the upper triangle of the row of atom x holds
-      !> d2E/dR_y,jc dR_x,ic in (jc, ic), the lower triangles are not used
+      !> Hessian blocks on the upper triangle of the list
       real(wp), allocatable :: hesslist(:, :, :)
 
-      !> Position derivatives of the Lagrange multiplier, the factors of the
-      !> charge constraint term
+      !> Position derivatives of the Lagrange multiplier
       real(wp), allocatable :: dlambda(:, :)
 
-      !> Second factor of the charge constraint term of an external function,
-      !> w = G^T u + B^T A^-1 d2f/dq2 u with the mixed derivatives G, the partial
-      !> derivatives B and the constraint response u = A^-1 1
+      !> Second factor of the charge constraint term of an external function
       real(wp), allocatable :: wvec(:, :)
 
-      !> Weight of the charge constraint term dlambda dlambda^T, sum(u) =
-      !> 1^T A^-1 1 for the electrostatic energy and u^T d2f/dq2 u for an
-      !> external function
+      !> Weight of the charge constraint term
       real(wp) :: weight = 0.0_wp
 
    end type mchrg_hessian
@@ -122,13 +104,10 @@ module multicharge_model_type
       !> Get external gradient
       procedure :: get_external_gradient
 
-      !> Calculate the analytical Hessian of an external function of the
-      !> charges at a fixed lattice
+      !> Calculate the analytical Hessian of an external function (molecular)
       procedure :: get_external_hessian_dense
 
-      !> Calculate the analytical Hessian of an external function of the
-      !> charges on a sorted complete neighborlist in compressed storage
-      !> (molecular)
+      !> Calculate the analytical Hessian of an external function on a list
       procedure :: get_external_hessian_list
 
       !> Calculate the analytical Hessian of an external function of the charges
@@ -138,19 +117,16 @@ module multicharge_model_type
       !> Calculate the analytical Hessian of the electrostatic energy (molecular)
       procedure :: get_hessian_dense
 
-      !> Calculate the analytical Hessian of the electrostatic energy on a sorted
-      !> complete neighborlist in compressed storage (molecular)
+      !> Calculate the analytical Hessian of the electrostatic energy on a list
       procedure :: get_hessian_list
 
       !> Calculate the analytical Hessian of the electrostatic energy
       generic :: get_hessian => get_hessian_dense, get_hessian_list
 
-      !> Calculate the implicit Hessian -(dX/dR - dA/dR*q)^T dq/dR from the
-      !> response of the charges (molecular)
+      !> Calculate the implicit Hessian (molecular)
       procedure :: get_implicit_hessian_dense
 
-      !> Calculate the implicit Hessian from the inverse and the partial
-      !> derivatives on a sorted complete neighborlist (molecular)
+      !> Calculate the implicit Hessian on a list (molecular)
       procedure :: get_implicit_hessian_list
 
       !> Calculate the implicit Hessian from the response of the charges
@@ -184,19 +160,16 @@ module multicharge_model_type
       !> Calculate Coulomb matrix
       procedure(get_coulomb_matrix), deferred :: get_coulomb_matrix
 
-      !> Add the Coulomb matrix derivatives contracted with a vector,
-      !> alpha * dA/dR*p
+      !> Add the Coulomb matrix derivatives contracted with a vector
       procedure(get_coulomb_derivs), deferred :: get_coulomb_derivs
 
       !> Calculate capacitance-corrected electronegativity derivatives
       procedure(get_grad), deferred :: get_grad
 
-      !> Calculate the explicit Hessian alpha * p^T d2A/dR2 q + beta * p^T d2X/dR2
-      !> at fixed p and q (molecular)
+      !> Calculate the explicit Hessian at fixed p and q (molecular)
       procedure(get_explicit_hessian_dense), deferred :: get_explicit_hessian_dense
 
-      !> Calculate the explicit Hessian at fixed p and q on a sorted complete
-      !> neighborlist in compressed storage (molecular)
+      !> Calculate the explicit Hessian at fixed p and q on a list (molecular)
       procedure(get_explicit_hessian_list), deferred :: get_explicit_hessian_list
 
       !> Calculate the explicit Hessian at fixed p and q
@@ -228,12 +201,10 @@ module multicharge_model_type
          !> Flag to compute derivatives
          logical, intent(in) :: grad
 
-         !> Flag for the charge derivatives w.r.t. positions and strain, stores
-         !> the CN (and local charge) derivatives in the cache
+         !> Flag for the charge derivatives w.r.t. positions and strain
          logical, intent(in), optional :: dqdr
 
-         !> Flag for the Hessian, stores the CN (and local charge) derivatives in
-         !> the cache
+         !> Flag for the Hessian
          logical, intent(in), optional :: hess
       end subroutine update
 
@@ -277,10 +248,7 @@ module multicharge_model_type
          type(csr_list), intent(in), optional :: list
       end subroutine get_coulomb_matrix
 
-      !> Coulomb matrix derivatives contracted with a vector, alpha * dA/dR*p,
-      !> w.r.t. positions and strain, added to the partial derivatives in the
-      !> cache, dabdr (dabdrlist with a neighborlist) and dabdL, allocated with
-      !> new_partial_derivs
+      !> Coulomb matrix derivatives contracted with a vector, alpha * dA/dR*p
       subroutine get_coulomb_derivs(self, mol, ndim, cache, alpha, p, list, dafdr)
          import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
 
@@ -305,14 +273,11 @@ module multicharge_model_type
          !> Multicharge neighborlist type (sorted complete)
          type(csr_list), intent(in), optional :: list
 
-         !> Add to dafdr (dafdrlist with a neighborlist) for an external vector
-         !> instead, without strain derivatives
+         !> Add to dafdr for an external vector instead
          logical, intent(in), optional :: dafdr
       end subroutine get_coulomb_derivs
 
-      !> Electronegativity vector derivatives, beta * dX/dR, w.r.t. positions and
-      !> strain, added to the partial derivatives in the cache, dabdr (dabdrlist
-      !> with a neighborlist) and dabdL, allocated with new_partial_derivs
+      !> Electronegativity vector derivatives, beta * dX/dR
       subroutine get_xvec_derivs(self, mol, ndim, cache, beta, list)
          import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
 
@@ -390,8 +355,7 @@ module multicharge_model_type
          type(csr_list), optional, intent(in) :: list
       end subroutine get_grad
 
-      !> Explicit part of the molecular nuclear Hessian at fixed p and charges q,
-      !> alpha * p^T d2A/dR2 q + beta * p^T d2X/dR2, added to the Hessian
+      !> Explicit part of the molecular nuclear Hessian at fixed p and charges q
       subroutine get_explicit_hessian_dense(self, mol, cache, p, hessian, error, &
          & alpha, beta)
          import :: mchrg_model_type, structure_type, mchrg_cache, error_type, wp
@@ -402,8 +366,7 @@ module multicharge_model_type
          !> Structure type
          type(structure_type), intent(in) :: mol
 
-         !> Multicharge cache with the position derivatives of the CN and the
-         !> local charges from the update for the Hessian
+         !> Multicharge cache
          type(mchrg_cache), intent(inout) :: cache
 
          !> Charge-like contraction vector
@@ -422,9 +385,7 @@ module multicharge_model_type
          real(wp), intent(in), optional :: beta
       end subroutine get_explicit_hessian_dense
 
-      !> Explicit part of the molecular nuclear Hessian at fixed p and charges q
-      !> on a sorted complete neighborlist, added to the blocks of the compressed
-      !> Hessian on the upper triangle of the list
+      !> Explicit part of the molecular nuclear Hessian on a sorted complete list
       subroutine get_explicit_hessian_list(self, mol, cache, p, hessian, error, &
          & list, alpha, beta)
          import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, &
@@ -436,15 +397,13 @@ module multicharge_model_type
          !> Structure type
          type(structure_type), intent(in) :: mol
 
-         !> Multicharge cache with the position derivatives of the CN and the
-         !> local charges on the neighborlist from the update for the Hessian
+         !> Multicharge cache
          type(mchrg_cache), intent(inout) :: cache
 
          !> Charge-like contraction vector
          real(wp), intent(in) :: p(:)
 
-         !> Molecular nuclear Hessian in compressed storage with allocated
-         !> blocks on the list
+         !> Molecular nuclear Hessian in compressed storage
          type(mchrg_hessian), intent(inout) :: hessian
 
          !> Error handling
@@ -468,8 +427,7 @@ module multicharge_model_type
    !> Smallest positive working-precision number
    real(wp), parameter :: eps = tiny(1.0_wp)
 
-   !> Number of atoms in a group of the charge derivatives on a neighborlist,
-   !> the last group of the spatial order may hold fewer atoms
+   !> Number of atoms in a group of the charge derivatives on a neighborlist
    integer, parameter :: max_group = 8
 
 
@@ -555,13 +513,10 @@ subroutine solve(self, mol, solver, cache, error, &
    !> Optional stress tensor for electrostatic energy
    real(wp), intent(inout), contiguous, optional :: sigma(:, :)
 
-   !> Optional derivative of the atomic partial charges w.r.t. atomic positions,
-   !> with a neighborlist they are kept in compressed-row storage in the cache
-   !> and only expanded into dqdr if present
+   !> Optional derivative of the atomic partial charges w.r.t. atomic positions
    real(wp), intent(out), contiguous, optional :: dqdr(:, :, :)
 
-   !> Optional derivative of the atomic partial charges w.r.t. lattice vectors,
-   !> requests the charge derivatives together with dqdr or a neighborlist
+   !> Optional derivative of the atomic partial charges w.r.t. lattice vectors
    real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
 
    !> Optional sorted complete neighborlist, see sort_neighborlist
@@ -599,8 +554,6 @@ subroutine solve(self, mol, solver, cache, error, &
       return
    end if
 
-   ! The symmetric matrices are kept on the upper triangles of the rows of a
-   ! sorted complete neighborlist
    if (present(list)) then
       if (.not. list%complete) then
          call fatal_error(error, "The neighborlist has to be a sorted complete "// &
@@ -808,8 +761,7 @@ subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit,
    !> Dimension of the linear system
    integer, intent(in) :: ndim
 
-   !> Derivative of the atomic partial charges w.r.t. atomic positions, with a
-   !> neighborlist only expanded from the compressed storage if present
+   !> Derivative of the atomic partial charges w.r.t. atomic positions
    real(wp), intent(out), optional :: dqdr(:, :, :)
 
    !> Derivative of the atomic partial charges w.r.t. lattice vectors
@@ -821,8 +773,7 @@ subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit,
    !> Output unit
    integer, intent(in), optional :: unit
 
-   !> Verbosity level, the times of the inverse and the product on a
-   !> neighborlist are printed from 1
+   !> Verbosity level
    integer, intent(in), optional :: verbosity
 
    real(wp), allocatable :: daqxdr(:, :, :), daqxdL(:, :, :), ainv(:, :)
@@ -841,9 +792,6 @@ subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit,
    select type (solver)
    class is (cg_solver)
       if (present(list)) then
-         ! J^-1 decays fast with the distance and is kept on the pattern of the
-         ! list, the dense part of (P J^-1)^T = J^-1 - u*u^T/sum(u) is the
-         ! rank-1 term of the charge constraint, which is rebuilt from uvec
          call timer%push("inverse")
          call get_inverse_list(mol, solver, cache, list, error, unit)
          call timer%pop
@@ -885,8 +833,6 @@ subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit,
          return
       end if
 
-      ! Inverse of J by block CG instead of 3N+9 solves with the columns of
-      ! dB/dR - dA/dR*q, then dq/dR = (dB/dR - dA/dR*q)^T (P J^-1)^T
       allocate(ainv(mol%nat, mol%nat))
       call solver%invert(amat=cache%amat, ainv=ainv, new_unit=unit, &
          & error=error)
@@ -922,9 +868,7 @@ subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit,
 end subroutine get_q_derivs
 
 
-!> Inverse S = J^-1 of the coefficient matrix on the pattern of a sorted
-!> complete neighborlist in cache%ainvlist, kept on the upper triangle of the
-!> list
+!> Inverse of the coefficient matrix on a sorted complete neighborlist
 subroutine get_inverse_list(mol, solver, cache, list, error, unit)
 
    !> Molecular structure data
@@ -958,21 +902,13 @@ subroutine get_inverse_list(mol, solver, cache, list, error, unit)
 end subroutine get_inverse_list
 
 
-!> Position derivatives of the charges from the inverse S = J^-1 on the pattern
-!> of a sorted complete neighborlist, dq_b/dR_x = (S B)_bx - u_b w_x / sum(u)
-!> with B = dB/dR - dA/dR*q and w = B^T u. The sparse product S B is kept on
-!> the pattern of the list in cache%dqdrlist, dq_b/dR_x at the entry of b in
-!> the row of x. The columns of S B are formed for groups of atoms close to
-!> each other, the elements outside of the pattern are of the order of the
-!> inverse at the cutoff and are dropped. The factors w / sum(u) of the charge
-!> constraint term follow from get_constraint_factors.
+!> Position derivatives of the charges on a sorted complete neighborlist
 subroutine get_dqdr_list(mol, cache, list)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
 
-   !> Cache with the inverse and the partial derivatives on the list, receives
-   !> the compressed position derivatives
+   !> Cache with the inverse and the partial derivatives on the list
    type(mchrg_cache), intent(inout) :: cache
 
    !> Sorted complete neighborlist
@@ -1019,23 +955,19 @@ subroutine get_dqdr_list(mol, cache, list)
 end subroutine get_dqdr_list
 
 
-!> Factors w / sum(u) of the charge constraint term of the position derivatives
-!> of the charges, w = B^T u with the partial derivatives B = dB/dR - dA/dR*q on
-!> a sorted complete neighborlist and the constraint response u
+!> Charge constraint factors of the position derivatives of the charges
 subroutine get_constraint_factors(mol, cache, list, dlambdadr)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
 
-   !> Cache with the partial derivatives on the list and the constraint
-   !> response
+   !> Cache with the partial derivatives and the constraint response
    type(mchrg_cache), intent(in) :: cache
 
    !> Sorted complete neighborlist
    type(csr_list), intent(in) :: list
 
-   !> Factors of the charge constraint term, the position derivatives of the
-   !> Lagrange multiplier
+   !> Position derivatives of the Lagrange multiplier
    real(wp), allocatable, intent(out) :: dlambdadr(:, :)
 
    allocate(dlambdadr(3, mol%nat), source=0.0_wp)
@@ -1045,10 +977,7 @@ subroutine get_constraint_factors(mol, cache, list, dlambdadr)
 end subroutine get_constraint_factors
 
 
-!> Add the transposed product of partial derivatives D on a sorted complete
-!> neighborlist with a vector, w(:, x) = w(:, x) + sum_b D(b, x) v(b), where
-!> D(b, x) is the derivative of component b w.r.t. atom x in the layout of
-!> dabdrlist, held in the row of x
+!> Add the transposed product of partial derivatives on a list with a vector
 subroutine add_transposed_product(list, dlist, vec, wvec)
 
    !> Sorted complete neighborlist
@@ -1080,17 +1009,13 @@ subroutine add_transposed_product(list, dlist, vec, wvec)
 end subroutine add_transposed_product
 
 
-!> Derivatives of the charges w.r.t. the lattice vectors, B_L^T S with the
-!> inverse S on the upper triangle of a sorted complete neighborlist and the
-!> strain derivatives B_L of the partial derivatives, and their charge
-!> constraint term
+!> Derivatives of the charges w.r.t. the lattice vectors on a list
 subroutine get_dqdL_list(mol, cache, list, dqdL)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
 
-   !> Cache with the inverse on the list and the strain derivatives of the
-   !> partial derivatives
+   !> Cache with the inverse and the strain derivatives
    type(mchrg_cache), intent(in) :: cache
 
    !> Sorted complete neighborlist
@@ -1123,13 +1048,7 @@ subroutine get_dqdL_list(mol, cache, list, dqdL)
 end subroutine get_dqdL_list
 
 
-!> Charge derivatives dq_b/dR_x of a group of atoms x for the union of their
-!> neighbors b on a sorted complete neighborlist, in qcol(3*(i-1)+1:3*i, n) for
-!> atom i of the group and atom n of the union.
-!> The product of the inverse S on the list with the columns x of the partial
-!> derivatives is only formed on the rows of the union, the elements of the
-!> atoms b outside of the list of x are dropped. The caller resets bloc for
-!> the atoms of the union.
+!> Charge derivatives of a group of atoms for the union of their neighbors
 subroutine get_group_dqdr(cache, list, group, nb, bloc, blist, qpos, pan, qcol)
 
    !> Cache with the inverse and the partial derivatives on the list
@@ -1150,8 +1069,7 @@ subroutine get_group_dqdr(cache, list, group, nb, bloc, blist, qpos, pan, qcol)
    !> Atoms of the union
    integer, intent(inout), contiguous :: blist(:)
 
-   !> Position of the entry of b in the row of x, which holds dq_b/dR_x, zero if
-   !> b is not a neighbor of x
+   !> Position of the entry of b in the row of x, zero if not a neighbor
    integer(i8), intent(inout), contiguous :: qpos(:, :)
 
    !> Partial derivatives dB_c/dR_x of the union in the layout of qcol
@@ -1174,12 +1092,7 @@ subroutine get_group_dqdr(cache, list, group, nb, bloc, blist, qpos, pan, qcol)
 end subroutine get_group_dqdr
 
 
-!> Derivatives of the adjoint vector dp_b/dR_x = (S (G + d2f/dq2 dq/dR))_bx of
-!> an external function for a group of atoms x and the union of their
-!> neighbors b from get_group_dqdr, in the layout of the charge derivatives.
-!> The mixed derivatives G = d2f/dRdq - dA/dR*p are read from the cache, the
-!> products with d2f/dq2 and the inverse S are only formed on the rows of the
-!> union and the elements of the atoms b outside of the list of x are dropped.
+!> Derivatives of the adjoint vector for a group of atoms
 subroutine get_group_dpdr(cache, list, d2fdq2, d2fdq2_list, ng, nb, bloc, blist, &
    & qpos, qcol, pan, pcol)
 
@@ -1207,8 +1120,7 @@ subroutine get_group_dpdr(cache, list, d2fdq2, d2fdq2_list, ng, nb, bloc, blist,
    !> Atoms of the union
    integer, intent(in), contiguous :: blist(:)
 
-   !> Position of the entry of each atom of the union in the row of x, zero if
-   !> the atom is not a neighbor of x
+   !> Position of the entry of each union atom in the row of x
    integer(i8), intent(in), contiguous :: qpos(:, :)
 
    !> Charge derivatives dq_b/dR_x of the union
@@ -1249,9 +1161,7 @@ subroutine get_group_dpdr(cache, list, d2fdq2, d2fdq2_list, ng, nb, bloc, blist,
 end subroutine get_group_dpdr
 
 
-!> Union of the neighbors of a group of atoms on a sorted complete neighborlist
-!> with the columns x of the partial derivatives of the group atoms, which are
-!> held in the rows of the atoms x
+!> Union of the neighbors of a group of atoms on a sorted complete list
 subroutine gather_group_list(list, dlist, group, nb, bloc, blist, qpos, pan)
 
    !> Sorted complete neighborlist
@@ -1272,8 +1182,7 @@ subroutine gather_group_list(list, dlist, group, nb, bloc, blist, qpos, pan)
    !> Atoms of the union
    integer, intent(inout), contiguous :: blist(:)
 
-   !> Position of the entry of each atom of the union in the row of x, zero if
-   !> the atom is not a neighbor of x
+   !> Position of the entry of each union atom in the row of x
    integer(i8), intent(inout), contiguous :: qpos(:, :)
 
    !> Partial derivatives dB_c/dR_x of the union
@@ -1296,8 +1205,7 @@ subroutine gather_group_list(list, dlist, group, nb, bloc, blist, qpos, pan)
 end subroutine gather_group_list
 
 
-!> Index of an atom in the union of the neighbors of a group, a new atom is
-!> appended without derivatives
+!> Index of an atom in the union of the neighbors of a group
 pure subroutine add_union_atom(bat, nb, bloc, blist, qpos, pan, n)
 
    !> Atom to add
@@ -1333,12 +1241,7 @@ pure subroutine add_union_atom(bat, nb, bloc, blist, qpos, pan, n)
 end subroutine add_union_atom
 
 
-!> Product of a symmetric matrix S on the upper triangle of a sorted complete
-!> list, the inverse or the second derivatives of an external function w.r.t.
-!> the charges, with the derivatives of the union U of a group,
-!> qcol = S_UU pan. The upper triangles of the rows of the union are read, each
-!> pair also adds the mirrored element of the symmetric matrix to the row of
-!> its other atom.
+!> Product of a symmetric matrix on a list with the derivatives of a union
 subroutine multiply_group_list(list, smat, nw, nb, bloc, blist, pan, qcol)
 
    !> Sorted complete list of the symmetric matrix
@@ -1389,8 +1292,7 @@ subroutine multiply_group_list(list, smat, nw, nb, bloc, blist, pan, qcol)
 end subroutine multiply_group_list
 
 
-!> Largest number of entries of a row of a complete neighborlist, including
-!> the atom itself
+!> Largest number of entries of a row of a complete neighborlist
 function get_max_neighbors(nat, list) result(kmax)
 
    !> Number of atoms
@@ -1408,10 +1310,7 @@ function get_max_neighbors(nat, list) result(kmax)
 end function get_max_neighbors
 
 
-!> Allocate the partial derivatives in the cache and set them to zero, which
-!> get_xvec_derivs and get_coulomb_derivs add to: dabdr (dabdrlist with a
-!> neighborlist) and dabdL, or with dafdr the Coulomb matrix derivatives
-!> contracted with an external vector, dafdr (dafdrlist with a neighborlist)
+!> Allocate the partial derivatives in the cache and set them to zero
 subroutine new_partial_derivs(mol, ndim, cache, list, dafdr)
 
    !> Molecular structure data
@@ -1459,9 +1358,7 @@ subroutine new_partial_derivs(mol, ndim, cache, list, dafdr)
 end subroutine new_partial_derivs
 
 
-!> Add partial derivatives on a sorted complete list of their own to the
-!> partial derivatives on a sorted complete neighborlist, both in the layout
-!> of dabdrlist. The pairs outside of the neighborlist are dropped.
+!> Add partial derivatives on another sorted complete list
 subroutine add_list_derivs(nat, list, dlist, plist, pval)
 
    !> Number of atoms
@@ -1508,9 +1405,7 @@ subroutine add_list_derivs(nat, list, dlist, plist, pval)
 end subroutine add_list_derivs
 
 
-!> Position derivatives of the charge of one atom w.r.t. all atomic positions,
-!> expanded from the compressed storage on the pattern of the sorted complete
-!> neighborlist of the solve and the charge constraint term
+!> Position derivatives of the charge of one atom
 subroutine get_dqdr_row(cache, list, jat, dqdr)
 
    !> Cache with the compressed position derivatives
@@ -1618,8 +1513,7 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
       & print_unit, verbosity_solve)
    if (allocated(error)) return
 
-   ! Evaluate external gradients via adjoint contraction:
-   ! dfdr = p^T * (db/dr - dA/dr X q)
+   ! Evaluate external gradients via adjoint contraction
 
    call self%get_grad(mol, cache, padj(:mol%nat), dfdr, dfdL, alpha=-1.0_wp, &
       & beta=1.0_wp, list=list)
@@ -1632,11 +1526,7 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
 end subroutine get_external_gradient
 
 
-!> Compute the molecular nuclear Hessian of the electrostatic energy, the
-!> explicit part at fixed charges and the implicit part from the response of
-!> the charges. The cache has to hold the solve and the CN derivatives, update
-!> it with hess and solve first. The direct solver keeps the inverse of the
-!> augmented matrix only if the solve requested the charge derivatives.
+!> Compute the molecular nuclear Hessian of the electrostatic energy
 subroutine get_hessian_dense(self, mol, solver, cache, error, hessian, &
    & unit, verbosity)
 
@@ -1699,14 +1589,7 @@ subroutine get_hessian_dense(self, mol, solver, cache, error, hessian, &
 end subroutine get_hessian_dense
 
 
-!> Compute the molecular nuclear Hessian of the electrostatic energy on a
-!> sorted complete neighborlist, which requires the CG solver with
-!> neighborlist support. The Hessian is kept in compressed storage on the upper
-!> triangle of the neighborlist, which keeps the blocks of the atoms y >= x, and
-!> the dense charge constraint term in its factors. The implicit part is formed
-!> first from the inverse and the partial derivatives, which are freed before
-!> the explicit part. The cache has to hold the solve on the neighborlist,
-!> update it with hess and solve first.
+!> Compute the molecular nuclear Hessian of the electrostatic energy on a list
 subroutine get_hessian_list(self, mol, solver, cache, error, hessian, list, &
    & unit, verbosity)
 
@@ -1789,8 +1672,7 @@ subroutine get_hessian_list(self, mol, solver, cache, error, hessian, list, &
 end subroutine get_hessian_list
 
 
-!> Allocate the zero blocks of a compressed Hessian on the sorted complete
-!> neighborlist, only the blocks of its upper triangle are used
+!> Allocate the zero blocks of a compressed Hessian
 subroutine new_hessian_blocks(hessian, list)
 
    !> Molecular nuclear Hessian in compressed storage
@@ -1805,9 +1687,7 @@ subroutine new_hessian_blocks(hessian, list)
 end subroutine new_hessian_blocks
 
 
-!> Check the setup of the Hessian on a neighborlist: a molecular structure, a
-!> sorted complete list, the CG solver and a cache with the solve and the CN
-!> derivatives on this list
+!> Check the setup of the Hessian on a neighborlist
 subroutine check_hessian_setup(mol, solver, cache, list, error)
 
    !> Molecular structure data
@@ -1857,10 +1737,7 @@ subroutine check_hessian_setup(mol, solver, cache, list, error)
 end subroutine check_hessian_setup
 
 
-!> Compute the implicit part of the molecular nuclear Hessian of the
-!> electrostatic energy from the response of the charges,
-!> -(dX/dR - dA/dR*q)^T dq/dR. The cache has to hold the partial derivatives
-!> dX/dR - dA/dR*q of the dense charge derivatives.
+!> Compute the implicit Hessian of the electrostatic energy
 subroutine get_implicit_hessian_dense(self, mol, cache, hessian, dqdr)
 
    !> Electronegativity-equilibration model
@@ -1885,19 +1762,7 @@ subroutine get_implicit_hessian_dense(self, mol, cache, hessian, dqdr)
 end subroutine get_implicit_hessian_dense
 
 
-!> Compute the implicit part of the molecular nuclear Hessian of the
-!> electrostatic energy on a sorted complete neighborlist from the inverse
-!> S = J^-1 on the pattern of the list and the partial derivatives
-!> B = dX/dR - dA/dR*q in the cache. The block of the atoms x <= y is
-!> -sum_b (dX_b/dR_y - (dA/dR_y*q)_b) (dq_b/dR_x)^T over the atoms b in the
-!> lists of x and y, without the constraint term of the charge derivatives.
-!> The charge derivatives dq_b/dR_x = (S B)_bx on the pattern of the list are
-!> formed for groups of atoms x close to each other and used at once, they are
-!> not stored. The block of y and x is the transpose and the diagonal blocks are
-!> symmetrized, so this part is symmetric. The blocks are added on the upper
-!> triangles of the rows of the list, which only keeps the blocks of y >= x.
-!> The charge constraint gives the dense rank-1 term
-!> sum(u) * vec(dlambda) vec(dlambda)^T, which is kept in its factors.
+!> Compute the implicit Hessian of the electrostatic energy on a list
 subroutine get_implicit_hessian_list(self, mol, cache, hessian, list, times)
 
    !> Electronegativity-equilibration model
@@ -1909,15 +1774,13 @@ subroutine get_implicit_hessian_list(self, mol, cache, hessian, list, times)
    !> Cache handling
    type(mchrg_cache), intent(in) :: cache
 
-   !> Molecular nuclear Hessian in compressed storage with allocated blocks on
-   !> the list
+   !> Molecular nuclear Hessian in compressed storage
    type(mchrg_hessian), intent(inout) :: hessian
 
    !> Multicharge neighborlist type (sorted complete)
    type(csr_list), intent(in) :: list
 
-   !> Time of the charge derivatives of the groups and of their contraction
-   !> in seconds, summed over the threads
+   !> Times of the group derivatives and their contraction
    real(wp), intent(out), optional :: times(2)
 
    real(wp) :: tgroup(2)
@@ -1927,8 +1790,6 @@ subroutine get_implicit_hessian_list(self, mol, cache, hessian, list, times)
    call add_implicit_blocks_list(mol, cache, hessian, list, order, tgroup)
    if (present(times)) times(:) = tgroup
 
-   ! Charge constraint term, sum_b (dX_b/dR_x - (dA/dR_x*q)_b) * uvec(b) is
-   ! sum(u) * dlambda(:, x), where sum(u) = 1^T A^-1 1 is positive
    call get_constraint_factors(mol, cache, list, hessian%dlambda)
    hessian%weight = sum(cache%uvec)
    if (allocated(hessian%wvec)) deallocate(hessian%wvec)
@@ -1936,27 +1797,14 @@ subroutine get_implicit_hessian_list(self, mol, cache, hessian, list, times)
 end subroutine get_implicit_hessian_list
 
 
-!> Add the implicit blocks of the atoms x <= y on a sorted complete
-!> neighborlist for groups of max_group consecutive atoms of a spatial order,
-!> without the charge constraint term. The block of the electrostatic energy
-!> is -sum_b B(b, y) dq_b/dR_x with the partial derivatives
-!> B = dX/dR - dA/dR*q. With d2f/dq2 of an external function it is the
-!> response of its gradient df/dR + p^T B, sum_b G(b, y) dq_b/dR_x
-!> + B(b, y) dp_b/dR_x, with the mixed derivatives G = d2f/dRdq - dA/dR*p in
-!> the cache and the derivatives of the adjoint vector
-!> dp/dR = S (G + d2f/dq2 dq/dR). The derivatives of a group are contracted
-!> with the column y of B and G at once, which is the row of y of the list, so
-!> each column is read once per group. The Hessian keeps the blocks of y >= x
-!> in the upper triangles of the rows of the list, only the group of atom x
-!> writes the blocks (x, y), so the groups are independent.
+!> Add the implicit blocks for groups of atoms on a sorted complete list
 subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times, &
    & d2fdq2, d2fdq2_list)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
 
-   !> Cache with the inverse and the partial derivatives on the list, and the
-   !> mixed derivatives of an external function
+   !> Cache with the inverse, partial and mixed derivatives
    type(mchrg_cache), intent(in) :: cache
 
    !> Molecular nuclear Hessian with allocated blocks
@@ -1968,12 +1816,10 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times, &
    !> Atoms in the spatial order of the groups
    integer, intent(in), contiguous :: order(:)
 
-   !> Time of the derivatives of the groups and of their contraction in
-   !> seconds, summed over the threads
+   !> Times of the group derivatives and their contraction
    real(wp), intent(out) :: times(2)
 
-   !> Second derivatives of an external function w.r.t. the charges on the
-   !> upper triangle of their list, selects the external Hessian
+   !> Second derivatives of an external function w.r.t. the charges
    real(wp), intent(in), contiguous, optional :: d2fdq2(:)
 
    !> Sorted complete list of the second derivatives w.r.t. the charges
@@ -2019,18 +1865,12 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times, &
       x0 = max_group * (igrp - 1)
       ng = min(max_group, mol%nat - x0)
 
-      ! Charge derivatives dq_b/dR_x of the atoms x of the group for the union
-      ! of their neighbors b, zero if b is not a neighbor of x, and the
-      ! derivatives of the adjoint vector of an external function
       call get_group_dqdr(cache, list, order(x0 + 1:x0 + ng), nb, bloc, blist, &
          & qpos, pan, qcol)
       if (ext) call get_group_dpdr(cache, list, d2fdq2, d2fdq2_list, ng, nb, &
          & bloc, blist, qpos, qcol, pan, pcol)
       call system_clock(tick(2))
 
-      ! Union of the atoms y >= x in the upper triangles of the rows of the
-      ! Hessian of the group with the positions of the blocks (x, y), zero if
-      ! not present
       nu = 0
       do i = 1, ng
          xat = order(x0 + i)
@@ -2049,10 +1889,6 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times, &
          end do
       end do
 
-      ! acc(jc, ic, ia) = sum_b B(b, y)_jc dq_b/dR_x,ic, for an external
-      ! function sum_b B(b, y)_jc dp_b/dR_x,ic + G(b, y)_jc dq_b/dR_x,ic, of
-      ! the atoms x = act(ia) of the group with a block (x, y) in the Hessian,
-      ! the block (x, y) is scale * acc
       do u = 1, nu
          yat = ulist(u)
          hloc(yat) = 0
@@ -2100,11 +1936,7 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times, &
 end subroutine add_implicit_blocks_list
 
 
-!> Add the products of the column y of partial derivatives D on a sorted
-!> complete neighborlist with the derivatives of a group for the union of
-!> their neighbors, acc(jc, ic, ia) = acc(jc, ic, ia) + sum_b D(b, y)_jc
-!> col(3 * (act(ia) - 1) + ic, bloc(b)) over the atoms b of the union. The
-!> column y is held in the row of y.
+!> Add the products of a column of partial derivatives with group derivatives
 subroutine add_column_products(list, dlist, yat, bloc, act, col, acc)
 
    !> Sorted complete neighborlist
@@ -2147,16 +1979,7 @@ subroutine add_column_products(list, dlist, yat, bloc, act, col, acc)
 end subroutine add_column_products
 
 
-!> Compute the nuclear Hessian of an external function f(q, R) of the charges
-!> at a fixed lattice with the adjoint vector p = S df/dq, the explicit part
-!> p^T (d2X/dR2 - d2A/dR2*q) at fixed charges and the implicit part
-!> G^T dq/dR + (dq/dR)^T G + (dq/dR)^T d2f/dq2 dq/dR from the response of the
-!> charges with G = d2f/dRdq - dA/dR*p. The derivatives of f are taken at the
-!> charges of the structure, the second derivative d2f/dR2 at fixed charges is
-!> added by the caller. Periodic systems are supported if the explicit Hessian of the
-!> model is. The cache has to hold the solve and the CN derivatives,
-!> update it with hess and solve first. The direct solver keeps the inverse of
-!> the augmented matrix only if the solve requested the charge derivatives.
+!> Compute the nuclear Hessian of an external function of the charges
 subroutine get_external_hessian_dense(self, mol, solver, cache, error, dfdq, &
    & d2fdq2, dfdrdq, hessian, unit, verbosity)
 
@@ -2181,8 +2004,7 @@ subroutine get_external_hessian_dense(self, mol, solver, cache, error, dfdq, &
    !> Second derivative of the external function w.r.t. atomic charges
    real(wp), intent(in) :: d2fdq2(:, :)
 
-   !> Mixed derivative of the external function w.r.t. positions and charges,
-   !> dfdrdq(:, x, b) = d2f/dR_x dq_b
+   !> Mixed derivative of the external function w.r.t. positions and charges
    real(wp), intent(in) :: dfdrdq(:, :, :)
 
    !> Nuclear Hessian of the external function without d2f/dR2
@@ -2232,8 +2054,6 @@ subroutine get_external_hessian_dense(self, mol, solver, cache, error, dfdq, &
       & p=padj(:mol%nat), dafdr=.true.)
    cache%dafdr = cache%dafdr + dfdrdq
 
-   ! Implicit part G^T dq/dR + (dq/dR)^T (G + d2f/dq2 dq/dR), the second
-   ! factor replaces G in place
    call gemm(reshape(cache%dafdr, [ndim, mol%nat]), &
       & reshape(dqdr, [ndim, mol%nat]), hessian, transb='t')
    call gemm(dqdr, d2fdq2, cache%dafdr, beta=1.0_wp)
@@ -2250,22 +2070,7 @@ subroutine get_external_hessian_dense(self, mol, solver, cache, error, dfdq, &
 end subroutine get_external_hessian_dense
 
 
-!> Compute the molecular nuclear Hessian of an external function f(q, R) of the
-!> charges on a sorted complete neighborlist, which requires the CG solver with
-!> neighborlist support. The second derivatives d2f/dq2 and the mixed
-!> derivatives d2f/dRdq are given on sorted complete lists of their own, the
-!> mixed derivatives of the pairs outside of the neighborlist are dropped. With
-!> the adjoint vector p = S df/dq, the response of the gradient df/dR + p^T B
-!> with the partial derivatives B = dX/dR - dA/dR*q gives the block of the
-!> atoms x and y, sum_b G(b, y) dq_b/dR_x + B(b, y) dp_b/dR_x with the mixed
-!> derivatives G = d2f/dRdq - dA/dR*p and the derivatives of the adjoint
-!> vector dp/dR = S (G + d2f/dq2 dq/dR), plus the explicit part
-!> p^T (d2X/dR2 - d2A/dR2*q). The inverse S and the Hessian are kept on the
-!> upper triangle of the neighborlist, the dense rank-2 term of the charge
-!> constraint in its factors. The derivatives of f are taken at the charges of
-!> the structure, the second derivative d2f/dR2 at fixed charges is added by
-!> the caller. The cache has to hold the solve on the neighborlist, update it
-!> with hess and solve first.
+!> Compute the nuclear Hessian of an external function on a list
 subroutine get_external_hessian_list(self, mol, solver, cache, error, dfdq, &
    & d2fdq2, d2fdq2_list, dfdrdq, dfdrdq_list, hessian, list, unit, verbosity)
 
@@ -2287,22 +2092,19 @@ subroutine get_external_hessian_list(self, mol, solver, cache, error, dfdq, &
    !> Derivative of the external function w.r.t. atomic charges
    real(wp), intent(in) :: dfdq(:)
 
-   !> Second derivative of the external function w.r.t. atomic charges, the
-   !> symmetric matrix on the upper triangle of its list
+   !> Second derivative of the external function w.r.t. atomic charges
    real(wp), intent(in), contiguous :: d2fdq2(:)
 
    !> Sorted complete list of the second derivative w.r.t. atomic charges
    type(csr_list), intent(in) :: d2fdq2_list
 
    !> Mixed derivative of the external function w.r.t. positions and charges
-   !> on its list, the entry of atom b in the row of atom x holds d2f/dR_x dq_b
    real(wp), intent(in) :: dfdrdq(:, :)
 
    !> Sorted complete list of the mixed derivative w.r.t. positions and charges
    type(csr_list), intent(in) :: dfdrdq_list
 
-   !> Molecular nuclear Hessian of the external function without d2f/dR2 in
-   !> compressed storage on the neighborlist
+   !> Molecular nuclear Hessian in compressed storage
    type(mchrg_hessian), intent(inout) :: hessian
 
    !> Neighborlist type
@@ -2342,8 +2144,6 @@ subroutine get_external_hessian_list(self, mol, solver, cache, error, dfdq, &
    call timer%pop
    if (allocated(error)) return
 
-   ! Partial derivatives B = dX/dR - dA/dR*q and the mixed derivatives
-   ! G = d2f/dRdq - dA/dR*p on the list, and the inverse on the list
    call print_hessian_header(print_unit, verbosity_hess)
    call timer%push("dabdr")
    call new_partial_derivs(mol, mol%nat, cache, list)
@@ -2367,8 +2167,6 @@ subroutine get_external_hessian_list(self, mol, solver, cache, error, dfdq, &
    call new_hessian_blocks(hessian, list)
    call get_external_constraint_factors(mol, cache, list, fuvec, tvec, hessian)
 
-   ! Response of the charges and of the adjoint vector,
-   ! sum_b G(b, y) dq_b/dR_x + B(b, y) dp_b/dR_x
    call timer%push("implicit")
    call get_spatial_order(mol%xyz, order)
    call add_implicit_blocks_list(mol, cache, hessian, list, order, tgroup, &
@@ -2390,8 +2188,7 @@ subroutine get_external_hessian_list(self, mol, solver, cache, error, dfdq, &
 end subroutine get_external_hessian_list
 
 
-!> Check the derivatives of an external function on their sorted complete
-!> lists
+!> Check the derivatives of an external function on their lists
 subroutine check_external_derivs(mol, dfdq, d2fdq2, d2fdq2_list, dfdrdq, &
    & dfdrdq_list, error)
 
@@ -2433,9 +2230,7 @@ subroutine check_external_derivs(mol, dfdq, d2fdq2, d2fdq2_list, dfdrdq, &
 end subroutine check_external_derivs
 
 
-!> Response of the charge constraint to the second derivatives of an external
-!> function, F u = d2f/dq2 u with the constraint response u = A^-1 1 and
-!> t = A^-1 F u, which give the factors of the charge constraint term
+!> Response of the charge constraint to an external function
 subroutine get_constraint_response(mol, solver, cache, list, d2fdq2, &
    & d2fdq2_list, fuvec, tvec, unit, error)
 
@@ -2485,17 +2280,14 @@ subroutine get_constraint_response(mol, solver, cache, list, d2fdq2, &
 end subroutine get_constraint_response
 
 
-!> Factors of the charge constraint term of the Hessian of an external
-!> function, -(w dlambda^T + dlambda w^T) + phi dlambda dlambda^T with
-!> dlambda = B^T u / sum(u), w = G^T u + B^T t and phi = u^T F u
+!> Charge constraint factors of the Hessian of an external function
 subroutine get_external_constraint_factors(mol, cache, list, fuvec, tvec, &
    & hessian)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
 
-   !> Cache with the partial and the mixed derivatives on the list and the
-   !> constraint response
+   !> Cache with the partial and mixed derivatives
    type(mchrg_cache), intent(in) :: cache
 
    !> Sorted complete neighborlist
@@ -2530,8 +2322,7 @@ subroutine get_adjoint_vector(mol, solver, cache, error, dfdq, padj, list, unit,
    !> Solver instance
    class(mchrg_solver_type), intent(in) :: solver
 
-   !> Cache with the coefficient matrix, on the neighborlist if present, and
-   !> the constraint response of the CG solver
+   !> Cache with the coefficient matrix and the constraint response
    type(mchrg_cache), intent(in) :: cache
 
    !> Error handling
@@ -2592,8 +2383,7 @@ subroutine get_adjoint_vector(mol, solver, cache, error, dfdq, padj, list, unit,
 end subroutine get_adjoint_vector
 
 
-!> Semi-numerical Hessian and pressure tensor from central differences of
-!> the analytical energy gradient and virial
+!> Semi-numerical Hessian and pressure tensor
 subroutine get_numhess_packed(self, mol, solver, cache, error, qvec, energy, grad, &
    & sigma, hess, press, list, unit, verbosity)
 
@@ -2727,8 +2517,7 @@ subroutine get_numhess_packed(self, mol, solver, cache, error, qvec, energy, gra
 end subroutine get_numhess_packed
 
 
-!> Semi-numerical Hessian in dense symmetric storage, obtained by expanding the
-!> packed lower triangle
+!> Semi-numerical Hessian in dense symmetric storage
 subroutine get_numhess_dense(self, mol, solver, cache, error, qvec, energy, grad, &
    & sigma, hess, press, list, unit, verbosity)
 
@@ -2797,9 +2586,7 @@ subroutine get_numhess_dense(self, mol, solver, cache, error, qvec, energy, grad
 end subroutine get_numhess_dense
 
 
-!> Accumulate one column of the Cartesian Hessian into packed lower-triangle
-!> storage. Every off-diagonal element is reached once from each of the two
-!> displacements that contribute to it, so both estimates are averaged.
+!> Accumulate one column of the Hessian in packed storage
 subroutine add_hess_column(jdx, dgdr, hess)
 
    !> Index of the displaced Cartesian coordinate
@@ -2845,8 +2632,7 @@ elemental function hess_index(idx, jdx) result(ij)
 end function hess_index
 
 
-!> Energy gradient and virial for a displaced structure using a fresh cache
-!> and, if requested, a rebuilt neighborlist
+!> Energy gradient and virial for a displaced structure
 subroutine get_displaced_gradient(self, mol, solver, error, gradient, sigma, &
    & list, unit, verbosity)
 
@@ -2868,8 +2654,7 @@ subroutine get_displaced_gradient(self, mol, solver, error, gradient, sigma, &
    !> Virial
    real(wp), intent(out), contiguous :: sigma(:, :)
 
-   !> Reference neighborlist, only its cutoff is reused for a sorted complete
-   !> neighborlist of the displaced structure
+   !> Reference neighborlist
    type(csr_list), intent(in), optional :: list
 
    !> Output unit
@@ -2934,9 +2719,7 @@ subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL, &
    !> Multicharge neighborlist type
    type(csr_list), intent(in), optional :: list
 
-   !> Optional derivative of local atomic partial charges w.r.t. atomic positions
-   !> in the CSR list layout: d(qloc_j)/d(r_i) for each list entry, with
-   !> d(qloc_i)/d(r_i) stored in the diagonal entry list%inl(i)
+   !> Optional derivative of local charges w.r.t. positions on the list
    real(wp), intent(out), optional :: dqlocdrlist(:, :)
 
    qloc = 0.0_wp
@@ -3141,8 +2924,7 @@ subroutine print_hessian_stages(unit, timer, tgroup, adjoint)
    !> Timer of the stages
    type(timer_type), intent(in) :: timer
 
-   !> Time of the derivatives of the groups and of their contraction in
-   !> seconds, summed over the threads
+   !> Times of the group derivatives and their contraction
    real(wp), intent(in) :: tgroup(2)
 
    !> Print the stage of the adjoint solves of an external function
