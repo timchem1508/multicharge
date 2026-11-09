@@ -90,8 +90,7 @@ subroutine collect_csrlist(testsuite)
    & new_unittest("eeqbc-api-mb01", test_eeqbc_api_mb01), &
    & new_unittest("eeqbc-api-mb02", test_eeqbc_api_mb02), &
    & new_unittest("eeqbc-api-actinides", test_eeqbc_api_actinides), &
-   & new_unittest("partial-derivs-half-list", test_partial_derivs_half_list, &
-   & should_fail=.true.), &
+   & new_unittest("partial-derivs-half-list", test_partial_derivs_half_list, should_fail=.true.), &
    & new_unittest("partial-derivs-mb01", test_partial_derivs_mb01), &
    & new_unittest("partial-derivs-co2", test_partial_derivs_co2), &
    & new_unittest("partial-derivs-ice", test_partial_derivs_ice), &
