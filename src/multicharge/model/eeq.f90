@@ -356,7 +356,7 @@ subroutine get_amat_3d(self, mol, wsc, alpha, amat)
          wsw = 1.0_wp / real(wsc%nimg(jat, iat), wp)
          do img = 1, wsc%nimg(jat, iat)
             vec = mol%xyz(:, jat) - mol%xyz(:, iat) + wsc%trans(:, wsc%tridx(img, jat, &
-            & iat))
+               & iat))
             call get_amat_dir_3d(vec, gam, alpha, dtrans, dtmp)
             call get_amat_rec_3d(vec, vol, alpha, rtrans, rtmp)
             amat_local(jat, iat) = amat_local(jat, iat) + (dtmp + rtmp) * wsw
@@ -574,7 +574,7 @@ subroutine get_damat_0d(self, mol, cache, alpha, p, dadr, dadL)
          gam = 1.0_wp / sqrt(self%rad(izp)**2 + self%rad(jzp)**2)
          arg = gam * gam * r2
          dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) - erf(sqrt(arg)) &
-         & / (r2 * sqrt(r2))
+            & / (r2 * sqrt(r2))
          dG = alpha * dtmp * vec
          dS = spread(dG, 1, 3) * spread(vec, 2, 3)
          dadr_local(:, iat, iat) = dadr_local(:, iat, iat) - dG * p(jat)
@@ -642,7 +642,7 @@ subroutine get_damat_3d(self, mol, cache, alpha, p, dadr, dadL)
          wsw = 1.0_wp / real(cache%wsc%nimg(jat, iat), wp)
          do img = 1, cache%wsc%nimg(jat, iat)
             vec = mol%xyz(:, jat) - mol%xyz(:, iat) + cache%wsc%trans(:, &
-            & cache%wsc%tridx(img, jat, iat))
+               & cache%wsc%tridx(img, jat, iat))
             call get_damat_dir_3d(vec, gam, cache%alpha, dtrans, dGd, dSd)
             call get_damat_rec_3d(vec, vol, cache%alpha, rtrans, dGr, dSr)
             dG = dG + (dGd + dGr) * wsw
@@ -1127,7 +1127,7 @@ subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
          gam = 1.0_wp / sqrt(self%rad(izp)**2 + self%rad(jzp)**2)
          arg = gam * gam * r2
          dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) - erf(sqrt(arg)) &
-         & / (r2 * sqrt(r2))
+            & / (r2 * sqrt(r2))
          dG = dtmp * vec
          dS = spread(dG, 1, 3) * spread(vec, 2, 3)
 
@@ -1158,7 +1158,7 @@ subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
    allocate(sigma_local(3, 3), source = 0.0_wp)
 
    call self%ncoord%add_coordination_number_derivs(mol, cache%trans, cnacc, &
-   & gradient_local, sigma_local)
+      & gradient_local, sigma_local)
 
    gradient = gradient + beta * gradient_local
    sigma = sigma + beta * sigma_local
@@ -1226,7 +1226,7 @@ subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
          wsw = 1.0_wp / real(cache%wsc%nimg(jat, iat), wp)
          do img = 1, cache%wsc%nimg(jat, iat)
             vec = mol%xyz(:, jat) - mol%xyz(:, iat) + cache%wsc%trans(:, &
-            & cache%wsc%tridx(img, jat, iat))
+               & cache%wsc%tridx(img, jat, iat))
             call get_damat_dir_3d(vec, gam, cache%alpha, dtrans, dGd, dSd)
             call get_damat_rec_3d(vec, vol, cache%alpha, rtrans, dGr, dSr)
             dG = dG + (dGd + dGr) * wsw
@@ -1269,7 +1269,7 @@ subroutine get_grad_3d(self, mol, cache, p, gradient, sigma, alphain, betain)
    allocate(sigma_local(3, 3), source = 0.0_wp)
 
    call self%ncoord%add_coordination_number_derivs(mol, cache%trans, cnacc, &
-   & gradient_local, sigma_local)
+      & gradient_local, sigma_local)
 
    gradient = gradient + beta * gradient_local
    sigma = sigma + beta * sigma_local
