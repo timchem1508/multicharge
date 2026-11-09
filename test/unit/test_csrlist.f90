@@ -2123,8 +2123,7 @@ end subroutine test_external_hessian
 
 
 !> Check the weighted charge Hessian of add_charge_hessian on a sorted complete
-!> neighbour list holding all pairs against the dense contraction, and that the
-!> dense Hessian is left unchanged with a list
+!> neighbour list holding all pairs against the dense contraction
 subroutine test_charge_hessian(error, mol, model)
 
    !> Error handling
@@ -2141,6 +2140,7 @@ subroutine test_charge_hessian(error, mol, model)
    type(mchrg_hessian), allocatable :: sphess
    integer :: iat, ndim
    real(wp), allocatable :: qvec(:), weights(:), hessian(:, :), refhess(:, :)
+   real(wp), allocatable :: d2fdq2(:, :), dfdrdq(:, :, :), qval(:), rval(:, :)
 
    allocate(list)
    call get_sorted_list(list, mol, error, cutoff)
@@ -2157,27 +2157,27 @@ subroutine test_charge_hessian(error, mol, model)
       weights(iat) = 0.7_wp - 0.3_wp * real(mod(3*iat, 5), wp) / 4.0_wp
    end do
 
+   ! f = weights^T q without second and mixed derivatives, on the neighbour
+   ! list itself for the compressed Hessian
+   allocate(d2fdq2(mol%nat, mol%nat), dfdrdq(3, mol%nat, mol%nat), &
+      & qval(size(list%nlat)), rval(3, size(list%nlat)), source=0.0_wp)
+
    refhess(:, :) = 0.0_wp
    allocate(cache)
    call get_charges(model, mol, error, qvec, cache=cache)
    if (allocated(error)) return
-   call add_charge_hessian(model, mol, error, weights, refhess, cache)
+   call add_charge_hessian(model, mol, error, weights, d2fdq2, dfdrdq, refhess, &
+      & cache)
    if (allocated(error)) return
 
    ! Compressed Hessian on the neighbour list
-   hessian(:, :) = 1.0_wp
    deallocate(cache)
    allocate(cache, sphess)
    call get_charges(model, mol, error, qvec, list=list, cache=cache)
    if (allocated(error)) return
-   call add_charge_hessian(model, mol, error, weights, hessian, cache, list, &
-      & sphess)
+   call add_charge_hessian(model, mol, error, weights, qval, list, rval, list, &
+      & sphess, cache, list)
    if (allocated(error)) return
-
-   if (any(hessian /= 1.0_wp)) then
-      call test_failed(error, "Dense Hessian changed on the neighbour list")
-      return
-   end if
 
    call expand_hessian(mol, list, sphess, hessian)
    if (.not. all(abs(hessian - refhess) <= thr2)) then

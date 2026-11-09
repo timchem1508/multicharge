@@ -1966,8 +1966,10 @@ subroutine test_charge_hessian(error, mol, model)
    real(wp) :: xorig
    real(wp), allocatable :: qvec(:), weights(:), dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: gr(:, :), gl(:, :), hessian(:, :), numhess(:, :)
+   real(wp), allocatable :: d2fdq2(:, :), dfdrdq(:, :, :)
 
    ndim = 3*mol%nat
+   allocate(d2fdq2(mol%nat, mol%nat), dfdrdq(3, mol%nat, mol%nat), source=0.0_wp)
    allocate(qvec(mol%nat), weights(mol%nat), dqdr(3, mol%nat, mol%nat), &
       & dqdL(3, 3, mol%nat), gr(3, mol%nat), gl(3, mol%nat), &
       & hessian(ndim, ndim), numhess(ndim, ndim))
@@ -1994,7 +1996,9 @@ subroutine test_charge_hessian(error, mol, model)
    allocate(cache)
    call get_charges(model, mol, error, qvec, cache=cache)
    if (allocated(error)) return
-   call add_charge_hessian(model, mol, error, weights, hessian, cache)
+   ! f = weights^T q without second and mixed derivatives
+   call add_charge_hessian(model, mol, error, weights, d2fdq2, dfdrdq, hessian, &
+      & cache)
    if (allocated(error)) return
    hessian(:, :) = hessian - 1.0_wp
 

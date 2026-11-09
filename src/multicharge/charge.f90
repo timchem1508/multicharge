@@ -26,6 +26,7 @@ module multicharge_charge
    use mctc_csrlist, only : csr_list
    use multicharge_model_type, only : mchrg_model_type, mchrg_hessian
    use multicharge_model_cache, only : mchrg_cache
+   use multicharge_model_eeqbc, only : eeqbc_model
    use multicharge_solver_type, only : mchrg_solver_type, mchrg_solver_input
    use multicharge_solver_cg, only : cg_solver, new_cg_solver, cg_input
    use multicharge_solver_direct, only : direct_solver, new_direct_solver, direct_input
@@ -35,6 +36,11 @@ module multicharge_charge
 
    public :: get_charges, get_eeq_charges, get_eeqbc_charges, add_charge_hessian
 
+   !> Hessian of an external function of the charges, dense or on a neighborlist
+   interface add_charge_hessian
+      module procedure :: add_charge_hessian_dense
+      module procedure :: add_charge_hessian_list
+   end interface add_charge_hessian
 
 contains
 
@@ -115,13 +121,12 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, list, efield, 
 end subroutine get_charges
 
 
-!> Add the Hessian of the charges contracted with fixed atomic weights,
-!> sum_i weights(i) d2q_i/dR2, at a fixed lattice. The cache has to come from
-!> get_charges with the same structure, model and neighborlist. With a
-!> neighborlist the contraction replaces the compressed Hessian on the list
-!> and the dense Hessian is left unchanged.
-subroutine add_charge_hessian(mchrg_model, mol, error, weights, hessian, cache, &
-   & list, hesslist)
+!> Add the Hessian of an external function f(q, R) of the charges without
+!> d2f/dR2 at a fixed lattice, with the weights df/dq, for f = weights^T q the
+!> contraction sum_i weights(i) d2q_i/dR2. The cache has to come from
+!> get_charges with the same structure and model and without a neighborlist.
+subroutine add_charge_hessian_dense(mchrg_model, mol, error, weights, d2fdq2, &
+   & dfdrdq, hessian, cache)
 
    !> Multicharge model
    class(mchrg_model_type), intent(in) :: mchrg_model
@@ -132,68 +137,111 @@ subroutine add_charge_hessian(mchrg_model, mol, error, weights, hessian, cache, 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
-   !> Weights of the atomic partial charges
+   !> Weights of the atomic partial charges, df/dq
    real(wp), intent(in) :: weights(:)
 
-   !> Nuclear Hessian of shape (3*nat, 3*nat), the contraction is added,
-   !> unchanged with a neighborlist
+   !> Second derivative of the external function w.r.t. atomic charges
+   real(wp), intent(in) :: d2fdq2(:, :)
+
+   !> Mixed derivative of the external function w.r.t. positions and charges,
+   !> dfdrdq(:, x, b) = d2f/dR_x dq_b
+   real(wp), intent(in) :: dfdrdq(:, :, :)
+
+   !> Nuclear Hessian of shape (3*nat, 3*nat), the contraction is added
    real(wp), intent(inout) :: hessian(:, :)
 
    !> Cache retained by get_charges, holds partial derivatives afterwards
    type(mchrg_cache), intent(inout) :: cache
 
-   !> Sorted complete neighborlist of get_charges, see sort_neighborlist
-   type(csr_list), intent(in), optional :: list
-
-   !> Nuclear Hessian in compressed storage on the neighborlist, required and
-   !> replaced with a neighborlist
-   type(mchrg_hessian), intent(inout), optional :: hesslist
-
-   real(wp), allocatable :: whess(:, :), d2fdq2(:, :), dfdrdq(:, :, :)
-   real(wp), allocatable :: qval(:), rval(:, :)
+   real(wp), allocatable :: whess(:, :)
    class(cg_solver), allocatable :: solver
    class(cg_input), allocatable :: solver_input
-
-   ! Same solver as in get_charges, the constraint response of its solve is
-   ! kept in the cache
-   allocate(solver_input)
-   solver_input%use_nlist = present(list)
-   allocate(solver)
-   call new_cg_solver(solver, solver_input)
-
-   ! The weighted sum of the charges is linear in the charges, its Hessian is
-   ! the external Hessian with df/dq = weights and vanishing second and mixed
-   ! derivatives, on the neighborlist itself if present
-   if (present(list)) then
-      if (.not. present(hesslist)) then
-         call fatal_error(error, "Charge Hessian on a neighborlist requires "// &
-            & "the compressed Hessian")
-         return
-      end if
-      if (list%complete = .false.) then
-         call fatal_error(error, "Hessian calculation requires a complete neighborlist")
-         return
-      end if
-      allocate(qval(size(list%nlat)), source=0.0_wp)
-      allocate(rval(3, size(list%nlat)), source=0.0_wp)
-      call mchrg_model%get_external_hessian(mol, solver, cache, error, weights, &
-         & qval, list, rval, list, hesslist, list)
-      return
-   end if
 
    if (any(shape(hessian) /= 3 * mol%nat)) then
       call fatal_error(error, "Invalid dimensions for charge Hessian contraction")
       return
    end if
+
+   ! Same solver as in get_charges, the constraint response of its solve is
+   ! kept in the cache
+   allocate(solver_input)
+   allocate(solver)
+   call new_cg_solver(solver, solver_input)
+
    allocate(whess(3 * mol%nat, 3 * mol%nat))
-   allocate(d2fdq2(mol%nat, mol%nat), source=0.0_wp)
-   allocate(dfdrdq(3, mol%nat, mol%nat), source=0.0_wp)
    call mchrg_model%get_external_hessian(mol, solver, cache, error, weights, &
       & d2fdq2, dfdrdq, whess)
    if (allocated(error)) return
    hessian(:, :) = hessian + whess
 
-end subroutine add_charge_hessian
+end subroutine add_charge_hessian_dense
+
+
+!> Hessian of an external function f(q, R) of the charges without d2f/dR2 on a
+!> sorted complete neighborlist in compressed storage, for f = weights^T q the
+!> contraction sum_i weights(i) d2q_i/dR2. Only available for the EEQBC model,
+!> the cache has to come from get_charges with the same structure, model and
+!> neighborlist.
+subroutine add_charge_hessian_list(mchrg_model, mol, error, weights, d2fdq2, &
+   & d2fdq2_list, dfdrdq, dfdrdq_list, hessian, cache, list)
+
+   !> Multicharge model
+   class(mchrg_model_type), intent(in) :: mchrg_model
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Weights of the atomic partial charges, df/dq
+   real(wp), intent(in) :: weights(:)
+
+   !> Second derivative of the external function w.r.t. atomic charges, the
+   !> symmetric matrix on the upper triangle of its list
+   real(wp), intent(in), contiguous :: d2fdq2(:)
+
+   !> Sorted complete list of the second derivative w.r.t. atomic charges
+   type(csr_list), intent(in) :: d2fdq2_list
+
+   !> Mixed derivative of the external function w.r.t. positions and charges
+   !> on its list, the entry of atom b in the row of atom x holds d2f/dR_x dq_b
+   real(wp), intent(in) :: dfdrdq(:, :)
+
+   !> Sorted complete list of the mixed derivative w.r.t. positions and charges
+   type(csr_list), intent(in) :: dfdrdq_list
+
+   !> Nuclear Hessian in compressed storage on the neighborlist, replaced
+   type(mchrg_hessian), intent(inout) :: hessian
+
+   !> Cache retained by get_charges, holds partial derivatives afterwards
+   type(mchrg_cache), intent(inout) :: cache
+
+   !> Sorted complete neighborlist of get_charges, see sort_neighborlist
+   type(csr_list), intent(in) :: list
+
+   class(cg_solver), allocatable :: solver
+   class(cg_input), allocatable :: solver_input
+
+   select type (mchrg_model)
+   class is (eeqbc_model)
+   class default
+      call fatal_error(error, "Charge Hessian on a neighborlist is only "// &
+         & "available for the EEQBC model")
+      return
+   end select
+
+   ! Same solver as in get_charges, the constraint response of its solve is
+   ! kept in the cache
+   allocate(solver_input)
+   solver_input%use_nlist = .true.
+   allocate(solver)
+   call new_cg_solver(solver, solver_input)
+
+   call mchrg_model%get_external_hessian(mol, solver, cache, error, weights, &
+      & d2fdq2, d2fdq2_list, dfdrdq, dfdrdq_list, hessian, list)
+
+end subroutine add_charge_hessian_list
 
 
 !> Obtain charges from electronegativity equilibration model
@@ -250,11 +298,11 @@ subroutine get_eeqbc_charges(mol, error, qvec, dqdr, dqdL, list, efield)
    !> Optional external electric field
    real(wp), intent(in), contiguous, optional :: efield(:)
 
-   class(mchrg_model_type), allocatable :: eeqbc_model
+   class(mchrg_model_type), allocatable :: model
 
-   call new_eeqbc2025_model(mol, eeqbc_model, error)
+   call new_eeqbc2025_model(mol, model, error)
 
-   call get_charges(eeqbc_model, mol, error, qvec, dqdr, dqdL, list=list, efield=efield)
+   call get_charges(model, mol, error, qvec, dqdr, dqdL, list=list, efield=efield)
 
 end subroutine get_eeqbc_charges
 
