@@ -32,7 +32,7 @@ module multicharge_model_type
    use mctc_cutoff, only : get_lattice_points
    use mctc_ncoord, only : ncoord_type
    use mctc_csrlist, only : csr_list, new_csr_list, distance_screening, &
-      & sort_neighborlist, spsymv_csr, spmm_csr
+      & find_lower_start, sort_neighborlist, spsymv_csr, spmm_csr
    use mctc_wignerseitz, only : wignerseitz_cell
    use multicharge_blas, only : gemv, symv, gemm
    use multicharge_model_cache, only : mchrg_cache
@@ -917,19 +917,24 @@ subroutine get_dqdr_list(mol, cache, list)
    integer :: igrp, ngrp, nbmax, x0, ng, nb, n, i
    integer(i8) :: kat
    integer, allocatable :: order(:), bloc(:), blist(:)
-   integer(i8), allocatable :: qpos(:, :)
+   integer(i8), allocatable :: ufin(:), qpos(:, :)
    real(wp), allocatable :: pan(:, :), qcol(:, :)
 
    call get_spatial_order(mol%xyz, order)
    ngrp = (mol%nat + max_group - 1) / max_group
    nbmax = min(mol%nat, max_group * get_max_neighbors(mol%nat, list))
 
+   allocate(ufin(mol%nat))
+   do i = 1, mol%nat
+      ufin(i) = find_lower_start(list, i) - 1_i8
+   end do
+
    if (allocated(cache%dqdrlist)) deallocate(cache%dqdrlist)
    allocate(cache%dqdrlist(3, size(list%nlat, kind=i8)), source=0.0_wp)
 
    ! Only the group of atom x writes the derivatives w.r.t. R_x in the row of x
    !$omp parallel default(none) &
-   !$omp shared(mol, cache, list, order, ngrp, nbmax) &
+   !$omp shared(mol, cache, list, ufin, order, ngrp, nbmax) &
    !$omp private(igrp, x0, ng, nb, n, i, kat, bloc, blist, qpos, pan, qcol)
    allocate(bloc(mol%nat), source=0)
    allocate(blist(nbmax), qpos(max_group, nbmax), pan(3 * max_group, nbmax), &
@@ -938,8 +943,8 @@ subroutine get_dqdr_list(mol, cache, list)
    do igrp = 1, ngrp
       x0 = max_group * (igrp - 1)
       ng = min(max_group, mol%nat - x0)
-      call get_group_dqdr(cache, list, order(x0 + 1:x0 + ng), nb, bloc, blist, &
-         & qpos, pan, qcol)
+      call get_group_dqdr(cache, list, ufin, order(x0 + 1:x0 + ng), nb, bloc, &
+         & blist, qpos, pan, qcol)
       do n = 1, nb
          do i = 1, ng
             kat = qpos(i, n)
@@ -1049,13 +1054,16 @@ end subroutine get_dqdL_list
 
 
 !> Charge derivatives of a group of atoms for the union of their neighbors
-subroutine get_group_dqdr(cache, list, group, nb, bloc, blist, qpos, pan, qcol)
+subroutine get_group_dqdr(cache, list, ufin, group, nb, bloc, blist, qpos, pan, qcol)
 
    !> Cache with the inverse and the partial derivatives on the list
    type(mchrg_cache), intent(in) :: cache
 
    !> Sorted complete neighborlist
    type(csr_list), intent(in) :: list
+
+   !> End of the upper triangle in each row of the neighborlist
+   integer(i8), intent(in), contiguous :: ufin(:)
 
    !> Atoms of the group
    integer, intent(in), contiguous :: group(:)
@@ -1081,8 +1089,7 @@ subroutine get_group_dqdr(cache, list, group, nb, bloc, blist, qpos, pan, qcol)
    integer :: n, i
 
    call gather_group_list(list, cache%dabdrlist, group, nb, bloc, blist, qpos, pan)
-   call multiply_group_list(list, cache%ainvlist, 3 * size(group), nb, bloc, &
-      & blist, pan, qcol)
+   call multiply_group_list(list, ufin, cache%ainvlist, nb, bloc, blist, pan, qcol)
    do n = 1, nb
       do i = 1, size(group)
          if (qpos(i, n) == 0) qcol(3 * i - 2:3 * i, n) = 0.0_wp
@@ -1093,8 +1100,8 @@ end subroutine get_group_dqdr
 
 
 !> Derivatives of the adjoint vector for a group of atoms
-subroutine get_group_dpdr(cache, list, d2fdq2, d2fdq2_list, ng, nb, bloc, blist, &
-   & qpos, qcol, pan, pcol)
+subroutine get_group_dpdr(cache, list, ufin, d2fdq2, d2fdq2_list, ufin_d2f, &
+   & ng, nb, bloc, blist, qpos, qcol, pan, pcol)
 
    !> Cache with the inverse and the mixed derivatives on the list
    type(mchrg_cache), intent(in) :: cache
@@ -1102,11 +1109,17 @@ subroutine get_group_dpdr(cache, list, d2fdq2, d2fdq2_list, ng, nb, bloc, blist,
    !> Sorted complete neighborlist
    type(csr_list), intent(in) :: list
 
+   !> End of the upper triangle in each row of the neighborlist
+   integer(i8), intent(in), contiguous :: ufin(:)
+
    !> Second derivatives w.r.t. the charges on the upper triangle of their list
    real(wp), intent(in), contiguous :: d2fdq2(:)
 
    !> Sorted complete list of the second derivatives w.r.t. the charges
    type(csr_list), intent(in) :: d2fdq2_list
+
+   !> End of the upper triangle in each row of d2fdq2_list
+   integer(i8), intent(in), contiguous :: ufin_d2f(:)
 
    !> Number of atoms in the group
    integer, intent(in) :: ng
@@ -1136,8 +1149,8 @@ subroutine get_group_dpdr(cache, list, d2fdq2, d2fdq2_list, ng, nb, bloc, blist,
    integer(i8) :: kat
 
    ! G + d2f/dq2 dq/dR on the neighbors of x
-   call multiply_group_list(d2fdq2_list, d2fdq2, 3 * ng, nb, bloc, blist, qcol, &
-      & pan)
+   call multiply_group_list(d2fdq2_list, ufin_d2f, d2fdq2, nb, bloc, blist, &
+      & qcol, pan)
    do n = 1, nb
       do i = 1, ng
          kat = qpos(i, n)
@@ -1150,7 +1163,7 @@ subroutine get_group_dpdr(cache, list, d2fdq2, d2fdq2_list, ng, nb, bloc, blist,
       end do
    end do
    ! Product with the inverse on the neighbors of x
-   call multiply_group_list(list, cache%ainvlist, 3 * ng, nb, bloc, blist, pan, &
+   call multiply_group_list(list, ufin, cache%ainvlist, nb, bloc, blist, pan, &
       & pcol)
    do n = 1, nb
       do i = 1, ng
@@ -1179,7 +1192,7 @@ subroutine gather_group_list(list, dlist, group, nb, bloc, blist, qpos, pan)
    !> Index of each atom in the union, zero outside
    integer, intent(inout), contiguous :: bloc(:)
 
-   !> Atoms of the union
+   !> Atoms of the union, sorted in ascending order
    integer, intent(inout), contiguous :: blist(:)
 
    !> Position of the entry of each union atom in the row of x
@@ -1188,7 +1201,7 @@ subroutine gather_group_list(list, dlist, group, nb, bloc, blist, qpos, pan)
    !> Partial derivatives dB_c/dR_x of the union
    real(wp), intent(inout), contiguous :: pan(:, :)
 
-   integer :: i, ic, xat, n
+   integer :: i, ic, xat, bat, n
    integer(i8) :: kat
 
    nb = 0
@@ -1196,7 +1209,16 @@ subroutine gather_group_list(list, dlist, group, nb, bloc, blist, qpos, pan)
       xat = group(i)
       ic = 3 * (i - 1)
       do kat = list%inl(xat), list%inl(xat + 1) - 1
-         call add_union_atom(list%nlat(kat), nb, bloc, blist, qpos, pan, n)
+         bat = list%nlat(kat)
+         n = bloc(bat)
+         if (n == 0) then
+            nb = nb + 1
+            n = nb
+            bloc(bat) = n
+            blist(n) = bat
+            qpos(:, n) = 0_i8
+            pan(:, n) = 0.0_wp
+         end if
          pan(ic + 1:ic + 3, n) = dlist(:, kat)
          qpos(i, n) = kat
       end do
@@ -1205,53 +1227,17 @@ subroutine gather_group_list(list, dlist, group, nb, bloc, blist, qpos, pan)
 end subroutine gather_group_list
 
 
-!> Index of an atom in the union of the neighbors of a group
-pure subroutine add_union_atom(bat, nb, bloc, blist, qpos, pan, n)
-
-   !> Atom to add
-   integer, intent(in) :: bat
-
-   !> Number of atoms in the union
-   integer, intent(inout) :: nb
-
-   !> Index of each atom in the union, zero outside
-   integer, intent(inout), contiguous :: bloc(:)
-
-   !> Atoms of the union
-   integer, intent(inout), contiguous :: blist(:)
-
-   !> Positions of the derivatives of the union
-   integer(i8), intent(inout), contiguous :: qpos(:, :)
-
-   !> Partial derivatives of the union
-   real(wp), intent(inout), contiguous :: pan(:, :)
-
-   !> Index of the atom in the union
-   integer, intent(out) :: n
-
-   n = bloc(bat)
-   if (n > 0) return
-   nb = nb + 1
-   n = nb
-   bloc(bat) = n
-   blist(n) = bat
-   qpos(:, n) = 0_i8
-   pan(:, n) = 0.0_wp
-
-end subroutine add_union_atom
-
-
 !> Product of a symmetric matrix on a list with the derivatives of a union
-subroutine multiply_group_list(list, smat, nw, nb, bloc, blist, pan, qcol)
+pure subroutine multiply_group_list(list, ufin, smat, nb, bloc, blist, pan, qcol)
 
    !> Sorted complete list of the symmetric matrix
    type(csr_list), intent(in) :: list
 
+   !> End of the upper triangle in each row of the list
+   integer(i8), intent(in), contiguous :: ufin(:)
+
    !> Symmetric matrix on the upper triangle of the list
    real(wp), intent(in), contiguous :: smat(:)
-
-   !> Number of derivatives of each atom of the union, three per group atom
-   integer, intent(in) :: nw
 
    !> Number of atoms in the union
    integer, intent(in) :: nb
@@ -1262,31 +1248,30 @@ subroutine multiply_group_list(list, smat, nw, nb, bloc, blist, pan, qcol)
    !> Atoms of the union
    integer, intent(in), contiguous :: blist(:)
 
-   !> Derivatives of the union
-   real(wp), intent(in), contiguous :: pan(:, :)
+   !> Derivatives of the union with fixed leading dimension 3 * max_group
+   real(wp), intent(in) :: pan(3 * max_group, *)
 
    !> Product with the symmetric matrix on the union
-   real(wp), intent(inout), contiguous :: qcol(:, :)
+   real(wp), intent(inout) :: qcol(3 * max_group, *)
 
-   integer :: n, m, bat, nlow
-   integer(i8) :: hat, nfin
-   real(wp) :: s, acc(3 * max_group)
+   integer, parameter :: nvec = 3 * max_group
+   integer :: n, m, bat
+   integer(i8) :: hat
+   real(wp) :: s, pn(nvec), acc(nvec)
 
-   qcol(:nw, :nb) = 0.0_wp
+   qcol(:, :nb) = 0.0_wp
    do n = 1, nb
       bat = blist(n)
-      acc(:nw) = 0.0_wp
-      nfin = list%inl(bat + 1) - 1
-      nlow = findloc(list%nlat(list%inl(bat) + 1:nfin) < bat, .true., dim=1)
-      if (nlow > 0) nfin = list%inl(bat) + nlow - 1
-      do hat = list%inl(bat), nfin
+      pn(:) = pan(:, n)
+      acc(:) = qcol(:, n) + smat(list%inl(bat)) * pn(:)
+      do hat = list%inl(bat) + 1, ufin(bat)
          m = bloc(list%nlat(hat))
          if (m == 0) cycle
          s = smat(hat)
-         acc(:nw) = acc(:nw) + s * pan(:nw, m)
-         if (m /= n) qcol(:nw, m) = qcol(:nw, m) + s * pan(:nw, n)
+         acc(:) = acc(:) + s * pan(:, m)
+         qcol(:, m) = qcol(:, m) + s * pn(:)
       end do
-      qcol(:nw, n) = qcol(:nw, n) + acc(:nw)
+      qcol(:, n) = acc(:)
    end do
 
 end subroutine multiply_group_list
@@ -1642,6 +1627,7 @@ subroutine get_hessian_list(self, mol, solver, cache, error, hessian, list, &
    call self%get_coulomb_derivs(mol, mol%nat, cache, alpha=-1.0_wp, &
       & p=cache%vrhs(:mol%nat), list=list)
    call timer%pop
+   if (allocated(cache%tpos)) deallocate(cache%tpos)
    call timer%push("inverse")
    select type (solver)
    class is (cg_solver)
@@ -1825,14 +1811,15 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times, &
    !> Sorted complete list of the second derivatives w.r.t. the charges
    type(csr_list), intent(in), optional :: d2fdq2_list
 
-   integer :: igrp, ngrp, nbmax, numax, x0, ng, i, xat, yat, nb, nu, n, u
-   integer :: na, ia, act(max_group), nlow
-   integer(i8) :: hat, nfin, tick(3), rate
+   integer :: igrp, ngrp, nbmax, numax, x0, ng, i, a, na, xat, yat, nb, nu, n, u
+   integer :: act(max_group)
+   integer(i8) :: hat, tick(3), rate
    real(wp) :: scale, tpan, tcon
+   real(wp) :: blk(3, 3, max_group)
    logical :: ext
    integer, allocatable :: bloc(:), hloc(:), blist(:), ulist(:)
-   integer(i8), allocatable :: qpos(:, :), jmap(:, :)
-   real(wp), allocatable :: pan(:, :), qcol(:, :), pcol(:, :), acc(:, :, :)
+   integer(i8), allocatable :: ufin(:), ufin_d2f(:), qpos(:, :), jmap(:, :)
+   real(wp), allocatable :: pan(:, :), qcol(:, :), pcol(:, :)
 
    times(:) = 0.0_wp
    ngrp = (mol%nat + max_group - 1) / max_group
@@ -1843,21 +1830,30 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times, &
    scale = -1.0_wp
    if (ext) scale = 1.0_wp
 
+   allocate(ufin(mol%nat))
+   do i = 1, mol%nat
+      ufin(i) = find_lower_start(list, i) - 1_i8
+   end do
+   if (ext) then
+      allocate(ufin_d2f(mol%nat))
+      do i = 1, mol%nat
+         ufin_d2f(i) = find_lower_start(d2fdq2_list, i) - 1_i8
+      end do
+   end if
+
    ! bloc and hloc hold the position of each atom in the unions of the group
    tpan = 0.0_wp
    tcon = 0.0_wp
    !$omp parallel default(none) &
-   !$omp shared(mol, cache, hessian, list, order, ngrp, nbmax) &
+   !$omp shared(mol, cache, hessian, list, ufin, ufin_d2f, order, ngrp, nbmax) &
    !$omp shared(numax, ext, scale, d2fdq2, d2fdq2_list) &
-   !$omp private(igrp, x0, ng, i, xat, yat, nb, nu, n, u, hat, nfin, nlow, tick) &
-   !$omp private(rate) &
-   !$omp private(bloc, hloc, blist, ulist, qpos, jmap, pan, qcol, pcol) &
-   !$omp private(na, ia, act, acc) &
+   !$omp private(igrp, x0, ng, i, a, na, act, xat, yat, nb, nu, n, u, hat, tick, rate) &
+   !$omp private(bloc, hloc, blist, ulist, qpos, jmap, pan, qcol, pcol, blk) &
    !$omp reduction(+:tpan, tcon)
    allocate(bloc(mol%nat), hloc(mol%nat), source=0)
    allocate(blist(nbmax), ulist(numax), qpos(max_group, nbmax), &
       & jmap(max_group, numax), pan(3 * max_group, nbmax), &
-      & qcol(3 * max_group, nbmax), acc(3, 3, max_group))
+      & qcol(3 * max_group, nbmax))
    if (ext) allocate(pcol(3 * max_group, nbmax))
    !$omp do schedule(runtime)
    do igrp = 1, ngrp
@@ -1865,19 +1861,16 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times, &
       x0 = max_group * (igrp - 1)
       ng = min(max_group, mol%nat - x0)
 
-      call get_group_dqdr(cache, list, order(x0 + 1:x0 + ng), nb, bloc, blist, &
-         & qpos, pan, qcol)
-      if (ext) call get_group_dpdr(cache, list, d2fdq2, d2fdq2_list, ng, nb, &
-         & bloc, blist, qpos, qcol, pan, pcol)
+      call get_group_dqdr(cache, list, ufin, order(x0 + 1:x0 + ng), nb, bloc, &
+         & blist, qpos, pan, qcol)
+      if (ext) call get_group_dpdr(cache, list, ufin, d2fdq2, d2fdq2_list, &
+         & ufin_d2f, ng, nb, bloc, blist, qpos, qcol, pan, pcol)
       call system_clock(tick(2))
 
       nu = 0
       do i = 1, ng
          xat = order(x0 + i)
-         nfin = list%inl(xat + 1) - 1
-         nlow = findloc(list%nlat(list%inl(xat) + 1:nfin) < xat, .true., dim=1)
-         if (nlow > 0) nfin = list%inl(xat) + nlow - 1
-         do hat = list%inl(xat), nfin
+         do hat = list%inl(xat), ufin(xat)
             yat = list%nlat(hat)
             if (hloc(yat) == 0) then
                nu = nu + 1
@@ -1894,29 +1887,27 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times, &
          hloc(yat) = 0
          na = 0
          do i = 1, ng
-            if (jmap(i, u) == 0) cycle
+            hat = jmap(i, u)
+            if (hat == 0) cycle
             na = na + 1
             act(na) = i
          end do
-         acc(:, :, :na) = 0.0_wp
          if (ext) then
-            call add_column_products(list, cache%dabdrlist, yat, bloc, act(:na), &
-               & pcol, acc)
-            call add_column_products(list, cache%dafdrlist, yat, bloc, act(:na), &
-               & qcol, acc)
+            call add_column_products_ext(list, cache%dabdrlist, cache%dafdrlist, &
+               & yat, bloc, pcol, qcol, na, act, blk)
          else
-            call add_column_products(list, cache%dabdrlist, yat, bloc, act(:na), &
-               & qcol, acc)
+            call add_column_products(list, cache%dabdrlist, yat, bloc, qcol, &
+               & na, act, blk)
          end if
-         do ia = 1, na
-            i = act(ia)
+         do a = 1, na
+            i = act(a)
             hat = jmap(i, u)
             if (yat == order(x0 + i)) then
                hessian%hesslist(:, :, hat) = hessian%hesslist(:, :, hat) &
-                  & + 0.5_wp * scale * (acc(:, :, ia) + transpose(acc(:, :, ia)))
+                  & + 0.5_wp * scale * (blk(:, :, a) + transpose(blk(:, :, a)))
             else
                hessian%hesslist(:, :, hat) = hessian%hesslist(:, :, hat) &
-                  & + scale * acc(:, :, ia)
+                  & + scale * blk(:, :, a)
             end if
          end do
       end do
@@ -1928,7 +1919,7 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times, &
       tcon = tcon + real(tick(3) - tick(2), wp) / real(rate, wp)
    end do
    !$omp end do
-   deallocate(bloc, hloc, blist, ulist, qpos, jmap, pan, qcol, acc)
+   deallocate(bloc, hloc, blist, ulist, qpos, jmap, pan, qcol)
    if (ext) deallocate(pcol)
    !$omp end parallel
    times(:) = [tpan, tcon]
@@ -1936,8 +1927,8 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times, &
 end subroutine add_implicit_blocks_list
 
 
-!> Add the products of a column of partial derivatives with group derivatives
-subroutine add_column_products(list, dlist, yat, bloc, act, col, acc)
+!> Compute the products of a column of partial derivatives with group derivatives
+pure subroutine add_column_products(list, dlist, yat, bloc, col, na, act, blk)
 
    !> Sorted complete neighborlist
    type(csr_list), intent(in) :: list
@@ -1951,32 +1942,105 @@ subroutine add_column_products(list, dlist, yat, bloc, act, col, acc)
    !> Index of each atom in the union, zero outside
    integer, intent(in), contiguous :: bloc(:)
 
-   !> Group atoms of the products
-   integer, intent(in), contiguous :: act(:)
+   !> Derivatives of the group for the union with leading dimension 3 * max_group
+   real(wp), intent(in) :: col(3 * max_group, *)
 
-   !> Derivatives of the group for the union
-   real(wp), intent(in), contiguous :: col(:, :)
+   !> Number of group atoms with an upper-triangle block with y
+   integer, intent(in) :: na
 
-   !> Products for each atom of act
-   real(wp), intent(inout) :: acc(3, 3, max_group)
+   !> Indices of the active group atoms
+   integer, intent(in) :: act(max_group)
 
-   integer :: n, ia, ic
+   !> 3x3 blocks for the active group atoms
+   real(wp), intent(out) :: blk(3, 3, max_group)
+
+   integer :: a, ic, n
    integer(i8) :: kat
    real(wp) :: dy(3)
 
+   blk(:, :, :na) = 0.0_wp
+   if (na == max_group) then
+      do kat = list%inl(yat), list%inl(yat + 1) - 1
+         n = bloc(list%nlat(kat))
+         if (n == 0) cycle
+         dy(:) = dlist(:, kat)
+         do a = 1, max_group
+            ic = 3 * (a - 1)
+            blk(:, 1, a) = blk(:, 1, a) + dy * col(ic + 1, n)
+            blk(:, 2, a) = blk(:, 2, a) + dy * col(ic + 2, n)
+            blk(:, 3, a) = blk(:, 3, a) + dy * col(ic + 3, n)
+         end do
+      end do
+   else
+      do kat = list%inl(yat), list%inl(yat + 1) - 1
+         n = bloc(list%nlat(kat))
+         if (n == 0) cycle
+         dy(:) = dlist(:, kat)
+         do a = 1, na
+            ic = 3 * (act(a) - 1)
+            blk(:, 1, a) = blk(:, 1, a) + dy * col(ic + 1, n)
+            blk(:, 2, a) = blk(:, 2, a) + dy * col(ic + 2, n)
+            blk(:, 3, a) = blk(:, 3, a) + dy * col(ic + 3, n)
+         end do
+      end do
+   end if
+
+end subroutine add_column_products
+
+
+!> Compute the fused products of two columns of partial derivatives with group derivatives
+pure subroutine add_column_products_ext(list, dlist1, dlist2, yat, bloc, col1, &
+   & col2, na, act, blk)
+
+   !> Sorted complete neighborlist
+   type(csr_list), intent(in) :: list
+
+   !> First partial derivatives on the list
+   real(wp), intent(in), contiguous :: dlist1(:, :)
+
+   !> Second partial derivatives on the list
+   real(wp), intent(in), contiguous :: dlist2(:, :)
+
+   !> Atom of the column
+   integer, intent(in) :: yat
+
+   !> Index of each atom in the union, zero outside
+   integer, intent(in), contiguous :: bloc(:)
+
+   !> First derivatives of the group for the union
+   real(wp), intent(in) :: col1(3 * max_group, *)
+
+   !> Second derivatives of the group for the union
+   real(wp), intent(in) :: col2(3 * max_group, *)
+
+   !> Number of group atoms with an upper-triangle block with y
+   integer, intent(in) :: na
+
+   !> Indices of the active group atoms
+   integer, intent(in) :: act(max_group)
+
+   !> 3x3 blocks for the active group atoms
+   real(wp), intent(out) :: blk(3, 3, max_group)
+
+   integer :: a, ic, n
+   integer(i8) :: kat
+   real(wp) :: dy1(3), dy2(3)
+
+   blk(:, :, :na) = 0.0_wp
    do kat = list%inl(yat), list%inl(yat + 1) - 1
       n = bloc(list%nlat(kat))
       if (n == 0) cycle
-      dy = dlist(:, kat)
-      do ia = 1, size(act)
-         ic = 3 * (act(ia) - 1)
-         acc(:, 1, ia) = acc(:, 1, ia) + dy * col(ic + 1, n)
-         acc(:, 2, ia) = acc(:, 2, ia) + dy * col(ic + 2, n)
-         acc(:, 3, ia) = acc(:, 3, ia) + dy * col(ic + 3, n)
+      dy1(:) = dlist1(:, kat)
+      dy2(:) = dlist2(:, kat)
+      do a = 1, na
+         ic = 3 * (act(a) - 1)
+         blk(:, 1, a) = blk(:, 1, a) + dy1 * col1(ic + 1, n) + dy2 * col2(ic + 1, n)
+         blk(:, 2, a) = blk(:, 2, a) + dy1 * col1(ic + 2, n) + dy2 * col2(ic + 2, n)
+         blk(:, 3, a) = blk(:, 3, a) + dy1 * col1(ic + 3, n) + dy2 * col2(ic + 3, n)
       end do
    end do
 
-end subroutine add_column_products
+end subroutine add_column_products_ext
 
 
 !> Compute the nuclear Hessian of an external function of the charges
@@ -2155,6 +2219,7 @@ subroutine get_external_hessian_list(self, mol, solver, cache, error, dfdq, &
       & list=list, dafdr=.true.)
    call add_list_derivs(mol%nat, list, cache%dafdrlist, dfdrdq_list, dfdrdq)
    call timer%pop
+   if (allocated(cache%tpos)) deallocate(cache%tpos)
    call timer%push("inverse")
    select type (solver)
    class is (cg_solver)

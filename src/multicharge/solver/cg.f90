@@ -19,7 +19,7 @@
 module multicharge_solver_cg
    use iso_fortran_env, only : output_unit
    use mctc_env, only : error_type, fatal_error, format_time, timer_type, wp, i8
-   use mctc_csrlist, only : csr_list, spsymv_csr, spmm_csr
+   use mctc_csrlist, only : csr_list, find_lower_start, spsymv_csr, spmm_csr
    use mctc_io_structure_atomsort, only : get_spatial_order
    use multicharge_blas, only : axpy, dot, gemm, scal, symv
    use multicharge_lapack, only : potrf, potrs, syevd
@@ -373,7 +373,7 @@ end subroutine solve
 
 !> Solve a linear system with multiple right-hand sides by block CG
 subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
-   & niter, sidx, loc)
+   & niter)
    !> Conjugate-gradient solver instance
    class(cg_solver), intent(in) :: self
 
@@ -400,12 +400,6 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
 
    !> Number of iterations until convergence
    integer, intent(out), optional :: niter
-
-   !> Atoms of the subsystem in the neighborlist, in the order of the vectors
-   integer, intent(in), optional :: sidx(:)
-
-   !> Index of the atoms of the neighborlist in the subsystem, zero outside
-   integer, intent(in), optional :: loc(:)
 
    ! Maximal number of iterations
    integer :: maxit
@@ -440,14 +434,10 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
 
    type(timer_type) :: timer
    integer :: unit, info
-   logical :: nlist, sub
-   ! Extracted upper-triangle CSR matrix and transposed buffers for a subsystem
-   real(wp), allocatable :: subdiag(:), subval(:), vect(:, :), avect(:, :)
-   integer, allocatable :: subinl(:), subjat(:)
+   logical :: nlist
 
    nlist = self%use_nlist .and. .not. present(amat) .and. &
       & present(list) .and. present(alist)
-   sub = present(sidx) .or. present(loc)
    if (present(niter)) niter = 0
 
    if (present(new_unit)) then
@@ -473,17 +463,6 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
          return
       end if
    end if
-   if (sub) then
-      if (.not. (nlist .and. present(sidx) .and. present(loc))) then
-         call fatal_error(error, &
-            & "Subsystem requires a neighborlist, sidx and loc.")
-         return
-      end if
-      if (size(sidx) /= ndim .or. size(loc) < size(list%inl) - 1) then
-         call fatal_error(error, "Dimension mismatch of the subsystem.")
-         return
-      end if
-   end if
    if (nrhs == 0) return
 
    tol = self%cgtol
@@ -497,14 +476,8 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
    if (self%verbosity > 1) call timer%push("total")
    if (self%verbosity > 1) call timer%push("initialization")
 
-   ! Diagonal preconditioner and subsystem matrix extraction
-   if (sub) then
-      allocate(vect(nrhs, ndim), avect(nrhs, ndim))
-      call get_sub_matrix(alist, list, sidx, loc, subdiag, subinl, subjat, subval)
-      do iat = 1, ndim
-         prec(iat) = 1.0_wp / (subdiag(iat) + eps)
-      end do
-   else if (nlist) then
+   ! Diagonal preconditioner
+   if (nlist) then
       do iat = 1, ndim
          prec(iat) = 1.0_wp / (alist(list%inl(iat)) + eps)
       end do
@@ -515,11 +488,7 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
    end if
 
    ! Initial residual R = B - A X
-   if (sub) then
-      call sub_block_matmul(subdiag, subinl, subjat, subval, xmat, res, vect, avect)
-   else
-      call block_matmul(nlist, xmat, res, amat, alist, list)
-   end if
+   call block_matmul(nlist, xmat, res, amat, alist, list)
    res(:, :) = bmat - res
 
    ! Initial norms
@@ -560,13 +529,8 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
       if (self%verbosity > 1) call timer%push("iteration")
 
       ! Matrix-block product Q = A P
-      if (sub) then
-         call sub_block_matmul(subdiag, subinl, subjat, subval, dir(:, :nrank), &
-            & adir(:, :nrank), vect(:nrank, :), avect(:nrank, :))
-      else
-         call block_matmul(nlist, dir(:, :nrank), adir(:, :nrank), amat, alist, &
-            & list)
-      end if
+      call block_matmul(nlist, dir(:, :nrank), adir(:, :nrank), amat, alist, &
+         & list)
 
       ! Shrink the small matrices to the current rank to keep them contiguous
       if (size(dtad, 1) /= nrank) then
@@ -775,11 +739,15 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    type(error_type), allocatable, intent(out) :: error
 
    ! Size of the system, number of blocks and counters
-   integer :: ndim, nblk, iblk, iat
+   integer :: ndim, nblk, iblk, iat, max_nnz
    ! Atoms ordered into blocks of columns
    integer, allocatable :: order(:)
-   ! Local index and atom list of the subsystem of a block
-   integer, allocatable :: loc(:), sidx(:)
+   ! End of the upper triangle in each row of the neighborlist
+   integer(i8), allocatable :: ufin(:)
+   ! Per-thread workspace for the subsystem matrix and block CG vectors
+   integer, allocatable :: loc(:), col_id(:), sidx(:), subinl(:), subjat(:)
+   real(wp), allocatable :: subdiag(:), prec(:), subval(:)
+   real(wp), allocatable :: work_x(:), work_r(:), work_z(:), work_p(:), work_q(:)
    ! Size of the subsystem and number of iterations of a block
    integer :: nsub, niter, maxsub, maxiter
    integer(i8) :: sumsub, sumiter
@@ -832,6 +800,14 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    end if
    nblk = (ndim + block_size_def - 1) / block_size_def
 
+   ! Precompute upper-triangle row bounds once
+   allocate(ufin(ndim))
+   max_nnz = 0
+   do iat = 1, ndim
+      ufin(iat) = find_lower_start(list, iat) - 1_i8
+      max_nnz = max_nnz + int(ufin(iat) - list%inl(iat))
+   end do
+
    call new_cg_solver(blksolver, cg_input(cgmiter=self%cgmiter, &
       & cgtol=self%invtol, verbosity=0, use_nlist=.true.))
 
@@ -842,20 +818,27 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    maxsub = 0
    maxiter = 0
    !$omp parallel default(none) &
-   !$omp shared(ndim, nblk, order, alist, list, ainvlist, blksolver, error) &
-   !$omp shared(failed) &
-   !$omp private(iblk, loc, sidx, nsub, niter, skip, tblk) &
+   !$omp shared(ndim, nblk, max_nnz, order, ufin, alist, list, ainvlist) &
+   !$omp shared(blksolver, error, failed) &
+   !$omp private(iblk, loc, col_id, sidx, subdiag, prec, subinl, subjat, subval) &
+   !$omp private(work_x, work_r, work_z, work_p, work_q, nsub, niter, skip, tblk) &
    !$omp reduction(+:sumsub, sumiter, sumtime) reduction(max:maxsub, maxiter)
-   allocate(loc(ndim), source=0)
-   allocate(sidx(ndim))
+   allocate(loc(ndim), col_id(ndim), source=0)
+   allocate(sidx(ndim), subdiag(ndim), prec(ndim), subinl(ndim + 1))
+   allocate(subjat(max(1, max_nnz)), subval(max(1, max_nnz)))
+   allocate(work_x(block_size_def * ndim), work_r(block_size_def * ndim), &
+      & work_z(block_size_def * ndim), work_p(block_size_def * ndim), &
+      & work_q(block_size_def * ndim))
    !$omp do schedule(dynamic)
    do iblk = 1, nblk
       !$omp atomic read
       skip = failed
       if (skip) cycle
-      call invert_block(blksolver, alist, list, &
+      call invert_block(blksolver, alist, list, ufin, &
          & order((iblk - 1) * block_size_def + 1:min(iblk * block_size_def, ndim)), &
-         & loc, sidx, ainvlist, nsub, niter, tblk, error, failed)
+         & loc, col_id, sidx, subdiag, prec, subinl, subjat, subval, &
+         & work_x, work_r, work_z, work_p, work_q, ainvlist, nsub, niter, &
+         & tblk, error, failed)
       sumsub = sumsub + nsub
       sumtime(:) = sumtime + tblk
       sumiter = sumiter + niter
@@ -863,7 +846,8 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
       maxiter = max(maxiter, niter)
    end do
    !$omp end do
-   deallocate(loc, sidx)
+   deallocate(loc, col_id, sidx, subdiag, prec, subinl, subjat, subval, &
+      & work_x, work_r, work_z, work_p, work_q)
    !$omp end parallel
    if (allocated(error)) return
 
@@ -885,8 +869,9 @@ end subroutine invert_list
 
 
 !> Solve a block of columns of the inverse on its subsystem
-subroutine invert_block(solver, alist, list, cols, loc, sidx, ainvlist, nsub, &
-   & niter, times, error, failed)
+subroutine invert_block(solver, alist, list, ufin, cols, loc, col_id, sidx, &
+   & subdiag, prec, subinl, subjat, subval, work_x, work_r, work_z, work_p, &
+   & work_q, ainvlist, nsub, niter, times, error, failed)
    !> Conjugate-gradient solver for the block
    type(cg_solver), intent(in) :: solver
 
@@ -896,14 +881,39 @@ subroutine invert_block(solver, alist, list, cols, loc, sidx, ainvlist, nsub, &
    !> Sorted complete neighborlist representation of the matrix
    type(csr_list), intent(in) :: list
 
+   !> End of the upper triangle in each row of the neighborlist
+   integer(i8), intent(in) :: ufin(:)
+
    !> Atoms of the block columns
    integer, intent(in) :: cols(:)
 
    !> Local index of the atoms in the subsystem, zero on entry and exit
    integer, intent(inout) :: loc(:)
 
+   !> Column index (1..ncol) of subsystem atoms, zero on entry and exit
+   integer, intent(inout) :: col_id(:)
+
    !> Atoms of the subsystem
    integer, intent(inout) :: sidx(:)
+
+   !> Preallocated subsystem diagonal buffer
+   real(wp), intent(inout) :: subdiag(:)
+
+   !> Preallocated diagonal preconditioner buffer
+   real(wp), intent(inout) :: prec(:)
+
+   !> Preallocated subsystem row-offset buffer
+   integer, intent(inout) :: subinl(:)
+
+   !> Preallocated subsystem column-index buffer
+   integer, intent(inout) :: subjat(:)
+
+   !> Preallocated subsystem matrix-value buffer
+   real(wp), intent(inout) :: subval(:)
+
+   !> Preallocated block-CG vector buffers
+   real(wp), target, intent(inout) :: work_x(:), work_r(:), work_z(:)
+   real(wp), target, intent(inout) :: work_p(:), work_q(:)
 
    !> Inverse on the pattern of the list, the rows of the block atoms are set
    real(wp), intent(inout) :: ainvlist(:)
@@ -923,16 +933,15 @@ subroutine invert_block(solver, alist, list, cols, loc, sidx, ainvlist, nsub, &
    !> Whether any block failed, shared by all blocks
    logical, intent(inout) :: failed
 
-   integer :: ncol, isub, iat, jat, ivec, nlow
-   integer(i8) :: kat, nfin, tick(4), rate
-   ! Right-hand sides and solutions of the subsystem
-   real(wp), allocatable :: bsub(:, :), xsub(:, :)
+   integer :: ncol, isub, iat, jat, ivec
+   integer(i8) :: kat, tick(4), rate
+   real(wp), pointer :: xsub(:, :), rsub(:, :)
    type(error_type), allocatable :: blkerror
 
    call system_clock(tick(1), rate)
    ncol = size(cols)
 
-   ! Neighbors of the block atoms, the block atoms come first
+   ! Collect unique neighbors of the block atoms and sort in ascending order
    nsub = 0
    do ivec = 1, ncol
       iat = cols(ivec)
@@ -940,23 +949,24 @@ subroutine invert_block(solver, alist, list, cols, loc, sidx, ainvlist, nsub, &
          jat = list%nlat(kat)
          if (loc(jat) /= 0) cycle
          nsub = nsub + 1
-         loc(jat) = nsub
+         loc(jat) = 1
          sidx(nsub) = jat
       end do
+   end do
+   call sort_int(sidx(:nsub))
+   do isub = 1, nsub
+      loc(sidx(isub)) = isub
    end do
 
    call system_clock(tick(2))
 
-   ! Unit vectors of the block columns, initial guess from the diagonal
-   allocate(bsub(nsub, ncol), xsub(nsub, ncol), source=0.0_wp)
-   do ivec = 1, ncol
-      isub = loc(cols(ivec))
-      bsub(isub, ivec) = 1.0_wp
-      xsub(isub, ivec) = 1.0_wp / (alist(list%inl(cols(ivec))) + eps)
-   end do
+   xsub(1:ncol, 1:nsub) => work_x(1:ncol * nsub)
+   rsub(1:ncol, 1:nsub) => work_r(1:ncol * nsub)
 
-   call solver%solve_block(alist=alist, bmat=bsub, xmat=xsub, list=list, &
-      & error=blkerror, niter=niter, sidx=sidx(:nsub), loc=loc)
+   call solve_sub_block(solver, alist, list, ufin, cols, nsub, sidx, loc, &
+      & col_id, subdiag, prec, subinl, subjat, subval, xsub, rsub, work_z, &
+      & work_p, work_q, niter, blkerror)
+
    call system_clock(tick(3))
    if (allocated(blkerror)) then
       !$omp critical (invert_list_error)
@@ -967,11 +977,8 @@ subroutine invert_block(solver, alist, list, cols, loc, sidx, ainvlist, nsub, &
    else
       do ivec = 1, ncol
          iat = cols(ivec)
-         nfin = list%inl(iat + 1) - 1
-         nlow = findloc(list%nlat(list%inl(iat) + 1:nfin) < iat, .true., dim=1)
-         if (nlow > 0) nfin = list%inl(iat) + nlow - 1
-         do kat = list%inl(iat), nfin
-            ainvlist(kat) = xsub(loc(list%nlat(kat)), ivec)
+         do kat = list%inl(iat), ufin(iat)
+            ainvlist(kat) = xsub(ivec, loc(list%nlat(kat)))
          end do
       end do
    end if
@@ -981,6 +988,181 @@ subroutine invert_block(solver, alist, list, cols, loc, sidx, ainvlist, nsub, &
    times(:) = real(tick(2:4) - tick(1:3), wp) / real(rate, wp)
 
 end subroutine invert_block
+
+
+!> Solve the subsystem block linear system A_SS X_S = I_S in transposed (ncol, nsub) layout
+subroutine solve_sub_block(self, alist, list, ufin, cols, nsub, sidx, loc, &
+   & col_id, subdiag, prec, subinl, subjat, subval, xmat, res, work_z, &
+   & work_p, work_q, niter, error)
+   !> Conjugate-gradient solver instance
+   type(cg_solver), intent(in) :: self
+
+   !> Coefficient matrix values on the upper triangle of the neighborlist
+   real(wp), intent(in) :: alist(:)
+
+   !> Sorted complete neighborlist representation of the matrix
+   type(csr_list), intent(in) :: list
+
+   !> End of the upper triangle in each row of the neighborlist
+   integer(i8), intent(in) :: ufin(:)
+
+   !> Atoms of the block columns
+   integer, intent(in) :: cols(:)
+
+   !> Number of atoms in the subsystem
+   integer, intent(in) :: nsub
+
+   !> Sorted atoms of the subsystem
+   integer, intent(in) :: sidx(:)
+
+   !> Index of the atoms of the neighborlist in the subsystem, zero outside
+   integer, intent(in) :: loc(:)
+
+   !> Column index (1..ncol) of subsystem atoms, zero on entry and exit
+   integer, intent(inout) :: col_id(:)
+
+   !> Subsystem diagonal buffer
+   real(wp), intent(inout) :: subdiag(:)
+
+   !> Diagonal preconditioner buffer
+   real(wp), intent(inout) :: prec(:)
+
+   !> Subsystem row-offset buffer
+   integer, intent(inout) :: subinl(:)
+
+   !> Subsystem column-index buffer
+   integer, intent(inout) :: subjat(:)
+
+   !> Subsystem matrix-value buffer
+   real(wp), intent(inout) :: subval(:)
+
+   !> Solution vectors in (ncol, nsub) layout
+   real(wp), contiguous, intent(inout) :: xmat(:, :)
+
+   !> Residual vectors in (ncol, nsub) layout
+   real(wp), contiguous, intent(inout) :: res(:, :)
+
+   !> Preallocated workspace for preconditioned residuals, search directions and A*P
+   real(wp), target, intent(inout) :: work_z(:), work_p(:), work_q(:)
+
+   !> Number of iterations until convergence
+   integer, intent(out) :: niter
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   integer :: ncol, nrank, maxit, it, isub, ivec, info
+   real(wp) :: tol_square, rel_resnorm
+   real(wp) :: resnorm(block_size_def)
+   real(wp), target :: dtad_buf(block_size_def * block_size_def)
+   real(wp), target :: step_buf(block_size_def * block_size_def)
+   real(wp), target :: updfact_buf(block_size_def * block_size_def)
+   real(wp), pointer :: precres(:, :), dir(:, :), adir(:, :)
+   real(wp), pointer :: dtad(:, :), step(:, :), updfact(:, :)
+
+   niter = 0
+   ncol = size(cols)
+   if (ncol == 0 .or. nsub == 0) return
+
+   tol_square = self%cgtol**2
+   maxit = self%cgmiter
+
+   precres(1:ncol, 1:nsub) => work_z(1:ncol * nsub)
+
+   ! Extract subsystem CSR matrix and form initial guess X_0 and residual R_0 = I_S - A_SS X_0
+   call get_sub_matrix_and_res(alist, list, ufin, cols, nsub, sidx, loc, &
+      & col_id, subdiag, prec, subinl, subjat, subval, xmat, res)
+
+   ! Initial squared residual norms (right-hand sides are unit vectors so ||b_i||^2 = 1)
+   resnorm(:ncol) = 0.0_wp
+   do isub = 1, nsub
+      do ivec = 1, ncol
+         resnorm(ivec) = resnorm(ivec) + res(ivec, isub)**2
+      end do
+      precres(:, isub) = prec(isub) * res(:, isub)
+   end do
+   rel_resnorm = maxval(resnorm(:ncol))
+
+   ! Initial search directions P = orth(M^-1 R)
+   call orthonormalize_rows(ncol, nsub, precres, work_p, nrank, error)
+   if (allocated(error)) return
+   if (rel_resnorm <= tol_square .or. nrank == 0) return
+
+   dir(1:nrank, 1:nsub) => work_p(1:nrank * nsub)
+   adir(1:nrank, 1:nsub) => work_q(1:nrank * nsub)
+
+   do it = 1, maxit
+
+      ! Matrix-block product Q = A_SS P
+      call sub_block_matmul(nsub, nrank, subdiag, subinl, subjat, subval, &
+         & dir, adir)
+
+      dtad(1:nrank, 1:nrank) => dtad_buf(1:nrank * nrank)
+      step(1:nrank, 1:ncol) => step_buf(1:nrank * ncol)
+      updfact(1:nrank, 1:ncol) => updfact_buf(1:nrank * ncol)
+
+      ! Cholesky factorization of P^T Q
+      call gemm(dir, adir, dtad, transb='t')
+      call potrf(dtad, info=info)
+      if (info /= 0) then
+         call fatal_error(error, &
+            & "Block CG: P^T A P is not positive definite.")
+         return
+      end if
+
+      ! Step lengths alpha = (P^T Q)^-1 (P^T R)
+      call gemm(dir, res, step, transb='t')
+      call potrs(dtad, step)
+
+      ! Update solution X = X + P alpha and residual R = R - Q alpha
+      call gemm(step, dir, xmat, transa='t', beta=1.0_wp)
+      call gemm(step, adir, res, transa='t', alpha=-1.0_wp, beta=1.0_wp)
+
+      ! Compute new residual norms
+      resnorm(:ncol) = 0.0_wp
+      do isub = 1, nsub
+         do ivec = 1, ncol
+            resnorm(ivec) = resnorm(ivec) + res(ivec, isub)**2
+         end do
+      end do
+      rel_resnorm = maxval(resnorm(:ncol))
+
+      if (rel_resnorm <= tol_square) then
+         niter = it
+         exit
+      end if
+
+      ! Updated preconditioned residuals Z = M^-1 R
+      do isub = 1, nsub
+         precres(:, isub) = prec(isub) * res(:, isub)
+      end do
+
+      ! Update factors (P^T Q)^-1 (Q^T Z), beta is their negative
+      call gemm(adir, precres, updfact, transb='t')
+      call potrs(dtad, updfact)
+
+      ! Update search directions P = orth(Z + P beta)
+      call gemm(updfact, dir, precres, transa='t', alpha=-1.0_wp, beta=1.0_wp)
+      call orthonormalize_rows(ncol, nsub, precres, work_p, nrank, error)
+      if (allocated(error)) return
+
+      if (nrank == 0) then
+         call fatal_error(error, "Block CG: search space collapsed.")
+         return
+      end if
+
+      if (it == maxit) then
+         call fatal_error(error, &
+            & "Block CG did not converge within max iterations.")
+         return
+      end if
+
+      dir(1:nrank, 1:nsub) => work_p(1:nrank * nsub)
+      adir(1:nrank, 1:nsub) => work_q(1:nrank * nsub)
+
+   end do
+
+end subroutine solve_sub_block
 
 
 !> Multiply the coefficient matrix with a block of vectors
@@ -1017,70 +1199,111 @@ subroutine block_matmul(nlist, vec, avec, amat, alist, list)
 end subroutine block_matmul
 
 
-!> Extract the subsystem block A_SS from a matrix on a neighborlist
-subroutine get_sub_matrix(alist, list, sidx, loc, subdiag, subinl, subjat, &
-   & subval)
+!> Extract the subsystem matrix A_SS and form initial diagonal guess X_0 and residual R_0
+subroutine get_sub_matrix_and_res(alist, list, ufin, cols, nsub, sidx, loc, &
+   & col_id, subdiag, prec, subinl, subjat, subval, xmat, res)
    !> Matrix values on the upper triangle of the list
    real(wp), intent(in) :: alist(:)
 
    !> Sorted complete neighborlist representation of the matrix
    type(csr_list), intent(in) :: list
 
-   !> Atoms of the subsystem in the neighborlist, in the order of the vectors
+   !> End of the upper triangle in each row of the neighborlist
+   integer(i8), intent(in) :: ufin(:)
+
+   !> Atoms of the block columns
+   integer, intent(in) :: cols(:)
+
+   !> Number of atoms in the subsystem
+   integer, intent(in) :: nsub
+
+   !> Sorted atoms of the subsystem in the neighborlist
    integer, intent(in) :: sidx(:)
 
    !> Index of the atoms of the neighborlist in the subsystem, zero outside
    integer, intent(in) :: loc(:)
 
+   !> Column index (1..ncol) of subsystem atoms, zero on entry and exit
+   integer, intent(inout) :: col_id(:)
+
    !> Diagonal elements of the subsystem matrix
-   real(wp), allocatable, intent(out) :: subdiag(:)
+   real(wp), intent(inout) :: subdiag(:)
+
+   !> Diagonal preconditioner of the subsystem matrix
+   real(wp), intent(inout) :: prec(:)
 
    !> Row offsets of the off-diagonal upper triangle of the subsystem matrix
-   integer, allocatable, intent(out) :: subinl(:)
+   integer, intent(inout) :: subinl(:)
 
    !> Subsystem column indices of the off-diagonal upper triangle
-   integer, allocatable, intent(out) :: subjat(:)
+   integer, intent(inout) :: subjat(:)
 
    !> Matrix values of the off-diagonal upper triangle
-   real(wp), allocatable, intent(out) :: subval(:)
+   real(wp), intent(inout) :: subval(:)
 
-   integer :: ndim, isub, jsub, iat, nnz, nlow
-   integer(i8) :: kat, nfin
+   !> Initial solution guess in (ncol, nsub) layout
+   real(wp), contiguous, intent(out) :: xmat(:, :)
 
-   ! The complete rows of the subsystem bound its upper-triangle elements
-   ndim = size(sidx)
-   allocate(subdiag(ndim), subinl(ndim + 1))
-   nnz = 0
-   do isub = 1, ndim
-      iat = sidx(isub)
-      nnz = nnz + int(list%inl(iat + 1) - list%inl(iat)) - 1
+   !> Initial residual R_0 = I_S - A_SS X_0 in (ncol, nsub) layout
+   real(wp), contiguous, intent(out) :: res(:, :)
+
+   integer :: ncol, isub, jsub, iat, ivec, jvec, nnz
+   integer(i8) :: kat
+   real(wp) :: val, diag_val, x0(block_size_def)
+
+   ncol = size(cols)
+   xmat(:, :nsub) = 0.0_wp
+   res(:, :nsub) = 0.0_wp
+
+   do ivec = 1, ncol
+      iat = cols(ivec)
+      isub = loc(iat)
+      col_id(isub) = ivec
+      diag_val = alist(list%inl(iat))
+      x0(ivec) = 1.0_wp / (diag_val + eps)
+      xmat(ivec, isub) = x0(ivec)
+      res(ivec, isub) = 1.0_wp - diag_val * x0(ivec)
    end do
-   allocate(subjat(nnz), subval(nnz))
 
    nnz = 0
    subinl(1) = 1
-   do isub = 1, ndim
+   do isub = 1, nsub
       iat = sidx(isub)
-      subdiag(isub) = alist(list%inl(iat))
-      nfin = list%inl(iat + 1) - 1
-      nlow = findloc(list%nlat(list%inl(iat) + 1:nfin) < iat, .true., dim=1)
-      if (nlow > 0) nfin = list%inl(iat) + nlow - 1
-      do kat = list%inl(iat) + 1, nfin
+      diag_val = alist(list%inl(iat))
+      subdiag(isub) = diag_val
+      prec(isub) = 1.0_wp / (diag_val + eps)
+      ivec = col_id(isub)
+      ! Traverse upper-triangle neighbors in ascending atom order so subjat is increasing
+      do kat = ufin(iat), list%inl(iat) + 1, -1
          jsub = loc(list%nlat(kat))
          if (jsub == 0) cycle
+         val = alist(kat)
          nnz = nnz + 1
          subjat(nnz) = jsub
-         subval(nnz) = alist(kat)
+         subval(nnz) = val
+         if (ivec /= 0) res(ivec, jsub) = -val * x0(ivec)
+         jvec = col_id(jsub)
+         if (jvec /= 0) res(jvec, isub) = -val * x0(jvec)
       end do
       subinl(isub + 1) = nnz + 1
    end do
 
-end subroutine get_sub_matrix
+   do ivec = 1, ncol
+      col_id(loc(cols(ivec))) = 0
+   end do
+
+end subroutine get_sub_matrix_and_res
 
 
-!> Multiply the subsystem matrix with a block of vectors
-subroutine sub_block_matmul(subdiag, subinl, subjat, subval, vec, avec, vect, &
-   & avect)
+!> Multiply the subsystem matrix with a block of vectors in (nrank, nsub) layout
+pure subroutine sub_block_matmul(nsub, nrank, subdiag, subinl, subjat, subval, &
+   & vec, avec)
+   !> Number of atoms in the subsystem
+   integer, intent(in) :: nsub
+
+   !> Number of active vectors in the block
+   integer, intent(in) :: nrank
+
    !> Diagonal elements of the subsystem matrix
    real(wp), intent(in) :: subdiag(:)
 
@@ -1093,34 +1316,133 @@ subroutine sub_block_matmul(subdiag, subinl, subjat, subval, vec, avec, vect, &
    !> Matrix values of the off-diagonal upper triangle
    real(wp), intent(in) :: subval(:)
 
-   !> Block of input vectors
-   real(wp), intent(in) :: vec(:, :)
+   !> Block of input vectors of shape (nrank, nsub)
+   real(wp), contiguous, intent(in) :: vec(:, :)
 
-   !> Block of output vectors
-   real(wp), intent(inout) :: avec(:, :)
+   !> Block of output vectors of shape (nrank, nsub)
+   real(wp), contiguous, intent(out) :: avec(:, :)
 
-   !> Transposed input buffer of shape (size(vec, 2), size(vec, 1))
-   real(wp), intent(out) :: vect(:, :)
+   integer :: isub, jsub, k
+   real(wp) :: val, vi(block_size_def), ai(block_size_def)
 
-   !> Transposed output buffer of shape (size(vec, 2), size(vec, 1))
-   real(wp), intent(out) :: avect(:, :)
-
-   integer :: ndim, isub, jsub, k
-
-   ndim = size(vec, 1)
-   vect(:, :) = transpose(vec)
-   avect(:, :) = 0.0_wp
-   do isub = 1, ndim
-      avect(:, isub) = avect(:, isub) + subdiag(isub) * vect(:, isub)
-      do k = subinl(isub), subinl(isub + 1) - 1
-         jsub = subjat(k)
-         avect(:, isub) = avect(:, isub) + subval(k) * vect(:, jsub)
-         avect(:, jsub) = avect(:, jsub) + subval(k) * vect(:, isub)
+   avec(:, :nsub) = 0.0_wp
+   if (nrank == block_size_def) then
+      do isub = 1, nsub
+         vi(:) = vec(:, isub)
+         ai(:) = avec(:, isub) + subdiag(isub) * vi(:)
+         do k = subinl(isub), subinl(isub + 1) - 1
+            jsub = subjat(k)
+            val = subval(k)
+            ai(:) = ai(:) + val * vec(:, jsub)
+            avec(:, jsub) = avec(:, jsub) + val * vi(:)
+         end do
+         avec(:, isub) = ai(:)
       end do
-   end do
-   avec(:, :) = transpose(avect)
+   else
+      do isub = 1, nsub
+         avec(:, isub) = avec(:, isub) + subdiag(isub) * vec(:, isub)
+         do k = subinl(isub), subinl(isub + 1) - 1
+            jsub = subjat(k)
+            val = subval(k)
+            avec(:, isub) = avec(:, isub) + val * vec(:, jsub)
+            avec(:, jsub) = avec(:, jsub) + val * vec(:, isub)
+         end do
+      end do
+   end if
 
 end subroutine sub_block_matmul
+
+
+!> Orthonormal basis of the row space of vec in (ncol, nsub) layout
+subroutine orthonormalize_rows(ncol, nsub, vec, out_buf, nrank, error)
+   !> Number of input vectors (rows)
+   integer, intent(in) :: ncol
+
+   !> Length of each vector (columns)
+   integer, intent(in) :: nsub
+
+   !> Input block of vectors of shape (ncol, nsub)
+   real(wp), contiguous, intent(in) :: vec(:, :)
+
+   !> Output buffer for the orthonormal basis of shape (nrank, nsub)
+   real(wp), target, intent(inout) :: out_buf(:)
+
+   !> Rank of the block of vectors
+   integer, intent(out) :: nrank
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   integer :: ivec, isub, info
+   real(wp) :: vnorm(block_size_def)
+   real(wp), target :: gram_buf(block_size_def * block_size_def)
+   real(wp), target :: eval_buf(block_size_def)
+   real(wp), target :: evec_buf(block_size_def * block_size_def)
+   real(wp), pointer :: gram(:, :), eval(:), evec(:, :), outvec(:, :)
+
+   gram(1:ncol, 1:ncol) => gram_buf(1:ncol * ncol)
+   eval(1:ncol) => eval_buf(1:ncol)
+
+   ! Gram matrix and its eigendecomposition in ascending order
+   call gemm(vec, vec, gram, transb='t')
+   call syevd(gram, eval, info=info)
+   if (info /= 0) then
+      call fatal_error(error, "Block CG: eigendecomposition failed.")
+      return
+   end if
+
+   ! Keep the dominant eigenvectors, largest eigenvalue first
+   nrank = 0
+   if (eval(ncol) > eps) then
+      nrank = count(eval > orth_thr * eval(ncol))
+   end if
+   if (nrank == 0) return
+
+   evec(1:nrank, 1:ncol) => evec_buf(1:nrank * ncol)
+   outvec(1:nrank, 1:nsub) => out_buf(1:nrank * nsub)
+   do ivec = 1, nrank
+      evec(ivec, :) = gram(:, ncol - ivec + 1)
+   end do
+
+   ! New basis E^T vec, normalized row by row
+   call gemm(evec, vec, outvec)
+   vnorm(:nrank) = 0.0_wp
+   do isub = 1, nsub
+      vnorm(:nrank) = vnorm(:nrank) + outvec(:, isub)**2
+   end do
+   vnorm(:nrank) = 1.0_wp / sqrt(vnorm(:nrank))
+   do isub = 1, nsub
+      outvec(:, isub) = outvec(:, isub) * vnorm(:nrank)
+   end do
+
+end subroutine orthonormalize_rows
+
+
+!> Sort an integer array in ascending order in place (Shell sort)
+pure subroutine sort_int(arr)
+   !> Array to sort in ascending order
+   integer, intent(inout) :: arr(:)
+
+   integer, parameter :: gaps(9) = [1750, 701, 301, 132, 57, 23, 10, 4, 1]
+   integer :: n, igap, gap, i, j, val
+
+   n = size(arr)
+   do igap = 1, size(gaps)
+      gap = gaps(igap)
+      if (gap >= n) cycle
+      do i = gap + 1, n
+         val = arr(i)
+         j = i
+         do while (j > gap)
+            if (arr(j - gap) <= val) exit
+            arr(j) = arr(j - gap)
+            j = j - gap
+         end do
+         arr(j) = val
+      end do
+   end do
+
+end subroutine sort_int
 
 
 !> Orthonormal basis of the column space of vec

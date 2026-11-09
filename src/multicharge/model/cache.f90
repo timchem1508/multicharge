@@ -19,7 +19,7 @@
 
 !> Cache for charge models
 module multicharge_model_cache
-   use mctc_env, only : wp
+   use mctc_env, only : wp, i8
    use mctc_io, only : structure_type
    use mctc_wignerseitz, only : wignerseitz_cell
    implicit none
@@ -62,6 +62,15 @@ module multicharge_model_cache
 
       !> Local charge derivatives on the sorted complete neighborlist
       real(wp), allocatable :: dqlocdrlist(:, :)
+
+      !> Transposed positions of the entries of the sorted complete neighborlist
+      integer(i8), allocatable :: tpos(:)
+
+      !> Offsets of the rows of the CN and local-charge derivative entries on the list
+      integer(i8), allocatable :: cninl(:)
+
+      !> Positions of the CN and local-charge derivative entries in the list
+      integer(i8), allocatable :: cnpos(:)
 
       !> Full Maxwell capacitance matrix
       real(wp), allocatable :: cmat(:, :)

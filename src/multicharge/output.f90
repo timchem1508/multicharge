@@ -17,7 +17,7 @@
 module multicharge_output
    use mctc_env, only : wp, i8, timer_type, format_time
    use mctc_io, only : structure_type
-   use mctc_csrlist, only : csr_list
+   use mctc_csrlist, only : csr_list, find_lower_start
    use mctc_io_convert, only : autoaa
    use mctc_io_constants, only : pi
    use multicharge_model, only : mchrg_model_type
@@ -328,7 +328,7 @@ subroutine write_ascii_hessian_list(unit, mol, hessian, list)
    !> Sorted complete neighborlist of the Hessian
    type(csr_list), intent(in) :: list
 
-   integer :: iat, jat, isp, jsp, ic, pos, nlow
+   integer :: iat, jat, isp, jsp, ic, pos
    integer(i8) :: hat, nfin
    real(wp) :: hblk(3, 3), dnorm2, hnorm, usum
    real(wp) :: hrow(3)
@@ -342,11 +342,9 @@ subroutine write_ascii_hessian_list(unit, mol, hessian, list)
    hnorm = usum**2 * dnorm2**2
    !$omp parallel do default(none) schedule(runtime) reduction(+:hnorm) &
    !$omp shared(mol, hessian, list, usum) &
-   !$omp private(iat, jat, ic, hat, nfin, nlow, hblk)
+   !$omp private(iat, jat, ic, hat, nfin, hblk)
    do iat = 1, mol%nat
-      nfin = list%inl(iat + 1) - 1
-      nlow = findloc(list%nlat(list%inl(iat) + 1:nfin) < iat, .true., dim=1)
-      if (nlow > 0) nfin = list%inl(iat) + nlow - 1
+      nfin = find_lower_start(list, iat) - 1
       do hat = list%inl(iat), nfin
          jat = list%nlat(hat)
          do ic = 1, 3
@@ -379,12 +377,10 @@ subroutine write_ascii_hessian_list(unit, mol, hessian, list)
    write(unit, '(78("-"))')
    !$omp parallel do default(none) ordered schedule(dynamic) &
    !$omp shared(unit, mol, hessian, list) &
-   !$omp private(iat, jat, isp, jsp, ic, hat, nfin, nlow, pos, hrow, buffer)
+   !$omp private(iat, jat, isp, jsp, ic, hat, nfin, pos, hrow, buffer)
    do iat = 1, mol%nat
       isp = mol%id(iat)
-      nfin = list%inl(iat + 1) - 1
-      nlow = findloc(list%nlat(list%inl(iat) + 1:nfin) < iat, .true., dim=1)
-      if (nlow > 0) nfin = list%inl(iat) + nlow - 1
+      nfin = find_lower_start(list, iat) - 1
       allocate(character(len=3 * (hlen + 1) * (nfin - list%inl(iat) + 1)) :: buffer)
       pos = 0
       do hat = list%inl(iat), nfin
