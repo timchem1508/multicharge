@@ -140,6 +140,10 @@ module multicharge_model_cache
       !> matrix w.r.t. positions of (3, 3, mol%nat) size.
       real(wp), allocatable :: d2cdr2diag(:, :, :)
 
+      !> External electric field of the last solve, reused when a Hessian
+      !> routine repeats the solve on a rebuilt neighborlist
+      real(wp), allocatable :: efield(:)
+
       !> Logical flag for gradient calculation
       logical :: grad
 

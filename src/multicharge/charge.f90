@@ -20,7 +20,7 @@
 !> Interface to the charge models
 module multicharge_charge
    use iso_fortran_env, only : output_unit
-   use mctc_env, only : error_type, wp
+   use mctc_env, only : error_type, fatal_error, wp
    use mctc_io, only : structure_type
    use mctc_cutoff, only : get_lattice_points
    use mctc_csrlist, only : csr_list
@@ -33,14 +33,15 @@ module multicharge_charge
    implicit none
    private
 
-   public :: get_charges, get_eeq_charges, get_eeqbc_charges
+   public :: get_charges, get_eeq_charges, get_eeqbc_charges, add_charge_hessian
 
 
 contains
 
 
 !> Classical electronegativity equilibration charges
-subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, list, efield)
+subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, list, efield, &
+   & cache)
 
    !> Multicharge model
    class(mchrg_model_type), intent(in) :: mchrg_model
@@ -66,8 +67,13 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, list, efield)
    !> Optional external electric field
    real(wp), intent(in), contiguous, optional :: efield(:)
 
-   type(mchrg_cache), allocatable :: cache
-   logical :: grad
+   !> Optional cache retaining the solve and the CN derivatives for
+   !> add_charge_hessian, recompute after any change of the structure or model
+   type(mchrg_cache), intent(inout), optional :: cache
+
+   type(mchrg_cache), allocatable :: local_cache
+   type(mchrg_cache) :: empty_cache
+   logical :: grad, hess
    real(wp), allocatable :: trans(:, :)
 
    class(cg_solver), allocatable :: solver
@@ -79,16 +85,83 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, list, efield)
    call new_cg_solver(solver, solver_input)
 
    ! With a neighborlist the position derivatives can stay in the cache
-   grad = present(dqdL) .and. (present(dqdr) .or. present(list))
+   grad = present(dqdL) .and. present(dqdr)
+   hess = present(cache)
+   if (present(list)) then
+      if ((grad .or. hess) .and. .not. list%complete) then
+         call fatal_error(error, "Neighborlist must be sorted and complete "// &
+            & "when computing charge gradients or Hessian")
+         return
+      end if
+   end if
 
-   allocate(cache)
    call get_lattice_points(mol%periodic, mol%lattice, mchrg_model%ncoord%cutoff, trans)
-   call mchrg_model%update(mol, cache, trans, grad, list=list, dqdr=grad)
-   call mchrg_model%solve(mol, solver, cache, error, &
-      & qvec=qvec, dqdr=dqdr, dqdL=dqdL, list=list, &
-      & efield=efield, unit=output_unit)
+   if (present(cache)) then
+      ! Start from an empty cache, the Hessian checks for allocated data
+      cache = empty_cache
+      call mchrg_model%update(mol, cache, trans, grad, list=list, dqdr=grad, &
+         & hess=.true.)
+      call mchrg_model%solve(mol, solver, cache, error, &
+         & qvec=qvec, dqdr=dqdr, dqdL=dqdL, list=list, &
+         & efield=efield, unit=output_unit)
+   else
+      allocate(local_cache)
+      call mchrg_model%update(mol, local_cache, trans, grad, list=list, dqdr=grad)
+      call mchrg_model%solve(mol, solver, local_cache, error, &
+         & qvec=qvec, dqdr=dqdr, dqdL=dqdL, list=list, &
+         & efield=efield, unit=output_unit)
+   end if
 
 end subroutine get_charges
+
+
+!> Add the Hessian of the charges contracted with fixed atomic weights,
+!> sum_i weights(i) d2q_i/dR2, at a fixed lattice. The cache has to come from
+!> get_charges with the same structure and model and without a neighborlist.
+subroutine add_charge_hessian(mchrg_model, mol, error, weights, hessian, cache)
+
+   !> Multicharge model
+   class(mchrg_model_type), intent(in) :: mchrg_model
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Weights of the atomic partial charges
+   real(wp), intent(in) :: weights(:)
+
+   !> Nuclear Hessian of shape (3*nat, 3*nat), the contraction is added
+   real(wp), intent(inout) :: hessian(:, :)
+
+   !> Cache retained by get_charges, holds partial derivatives afterwards
+   type(mchrg_cache), intent(inout) :: cache
+
+   real(wp), allocatable :: whess(:, :)
+   class(cg_solver), allocatable :: solver
+   class(cg_input), allocatable :: solver_input
+
+   if (any(shape(hessian) /= 3 * mol%nat)) then
+      call fatal_error(error, "Invalid dimensions for charge Hessian contraction")
+      return
+   end if
+
+   ! Same solver as in get_charges, the constraint response of its solve is
+   ! kept in the cache
+   allocate(solver_input)
+   allocate(solver)
+   call new_cg_solver(solver, solver_input)
+
+   ! The weighted sum of the charges is linear in the charges, its Hessian is
+   ! the external Hessian with df/dq = weights and no further derivatives
+   allocate(whess(3 * mol%nat, 3 * mol%nat))
+   call mchrg_model%get_external_hessian(mol, solver, cache, error, weights, &
+      & hessian=whess)
+   if (allocated(error)) return
+   hessian(:, :) = hessian + whess
+
+end subroutine add_charge_hessian
 
 
 !> Obtain charges from electronegativity equilibration model

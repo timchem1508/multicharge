@@ -31,6 +31,7 @@ module multicharge_model_eeq
    use mctc_wignerseitz, only : wignerseitz_cell
    use multicharge_wignerseitz, only : new_wignerseitz_cell
    use mctc_csrlist, only : csr_list
+   use multicharge_blas, only : gemm
    use multicharge_ewald, only : get_alpha
    use multicharge_model_type, only : mchrg_model_type, mchrg_hessian, get_dir_trans, &
       & get_rec_trans
@@ -57,7 +58,7 @@ module multicharge_model_eeq
       procedure :: get_xvec_derivs
       !> Calculate gradient
       procedure :: get_grad
-      !> Explicit Hessian, not available for the EEQ model
+      !> Explicit Hessian at a fixed lattice
       procedure :: get_explicit_hessian_dense
       !> Explicit Hessian on a neighborlist, not available for the EEQ model
       procedure :: get_explicit_hessian_list
@@ -797,7 +798,11 @@ subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta, list)
 end subroutine get_grad
 
 
-!> The explicit part of the Hessian is not implemented for the EEQ model
+!> Compute the explicit part of the nuclear Hessian at a fixed lattice,
+!> alpha * p^T d2A/dR2 q + beta * p^T d2X/dR2 at fixed p and charges q. The
+!> cache has to hold the charges and the CN derivatives of the update for the
+!> Hessian. The off-diagonal blocks of a pair are written by the thread of the
+!> pair, only the diagonal blocks are reduced over the threads.
 subroutine get_explicit_hessian_dense(self, mol, cache, p, hessian, error, alpha, &
    & beta)
    !> EEQ model type
@@ -808,7 +813,7 @@ subroutine get_explicit_hessian_dense(self, mol, cache, p, hessian, error, alpha
    type(mchrg_cache), intent(inout) :: cache
    !> Charge-like contraction vector
    real(wp), intent(in) :: p(:)
-   !> Molecular nuclear Hessian
+   !> Nuclear Hessian
    real(wp), intent(inout) :: hessian(:, :)
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -817,9 +822,255 @@ subroutine get_explicit_hessian_dense(self, mol, cache, p, hessian, error, alpha
    !> Optional electronegativity prefactor
    real(wp), intent(in), optional :: beta
 
-   call fatal_error(error, "Analytical Hessian is not available for the EEQ model")
+   real(wp), parameter :: reg = 1.0e-14_wp
+
+   integer :: iat, izp, ii, nat
+   real(wp) :: alp, bet, sqcn
+   real(wp), allocatable :: dEdcn(:), work(:, :), diagonal(:, :, :)
+
+   alp = 1.0_wp
+   if (present(alpha)) alp = alpha
+   bet = 1.0_wp
+   if (present(beta)) bet = beta
+   nat = mol%nat
+
+   if (.not. allocated(cache%vrhs) .or. .not. allocated(cache%dcndr)) then
+      call fatal_error(error, "Charges and CN derivatives are not in the cache, "// &
+         & "update the cache with hess and solve first")
+      return
+   end if
+
+   ! X_i = -chi_i + kcnchi_i * CN_i / sqrt(CN_i + reg) with the first derivative
+   ! 0.5 * kcnchi_i / sqrt(CN_i + reg) of get_xvec_derivs, the CN Hessian is
+   ! contracted with the first and the products of the CN derivatives with the
+   ! second derivative w.r.t. the CN
+   allocate(dEdcn(nat), work(3 * nat, nat))
+   !$omp parallel do default(none) schedule(runtime) &
+   !$omp shared(self, mol, cache, p, bet, dEdcn, work, nat) private(iat, izp, sqcn)
+   do iat = 1, nat
+      izp = mol%id(iat)
+      sqcn = sqrt(cache%cn(iat) + reg)
+      dEdcn(iat) = bet * p(iat) * 0.5_wp * self%kcnchi(izp) / sqcn
+      work(:, iat) = reshape(-bet * p(iat) * 0.25_wp * self%kcnchi(izp) &
+         & / sqcn**3 * cache%dcndr(:, :, iat), [3 * nat])
+   end do
+   !$omp end parallel do
+   call self%ncoord%add_coordination_number_hessian(mol, cache%trans, dEdcn, &
+      & hessian)
+   call gemm(work, reshape(cache%dcndr, [3 * nat, nat]), hessian, transb='t', &
+      & beta=1.0_wp)
+   deallocate(work, dEdcn)
+
+   ! Pair terms of the Coulomb matrix, the self terms do not depend on the
+   ! positions at a fixed lattice
+   allocate(diagonal(3, 3, nat), source=0.0_wp)
+   if (any(mol%periodic)) then
+      call get_d2amat_3d(self, mol, cache, alp, p, hessian, diagonal)
+   else
+      call get_d2amat_0d(self, mol, cache, alp, p, hessian, diagonal)
+   end if
+
+   !$omp parallel do default(none) schedule(static) &
+   !$omp shared(nat, hessian, diagonal) private(iat, ii)
+   do iat = 1, nat
+      ii = 3 * (iat - 1)
+      hessian(ii + 1:ii + 3, ii + 1:ii + 3) = hessian(ii + 1:ii + 3, ii + 1:ii + 3) &
+         & + diagonal(:, :, iat)
+   end do
+   !$omp end parallel do
 
 end subroutine get_explicit_hessian_dense
+
+
+!> Add alpha * p^T d2A/dR2 q of the pair terms for a non-periodic system, the
+!> diagonal blocks are added to a separate array
+subroutine get_d2amat_0d(self, mol, cache, alpha, p, hessian, diagonal)
+   !> EEQ model type
+   class(eeq_model), intent(in) :: self
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+   !> Multicharge cache with the charges
+   type(mchrg_cache), intent(in) :: cache
+   !> d2A/dR2 multiplier
+   real(wp), intent(in) :: alpha
+   !> Charge-like contraction vector
+   real(wp), intent(in) :: p(:)
+   !> Nuclear Hessian, receives the off-diagonal blocks
+   real(wp), intent(inout) :: hessian(:, :)
+   !> Diagonal blocks of the Hessian
+   real(wp), intent(inout) :: diagonal(:, :, :)
+
+   integer :: iat, jat, izp, jzp
+   real(wp) :: vec(3), r1, gam, dr, drr, weight
+
+   !$omp parallel do default(none) schedule(runtime) &
+   !$omp shared(self, mol, cache, alpha, p, hessian) &
+   !$omp private(iat, jat, izp, jzp, vec, r1, gam, dr, drr, weight) &
+   !$omp reduction(+:diagonal)
+   do iat = 1, mol%nat
+      izp = mol%id(iat)
+      do jat = 1, iat - 1
+         jzp = mol%id(jat)
+         vec = mol%xyz(:, iat) - mol%xyz(:, jat)
+         r1 = norm2(vec)
+         gam = 1.0_wp / sqrt(self%rad(izp)**2 + self%rad(jzp)**2)
+         call get_coulomb_kernel(r1, gam, dr, drr)
+         weight = alpha * (p(iat) * cache%vrhs(jat) + p(jat) * cache%vrhs(iat))
+         call add_pair_block(iat, jat, weight * radial_hessian(vec, dr, drr), &
+            & hessian, diagonal)
+      end do
+   end do
+   !$omp end parallel do
+
+end subroutine get_d2amat_0d
+
+
+!> Add alpha * p^T d2A/dR2 q of the pair terms for a periodic system at a
+!> fixed lattice with the Ewald sums and Wigner-Seitz images of get_amat_3d,
+!> the diagonal blocks are added to a separate array
+subroutine get_d2amat_3d(self, mol, cache, alpha, p, hessian, diagonal)
+   !> EEQ model type
+   class(eeq_model), intent(in) :: self
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+   !> Multicharge cache with the charges, the Wigner-Seitz cell and Ewald alpha
+   type(mchrg_cache), intent(in) :: cache
+   !> d2A/dR2 multiplier
+   real(wp), intent(in) :: alpha
+   !> Charge-like contraction vector
+   real(wp), intent(in) :: p(:)
+   !> Nuclear Hessian, receives the off-diagonal blocks
+   real(wp), intent(inout) :: hessian(:, :)
+   !> Diagonal blocks of the Hessian
+   real(wp), intent(inout) :: diagonal(:, :, :)
+
+   integer :: iat, jat, izp, jzp, img, itr
+   real(wp) :: rij(3), vec(3), box(3, 3), gam, r1, g2, wsw, weight, fac
+   real(wp) :: dr, drr, ar, arr
+   real(wp), allocatable :: dtrans(:, :), rtrans(:, :), rweight(:)
+
+   call get_dir_trans(mol, dtrans)
+   call get_rec_trans(mol, rtrans)
+
+   ! Reciprocal-space weights independent of the atom pair
+   fac = 4.0_wp * pi / abs(matdet_3x3(mol%lattice))
+   allocate(rweight(size(rtrans, 2)), source=0.0_wp)
+   do itr = 1, size(rtrans, 2)
+      g2 = dot_product(rtrans(:, itr), rtrans(:, itr))
+      if (g2 < eps) cycle
+      rweight(itr) = fac * exp(-0.25_wp * g2 / cache%alpha**2) / g2
+   end do
+
+   !$omp parallel do default(none) schedule(runtime) &
+   !$omp shared(self, mol, cache, alpha, p, hessian, dtrans, rtrans, rweight) &
+   !$omp private(iat, jat, izp, jzp, img, itr, rij, vec, box, gam, r1, wsw) &
+   !$omp private(weight, dr, drr, ar, arr) &
+   !$omp reduction(+:diagonal)
+   do iat = 1, mol%nat
+      izp = mol%id(iat)
+      do jat = 1, iat - 1
+         jzp = mol%id(jat)
+         gam = 1.0_wp / sqrt(self%rad(izp)**2 + self%rad(jzp)**2)
+         wsw = 1.0_wp / real(cache%wsc%nimg(jat, iat), wp)
+         box(:, :) = 0.0_wp
+         do img = 1, cache%wsc%nimg(jat, iat)
+            rij = mol%xyz(:, jat) - mol%xyz(:, iat) &
+               & + cache%wsc%trans(:, cache%wsc%tridx(img, jat, iat))
+            do itr = 1, size(dtrans, 2)
+               vec = rij + dtrans(:, itr)
+               r1 = norm2(vec)
+               if (r1 < eps) cycle
+               call get_coulomb_kernel(r1, gam, dr, drr)
+               call get_coulomb_kernel(r1, cache%alpha, ar, arr)
+               box = box + wsw * radial_hessian(vec, dr - ar, drr - arr)
+            end do
+            do itr = 1, size(rtrans, 2)
+               vec = rtrans(:, itr)
+               box = box - wsw * rweight(itr) * cos(dot_product(rij, vec)) &
+                  & * spread(vec, 1, 3) * spread(vec, 2, 3)
+            end do
+         end do
+         weight = alpha * (p(iat) * cache%vrhs(jat) + p(jat) * cache%vrhs(iat))
+         call add_pair_block(iat, jat, weight * box, hessian, diagonal)
+      end do
+   end do
+   !$omp end parallel do
+
+end subroutine get_d2amat_3d
+
+
+!> First and second derivative of the Gaussian Coulomb kernel erf(gam*r)/r
+!> w.r.t. the distance
+pure subroutine get_coulomb_kernel(r1, gam, dr, drr)
+   !> Distance
+   real(wp), intent(in) :: r1
+   !> Gaussian width parameter
+   real(wp), intent(in) :: gam
+   !> First derivative w.r.t. the distance
+   real(wp), intent(out) :: dr
+   !> Second derivative w.r.t. the distance
+   real(wp), intent(out) :: drr
+
+   real(wp) :: erfval, ex
+
+   erfval = erf(gam * r1)
+   ex = 2.0_wp / sqrtpi * exp(-(gam * r1)**2)
+   dr = gam * ex / r1 - erfval / r1**2
+   drr = -2.0_wp * gam**3 * ex - 2.0_wp * gam * ex / r1**2 + 2.0_wp * erfval / r1**3
+
+end subroutine get_coulomb_kernel
+
+
+!> Cartesian Hessian of a radial function from its first and second derivative
+!> w.r.t. the distance
+pure function radial_hessian(vec, dr, drr) result(box)
+   !> Distance vector
+   real(wp), intent(in) :: vec(3)
+   !> First derivative w.r.t. the distance
+   real(wp), intent(in) :: dr
+   !> Second derivative w.r.t. the distance
+   real(wp), intent(in) :: drr
+   !> Cartesian Hessian
+   real(wp) :: box(3, 3)
+
+   integer :: ic
+   real(wp) :: r1, evec(3)
+
+   r1 = norm2(vec)
+   evec = vec / r1
+   box = (drr - dr / r1) * spread(evec, 1, 3) * spread(evec, 2, 3)
+   do ic = 1, 3
+      box(ic, ic) = box(ic, ic) + dr / r1
+   end do
+
+end function radial_hessian
+
+
+!> Add the Hessian blocks of a pair term depending on R_j - R_i, the
+!> off-diagonal blocks to the Hessian and the diagonal blocks to a separate
+!> array, the box of the pair is symmetric
+pure subroutine add_pair_block(iat, jat, box, hessian, diagonal)
+   !> First atom of the pair
+   integer, intent(in) :: iat
+   !> Second atom of the pair
+   integer, intent(in) :: jat
+   !> Cartesian Hessian of the pair term w.r.t. the distance vector
+   real(wp), intent(in) :: box(3, 3)
+   !> Nuclear Hessian, receives the off-diagonal blocks
+   real(wp), intent(inout) :: hessian(:, :)
+   !> Diagonal blocks of the Hessian
+   real(wp), intent(inout) :: diagonal(:, :, :)
+
+   integer :: ii, jj
+
+   ii = 3 * (iat - 1)
+   jj = 3 * (jat - 1)
+   hessian(ii + 1:ii + 3, jj + 1:jj + 3) = hessian(ii + 1:ii + 3, jj + 1:jj + 3) - box
+   hessian(jj + 1:jj + 3, ii + 1:ii + 3) = hessian(jj + 1:jj + 3, ii + 1:ii + 3) - box
+   diagonal(:, :, iat) = diagonal(:, :, iat) + box
+   diagonal(:, :, jat) = diagonal(:, :, jat) + box
+
+end subroutine add_pair_block
 
 
 !> The explicit part of the Hessian is not implemented for the EEQ model

@@ -45,7 +45,7 @@ program main
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
    logical :: grad, egrad, qgrad, json, exist, use_nlist, numeric_hessian
-   logical :: analytic_hessian
+   logical :: analytic_hessian, full_list
    real(wp), allocatable :: trans(:, :)
    real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
    real(wp), allocatable :: hess(:), press(:, :, :, :), hessian(:, :)
@@ -58,6 +58,8 @@ program main
    integer, allocatable :: verbosity
    real(wp) :: cutoff
    type(timer_type) :: timer
+
+   full_list = .false.
 
    call timer%push("total")
 
@@ -82,8 +84,11 @@ program main
       error stop
    end if
 
+   if (qgrad) full_list = .true.
+
    ! The analytical Hessian is only implemented for the EEQBC model of molecules
    if (analytic_hessian) then
+      full_list = .true.
       if (model_id /= mchrg_model%eeqbc2025) then
          call fatal_error(error, &
          & "Analytical Hessian is only available for the EEQBC model")
@@ -126,10 +131,10 @@ program main
       call timer%push("nlist")
       allocate(list)
       if (any(mol%periodic)) then
-         call new_csr_list(list, screen, mol, error, cache%wsc, cutoff, complete=.true.)
+         call new_csr_list(list, screen, mol, error, cache%wsc, cutoff, complete=full_list)
          if (.not. allocated(error)) call sort_neighborlist(list, cache%wsc)
       else
-         call new_csr_list(list, screen, mol, error, cutoff=cutoff, complete=.true.)
+         call new_csr_list(list, screen, mol, error, cutoff=cutoff, complete=full_list)
          if (.not. allocated(error)) call sort_neighborlist(list)
       end if
       call timer%pop
@@ -198,6 +203,10 @@ program main
          & format_time(timer%get("numhess"))
       end if
    else if (analytic_hessian .and. use_nlist) then
+      if (.not. list%complete) then
+         call fatal_error(error, "Neighborlist must be complete for analytical Hessian")
+         return
+      end if
       ! Compressed Hessian on the pattern of the neighborlist with the factored
       ! charge constraint term, only expanded for the output
       allocate(hesslist)

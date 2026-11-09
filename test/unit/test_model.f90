@@ -24,7 +24,8 @@ module test_model
    use multicharge_model_eeqbc, only: eeqbc_model
    use multicharge_param, only: new_eeq2019_model, new_eeqbc2025_model
    use multicharge_model_cache, only: mchrg_cache
-   use multicharge_charge, only: get_charges, get_eeq_charges, get_eeqbc_charges
+   use multicharge_charge, only: get_charges, get_eeq_charges, get_eeqbc_charges, &
+      & add_charge_hessian
    use multicharge_solver_type, only: mchrg_solver_type, mchrg_solver_input
    use multicharge_solver_direct, only : direct_solver, new_direct_solver, direct_input
    use multicharge_solver_cg, only : cg_solver, new_cg_solver, cg_input
@@ -74,6 +75,12 @@ subroutine collect_model(testsuite)
    & new_unittest("dqdr-znooh", test_dqdr_znooh), &
    & new_unittest("eeq-dfdr-mb06", test_eeq_dfdr_mb06), &
    & new_unittest("eeq-dfdr-mb10", test_eeq_dfdr_mb10), &
+   & new_unittest("eeq-hess-expl-mb05", test_eeq_hexpl_mb05), &
+   & new_unittest("eeq-hess-mb05", test_eeq_hess_mb05), &
+   & new_unittest("eeq-hess-ext-mb05", test_eeq_hext_mb05), &
+   & new_unittest("eeq-charge-hess-mb05", test_eeq_qhess_mb05), &
+   & new_unittest("eeq-charge-hess-co2", test_eeq_qhess_co2), &
+   & new_unittest("eeqbc-charge-hess-mb05", test_eeqbc_qhess_mb05), &
    & new_unittest("eeqbc-dadr-mb01", test_eeqbc_dadr_mb01), &
    & new_unittest("eeqbc-dadL-mb01", test_eeqbc_dadL_mb01), &
    & new_unittest("eeqbc-dbdr-mb01", test_eeqbc_dbdr_mb01), &
@@ -1421,15 +1428,9 @@ subroutine test_explicit_hessian(error, mol, model, alpha, beta, pvec)
    end if
 
    hessian(:, :) = 0.0_wp
-   select type (model)
-    type is (eeqbc_model)
-      call model%get_explicit_hessian(mol, cache, p, hessian, error, &
-         & alpha=alpha, beta=beta)
-      if (allocated(error)) return
-    class default
-      call test_failed(error, "Explicit Hessian requires the EEQBC model")
-      return
-   end select
+   call model%get_explicit_hessian(mol, cache, p, hessian, error, &
+      & alpha=alpha, beta=beta)
+   if (allocated(error)) return
 
    ! Central differences of the analytical gradient at fixed charges
    do iat = 1, mol%nat
@@ -1700,18 +1701,12 @@ subroutine test_hessian(error, mol, model, cg)
    end if
 
    allocate(cache)
-   select type (model)
-    type is (eeqbc_model)
-      allocate(dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat))
-      call model%update(mol, cache, trans, grad=.false., hess=.true.)
-      call model%solve(mol, solver, cache, error, dqdr=dqdr, dqdL=dqdL)
-      if (allocated(error)) return
-      call model%get_hessian(mol, solver, cache, error, hessian)
-      if (allocated(error)) return
-    class default
-      call test_failed(error, "Analytical Hessian requires the EEQBC model")
-      return
-   end select
+   allocate(dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat))
+   call model%update(mol, cache, trans, grad=.false., hess=.true.)
+   call model%solve(mol, solver, cache, error, dqdr=dqdr, dqdL=dqdL)
+   if (allocated(error)) return
+   call model%get_hessian(mol, solver, cache, error, hessian)
+   if (allocated(error)) return
 
    if (any(abs(hessian - numhess) > thr2)) then
       call test_failed(error, "Hessian does not match")
@@ -1949,6 +1944,113 @@ subroutine test_external_hessian(error, mol, model, cg)
    end if
 
 end subroutine test_external_hessian
+
+
+!> Check the Hessian of the charges contracted with fixed weights from
+!> add_charge_hessian against central differences of the weighted charge
+!> derivatives, and its symmetry
+subroutine test_charge_hessian(error, mol, model)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular structure data
+   type(structure_type), intent(inout) :: mol
+
+   !> Electronegativity equilibration model
+   class(mchrg_model_type), intent(in) :: model
+
+   type(mchrg_cache), allocatable :: cache
+   integer :: iat, ic, ndim
+   real(wp), parameter :: step = 1.0e-6_wp
+   real(wp) :: xorig
+   real(wp), allocatable :: qvec(:), weights(:), dqdr(:, :, :), dqdL(:, :, :)
+   real(wp), allocatable :: gr(:, :), gl(:, :), hessian(:, :), numhess(:, :)
+
+   ndim = 3*mol%nat
+   allocate(qvec(mol%nat), weights(mol%nat), dqdr(3, mol%nat, mol%nat), &
+      & dqdL(3, 3, mol%nat), gr(3, mol%nat), gl(3, mol%nat), &
+      & hessian(ndim, ndim), numhess(ndim, ndim))
+   do iat = 1, mol%nat
+      weights(iat) = 0.7_wp - 0.3_wp * real(mod(3*iat, 5), wp) / 4.0_wp
+   end do
+
+   do iat = 1, mol%nat
+      do ic = 1, 3
+         xorig = mol%xyz(ic, iat)
+         mol%xyz(ic, iat) = xorig + step
+         call weighted_charge_derivs(mol, model, weights, error, gr)
+         if (allocated(error)) return
+         mol%xyz(ic, iat) = xorig - step
+         call weighted_charge_derivs(mol, model, weights, error, gl)
+         if (allocated(error)) return
+         mol%xyz(ic, iat) = xorig
+         numhess(:, 3*(iat - 1) + ic) = reshape(0.5_wp*(gr - gl)/step, [ndim])
+      end do
+   end do
+
+   ! The contraction is added to the Hessian
+   hessian(:, :) = 1.0_wp
+   allocate(cache)
+   call get_charges(model, mol, error, qvec, cache=cache)
+   if (allocated(error)) return
+   call add_charge_hessian(model, mol, error, weights, hessian, cache)
+   if (allocated(error)) return
+   hessian(:, :) = hessian - 1.0_wp
+
+   if (any(abs(hessian - numhess) > thr2)) then
+      call test_failed(error, "Charge Hessian does not match")
+      print'(a)', "hessian:"
+      print'(3es21.12)', hessian
+      print'(a)', "numhess:"
+      print'(3es21.12)', numhess
+      print'(a)', "diff:"
+      print'(3es21.12)', hessian - numhess
+      return
+   end if
+
+   if (any(abs(hessian - transpose(hessian)) > thr1)) then
+      call test_failed(error, "Charge Hessian is not symmetric")
+      print'(a)', "asymmetry:"
+      print'(3es21.12)', hessian - transpose(hessian)
+      return
+   end if
+
+end subroutine test_charge_hessian
+
+
+!> Weighted charge derivatives sum_i weights(i) dq_i/dR for a displaced
+!> structure
+subroutine weighted_charge_derivs(mol, model, weights, error, gradient)
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Electronegativity equilibration model
+   class(mchrg_model_type), intent(in) :: model
+
+   !> Weights of the atomic partial charges
+   real(wp), intent(in) :: weights(:)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Weighted charge derivatives
+   real(wp), intent(out) :: gradient(:, :)
+
+   integer :: iat
+   real(wp), allocatable :: qvec(:), dqdr(:, :, :), dqdL(:, :, :)
+
+   allocate(qvec(mol%nat), dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat))
+   call get_charges(model, mol, error, qvec, dqdr, dqdL)
+   if (allocated(error)) return
+
+   gradient(:, :) = 0.0_wp
+   do iat = 1, mol%nat
+      gradient(:, :) = gradient + weights(iat) * dqdr(:, :, iat)
+   end do
+
+end subroutine weighted_charge_derivs
 
 
 subroutine test_eeq_dadr_mb01(error)
@@ -2807,6 +2909,117 @@ subroutine test_eeqbc_hess_cg_znooh(error)
    call test_hessian(error, mol, model, cg=.true.)
 
 end subroutine test_eeqbc_hess_cg_znooh
+
+
+subroutine test_eeq_hexpl_mb05(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   real(wp), allocatable :: pvec(:)
+
+   integer :: iat
+
+   call get_structure(mol, "MB16-43", "05")
+   call new_eeq2019_model(mol, model, error)
+   if (allocated(error)) return
+   ! Contraction vector different from the charges
+   allocate(pvec(mol%nat))
+   do iat = 1, mol%nat
+      pvec(iat) = 0.2_wp - 0.05_wp * real(mod(iat, 7), wp)
+   end do
+   call test_explicit_hessian(error, mol, model, alpha=0.5_wp, beta=-1.0_wp, &
+      & pvec=pvec)
+
+end subroutine test_eeq_hexpl_mb05
+
+
+subroutine test_eeq_hess_mb05(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "MB16-43", "05")
+   call new_eeq2019_model(mol, model, error)
+   if (allocated(error)) return
+   call test_hessian(error, mol, model)
+
+end subroutine test_eeq_hess_mb05
+
+
+subroutine test_eeq_hext_mb05(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "MB16-43", "05")
+   call new_eeq2019_model(mol, model, error)
+   if (allocated(error)) return
+   call test_external_hessian(error, mol, model)
+
+end subroutine test_eeq_hext_mb05
+
+
+subroutine test_eeq_qhess_mb05(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "MB16-43", "05")
+   call new_eeq2019_model(mol, model, error)
+   if (allocated(error)) return
+   call test_charge_hessian(error, mol, model)
+
+end subroutine test_eeq_qhess_mb05
+
+
+subroutine test_eeq_qhess_co2(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   integer :: iat
+
+   ! 3D periodic, displaced from the symmetric positions
+   call get_structure(mol, "X23", "CO2")
+   do iat = 1, mol%nat
+      mol%xyz(:, iat) = mol%xyz(:, iat) &
+         & + 0.1_wp * [sin(real(iat, wp)), cos(real(2*iat, wp)), sin(real(3*iat, wp))]
+   end do
+   call new_eeq2019_model(mol, model, error)
+   if (allocated(error)) return
+   call test_charge_hessian(error, mol, model)
+
+end subroutine test_eeq_qhess_co2
+
+
+subroutine test_eeqbc_qhess_mb05(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "MB16-43", "05")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_charge_hessian(error, mol, model)
+
+end subroutine test_eeqbc_qhess_mb05
 
 
 subroutine test_eeqbc_hext_mb05(error)

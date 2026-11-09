@@ -33,6 +33,7 @@ module multicharge_model_type
    use mctc_ncoord, only : ncoord_type
    use mctc_csrlist, only : csr_list, new_csr_list, distance_screening, &
       & sort_neighborlist, spsymv_csr, spmm_csr
+   use mctc_wignerseitz, only : wignerseitz_cell
    use multicharge_blas, only : gemv, symv, gemm
    use multicharge_model_cache, only : mchrg_cache
    use multicharge_solver_type, only : mchrg_solver_type
@@ -122,7 +123,7 @@ module multicharge_model_type
       procedure :: get_external_gradient
 
       !> Calculate the analytical Hessian of an external function of the
-      !> charges (molecular)
+      !> charges at a fixed lattice
       procedure :: get_external_hessian_dense
 
       !> Calculate the analytical Hessian of an external function of the
@@ -583,7 +584,7 @@ subroutine solve(self, mol, solver, cache, error, &
    real(wp) :: vvecsum
    real(wp) :: lambda
 
-   logical :: grad, cpq
+   logical :: grad, cpq, rebuilt
    logical :: add_lagr = .true.
    type(timer_type) :: timer
    integer :: print_unit, verbosity_solve
@@ -1573,7 +1574,7 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
    !> External gradient w.r.t. lattice vectors
    real(wp), intent(inout) :: dfdL(:, :)
 
-   !> neighborlist optional type
+   !> Neighborlist optional type
    type(csr_list), intent(in), optional :: list
 
    !> Output unit
@@ -1727,8 +1728,7 @@ subroutine get_hessian_list(self, mol, solver, cache, error, hessian, list, &
    !> Molecular nuclear Hessian in compressed storage on the neighborlist
    type(mchrg_hessian), intent(inout) :: hessian
 
-   !> Multicharge neighborlist type (sorted complete) of the update and the
-   !> solve
+   !> Neighborlist type
    type(csr_list), intent(in) :: list
 
    !> Output unit
@@ -2147,13 +2147,15 @@ subroutine add_column_products(list, dlist, yat, bloc, act, col, acc)
 end subroutine add_column_products
 
 
-!> Compute the molecular nuclear Hessian of an external function f(q, R) of the
-!> charges with the adjoint vector p = S df/dq, the explicit part
+!> Compute the nuclear Hessian of an external function f(q, R) of the charges
+!> at a fixed lattice with the adjoint vector p = S df/dq, the explicit part
 !> p^T (d2X/dR2 - d2A/dR2*q) at fixed charges and the implicit part
 !> G^T dq/dR + (dq/dR)^T G + (dq/dR)^T d2f/dq2 dq/dR from the response of the
 !> charges with G = d2f/dRdq - dA/dR*p. The derivatives of f are taken at the
-!> charges of the structure, the second derivative d2f/dR2 at fixed charges is
-!> added by the caller. The cache has to hold the solve and the CN derivatives,
+!> charges of the structure, absent second derivatives of f w.r.t. the charges
+!> vanish, and the second derivative d2f/dR2 at fixed charges is added by the
+!> caller. Periodic systems are supported if the explicit Hessian of the
+!> model is. The cache has to hold the solve and the CN derivatives,
 !> update it with hess and solve first. The direct solver keeps the inverse of
 !> the augmented matrix only if the solve requested the charge derivatives.
 subroutine get_external_hessian_dense(self, mol, solver, cache, error, dfdq, &
@@ -2178,13 +2180,13 @@ subroutine get_external_hessian_dense(self, mol, solver, cache, error, dfdq, &
    real(wp), intent(in) :: dfdq(:)
 
    !> Second derivative of the external function w.r.t. atomic charges
-   real(wp), intent(in) :: d2fdq2(:, :)
+   real(wp), intent(in), optional :: d2fdq2(:, :)
 
    !> Mixed derivative of the external function w.r.t. positions and charges,
    !> dfdrdq(:, x, b) = d2f/dR_x dq_b
-   real(wp), intent(in) :: dfdrdq(:, :, :)
+   real(wp), intent(in), optional :: dfdrdq(:, :, :)
 
-   !> Molecular nuclear Hessian of the external function without d2f/dR2
+   !> Nuclear Hessian of the external function without d2f/dR2
    real(wp), intent(out) :: hessian(:, :)
 
    !> Output unit
@@ -2194,17 +2196,24 @@ subroutine get_external_hessian_dense(self, mol, solver, cache, error, dfdq, &
    integer, intent(in), optional :: verbosity
 
    real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :), padj(:)
+   integer :: ndim
 
-   if (any(mol%periodic)) then
-      call fatal_error(error, &
-         & "Analytical Hessian is not available for periodic systems")
-      return
-   end if
-
-   if (size(dfdq) /= mol%nat .or. any(shape(d2fdq2) /= [mol%nat, mol%nat]) &
-      & .or. any(shape(dfdrdq) /= [3, mol%nat, mol%nat])) then
+   ndim = 3 * mol%nat
+   if (size(dfdq) /= mol%nat .or. any(shape(hessian) /= [ndim, ndim])) then
       call fatal_error(error, "External partial derivatives are wrong size")
       return
+   end if
+   if (present(d2fdq2)) then
+      if (any(shape(d2fdq2) /= [mol%nat, mol%nat])) then
+         call fatal_error(error, "External partial derivatives are wrong size")
+         return
+      end if
+   end if
+   if (present(dfdrdq)) then
+      if (any(shape(dfdrdq) /= [3, mol%nat, mol%nat])) then
+         call fatal_error(error, "External partial derivatives are wrong size")
+         return
+      end if
    end if
 
    ! Get variables from the model cache
@@ -2232,16 +2241,21 @@ subroutine get_external_hessian_dense(self, mol, solver, cache, error, dfdq, &
    call new_partial_derivs(mol, size(padj), cache, dafdr=.true.)
    call self%get_coulomb_derivs(mol, size(padj), cache, alpha=-1.0_wp, &
       & p=padj(:mol%nat), dafdr=.true.)
-   cache%dafdr = cache%dafdr + dfdrdq
+   if (present(dfdrdq)) cache%dafdr = cache%dafdr + dfdrdq
 
    ! Implicit part G^T dq/dR + (dq/dR)^T (G + d2f/dq2 dq/dR), the second
    ! factor replaces G in place
-   call gemm(reshape(cache%dafdr, [3 * mol%nat, mol%nat]), &
-      & reshape(dqdr, [3 * mol%nat, mol%nat]), hessian, transb='t')
-   call gemm(dqdr, d2fdq2, cache%dafdr, beta=1.0_wp)
-   call gemm(reshape(dqdr, [3 * mol%nat, mol%nat]), &
-      & reshape(cache%dafdr, [3 * mol%nat, mol%nat]), hessian, transb='t', &
-      & beta=1.0_wp)
+   call gemm(reshape(cache%dafdr, [ndim, mol%nat]), &
+      & reshape(dqdr, [ndim, mol%nat]), hessian, transb='t')
+   if (present(d2fdq2)) then
+      call gemm(dqdr, d2fdq2, cache%dafdr, beta=1.0_wp)
+      call gemm(reshape(dqdr, [ndim, mol%nat]), &
+         & reshape(cache%dafdr, [ndim, mol%nat]), hessian, transb='t', &
+         & beta=1.0_wp)
+   else
+      ! Without d2f/dq2 the second product is the transpose of the first
+      hessian(:, :) = hessian + transpose(hessian)
+   end if
    deallocate(cache%dafdr)
 
    ! Second derivatives of p^T (X - A*q) at fixed charges and adjoint vector
@@ -2307,8 +2321,7 @@ subroutine get_external_hessian_list(self, mol, solver, cache, error, dfdq, &
    !> compressed storage on the neighborlist
    type(mchrg_hessian), intent(inout) :: hessian
 
-   !> Multicharge neighborlist type (sorted complete) of the update and the
-   !> solve
+   !> Neighborlist type
    type(csr_list), intent(in) :: list
 
    !> Output unit
