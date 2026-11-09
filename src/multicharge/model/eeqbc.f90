@@ -103,6 +103,10 @@ module multicharge_model_eeqbc
    !> Distance below which a lattice image of a pair is skipped as the atom itself
    real(wp), parameter :: eps = sqrt(epsilon(0.0_wp))
 
+   !> Threshold of the CN and local charge derivatives on the neighborlist below
+   !> which their products in the partial derivatives and the Hessian are skipped
+   real(wp), parameter :: cnthr = epsilon(1.0_wp)**2
+
    !> Default exponent of error function in bond capacitance
    real(wp), parameter :: default_kbc = 0.65_wp
 
@@ -667,13 +671,14 @@ subroutine get_xvec_derivs_0d_list(self, mol, list, cache, beta)
    real(wp), intent(in) :: beta
 
    integer :: iat, izp, jat, jzp, xat, nrow, xent, kmax
-   integer(i8) :: ist, kat, cat
+   integer(i8) :: ist, kat, cat, cent
    real(wp) :: vec(3), cij, dGc(3), dSc(3, 3)
    real(wp), allocatable :: dtmpdL(:, :, :), drow(:, :)
    integer, allocatable :: pos(:)
-   integer(i8), allocatable :: tpos(:)
+   integer(i8), allocatable :: tpos(:), cninl(:), cnpos(:)
 
    call get_transposed_positions(list, tpos)
+   call get_cn_entries_list(mol, list, cache, tpos, cninl, cnpos)
 
    allocate(dtmpdL(3, 3, mol%nat))
    !$omp parallel do default(none) schedule(runtime) &
@@ -688,6 +693,7 @@ subroutine get_xvec_derivs_0d_list(self, mol, list, cache, beta)
 
    !$omp parallel default(none) &
    !$omp shared(cache, mol, list, self, beta, dtmpdL, tpos, kmax) &
+   !$omp shared(cninl, cnpos) private(cent) &
    !$omp private(iat, izp, jat, jzp, xat, nrow, xent, ist, kat, cat, vec) &
    !$omp private(cij, dGc, dSc, pos, drow)
    allocate(pos(mol%nat), source=0)
@@ -707,7 +713,8 @@ subroutine get_xvec_derivs_0d_list(self, mol, list, cache, beta)
          jat = list%nlat(kat)
          jzp = mol%id(jat)
          cij = cache%clist(min(kat, tpos(kat)))
-         do cat = list%inl(jat), list%inl(jat + 1) - 1
+         do cent = cninl(jat), cninl(jat + 1) - 1
+            cat = cnpos(cent)
             xat = list%nlat(cat)
             xent = pos(xat)
             if (xent == 0) cycle
@@ -767,15 +774,16 @@ subroutine get_xvec_derivs_3d_list(self, mol, list, cache, beta)
    real(wp), intent(in) :: beta
 
    integer :: iat, izp, jat, jzp, xat, nrow, xent, kmax
-   integer(i8) :: ist, kat, cat, img
+   integer(i8) :: ist, kat, cat, cent, img
    real(wp) :: vec(3), rvdw, wsw, ctmp, cself, capi, capj, cij
    real(wp) :: dGc(3), dSc(3, 3)
    real(wp), allocatable :: dtrans(:, :), dtmpdL(:, :, :), drow(:, :)
    integer, allocatable :: pos(:)
-   integer(i8), allocatable :: tpos(:)
+   integer(i8), allocatable :: tpos(:), cninl(:), cnpos(:)
 
    call get_dir_trans(mol, dtrans, cutoff)
    call get_transposed_positions(list, tpos)
+   call get_cn_entries_list(mol, list, cache, tpos, cninl, cnpos)
 
    allocate(dtmpdL(3, 3, mol%nat))
    !$omp parallel do default(none) schedule(runtime) &
@@ -790,6 +798,7 @@ subroutine get_xvec_derivs_3d_list(self, mol, list, cache, beta)
 
    !$omp parallel default(none) &
    !$omp shared(cache, mol, list, self, beta, dtrans, dtmpdL, tpos, kmax) &
+   !$omp shared(cninl, cnpos) private(cent) &
    !$omp private(iat, izp, jat, jzp, xat, nrow, xent, ist, kat, cat, img) &
    !$omp private(vec, rvdw, wsw, ctmp, cself, capi, capj, cij, dGc, dSc) &
    !$omp private(pos, drow)
@@ -810,7 +819,8 @@ subroutine get_xvec_derivs_3d_list(self, mol, list, cache, beta)
          jat = list%nlat(kat)
          jzp = mol%id(jat)
          cij = cache%clist(min(kat, tpos(kat)))
-         do cat = list%inl(jat), list%inl(jat + 1) - 1
+         do cent = cninl(jat), cninl(jat + 1) - 1
+            cat = cnpos(cent)
             xat = list%nlat(cat)
             xent = pos(xat)
             if (xent == 0) cycle
@@ -1240,18 +1250,20 @@ subroutine get_damat_0d_list(self, mol, list, cache, alpha, p, dlist, dadL)
    real(wp), intent(inout) :: dadL(:, :, :)
 
    integer :: iat, izp, jat, jzp, xat, nrow, xent, kmax
-   integer(i8) :: ist, kat, cat
+   integer(i8) :: ist, kat, cat, cent
    real(wp) :: vec(3), r1, r2, gam, arg, dtmp, norm_cn, hardi, wtmp, wcni, cij
    real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), dGc(3), dSc(3, 3)
    real(wp), allocatable :: drow(:, :)
    integer, allocatable :: pos(:)
-   integer(i8), allocatable :: tpos(:)
+   integer(i8), allocatable :: tpos(:), cninl(:), cnpos(:)
 
    call get_transposed_positions(list, tpos)
+   call get_cn_entries_list(mol, list, cache, tpos, cninl, cnpos)
    kmax = int(maxval(list%inl(2:mol%nat + 1) - list%inl(:mol%nat)))
 
    !$omp parallel default(none) &
    !$omp shared(cache, mol, list, self, alpha, p, dlist, dadL, tpos, kmax) &
+   !$omp shared(cninl, cnpos) private(cent) &
    !$omp private(iat, izp, jat, jzp, xat, nrow, xent, ist, kat, cat, gam) &
    !$omp private(vec, r1, r2, dtmp, norm_cn, arg, hardi, wtmp, wcni, cij, radi) &
    !$omp private(radj, dradi, dradj, dG, dS, dGc, dSc, pos, drow)
@@ -1309,7 +1321,8 @@ subroutine get_damat_0d_list(self, mol, list, cache, alpha, p, dlist, dadL)
          dtmp = -wtmp * radj * dradj * gam**3
          drow(:, kat - ist + 1) = drow(:, kat - ist + 1) &
             & + dtmp * cache%dcndrlist(:, list%inl(jat))
-         do cat = list%inl(jat) + 1, list%inl(jat + 1) - 1
+         do cent = cninl(jat) + 1, cninl(jat + 1) - 1
+            cat = cnpos(cent)
             xat = list%nlat(cat)
             xent = pos(xat)
             if (xent == 0) cycle
@@ -1385,20 +1398,22 @@ subroutine get_damat_3d_list(self, mol, list, cache, alpha, p, dlist, dadL)
    real(wp), intent(inout) :: dadL(:, :, :)
 
    integer :: iat, izp, jat, jzp, xat, nrow, xent, kmax
-   integer(i8) :: ist, kat, cat, img
+   integer(i8) :: ist, kat, cat, cent, img
    real(wp) :: vec(3), gam, dtmp, norm_cn, rvdw, wsw, dgam, wgam, hardi, wcni
    real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), dGc(3), dSc(3, 3)
    real(wp) :: capi, capj
    real(wp), allocatable :: dtrans(:, :), drow(:, :)
    integer, allocatable :: pos(:)
-   integer(i8), allocatable :: tpos(:)
+   integer(i8), allocatable :: tpos(:), cninl(:), cnpos(:)
 
    call get_dir_trans(mol, dtrans, cutoff)
    call get_transposed_positions(list, tpos)
+   call get_cn_entries_list(mol, list, cache, tpos, cninl, cnpos)
    kmax = int(maxval(list%inl(2:mol%nat + 1) - list%inl(:mol%nat)))
 
    !$omp parallel default(none) &
    !$omp shared(cache, mol, list, self, alpha, p, dlist, dadL, dtrans, tpos, kmax) &
+   !$omp shared(cninl, cnpos) private(cent) &
    !$omp private(iat, izp, jat, jzp, xat, nrow, xent, ist, kat, cat, img) &
    !$omp private(vec, gam, dtmp, norm_cn, rvdw, wsw, dgam, wgam, hardi, wcni) &
    !$omp private(radi, radj, dradi, dradj, dG, dS, dGc, dSc, capi, capj) &
@@ -1475,7 +1490,8 @@ subroutine get_damat_3d_list(self, mol, list, cache, alpha, p, dlist, dadL)
          dtmp = wgam * p(jat) * radj * dradj * gam**3
          drow(:, kat - ist + 1) = drow(:, kat - ist + 1) &
             & + dtmp * cache%dcndrlist(:, list%inl(jat))
-         do cat = list%inl(jat) + 1, list%inl(jat + 1) - 1
+         do cent = cninl(jat) + 1, cninl(jat + 1) - 1
+            cat = cnpos(cent)
             xat = list%nlat(cat)
             xent = pos(xat)
             if (xent == 0) cycle
@@ -3887,7 +3903,7 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
 
    real(wp) :: alpha, beta
    integer :: iat, jat, kkat, xat, izp, jzp, kzp, ic, it, ntouch, nlow
-   integer(i8) :: kat, ist, hat, cat, nfin, pat
+   integer(i8) :: kat, ist, hat, cat, cent, nfin, pat
    real(wp) :: vec(3), evec(3), r1, r2, gam, arg, dtmp, norm_cn_i
    real(wp) :: radi, dradi, d2radi, capi, capj, rvdw
    real(wp) :: tqeta, hardi, dhdcni, d2hdcni2, detai, d2etai
@@ -3898,7 +3914,7 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    real(wp) :: dcn(3), dqloc(3), dx(3)
    real(wp), parameter :: dtrans(3, 1) = 0.0_wp
    integer, allocatable :: touch(:)
-   integer(i8), allocatable :: hmap(:), tpos(:)
+   integer(i8), allocatable :: hmap(:), tpos(:), cninl(:), cnpos(:)
    logical, allocatable :: mark(:)
    real(wp), allocatable :: v(:), qlocacc(:), cnacc(:), kcnacc(:), kqlocacc(:)
    real(wp), allocatable :: dcnacc(:, :), dqlocacc(:, :), rdrad(:), wcn(:), wqloc(:)
@@ -4066,10 +4082,12 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    deallocate(radius, drdrad, wcap, diagonal)
 
    call get_transposed_positions(list, tpos)
+   call get_cn_entries_list(mol, list, cache, tpos, cninl, cnpos)
 
    !$omp parallel default(none) &
    !$omp shared(mol, self, list, cache, p, beta, hessian, dcnacc, dqlocacc) &
    !$omp shared(kcnacc, kqlocacc, rdrad, wcn, wqloc, wpair, tpos) &
+   !$omp shared(cninl, cnpos) private(cent) &
    !$omp private(iat, jat, kkat, xat, kzp, ic, it, ntouch, kat, hat, cat, nfin) &
    !$omp private(nlow, pat) &
    !$omp private(wk, wq, dcn, dqloc, dx, gcn, gqloc, mark, touch, hmap)
@@ -4087,7 +4105,8 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
       end do
 
       ntouch = 0
-      do cat = list%inl(jat), list%inl(jat + 1) - 1
+      do cent = cninl(jat), cninl(jat + 1) - 1
+         cat = cnpos(cent)
          iat = list%nlat(cat)
          dcn = cache%dcndrlist(:, cat)
          if (.not. mark(iat)) then
@@ -4127,9 +4146,10 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
 
       do it = 1, ntouch
          kkat = touch(it)
-         do cat = list%inl(kkat), list%inl(kkat + 1) - 1
+         do cent = cninl(kkat), cninl(kkat + 1) - 1
+            cat = cnpos(cent)
             xat = list%nlat(cat)
-            if (cat > list%inl(kkat) .and. xat < jat) exit
+            if (cent > cninl(kkat) .and. xat < jat) exit
             hat = hmap(xat)
             if (hat == 0) cycle
             dcn = cache%dcndrlist(:, tpos(cat))
@@ -4144,7 +4164,8 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
          mark(kkat) = .false.
       end do
 
-      do cat = list%inl(jat), list%inl(jat + 1) - 1
+      do cent = cninl(jat), cninl(jat + 1) - 1
+         cat = cnpos(cent)
          kkat = list%nlat(cat)
          kzp = mol%id(kkat)
          dcn = cache%dcndrlist(:, cat)
@@ -4233,5 +4254,92 @@ subroutine get_transposed_positions(list, tpos)
    !$omp end parallel do
 
 end subroutine get_transposed_positions
+
+
+!> Entries of a sorted complete neighborlist with CN or local charge
+!> derivatives above cnthr, the atom itself first and in the order of the
+!> list. The rows cninl give the positions cnpos of these entries in the list.
+!> An entry is kept if the derivatives of the CN or local charge of either atom
+!> of the pair w.r.t. the other one are above the threshold.
+subroutine get_cn_entries_list(mol, list, cache, tpos, cninl, cnpos)
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Sorted complete neighborlist
+   type(csr_list), intent(in) :: list
+
+   !> Cache with the CN and local charge derivatives on the list
+   type(mchrg_cache), intent(in) :: cache
+
+   !> Position of the atom in the row of the neighbor for each entry
+   integer(i8), intent(in) :: tpos(:)
+
+   !> Offsets of the rows of the entries
+   integer(i8), allocatable, intent(out) :: cninl(:)
+
+   !> Positions of the entries in the list
+   integer(i8), allocatable, intent(out) :: cnpos(:)
+
+   integer :: iat
+   integer(i8) :: kat, cnt
+
+   allocate(cninl(mol%nat + 1))
+   cninl(1) = 1
+
+   !$omp parallel do default(none) schedule(runtime) &
+   !$omp shared(mol, list, cache, tpos, cninl) private(iat, kat, cnt)
+   do iat = 1, mol%nat
+      cnt = 1
+      do kat = list%inl(iat) + 1, list%inl(iat + 1) - 1
+         if (is_cn_entry(cache, kat, tpos(kat))) cnt = cnt + 1
+      end do
+      cninl(iat + 1) = cnt
+   end do
+   !$omp end parallel do
+   do iat = 1, mol%nat
+      cninl(iat + 1) = cninl(iat) + cninl(iat + 1)
+   end do
+
+   allocate(cnpos(cninl(mol%nat + 1) - 1))
+   !$omp parallel do default(none) schedule(runtime) &
+   !$omp shared(mol, list, cache, tpos, cninl, cnpos) private(iat, kat, cnt)
+   do iat = 1, mol%nat
+      cnt = cninl(iat)
+      cnpos(cnt) = list%inl(iat)
+      do kat = list%inl(iat) + 1, list%inl(iat + 1) - 1
+         if (is_cn_entry(cache, kat, tpos(kat))) then
+            cnt = cnt + 1
+            cnpos(cnt) = kat
+         end if
+      end do
+   end do
+   !$omp end parallel do
+
+end subroutine get_cn_entries_list
+
+
+!> Whether an entry or its transposed entry holds CN or local charge
+!> derivatives above cnthr
+pure function is_cn_entry(cache, kat, tat) result(keep)
+
+   !> Cache with the CN and local charge derivatives on the list
+   type(mchrg_cache), intent(in) :: cache
+
+   !> Position of the entry
+   integer(i8), intent(in) :: kat
+
+   !> Position of the transposed entry
+   integer(i8), intent(in) :: tat
+
+   !> Entry has derivatives above the threshold
+   logical :: keep
+
+   keep = any(abs(cache%dcndrlist(:, kat)) > cnthr) &
+      & .or. any(abs(cache%dcndrlist(:, tat)) > cnthr) &
+      & .or. any(abs(cache%dqlocdrlist(:, kat)) > cnthr) &
+      & .or. any(abs(cache%dqlocdrlist(:, tat)) > cnthr)
+
+end function is_cn_entry
 
 end module multicharge_model_eeqbc
