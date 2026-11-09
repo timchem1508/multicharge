@@ -666,8 +666,8 @@ subroutine get_xvec_derivs_0d_list(self, mol, list, cache, beta)
    !> dX/dR multiplier
    real(wp), intent(in) :: beta
 
-   integer :: iat, izp, jat, jzp, xat, nrow, ient, xent, kmax
-   integer(i8) :: ist, cat
+   integer :: iat, izp, jat, jzp, xat, nrow, xent, kmax
+   integer(i8) :: ist, kat, cat
    real(wp) :: vec(3), cij, dGc(3), dSc(3, 3)
    real(wp), allocatable :: dtmpdL(:, :, :), drow(:, :)
    integer, allocatable :: pos(:)
@@ -688,7 +688,7 @@ subroutine get_xvec_derivs_0d_list(self, mol, list, cache, beta)
 
    !$omp parallel default(none) &
    !$omp shared(cache, mol, list, self, beta, dtmpdL, tpos, kmax) &
-   !$omp private(iat, izp, jat, jzp, xat, nrow, ient, xent, ist, cat, vec) &
+   !$omp private(iat, izp, jat, jzp, xat, nrow, xent, ist, kat, cat, vec) &
    !$omp private(cij, dGc, dSc, pos, drow)
    allocate(pos(mol%nat), source=0)
    allocate(drow(3, kmax))
@@ -697,16 +697,16 @@ subroutine get_xvec_derivs_0d_list(self, mol, list, cache, beta)
       izp = mol%id(iat)
       ist = list%inl(iat)
       nrow = int(list%inl(iat + 1) - ist)
-      do ient = 1, nrow
-         pos(list%nlat(ist + ient - 1)) = ient
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         pos(list%nlat(kat)) = int(kat - ist) + 1
       end do
       drow(:, :nrow) = 0.0_wp
 
       ! EN derivative through the capacitance matrix
-      do ient = 1, nrow
-         jat = list%nlat(ist + ient - 1)
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         jat = list%nlat(kat)
          jzp = mol%id(jat)
-         cij = cache%clist(min(ist + ient - 1, tpos(ist + ient - 1)))
+         cij = cache%clist(min(kat, tpos(kat)))
          do cat = list%inl(jat), list%inl(jat + 1) - 1
             xat = list%nlat(cat)
             xent = pos(xat)
@@ -719,8 +719,8 @@ subroutine get_xvec_derivs_0d_list(self, mol, list, cache, beta)
             & + beta * cij * dtmpdL(:, :, jat)
       end do
 
-      do ient = 2, nrow
-         jat = list%nlat(ist + ient - 1)
+      do kat = list%inl(iat) + 1, list%inl(iat + 1) - 1
+         jat = list%nlat(kat)
          jzp = mol%id(jat)
          vec = mol%xyz(:, jat) - mol%xyz(:, iat)
 
@@ -730,7 +730,7 @@ subroutine get_xvec_derivs_0d_list(self, mol, list, cache, beta)
 
          ! EN derivative: capacitance matrix derivative
          drow(:, 1) = drow(:, 1) + beta * cache%xtmp(jat) * dGc
-         drow(:, ient) = drow(:, ient) &
+         drow(:, kat - ist + 1) = drow(:, kat - ist + 1) &
             & - beta * (cache%xtmp(jat) - cache%xtmp(iat)) * dGc
          cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) - beta * cache%xtmp(jat) * dSc
       end do
@@ -741,10 +741,10 @@ subroutine get_xvec_derivs_0d_list(self, mol, list, cache, beta)
          & + beta * cache%xtmp(iat) * cache%dcdL(:, :, iat)
 
       ! The derivatives w.r.t. each neighbor x are kept in the row of x
-      do ient = 1, nrow
-         pos(list%nlat(ist + ient - 1)) = 0
-         cache%dabdrlist(:, tpos(ist + ient - 1)) = &
-            & cache%dabdrlist(:, tpos(ist + ient - 1)) + drow(:, ient)
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         pos(list%nlat(kat)) = 0
+         cache%dabdrlist(:, tpos(kat)) = &
+            & cache%dabdrlist(:, tpos(kat)) + drow(:, kat - ist + 1)
       end do
    end do
    !$omp end do
@@ -766,7 +766,7 @@ subroutine get_xvec_derivs_3d_list(self, mol, list, cache, beta)
    !> dX/dR multiplier
    real(wp), intent(in) :: beta
 
-   integer :: iat, izp, jat, jzp, xat, nrow, ient, xent, kmax
+   integer :: iat, izp, jat, jzp, xat, nrow, xent, kmax
    integer(i8) :: ist, kat, cat, img
    real(wp) :: vec(3), rvdw, wsw, ctmp, cself, capi, capj, cij
    real(wp) :: dGc(3), dSc(3, 3)
@@ -790,7 +790,7 @@ subroutine get_xvec_derivs_3d_list(self, mol, list, cache, beta)
 
    !$omp parallel default(none) &
    !$omp shared(cache, mol, list, self, beta, dtrans, dtmpdL, tpos, kmax) &
-   !$omp private(iat, izp, jat, jzp, xat, nrow, ient, xent, ist, kat, cat, img) &
+   !$omp private(iat, izp, jat, jzp, xat, nrow, xent, ist, kat, cat, img) &
    !$omp private(vec, rvdw, wsw, ctmp, cself, capi, capj, cij, dGc, dSc) &
    !$omp private(pos, drow)
    allocate(pos(mol%nat), source=0)
@@ -800,16 +800,16 @@ subroutine get_xvec_derivs_3d_list(self, mol, list, cache, beta)
       izp = mol%id(iat)
       ist = list%inl(iat)
       nrow = int(list%inl(iat + 1) - ist)
-      do ient = 1, nrow
-         pos(list%nlat(ist + ient - 1)) = ient
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         pos(list%nlat(kat)) = int(kat - ist) + 1
       end do
       drow(:, :nrow) = 0.0_wp
 
       ! EN derivative through the capacitance matrix
-      do ient = 1, nrow
-         jat = list%nlat(ist + ient - 1)
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         jat = list%nlat(kat)
          jzp = mol%id(jat)
-         cij = cache%clist(min(ist + ient - 1, tpos(ist + ient - 1)))
+         cij = cache%clist(min(kat, tpos(kat)))
          do cat = list%inl(jat), list%inl(jat + 1) - 1
             xat = list%nlat(cat)
             xent = pos(xat)
@@ -823,8 +823,7 @@ subroutine get_xvec_derivs_3d_list(self, mol, list, cache, beta)
       end do
 
       capi = self%cap(izp)
-      do ient = 2, nrow
-         kat = ist + ient - 1
+      do kat = list%inl(iat) + 1, list%inl(iat + 1) - 1
          if (cache%wsc%nimg_list(kat) == 0) cycle
          jat = list%nlat(kat)
          jzp = mol%id(jat)
@@ -843,7 +842,7 @@ subroutine get_xvec_derivs_3d_list(self, mol, list, cache, beta)
 
             ! EN derivative: capacitance matrix derivative
             drow(:, 1) = drow(:, 1) + beta * cache%xtmp(jat) * dGc
-            drow(:, ient) = drow(:, ient) &
+            drow(:, kat - ist + 1) = drow(:, kat - ist + 1) &
                & - beta * (cache%xtmp(jat) - cache%xtmp(iat)) * dGc
             cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) &
                & - beta * cache%xtmp(jat) * dSc
@@ -870,11 +869,10 @@ subroutine get_xvec_derivs_3d_list(self, mol, list, cache, beta)
       end if
 
       ! EN derivative through the self-image capacitance
-      do ient = 1, nrow
-         kat = tpos(ist + ient - 1)
-         drow(:, ient) = drow(:, ient) - beta * cself &
-            & * (self%kcnchi(izp) * cache%dcndrlist(:, kat) &
-            & + self%kqchi(izp) * cache%dqlocdrlist(:, kat))
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         drow(:, kat - ist + 1) = drow(:, kat - ist + 1) - beta * cself &
+            & * (self%kcnchi(izp) * cache%dcndrlist(:, tpos(kat)) &
+            & + self%kqchi(izp) * cache%dqlocdrlist(:, tpos(kat)))
       end do
       cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) &
          & - beta * cself * dtmpdL(:, :, iat)
@@ -885,10 +883,10 @@ subroutine get_xvec_derivs_3d_list(self, mol, list, cache, beta)
          & + beta * cache%xtmp(iat) * cache%dcdL(:, :, iat)
 
       ! The derivatives w.r.t. each neighbor x are kept in the row of x
-      do ient = 1, nrow
-         pos(list%nlat(ist + ient - 1)) = 0
-         cache%dabdrlist(:, tpos(ist + ient - 1)) = &
-            & cache%dabdrlist(:, tpos(ist + ient - 1)) + drow(:, ient)
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         pos(list%nlat(kat)) = 0
+         cache%dabdrlist(:, tpos(kat)) = &
+            & cache%dabdrlist(:, tpos(kat)) + drow(:, kat - ist + 1)
       end do
    end do
    !$omp end do
@@ -1241,8 +1239,8 @@ subroutine get_damat_0d_list(self, mol, list, cache, alpha, p, dlist, dadL)
    !> Derivatives w.r.t. strain
    real(wp), intent(inout) :: dadL(:, :, :)
 
-   integer :: iat, izp, jat, jzp, xat, nrow, ient, xent, kmax
-   integer(i8) :: ist, cat
+   integer :: iat, izp, jat, jzp, xat, nrow, xent, kmax
+   integer(i8) :: ist, kat, cat
    real(wp) :: vec(3), r1, r2, gam, arg, dtmp, norm_cn, hardi, wtmp, wcni, cij
    real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), dGc(3), dSc(3, 3)
    real(wp), allocatable :: drow(:, :)
@@ -1254,7 +1252,7 @@ subroutine get_damat_0d_list(self, mol, list, cache, alpha, p, dlist, dadL)
 
    !$omp parallel default(none) &
    !$omp shared(cache, mol, list, self, alpha, p, dlist, dadL, tpos, kmax) &
-   !$omp private(iat, izp, jat, jzp, xat, nrow, ient, xent, ist, cat, gam) &
+   !$omp private(iat, izp, jat, jzp, xat, nrow, xent, ist, kat, cat, gam) &
    !$omp private(vec, r1, r2, dtmp, norm_cn, arg, hardi, wtmp, wcni, cij, radi) &
    !$omp private(radj, dradi, dradj, dG, dS, dGc, dSc, pos, drow)
    allocate(pos(mol%nat), source=0)
@@ -1264,8 +1262,8 @@ subroutine get_damat_0d_list(self, mol, list, cache, alpha, p, dlist, dadL)
       izp = mol%id(iat)
       ist = list%inl(iat)
       nrow = int(list%inl(iat + 1) - ist)
-      do ient = 1, nrow
-         pos(list%nlat(ist + ient - 1)) = ient
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         pos(list%nlat(kat)) = int(kat - ist) + 1
       end do
       drow(:, :nrow) = 0.0_wp
 
@@ -1277,13 +1275,13 @@ subroutine get_damat_0d_list(self, mol, list, cache, alpha, p, dlist, dadL)
       hardi = self%eta(izp) + self%kqeta_pre &
       & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi
       wcni = 0.0_wp
-      do ient = 2, nrow
-         jat = list%nlat(ist + ient - 1)
+      do kat = list%inl(iat) + 1, list%inl(iat + 1) - 1
+         jat = list%nlat(kat)
          jzp = mol%id(jat)
          vec = mol%xyz(:, jat) - mol%xyz(:, iat)
          r2 = vec(1)**2 + vec(2)**2 + vec(3)**2
          r1 = sqrt(r2)
-         cij = cache%clist(min(ist + ient - 1, tpos(ist + ient - 1)))
+         cij = cache%clist(min(kat, tpos(kat)))
          ! Effective charge width of j
          norm_cn = 1.0_wp / self%avg_cn(jzp)
          radj = self%rad(jzp) * exp(-self%kcnrad(jzp) * cache%cn(jat) * norm_cn)
@@ -1302,14 +1300,15 @@ subroutine get_damat_0d_list(self, mol, list, cache, alpha, p, dlist, dadL)
          dG(:) = alpha * dtmp * vec * p(jat) * cij
          dS(:, :) = spread(dG, 1, 3) * spread(vec, 2, 3)
          drow(:, 1) = drow(:, 1) - dG
-         drow(:, ient) = drow(:, ient) + dG
+         drow(:, kat - ist + 1) = drow(:, kat - ist + 1) + dG
          dadL(:, :, iat) = dadL(:, :, iat) + dS
 
          ! Effective charge width derivative, CN of i is collected in wcni
          wtmp = alpha * 2.0_wp * exp(-arg) / sqrtpi * p(jat) * cij
          wcni = wcni - wtmp * radi * dradi * gam**3
          dtmp = -wtmp * radj * dradj * gam**3
-         drow(:, ient) = drow(:, ient) + dtmp * cache%dcndrlist(:, list%inl(jat))
+         drow(:, kat - ist + 1) = drow(:, kat - ist + 1) &
+            & + dtmp * cache%dcndrlist(:, list%inl(jat))
          do cat = list%inl(jat) + 1, list%inl(jat + 1) - 1
             xat = list%nlat(cat)
             xent = pos(xat)
@@ -1321,20 +1320,21 @@ subroutine get_damat_0d_list(self, mol, list, cache, alpha, p, dlist, dadL)
          ! Capacitance derivative off-diagonal
          dtmp = alpha * erf(r1 * gam) / r1 * p(jat)
          drow(:, 1) = drow(:, 1) + dtmp * dGc
-         drow(:, ient) = drow(:, ient) - dtmp * dGc
+         drow(:, kat - ist + 1) = drow(:, kat - ist + 1) - dtmp * dGc
          dadL(:, :, iat) = dadL(:, :, iat) - dtmp * dSc
 
          ! Capacitance derivative diagonal
          dtmp = alpha * hardi * p(iat)
-         drow(:, ient) = drow(:, ient) + dtmp * dGc
+         drow(:, kat - ist + 1) = drow(:, kat - ist + 1) + dtmp * dGc
       end do
 
       ! Hardness derivative
       dtmp = alpha * self%kqeta_pre * self%kqeta(izp) &
       & / cosh(self%kqeta(izp) * cache%qloc(iat))**2 * p(iat) &
       & * cache%clist(ist)
-      do ient = 1, nrow
-         drow(:, ient) = drow(:, ient) + dtmp * cache%dqlocdrlist(:, tpos(ist + ient - 1))
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         drow(:, kat - ist + 1) = drow(:, kat - ist + 1) &
+            & + dtmp * cache%dqlocdrlist(:, tpos(kat))
       end do
       dadL(:, :, iat) = dadL(:, :, iat) + dtmp * cache%dqlocdL(:, :, iat)
 
@@ -1342,9 +1342,9 @@ subroutine get_damat_0d_list(self, mol, list, cache, alpha, p, dlist, dadL)
       dtmp = -alpha * sqrt2pi * dradi / (radi**2) * p(iat) &
       & * cache%clist(ist) + wcni
       drow(:, 1) = drow(:, 1) + dtmp * cache%dcndrlist(:, ist)
-      do ient = 2, nrow
-         drow(:, ient) = drow(:, ient) &
-            & + dtmp * cache%dcndrlist(:, tpos(ist + ient - 1))
+      do kat = list%inl(iat) + 1, list%inl(iat + 1) - 1
+         drow(:, kat - ist + 1) = drow(:, kat - ist + 1) &
+            & + dtmp * cache%dcndrlist(:, tpos(kat))
       end do
       dadL(:, :, iat) = dadL(:, :, iat) + dtmp * cache%dcndL(:, :, iat)
 
@@ -1354,9 +1354,9 @@ subroutine get_damat_0d_list(self, mol, list, cache, alpha, p, dlist, dadL)
       dadL(:, :, iat) = dadL(:, :, iat) + dtmp * cache%dcdL(:, :, iat)
 
       ! The derivatives w.r.t. each neighbor x are kept in the row of x
-      do ient = 1, nrow
-         pos(list%nlat(ist + ient - 1)) = 0
-         dlist(:, tpos(ist + ient - 1)) = dlist(:, tpos(ist + ient - 1)) + drow(:, ient)
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         pos(list%nlat(kat)) = 0
+         dlist(:, tpos(kat)) = dlist(:, tpos(kat)) + drow(:, kat - ist + 1)
       end do
    end do
    !$omp end do
@@ -1384,7 +1384,7 @@ subroutine get_damat_3d_list(self, mol, list, cache, alpha, p, dlist, dadL)
    !> Derivatives w.r.t. strain
    real(wp), intent(inout) :: dadL(:, :, :)
 
-   integer :: iat, izp, jat, jzp, xat, nrow, ient, xent, kmax
+   integer :: iat, izp, jat, jzp, xat, nrow, xent, kmax
    integer(i8) :: ist, kat, cat, img
    real(wp) :: vec(3), gam, dtmp, norm_cn, rvdw, wsw, dgam, wgam, hardi, wcni
    real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), dGc(3), dSc(3, 3)
@@ -1399,7 +1399,7 @@ subroutine get_damat_3d_list(self, mol, list, cache, alpha, p, dlist, dadL)
 
    !$omp parallel default(none) &
    !$omp shared(cache, mol, list, self, alpha, p, dlist, dadL, dtrans, tpos, kmax) &
-   !$omp private(iat, izp, jat, jzp, xat, nrow, ient, xent, ist, kat, cat, img) &
+   !$omp private(iat, izp, jat, jzp, xat, nrow, xent, ist, kat, cat, img) &
    !$omp private(vec, gam, dtmp, norm_cn, rvdw, wsw, dgam, wgam, hardi, wcni) &
    !$omp private(radi, radj, dradi, dradj, dG, dS, dGc, dSc, capi, capj) &
    !$omp private(pos, drow)
@@ -1410,8 +1410,8 @@ subroutine get_damat_3d_list(self, mol, list, cache, alpha, p, dlist, dadL)
       izp = mol%id(iat)
       ist = list%inl(iat)
       nrow = int(list%inl(iat + 1) - ist)
-      do ient = 1, nrow
-         pos(list%nlat(ist + ient - 1)) = ient
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         pos(list%nlat(kat)) = int(kat - ist) + 1
       end do
       drow(:, :nrow) = 0.0_wp
 
@@ -1424,8 +1424,7 @@ subroutine get_damat_3d_list(self, mol, list, cache, alpha, p, dlist, dadL)
       hardi = self%eta(izp) + self%kqeta_pre &
       & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi
       wcni = 0.0_wp
-      do ient = 2, nrow
-         kat = ist + ient - 1
+      do kat = list%inl(iat) + 1, list%inl(iat + 1) - 1
          if (cache%wsc%nimg_list(kat) == 0) cycle
          jat = list%nlat(kat)
          jzp = mol%id(jat)
@@ -1455,7 +1454,7 @@ subroutine get_damat_3d_list(self, mol, list, cache, alpha, p, dlist, dadL)
             dS = alpha * dS * wsw
             wgam = wgam + alpha * dgam * wsw
             drow(:, 1) = drow(:, 1) - dG * p(jat)
-            drow(:, ient) = drow(:, ient) + dG * p(jat)
+            drow(:, kat - ist + 1) = drow(:, kat - ist + 1) + dG * p(jat)
             dadL(:, :, iat) = dadL(:, :, iat) + dS * p(jat)
 
             ! Capacitance derivative off-diagonal
@@ -1463,17 +1462,19 @@ subroutine get_damat_3d_list(self, mol, list, cache, alpha, p, dlist, dadL)
             dG = alpha * dG * wsw
             dS = alpha * dS * wsw
             drow(:, 1) = drow(:, 1) + dG * p(jat)
-            drow(:, ient) = drow(:, ient) - dG * p(jat)
+            drow(:, kat - ist + 1) = drow(:, kat - ist + 1) - dG * p(jat)
             dadL(:, :, iat) = dadL(:, :, iat) - dS * p(jat)
 
             ! Capacitance derivative diagonal
-            drow(:, ient) = drow(:, ient) + alpha * hardi * p(iat) * dGc
+            drow(:, kat - ist + 1) = drow(:, kat - ist + 1) &
+               & + alpha * hardi * p(iat) * dGc
          end do
 
          ! Effective charge width derivative, CN of i is collected in wcni
          wcni = wcni + wgam * p(jat) * radi * dradi * gam**3
          dtmp = wgam * p(jat) * radj * dradj * gam**3
-         drow(:, ient) = drow(:, ient) + dtmp * cache%dcndrlist(:, list%inl(jat))
+         drow(:, kat - ist + 1) = drow(:, kat - ist + 1) &
+            & + dtmp * cache%dcndrlist(:, list%inl(jat))
          do cat = list%inl(jat) + 1, list%inl(jat + 1) - 1
             xat = list%nlat(cat)
             xent = pos(xat)
@@ -1510,8 +1511,9 @@ subroutine get_damat_3d_list(self, mol, list, cache, alpha, p, dlist, dadL)
       dtmp = alpha * self%kqeta_pre * self%kqeta(izp) &
       & / cosh(self%kqeta(izp) * cache%qloc(iat))**2 * p(iat) &
       & * cache%clist(ist)
-      do ient = 1, nrow
-         drow(:, ient) = drow(:, ient) + dtmp * cache%dqlocdrlist(:, tpos(ist + ient - 1))
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         drow(:, kat - ist + 1) = drow(:, kat - ist + 1) &
+            & + dtmp * cache%dqlocdrlist(:, tpos(kat))
       end do
       dadL(:, :, iat) = dadL(:, :, iat) + dtmp * cache%dqlocdL(:, :, iat)
 
@@ -1519,9 +1521,9 @@ subroutine get_damat_3d_list(self, mol, list, cache, alpha, p, dlist, dadL)
       dtmp = -alpha * sqrt2pi * dradi / (radi**2) * p(iat) &
       & * cache%clist(ist) + wcni
       drow(:, 1) = drow(:, 1) + dtmp * cache%dcndrlist(:, ist)
-      do ient = 2, nrow
-         drow(:, ient) = drow(:, ient) &
-            & + dtmp * cache%dcndrlist(:, tpos(ist + ient - 1))
+      do kat = list%inl(iat) + 1, list%inl(iat + 1) - 1
+         drow(:, kat - ist + 1) = drow(:, kat - ist + 1) &
+            & + dtmp * cache%dcndrlist(:, tpos(kat))
       end do
       dadL(:, :, iat) = dadL(:, :, iat) + dtmp * cache%dcndL(:, :, iat)
 
@@ -1531,9 +1533,9 @@ subroutine get_damat_3d_list(self, mol, list, cache, alpha, p, dlist, dadL)
       dadL(:, :, iat) = dadL(:, :, iat) + dtmp * cache%dcdL(:, :, iat)
 
       ! The derivatives w.r.t. each neighbor x are kept in the row of x
-      do ient = 1, nrow
-         pos(list%nlat(ist + ient - 1)) = 0
-         dlist(:, tpos(ist + ient - 1)) = dlist(:, tpos(ist + ient - 1)) + drow(:, ient)
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         pos(list%nlat(kat)) = 0
+         dlist(:, tpos(kat)) = dlist(:, tpos(kat)) + drow(:, kat - ist + 1)
       end do
    end do
    !$omp end do
