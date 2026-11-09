@@ -21,9 +21,8 @@
 module multicharge_solver_cg
    use iso_fortran_env, only : output_unit
    use mctc_env, only : error_type, fatal_error, format_time, timer_type, wp, i8
-   use mctc_csrlist, only : csr_list
+   use mctc_csrlist, only : csr_list, spsymv_csr, spmm_csr
    use mctc_io_structure_atomsort, only : get_spatial_order
-   use multicharge_atomsort, only : get_half_offsets, symv_half
    use multicharge_blas, only : axpy, dot, gemm, scal, symv
    use multicharge_lapack, only : potrf, potrs, syevd
    use multicharge_solver_type, only : mchrg_solver_input, mchrg_solver_type
@@ -160,7 +159,7 @@ subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error
    !> Dense coefficient matrix of the linear system
    real(wp), intent(in), optional :: amat(:, :)
 
-   !> Coefficient matrix values in the half storage of the neighborlist
+   !> Coefficient matrix values on the upper triangle of the neighborlist
    real(wp), intent(in), optional :: alist(:)
 
    !> Right-hand side vector
@@ -175,8 +174,7 @@ subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error
    !> Whether to solve coupled-perturbed equations
    logical, intent(in), optional :: cpq
 
-   !> Optional neighborlist representation of the matrix, a half list or a
-   !> sorted complete list
+   !> Optional sorted complete neighborlist representation of the matrix
    type(csr_list), intent(in), optional :: list
 
    !> Output unit
@@ -221,8 +219,6 @@ subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error
    type(timer_type) :: timer
    integer :: unit
    logical :: nlist
-   ! Offsets of the half storage of the matrix on the list
-   integer(i8), allocatable :: hinl(:)
 
    nlist = self%use_nlist .and. .not. present(amat) .and. &
       & present(list) .and. present(alist)
@@ -255,8 +251,6 @@ subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error
          call fatal_error(error, "dimension mismatch.")
          return
       end if
-   else
-      call get_half_offsets(list, hinl)
    end if
 
    tol = self%cgtol
@@ -271,7 +265,7 @@ subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error
    ! Diagonal preconditioner
    if (nlist) then
       do iat = 1, ndim
-         prec(iat) = 1.0_wp / (alist(hinl(iat)) + eps)
+         prec(iat) = 1.0_wp / (alist(list%inl(iat)) + eps)
       end do
    else
       do iat = 1, ndim
@@ -281,7 +275,7 @@ subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error
 
    ! Initial residual
    if (nlist) then
-      call symv_half(list, hinl, alist, vrhs, Adir)
+      call spsymv_csr(ndim, alist, list%inl, list%nlat, vrhs, Adir, uplo='U')
    else
       call symv(amat, vrhs, Adir, alpha=1.0_wp, beta=0.0_wp)
    end if
@@ -312,7 +306,7 @@ subroutine solve(self, amat, alist, xvec, vrhs, ainv, cpq, list, new_unit, error
 
       ! Matrix-vector product
       if (nlist) then
-         call symv_half(list, hinl, alist, dir, Adir)
+         call spsymv_csr(ndim, alist, list%inl, list%nlat, dir, Adir, uplo='U')
       else
          call symv(amat, dir, Adir, alpha=1.0_wp, beta=0.0_wp)
       end if
@@ -391,14 +385,14 @@ end subroutine solve
 !> subsystem, the system is restricted to the rows and columns of its atoms in
 !> the neighborlist, the vectors hold the subsystem atoms only.
 subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
-   & niter, sidx, loc, hinl)
+   & niter, sidx, loc)
    !> Conjugate-gradient solver instance
    class(cg_solver), intent(in) :: self
 
    !> Dense coefficient matrix of the linear system
    real(wp), intent(in), optional :: amat(:, :)
 
-   !> Coefficient matrix values in the half storage of the neighborlist
+   !> Coefficient matrix values on the upper triangle of the neighborlist
    real(wp), intent(in), optional :: alist(:)
 
    !> Block of right-hand sides
@@ -407,8 +401,7 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
    !> On input: initial guess; on output: solution
    real(wp), intent(inout) :: xmat(:, :)
 
-   !> Optional neighborlist representation of the matrix, a half list or a
-   !> sorted complete list
+   !> Optional sorted complete neighborlist representation of the matrix
    type(csr_list), intent(in), optional :: list
 
    !> Output unit
@@ -425,10 +418,6 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
 
    !> Index of the atoms of the neighborlist in the subsystem, zero outside
    integer, intent(in), optional :: loc(:)
-
-   !> Offsets of the half storage of the matrix on the list, obtained from the
-   !> list if absent
-   integer(i8), intent(in), optional :: hinl(:)
 
    ! Maximal number of iterations
    integer :: maxit
@@ -464,8 +453,6 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
    type(timer_type) :: timer
    integer :: unit, info
    logical :: nlist, sub
-   ! Offsets of the half storage of the matrix on the list
-   integer(i8), allocatable :: hoff(:)
    ! Extracted upper-triangle CSR matrix and transposed buffers for a subsystem
    real(wp), allocatable :: subdiag(:), subval(:), vect(:, :), avect(:, :)
    integer, allocatable :: subinl(:), subjat(:)
@@ -497,8 +484,6 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
          call fatal_error(error, "dimension mismatch.")
          return
       end if
-   else if (.not. present(hinl)) then
-      call get_half_offsets(list, hoff)
    end if
    if (sub) then
       if (.not. (nlist .and. present(sidx) .and. present(loc))) then
@@ -527,26 +512,14 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
    ! Diagonal preconditioner and subsystem matrix extraction
    if (sub) then
       allocate(vect(nrhs, ndim), avect(nrhs, ndim))
-      if (present(hinl)) then
-         call get_sub_matrix(alist, list, hinl, sidx, loc, subdiag, subinl, &
-            & subjat, subval)
-      else
-         call get_sub_matrix(alist, list, hoff, sidx, loc, subdiag, subinl, &
-            & subjat, subval)
-      end if
+      call get_sub_matrix(alist, list, sidx, loc, subdiag, subinl, subjat, subval)
       do iat = 1, ndim
          prec(iat) = 1.0_wp / (subdiag(iat) + eps)
       end do
    else if (nlist) then
-      if (present(hinl)) then
-         do iat = 1, ndim
-            prec(iat) = 1.0_wp / (alist(hinl(iat)) + eps)
-         end do
-      else
-         do iat = 1, ndim
-            prec(iat) = 1.0_wp / (alist(hoff(iat)) + eps)
-         end do
-      end if
+      do iat = 1, ndim
+         prec(iat) = 1.0_wp / (alist(list%inl(iat)) + eps)
+      end do
    else
       do iat = 1, ndim
          prec(iat) = 1.0_wp / (amat(iat, iat) + eps)
@@ -556,10 +529,8 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
    ! Initial residual R = B - A X
    if (sub) then
       call sub_block_matmul(subdiag, subinl, subjat, subval, xmat, res, vect, avect)
-   else if (present(hinl)) then
-      call block_matmul(nlist, xmat, res, amat, alist, list, hinl)
    else
-      call block_matmul(nlist, xmat, res, amat, alist, list, hoff)
+      call block_matmul(nlist, xmat, res, amat, alist, list)
    end if
    res(:, :) = bmat - res
 
@@ -604,12 +575,9 @@ subroutine solve_block(self, amat, alist, bmat, xmat, list, new_unit, error, &
       if (sub) then
          call sub_block_matmul(subdiag, subinl, subjat, subval, dir(:, :nrank), &
             & adir(:, :nrank), vect(:nrank, :), avect(:nrank, :))
-      else if (present(hinl)) then
-         call block_matmul(nlist, dir(:, :nrank), adir(:, :nrank), amat, alist, &
-            & list, hinl)
       else
          call block_matmul(nlist, dir(:, :nrank), adir(:, :nrank), amat, alist, &
-            & list, hoff)
+            & list)
       end if
 
       ! Shrink the small matrices to the current rank to keep them contiguous
@@ -799,27 +767,27 @@ subroutine invert(self, amat, ainv, new_unit, error)
 end subroutine invert
 
 
-!> Invert a symmetric positive definite matrix in the half storage of a sorted
-!> complete neighborlist with the block CG solver and keep only the elements
-!> on the pattern of the matrix. The columns are solved in blocks of spatially
-!> close atoms, each from A_SS X_S = I_S on the subsystem S of the neighbors of
-!> the block atoms. The inverse decays fast with the distance, the error of the
-!> subsystem is of the order of the elements outside of the pattern, which are
-!> dropped. The column of an atom is stored in the upper triangle of its row,
-!> which keeps the elements of the atoms of higher index. The blocks are
-!> independent and solved in parallel.
+!> Invert a symmetric positive definite matrix on the upper triangle of a
+!> sorted complete neighborlist with the block CG solver and keep only the
+!> elements on the pattern of the matrix. The columns are solved in blocks of
+!> spatially close atoms, each from A_SS X_S = I_S on the subsystem S of the
+!> neighbors of the block atoms. The inverse decays fast with the distance,
+!> the error of the subsystem is of the order of the elements outside of the
+!> pattern, which are dropped. The column of an atom is stored in the upper
+!> triangle of its row, which keeps the elements of the atoms of higher index.
+!> The blocks are independent and solved in parallel.
 subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    !> Conjugate-gradient solver instance
    class(cg_solver), intent(in) :: self
 
-   !> Coefficient matrix values in the half storage of the list
+   !> Coefficient matrix values on the upper triangle of the list
    real(wp), intent(in) :: alist(:)
 
    !> Sorted complete neighborlist representation of the matrix
    type(csr_list), intent(in) :: list
 
-   !> Inverse of the coefficient matrix on the pattern of the list in its half
-   !> storage
+   !> Inverse of the coefficient matrix on the upper triangle of the list, the
+   !> lower triangles are zero
    real(wp), intent(out) :: ainvlist(:)
 
    !> Cartesian coordinates for spatially compact blocks, the blocks follow the
@@ -844,8 +812,6 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    ! Time of the subsystem selection, the block CG and the storage of the
    ! columns, summed over the blocks
    real(wp) :: tblk(3), sumtime(3)
-   ! Offsets of the half storage of the matrix on the list
-   integer(i8), allocatable :: hinl(:)
    ! Solver for the blocks without output
    type(cg_solver) :: blksolver
    integer :: unit
@@ -868,9 +834,8 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
       return
    end if
    ndim = size(list%inl) - 1
-   call get_half_offsets(list, hinl)
-   if (size(ainvlist, kind=i8) /= hinl(ndim + 1) - 1 &
-      & .or. size(alist, kind=i8) < hinl(ndim + 1) - 1) then
+   if (size(ainvlist, kind=i8) /= size(list%nlat, kind=i8) &
+      & .or. size(alist, kind=i8) < size(list%nlat, kind=i8)) then
       call fatal_error(error, "Dimension mismatch between list and ainvlist.")
       return
    end if
@@ -881,6 +846,7 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
       end if
    end if
    if (ndim <= 0) return
+   ainvlist(:) = 0.0_wp
 
    if (present(new_unit)) then
       unit = new_unit
@@ -906,7 +872,7 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    maxsub = 0
    maxiter = 0
    !$omp parallel default(none) &
-   !$omp shared(ndim, nblk, order, alist, list, hinl, ainvlist, blksolver, error) &
+   !$omp shared(ndim, nblk, order, alist, list, ainvlist, blksolver, error) &
    !$omp shared(failed) &
    !$omp private(iblk, loc, sidx, nsub, niter, skip, tblk) &
    !$omp reduction(+:sumsub, sumiter, sumtime) reduction(max:maxsub, maxiter)
@@ -917,7 +883,7 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
       !$omp atomic read
       skip = failed
       if (skip) cycle
-      call invert_block(blksolver, alist, list, hinl, &
+      call invert_block(blksolver, alist, list, &
          & order((iblk - 1) * block_size_def + 1:min(iblk * block_size_def, ndim)), &
          & loc, sidx, ainvlist, nsub, niter, tblk, error, failed)
       sumsub = sumsub + nsub
@@ -953,19 +919,16 @@ end subroutine invert_list
 !> of the rows of the list, skipping the elements outside of the subsystem.
 !> The columns are stored in the upper triangles of the rows of the block
 !> atoms.
-subroutine invert_block(solver, alist, list, hinl, cols, loc, sidx, ainvlist, &
-   & nsub, niter, times, error, failed)
+subroutine invert_block(solver, alist, list, cols, loc, sidx, ainvlist, nsub, &
+   & niter, times, error, failed)
    !> Conjugate-gradient solver for the block
    type(cg_solver), intent(in) :: solver
 
-   !> Coefficient matrix values in the half storage of the list
+   !> Coefficient matrix values on the upper triangle of the list
    real(wp), intent(in) :: alist(:)
 
    !> Sorted complete neighborlist representation of the matrix
    type(csr_list), intent(in) :: list
-
-   !> Offsets of the half storage of the matrix on the list
-   integer(i8), intent(in) :: hinl(:)
 
    !> Atoms of the block columns
    integer, intent(in) :: cols(:)
@@ -995,8 +958,8 @@ subroutine invert_block(solver, alist, list, hinl, cols, loc, sidx, ainvlist, &
    !> Whether any block failed, shared by all blocks
    logical, intent(inout) :: failed
 
-   integer :: ncol, isub, iat, jat, ivec
-   integer(i8) :: kat, hat, koff, tick(4), rate
+   integer :: ncol, isub, iat, jat, ivec, nlow
+   integer(i8) :: kat, nfin, tick(4), rate
    ! Right-hand sides and solutions of the subsystem
    real(wp), allocatable :: bsub(:, :), xsub(:, :)
    type(error_type), allocatable :: blkerror
@@ -1024,11 +987,11 @@ subroutine invert_block(solver, alist, list, hinl, cols, loc, sidx, ainvlist, &
    do ivec = 1, ncol
       isub = loc(cols(ivec))
       bsub(isub, ivec) = 1.0_wp
-      xsub(isub, ivec) = 1.0_wp / (alist(hinl(cols(ivec))) + eps)
+      xsub(isub, ivec) = 1.0_wp / (alist(list%inl(cols(ivec))) + eps)
    end do
 
    call solver%solve_block(alist=alist, bmat=bsub, xmat=xsub, list=list, &
-      & error=blkerror, niter=niter, sidx=sidx(:nsub), loc=loc, hinl=hinl)
+      & error=blkerror, niter=niter, sidx=sidx(:nsub), loc=loc)
    call system_clock(tick(3))
    if (allocated(blkerror)) then
       !$omp critical (invert_list_error)
@@ -1041,9 +1004,11 @@ subroutine invert_block(solver, alist, list, hinl, cols, loc, sidx, ainvlist, &
       ! the block atoms
       do ivec = 1, ncol
          iat = cols(ivec)
-         koff = list%inl(iat) - hinl(iat)
-         do hat = hinl(iat), hinl(iat + 1) - 1
-            ainvlist(hat) = xsub(loc(list%nlat(hat + koff)), ivec)
+         nfin = list%inl(iat + 1) - 1
+         nlow = findloc(list%nlat(list%inl(iat) + 1:nfin) < iat, .true., dim=1)
+         if (nlow > 0) nfin = list%inl(iat) + nlow - 1
+         do kat = list%inl(iat), nfin
+            ainvlist(kat) = xsub(loc(list%nlat(kat)), ivec)
          end do
       end do
    end if
@@ -1056,8 +1021,8 @@ end subroutine invert_block
 
 
 !> Multiply the coefficient matrix with a block of vectors, avec = A vec,
-!> using either the dense matrix or its half storage on a neighborlist
-subroutine block_matmul(nlist, vec, avec, amat, alist, list, hinl)
+!> using either the dense matrix or its upper triangle on a neighborlist
+subroutine block_matmul(nlist, vec, avec, amat, alist, list)
    !> Whether to use the compressed-row representation
    logical, intent(in) :: nlist
 
@@ -1070,22 +1035,19 @@ subroutine block_matmul(nlist, vec, avec, amat, alist, list, hinl)
    !> Dense coefficient matrix of the linear system
    real(wp), intent(in), optional :: amat(:, :)
 
-   !> Coefficient matrix values in the half storage of the list
+   !> Coefficient matrix values on the upper triangle of the list
    real(wp), intent(in), optional :: alist(:)
 
-   !> Optional neighborlist representation of the matrix
+   !> Optional sorted complete neighborlist representation of the matrix
    type(csr_list), intent(in), optional :: list
 
-   !> Offsets of the half storage of the matrix on the list
-   integer(i8), intent(in), optional :: hinl(:)
-
-   real(wp), allocatable :: avect(:, :)
+   integer :: ndim, nvec
 
    if (nlist) then
-      ! The vectors of the atoms are contiguous in the transposed block
-      allocate(avect(size(vec, 2), size(vec, 1)))
-      call symv_half(list, hinl, alist, transpose(vec), avect)
-      avec(:, :) = transpose(avect)
+      ndim = size(vec, 1)
+      nvec = size(vec, 2)
+      call spmm_csr('N', ndim, nvec, ndim, 1.0_wp, 'SU', alist, list%nlat, &
+         & list%inl(:ndim), list%inl(2:ndim + 1), vec, ndim, 0.0_wp, avec, ndim)
    else
       call gemm(amat, vec, avec)
    end if
@@ -1094,18 +1056,15 @@ end subroutine block_matmul
 
 
 !> Extract the upper-triangle CSR representation of the subsystem block A_SS
-!> from a matrix in the half storage of a sorted complete neighborlist,
+!> from a matrix on the upper triangle of a sorted complete neighborlist,
 !> skipping entries outside of the subsystem.
-subroutine get_sub_matrix(alist, list, hinl, sidx, loc, subdiag, subinl, &
-   & subjat, subval)
-   !> Matrix values in the half storage of the list
+subroutine get_sub_matrix(alist, list, sidx, loc, subdiag, subinl, subjat, &
+   & subval)
+   !> Matrix values on the upper triangle of the list
    real(wp), intent(in) :: alist(:)
 
    !> Sorted complete neighborlist representation of the matrix
    type(csr_list), intent(in) :: list
-
-   !> Offsets of the half storage of the matrix on the list
-   integer(i8), intent(in) :: hinl(:)
 
    !> Atoms of the subsystem in the neighborlist, in the order of the vectors
    integer, intent(in) :: sidx(:)
@@ -1125,15 +1084,16 @@ subroutine get_sub_matrix(alist, list, hinl, sidx, loc, subdiag, subinl, &
    !> Matrix values of the off-diagonal upper triangle
    real(wp), allocatable, intent(out) :: subval(:)
 
-   integer :: ndim, isub, jsub, iat, nnz
-   integer(i8) :: hat, koff
+   integer :: ndim, isub, jsub, iat, nnz, nlow
+   integer(i8) :: kat, nfin
 
+   ! The complete rows of the subsystem bound its upper-triangle elements
    ndim = size(sidx)
    allocate(subdiag(ndim), subinl(ndim + 1))
    nnz = 0
    do isub = 1, ndim
       iat = sidx(isub)
-      nnz = nnz + int(hinl(iat + 1) - hinl(iat)) - 1
+      nnz = nnz + int(list%inl(iat + 1) - list%inl(iat)) - 1
    end do
    allocate(subjat(nnz), subval(nnz))
 
@@ -1141,14 +1101,16 @@ subroutine get_sub_matrix(alist, list, hinl, sidx, loc, subdiag, subinl, &
    subinl(1) = 1
    do isub = 1, ndim
       iat = sidx(isub)
-      koff = list%inl(iat) - hinl(iat)
-      subdiag(isub) = alist(hinl(iat))
-      do hat = hinl(iat) + 1, hinl(iat + 1) - 1
-         jsub = loc(list%nlat(hat + koff))
+      subdiag(isub) = alist(list%inl(iat))
+      nfin = list%inl(iat + 1) - 1
+      nlow = findloc(list%nlat(list%inl(iat) + 1:nfin) < iat, .true., dim=1)
+      if (nlow > 0) nfin = list%inl(iat) + nlow - 1
+      do kat = list%inl(iat) + 1, nfin
+         jsub = loc(list%nlat(kat))
          if (jsub == 0) cycle
          nnz = nnz + 1
          subjat(nnz) = jsub
-         subval(nnz) = alist(hat)
+         subval(nnz) = alist(kat)
       end do
       subinl(isub + 1) = nnz + 1
    end do

@@ -60,7 +60,7 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, list, efield)
    !> Derivative of the partial charges w.r.t. strain deformations
    real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
 
-   !> Neighborlist, complete if the charge derivatives are requested
+   !> Sorted complete neighborlist, see sort_neighborlist
    type(csr_list), intent(in), optional :: list
 
    !> Optional external electric field

@@ -18,13 +18,12 @@ program main
    use mctc_env, only: error_type, fatal_error, get_argument, wp, timer_type, format_time
    use mctc_io, only: structure_type, read_structure, filetype, get_filetype
    use mctc_cutoff, only: get_lattice_points
-   use mctc_csrlist, only: csr_list, new_csr_list, distance_screening
+   use mctc_csrlist, only: csr_list, new_csr_list, distance_screening, sort_neighborlist
    use mctc_wignerseitz, only: wignerseitz_cell
    use multicharge, only: mchrg_model_type, mchrg_model, mchrg_cache, new_eeq2019_model, &
    & new_eeqbc2025_model, get_multicharge_version, &
    & write_ascii_model, write_ascii_properties, write_ascii_results
    use multicharge_model_type, only: hess_index, mchrg_hessian
-   use multicharge_atomsort, only: new_sorted_list
    use multicharge_output, only: json_results
    use multicharge_solver, only: new_mchrg_solver, mchrg_solver_type, direct_solver, &
    & cg_solver, mchrg_solver_input, cg_input, direct_input
@@ -40,7 +39,6 @@ program main
    type(error_type), allocatable :: error
    type(structure_type) :: mol
    type(csr_list), allocatable :: list
-   type(distance_screening) :: screen
    type(wignerseitz_cell), allocatable :: wsc
    class(mchrg_model_type), allocatable :: model
    type(mchrg_cache), allocatable :: cache
@@ -52,6 +50,7 @@ program main
    real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
    real(wp), allocatable :: hess(:), press(:, :, :, :), hessian(:, :)
    type(mchrg_hessian), allocatable :: hesslist
+   type(distance_screening) :: screen
    real(wp), allocatable :: qvec(:)
    real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: charge
@@ -121,20 +120,17 @@ program main
 
    allocate(cache)
 
-   ! Create a neighborlist if requested, a half list for the charges and the
-   ! energy gradient, and a sorted complete list for the charge derivatives and
-   ! the Hessian. The symmetric matrices keep the upper triangles of its rows.
+   ! Create a sorted complete neighborlist if requested, the symmetric matrices
+   ! keep the upper triangles of its rows
    if (use_nlist) then
       call timer%push("nlist")
       allocate(list)
-      if ((qgrad .or. analytic_hessian) .and. any(mol%periodic)) then
-         call new_sorted_list(list, mol, error, cutoff, cache%wsc)
-      else if (qgrad .or. analytic_hessian) then
-         call new_sorted_list(list, mol, error, cutoff)
-      else if (any(mol%periodic)) then
-         call new_csr_list(list, screen, mol, error, cache%wsc, cutoff, complete=.false.)
+      if (any(mol%periodic)) then
+         call new_csr_list(list, screen, mol, error, cache%wsc, cutoff, complete=.true.)
+         if (.not. allocated(error)) call sort_neighborlist(list, cache%wsc)
       else
-         call new_csr_list(list, screen, mol, error, cutoff=cutoff, complete=.false.)
+         call new_csr_list(list, screen, mol, error, cutoff=cutoff, complete=.true.)
+         if (.not. allocated(error)) call sort_neighborlist(list)
       end if
       call timer%pop
       write(output_unit, '(a, 1x, a)') "Neighborlist generation time :", &

@@ -340,8 +340,8 @@ subroutine write_ascii_hessian_list(unit, mol, hessian, list)
    !> Sorted complete neighborlist of the Hessian
    type(csr_list), intent(in) :: list
 
-   integer :: iat, jat, isp, jsp, ic, pos
-   integer(i8) :: hat, hoff
+   integer :: iat, jat, isp, jsp, ic, pos, nlow
+   integer(i8) :: hat, nfin
    real(wp) :: hblk(3, 3), dnorm2, hnorm, usum
    real(wp) :: hrow(3)
    character(len=:), allocatable :: buffer
@@ -357,11 +357,14 @@ subroutine write_ascii_hessian_list(unit, mol, hessian, list)
    dnorm2 = sum(hessian%dlambda**2)
    hnorm = usum**2 * dnorm2**2
    !$omp parallel do default(none) schedule(runtime) reduction(+:hnorm) &
-   !$omp shared(mol, hessian, list, usum) private(iat, jat, ic, hat, hoff, hblk)
+   !$omp shared(mol, hessian, list, usum) &
+   !$omp private(iat, jat, ic, hat, nfin, nlow, hblk)
    do iat = 1, mol%nat
-      hoff = list%inl(iat) - hessian%hinl(iat)
-      do hat = hessian%hinl(iat), hessian%hinl(iat + 1) - 1
-         jat = list%nlat(hat + hoff)
+      nfin = list%inl(iat + 1) - 1
+      nlow = findloc(list%nlat(list%inl(iat) + 1:nfin) < iat, .true., dim=1)
+      if (nlow > 0) nfin = list%inl(iat) + nlow - 1
+      do hat = list%inl(iat), nfin
+         jat = list%nlat(hat)
          do ic = 1, 3
             hblk(:, ic) = hessian%hesslist(:, ic, hat) &
                & + usum * hessian%dlambda(ic, iat) * hessian%dlambda(:, jat)
@@ -380,9 +383,10 @@ subroutine write_ascii_hessian_list(unit, mol, hessian, list)
 
    write(unit, '(a,":", t25, es20.13, 1x, a)') &
    & "Hessian matrix norm", sqrt(max(hnorm, 0.0_wp)), "Eh/a0^2"
+   ! Each pair of the complete list is held once in the upper triangles
    write(unit, '(a, 1x, i0, a, f0.1, a)') "Hessian blocks on the pattern:", &
-   & size(hessian%hesslist, 3, kind=i8), " (", &
-   & real(size(hessian%hesslist, 3, kind=i8), wp) / mol%nat, " per atom)"
+   & (size(list%nlat, kind=i8) + mol%nat) / 2, " (", &
+   & real((size(list%nlat, kind=i8) + mol%nat) / 2, wp) / mol%nat, " per atom)"
    write(unit, '(a)') &
    & "Upper triangle, the block of A and # is the transpose of the block of # and A"
    write(unit, '(78("-"))')
@@ -391,15 +395,16 @@ subroutine write_ascii_hessian_list(unit, mol, hessian, list)
    write(unit, '(78("-"))')
    !$omp parallel do default(none) ordered schedule(dynamic) &
    !$omp shared(unit, mol, hessian, list) &
-   !$omp private(iat, jat, isp, jsp, ic, hat, hoff, pos, hrow, buffer)
+   !$omp private(iat, jat, isp, jsp, ic, hat, nfin, nlow, pos, hrow, buffer)
    do iat = 1, mol%nat
       isp = mol%id(iat)
-      allocate(character(len=3 * (hlen + 1) &
-         & * (hessian%hinl(iat + 1) - hessian%hinl(iat))) :: buffer)
+      nfin = list%inl(iat + 1) - 1
+      nlow = findloc(list%nlat(list%inl(iat) + 1:nfin) < iat, .true., dim=1)
+      if (nlow > 0) nfin = list%inl(iat) + nlow - 1
+      allocate(character(len=3 * (hlen + 1) * (nfin - list%inl(iat) + 1)) :: buffer)
       pos = 0
-      hoff = list%inl(iat) - hessian%hinl(iat)
-      do hat = hessian%hinl(iat), hessian%hinl(iat + 1) - 1
-         jat = list%nlat(hat + hoff)
+      do hat = list%inl(iat), nfin
+         jat = list%nlat(hat)
          jsp = mol%id(jat)
          do ic = 1, 3
             hrow(:) = hessian%hesslist(:, ic, hat) + hessian%weight &

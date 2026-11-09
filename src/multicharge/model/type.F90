@@ -31,8 +31,8 @@ module multicharge_model_type
    use mctc_io_structure_atomsort, only : get_spatial_order
    use mctc_cutoff, only : get_lattice_points
    use mctc_ncoord, only : ncoord_type
-   use mctc_csrlist, only : csr_list, new_csr_list, distance_screening
-   use multicharge_atomsort, only : new_sorted_list, get_half_offsets, symv_half
+   use mctc_csrlist, only : csr_list, new_csr_list, distance_screening, &
+      & sort_neighborlist, spsymv_csr, spmm_csr
    use multicharge_blas, only : gemv, symv, gemm
    use multicharge_model_cache, only : mchrg_cache
    use multicharge_solver_type, only : mchrg_solver_type
@@ -45,7 +45,7 @@ module multicharge_model_type
       & hess_index, get_dqdr_row, new_partial_derivs, new_hessian_blocks
 
 
-   !> Molecular nuclear Hessian in compressed-row storage in the half storage of
+   !> Molecular nuclear Hessian in compressed-row storage on the upper triangle of
    !> the sorted complete neighborlist of the charges, which keeps the blocks of
    !> the atoms y >= x in the upper triangle of the row of x, the block of y and
    !> x is the transpose. The list itself is not kept, it is passed along with
@@ -59,13 +59,9 @@ module multicharge_model_type
    !> function of the charges.
    type :: mchrg_hessian
 
-      !> Offsets of the upper triangles of the rows of the list in the half
-      !> storage of the blocks
-      integer(i8), allocatable :: hinl(:)
-
-      !> Blocks without the charge constraint term in the half storage of the
-      !> list, the entry of atom y >= x in the upper triangle of the row of atom
-      !> x holds d2E/dR_y,jc dR_x,ic in (jc, ic)
+      !> Blocks without the charge constraint term on the list, the entry of atom
+      !> y >= x in the upper triangle of the row of atom x holds
+      !> d2E/dR_y,jc dR_x,ic in (jc, ic), the lower triangles are not used
       real(wp), allocatable :: hesslist(:, :, :)
 
       !> Position derivatives of the Lagrange multiplier, the factors of the
@@ -389,7 +385,7 @@ module multicharge_model_type
          !> Stress scaling factor
          real(wp), intent(in), optional :: beta
 
-         !> Multicharge neighborlist type (half or sorted complete)
+         !> Multicharge neighborlist type (sorted complete)
          type(csr_list), optional, intent(in) :: list
       end subroutine get_grad
 
@@ -427,7 +423,7 @@ module multicharge_model_type
 
       !> Explicit part of the molecular nuclear Hessian at fixed p and charges q
       !> on a sorted complete neighborlist, added to the blocks of the compressed
-      !> Hessian in the half storage of the list
+      !> Hessian on the upper triangle of the list
       subroutine get_explicit_hessian_list(self, mol, cache, p, hessian, error, &
          & list, alpha, beta)
          import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, &
@@ -447,7 +443,7 @@ module multicharge_model_type
          real(wp), intent(in) :: p(:)
 
          !> Molecular nuclear Hessian in compressed storage with allocated
-         !> blocks in the half storage of the list
+         !> blocks on the list
          type(mchrg_hessian), intent(inout) :: hessian
 
          !> Error handling
@@ -567,9 +563,7 @@ subroutine solve(self, mol, solver, cache, error, &
    !> requests the charge derivatives together with dqdr or a neighborlist
    real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
 
-   !> Optional neighborlist, a half list for the charges and their energy
-   !> gradient, a sorted complete list for the charge derivatives, see
-   !> new_sorted_list
+   !> Optional sorted complete neighborlist, see sort_neighborlist
    type(csr_list), intent(in), optional :: list
 
    !> Optional external electric field
@@ -604,18 +598,12 @@ subroutine solve(self, mol, solver, cache, error, &
       return
    end if
 
-   ! The symmetric matrices are kept in the half storage of the neighborlist,
-   ! whose offsets are set by the update. The charge derivatives need all
-   ! neighbors of each atom in its row of a sorted complete list.
+   ! The symmetric matrices are kept on the upper triangles of the rows of a
+   ! sorted complete neighborlist
    if (present(list)) then
-      if (.not. allocated(cache%hinl)) then
-         call fatal_error(error, "The cache is not set up for the neighborlist, "// &
-            & "update the cache with the list")
-         return
-      end if
-      if (cpq .and. .not. list%complete) then
-         call fatal_error(error, "Charge derivatives on a neighborlist require "// &
-            & "a sorted complete list, see new_sorted_list")
+      if (.not. list%complete) then
+         call fatal_error(error, "The neighborlist has to be a sorted complete "// &
+            & "list, see sort_neighborlist")
          return
       end if
    end if
@@ -692,8 +680,8 @@ subroutine solve(self, mol, solver, cache, error, &
       ! Initial guess
       if (present(list)) then
          do iat = 1, mol%nat
-            cache%uvec(iat) = 1.0_wp / (cache%alist(cache%hinl(iat)) + eps)
-            vvec(iat) = - cache%xvec(iat) / (cache%alist(cache%hinl(iat)) + eps)
+            cache%uvec(iat) = 1.0_wp / (cache%alist(list%inl(iat)) + eps)
+            vvec(iat) = - cache%xvec(iat) / (cache%alist(list%inl(iat)) + eps)
          end do
       else
          do iat = 1, mol%nat
@@ -734,7 +722,8 @@ subroutine solve(self, mol, solver, cache, error, &
       call timer%push("energy")
       if (present(list)) then
          allocate(avec(mol%nat))
-         call symv_half(list, cache%hinl, cache%alist, cache%vrhs, avec)
+         call spsymv_csr(mol%nat, cache%alist, list%inl, list%nlat, cache%vrhs, &
+            & avec, uplo='U')
          cache%xvec(:mol%nat) = 0.5_wp * avec - cache%xvec(:mol%nat)
       else
          call symv(cache%amat, cache%vrhs, cache%xvec(:mol%nat), &
@@ -933,7 +922,7 @@ end subroutine get_q_derivs
 
 
 !> Inverse S = J^-1 of the coefficient matrix on the pattern of a sorted
-!> complete neighborlist in cache%ainvlist, kept in the half storage of the
+!> complete neighborlist in cache%ainvlist, kept on the upper triangle of the
 !> list
 subroutine get_inverse_list(mol, solver, cache, list, error, unit)
 
@@ -955,13 +944,13 @@ subroutine get_inverse_list(mol, solver, cache, list, error, unit)
    !> Output unit
    integer, intent(in), optional :: unit
 
-   integer(i8) :: nhalf
+   integer(i8) :: nnz
 
-   nhalf = cache%hinl(mol%nat + 1) - 1
+   nnz = size(list%nlat, kind=i8)
    if (allocated(cache%ainvlist)) then
-      if (size(cache%ainvlist, kind=i8) /= nhalf) deallocate(cache%ainvlist)
+      if (size(cache%ainvlist, kind=i8) /= nnz) deallocate(cache%ainvlist)
    end if
-   if (.not. allocated(cache%ainvlist)) allocate(cache%ainvlist(nhalf))
+   if (.not. allocated(cache%ainvlist)) allocate(cache%ainvlist(nnz))
    call solver%invert_list(cache%alist, list, cache%ainvlist, xyz=mol%xyz, &
       & new_unit=unit, error=error)
 
@@ -1091,7 +1080,7 @@ end subroutine add_transposed_product
 
 
 !> Derivatives of the charges w.r.t. the lattice vectors, B_L^T S with the
-!> inverse S in the half storage of a sorted complete neighborlist and the
+!> inverse S on the upper triangle of a sorted complete neighborlist and the
 !> strain derivatives B_L of the partial derivatives, and their charge
 !> constraint term
 subroutine get_dqdL_list(mol, cache, list, dqdL)
@@ -1112,7 +1101,7 @@ subroutine get_dqdL_list(mol, cache, list, dqdL)
    integer :: iat, jat
    real(wp) :: uvecsum, scale
    real(wp) :: wlat(3, 3)
-   real(wp), allocatable :: sdabdL(:, :)
+   real(wp), allocatable :: dabdL(:, :), sdabdL(:, :)
 
    uvecsum = sum(cache%uvec)
    wlat(:, :) = 0.0_wp
@@ -1120,12 +1109,14 @@ subroutine get_dqdL_list(mol, cache, list, dqdL)
       wlat(:, :) = wlat + cache%dabdL(:, :, iat) * cache%uvec(iat)
    end do
 
-   allocate(sdabdL(9, mol%nat))
-   call symv_half(list, cache%hinl, cache%ainvlist, &
-      & reshape(cache%dabdL(:, :, :mol%nat), [9, mol%nat]), sdabdL)
+   ! The nine strain components of the atoms are the columns of the product
+   dabdL = transpose(reshape(cache%dabdL(:, :, :mol%nat), [9, mol%nat]))
+   allocate(sdabdL(mol%nat, 9))
+   call spmm_csr('N', mol%nat, 9, mol%nat, 1.0_wp, 'SU', cache%ainvlist, list%nlat, &
+      & list%inl(:mol%nat), list%inl(2:), dabdL, mol%nat, 0.0_wp, sdabdL, mol%nat)
    do jat = 1, mol%nat
       scale = cache%uvec(jat) / (uvecsum + eps)
-      dqdL(:, :, jat) = reshape(sdabdL(:, jat), [3, 3]) - scale * wlat
+      dqdL(:, :, jat) = reshape(sdabdL(jat, :), [3, 3]) - scale * wlat
    end do
 
 end subroutine get_dqdL_list
@@ -1171,8 +1162,8 @@ subroutine get_group_dqdr(cache, list, group, nb, bloc, blist, qpos, pan, qcol)
    integer :: n, i
 
    call gather_group_list(list, cache%dabdrlist, group, nb, bloc, blist, qpos, pan)
-   call multiply_group_list(list, cache%hinl, cache%ainvlist, 3 * size(group), nb, &
-      & bloc, blist, pan, qcol)
+   call multiply_group_list(list, cache%ainvlist, 3 * size(group), nb, bloc, &
+      & blist, pan, qcol)
    do n = 1, nb
       do i = 1, size(group)
          if (qpos(i, n) == 0) qcol(3 * i - 2:3 * i, n) = 0.0_wp
@@ -1188,8 +1179,8 @@ end subroutine get_group_dqdr
 !> The mixed derivatives G = d2f/dRdq - dA/dR*p are read from the cache, the
 !> products with d2f/dq2 and the inverse S are only formed on the rows of the
 !> union and the elements of the atoms b outside of the list of x are dropped.
-subroutine get_group_dpdr(cache, list, d2fdq2, d2fdq2_list, qhinl, ng, nb, bloc, &
-   & blist, qpos, qcol, pan, pcol)
+subroutine get_group_dpdr(cache, list, d2fdq2, d2fdq2_list, ng, nb, bloc, blist, &
+   & qpos, qcol, pan, pcol)
 
    !> Cache with the inverse and the mixed derivatives on the list
    type(mchrg_cache), intent(in) :: cache
@@ -1197,14 +1188,11 @@ subroutine get_group_dpdr(cache, list, d2fdq2, d2fdq2_list, qhinl, ng, nb, bloc,
    !> Sorted complete neighborlist
    type(csr_list), intent(in) :: list
 
-   !> Second derivatives w.r.t. the charges in the half storage of their list
+   !> Second derivatives w.r.t. the charges on the upper triangle of their list
    real(wp), intent(in), contiguous :: d2fdq2(:)
 
    !> Sorted complete list of the second derivatives w.r.t. the charges
    type(csr_list), intent(in) :: d2fdq2_list
-
-   !> Offsets of the half storage of the second derivatives
-   integer(i8), intent(in), contiguous :: qhinl(:)
 
    !> Number of atoms in the group
    integer, intent(in) :: ng
@@ -1235,8 +1223,8 @@ subroutine get_group_dpdr(cache, list, d2fdq2, d2fdq2_list, qhinl, ng, nb, bloc,
    integer(i8) :: kat
 
    ! G + d2f/dq2 dq/dR on the neighbors of x
-   call multiply_group_list(d2fdq2_list, qhinl, d2fdq2, 3 * ng, nb, bloc, blist, &
-      & qcol, pan)
+   call multiply_group_list(d2fdq2_list, d2fdq2, 3 * ng, nb, bloc, blist, qcol, &
+      & pan)
    do n = 1, nb
       do i = 1, ng
          kat = qpos(i, n)
@@ -1249,8 +1237,8 @@ subroutine get_group_dpdr(cache, list, d2fdq2, d2fdq2_list, qhinl, ng, nb, bloc,
       end do
    end do
    ! Product with the inverse on the neighbors of x
-   call multiply_group_list(list, cache%hinl, cache%ainvlist, 3 * ng, nb, bloc, &
-      & blist, pan, pcol)
+   call multiply_group_list(list, cache%ainvlist, 3 * ng, nb, bloc, blist, pan, &
+      & pcol)
    do n = 1, nb
       do i = 1, ng
          if (qpos(i, n) == 0) pcol(3 * i - 2:3 * i, n) = 0.0_wp
@@ -1344,21 +1332,18 @@ pure subroutine add_union_atom(bat, nb, bloc, blist, qpos, pan, n)
 end subroutine add_union_atom
 
 
-!> Product of a symmetric matrix S in the half storage of a sorted complete
+!> Product of a symmetric matrix S on the upper triangle of a sorted complete
 !> list, the inverse or the second derivatives of an external function w.r.t.
 !> the charges, with the derivatives of the union U of a group,
-!> qcol = S_UU pan. The upper triangles of the rows of the union are read from
-!> the half storage, each pair also adds the mirrored element of the symmetric
-!> matrix to the row of its other atom.
-subroutine multiply_group_list(list, hinl, smat, nw, nb, bloc, blist, pan, qcol)
+!> qcol = S_UU pan. The upper triangles of the rows of the union are read, each
+!> pair also adds the mirrored element of the symmetric matrix to the row of
+!> its other atom.
+subroutine multiply_group_list(list, smat, nw, nb, bloc, blist, pan, qcol)
 
    !> Sorted complete list of the symmetric matrix
    type(csr_list), intent(in) :: list
 
-   !> Offsets of the upper triangles of the rows in the half storage
-   integer(i8), intent(in), contiguous :: hinl(:)
-
-   !> Upper triangle of the symmetric matrix in the half storage
+   !> Symmetric matrix on the upper triangle of the list
    real(wp), intent(in), contiguous :: smat(:)
 
    !> Number of derivatives of each atom of the union, three per group atom
@@ -1379,17 +1364,19 @@ subroutine multiply_group_list(list, hinl, smat, nw, nb, bloc, blist, pan, qcol)
    !> Product with the symmetric matrix on the union
    real(wp), intent(inout), contiguous :: qcol(:, :)
 
-   integer :: n, m, bat
-   integer(i8) :: hat, koff
+   integer :: n, m, bat, nlow
+   integer(i8) :: hat, nfin
    real(wp) :: s, acc(3 * max_group)
 
    qcol(:nw, :nb) = 0.0_wp
    do n = 1, nb
       bat = blist(n)
-      koff = list%inl(bat) - hinl(bat)
       acc(:nw) = 0.0_wp
-      do hat = hinl(bat), hinl(bat + 1) - 1
-         m = bloc(list%nlat(hat + koff))
+      nfin = list%inl(bat + 1) - 1
+      nlow = findloc(list%nlat(list%inl(bat) + 1:nfin) < bat, .true., dim=1)
+      if (nlow > 0) nfin = list%inl(bat) + nlow - 1
+      do hat = list%inl(bat), nfin
+         m = bloc(list%nlat(hat))
          if (m == 0) cycle
          s = smat(hat)
          acc(:nw) = acc(:nw) + s * pan(:nw, m)
@@ -1713,8 +1700,8 @@ end subroutine get_hessian_dense
 
 !> Compute the molecular nuclear Hessian of the electrostatic energy on a
 !> sorted complete neighborlist, which requires the CG solver with
-!> neighborlist support. The Hessian is kept in compressed storage in the half
-!> storage of the neighborlist, which keeps the blocks of the atoms y >= x, and
+!> neighborlist support. The Hessian is kept in compressed storage on the upper
+!> triangle of the neighborlist, which keeps the blocks of the atoms y >= x, and
 !> the dense charge constraint term in its factors. The implicit part is formed
 !> first from the inverse and the partial derivatives, which are freed before
 !> the explicit part. The cache has to hold the solve on the neighborlist,
@@ -1781,7 +1768,7 @@ subroutine get_hessian_list(self, mol, solver, cache, error, hessian, list, &
    if (allocated(error)) return
    deallocate(cache%alist)
 
-   call new_hessian_blocks(hessian, cache%hinl)
+   call new_hessian_blocks(hessian, list)
 
    ! Response of the charges, -(dX/dR - dA/dR*q)^T dq/dR
    call timer%push("implicit")
@@ -1802,27 +1789,25 @@ subroutine get_hessian_list(self, mol, solver, cache, error, hessian, list, &
 end subroutine get_hessian_list
 
 
-!> Allocate the zero blocks of a compressed Hessian in the half storage of the
-!> sorted complete neighborlist
-subroutine new_hessian_blocks(hessian, hinl)
+!> Allocate the zero blocks of a compressed Hessian on the sorted complete
+!> neighborlist, only the blocks of its upper triangle are used
+subroutine new_hessian_blocks(hessian, list)
 
    !> Molecular nuclear Hessian in compressed storage
    type(mchrg_hessian), intent(inout) :: hessian
 
-   !> Offsets of the upper triangles of the rows of the list in the half
-   !> storage
-   integer(i8), intent(in) :: hinl(:)
+   !> Sorted complete neighborlist of the Hessian
+   type(csr_list), intent(in) :: list
 
-   hessian%hinl = hinl
    if (allocated(hessian%hesslist)) deallocate(hessian%hesslist)
-   allocate(hessian%hesslist(3, 3, hinl(size(hinl)) - 1), source=0.0_wp)
+   allocate(hessian%hesslist(3, 3, size(list%nlat, kind=i8)), source=0.0_wp)
 
 end subroutine new_hessian_blocks
 
 
 !> Check the setup of the Hessian on a neighborlist: a molecular structure, a
 !> sorted complete list, the CG solver and a cache with the solve and the CN
-!> derivatives in the half storage of this list
+!> derivatives on this list
 subroutine check_hessian_setup(mol, solver, cache, list, error)
 
    !> Molecular structure data
@@ -1847,7 +1832,7 @@ subroutine check_hessian_setup(mol, solver, cache, list, error)
    end if
    if (.not. list%complete) then
       call fatal_error(error, "The Hessian on a neighborlist requires a sorted "// &
-         & "complete list, see new_sorted_list")
+         & "complete list, see sort_neighborlist")
       return
    end if
    select type (solver)
@@ -1856,17 +1841,15 @@ subroutine check_hessian_setup(mol, solver, cache, list, error)
       call fatal_error(error, "The Hessian on a neighborlist requires the CG solver")
       return
    end select
-   if (.not. allocated(cache%vrhs) .or. .not. allocated(cache%dcndrlist) &
-      & .or. .not. allocated(cache%hinl)) then
+   if (.not. allocated(cache%vrhs) .or. .not. allocated(cache%dcndrlist)) then
       call fatal_error(error, "Charges and CN derivatives on the list are not "// &
          & "in the cache, update the cache with hess and solve first")
       return
    end if
 
-   ! Each pair is held once in the half storage and twice in the complete list
-   if (size(cache%hinl) /= mol%nat + 1 .or. size(list%inl) /= mol%nat + 1 &
-      & .or. 2 * (cache%hinl(mol%nat + 1) - 1) - mol%nat &
-      & /= list%inl(mol%nat + 1) - 1) then
+   ! The CN derivatives keep each entry of the list
+   if (size(list%inl) /= mol%nat + 1 &
+      & .or. size(cache%dcndrlist, 2, kind=i8) /= size(list%nlat, kind=i8)) then
       call fatal_error(error, "The cache was updated with a different neighborlist")
       return
    end if
@@ -1926,8 +1909,8 @@ subroutine get_implicit_hessian_list(self, mol, cache, hessian, list, times)
    !> Cache handling
    type(mchrg_cache), intent(in) :: cache
 
-   !> Molecular nuclear Hessian in compressed storage with allocated blocks in
-   !> the half storage of the list
+   !> Molecular nuclear Hessian in compressed storage with allocated blocks on
+   !> the list
    type(mchrg_hessian), intent(inout) :: hessian
 
    !> Multicharge neighborlist type (sorted complete)
@@ -1989,40 +1972,39 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times, &
    !> seconds, summed over the threads
    real(wp), intent(out) :: times(2)
 
-   !> Second derivatives of an external function w.r.t. the charges in the half
-   !> storage of their list, selects the external Hessian
+   !> Second derivatives of an external function w.r.t. the charges on the
+   !> upper triangle of their list, selects the external Hessian
    real(wp), intent(in), contiguous, optional :: d2fdq2(:)
 
    !> Sorted complete list of the second derivatives w.r.t. the charges
    type(csr_list), intent(in), optional :: d2fdq2_list
 
    integer :: igrp, ngrp, nbmax, numax, x0, ng, i, xat, yat, nb, nu, n, u
-   integer :: na, ia, act(max_group)
-   integer(i8) :: hat, hoff, tick(3), rate
+   integer :: na, ia, act(max_group), nlow
+   integer(i8) :: hat, nfin, tick(3), rate
    real(wp) :: scale, tpan, tcon
    logical :: ext
    integer, allocatable :: bloc(:), hloc(:), blist(:), ulist(:)
-   integer(i8), allocatable :: qpos(:, :), jmap(:, :), qhinl(:)
+   integer(i8), allocatable :: qpos(:, :), jmap(:, :)
    real(wp), allocatable :: pan(:, :), qcol(:, :), pcol(:, :), acc(:, :, :)
 
    times(:) = 0.0_wp
    ngrp = (mol%nat + max_group - 1) / max_group
    if (ngrp < 1) return
    nbmax = min(mol%nat, max_group * get_max_neighbors(mol%nat, list))
-   numax = min(mol%nat, max_group * int(maxval(cache%hinl(2:mol%nat + 1) &
-      & - cache%hinl(:mol%nat))))
+   numax = nbmax
    ext = present(d2fdq2) .and. present(d2fdq2_list)
    scale = -1.0_wp
    if (ext) scale = 1.0_wp
-   if (ext) call get_half_offsets(d2fdq2_list, qhinl)
 
    ! bloc and hloc hold the position of each atom in the unions of the group
    tpan = 0.0_wp
    tcon = 0.0_wp
    !$omp parallel default(none) &
    !$omp shared(mol, cache, hessian, list, order, ngrp, nbmax) &
-   !$omp shared(numax, ext, scale, d2fdq2, d2fdq2_list, qhinl) &
-   !$omp private(igrp, x0, ng, i, xat, yat, nb, nu, n, u, hat, hoff, tick, rate) &
+   !$omp shared(numax, ext, scale, d2fdq2, d2fdq2_list) &
+   !$omp private(igrp, x0, ng, i, xat, yat, nb, nu, n, u, hat, nfin, nlow, tick) &
+   !$omp private(rate) &
    !$omp private(bloc, hloc, blist, ulist, qpos, jmap, pan, qcol, pcol) &
    !$omp private(na, ia, act, acc) &
    !$omp reduction(+:tpan, tcon)
@@ -2042,8 +2024,8 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times, &
       ! derivatives of the adjoint vector of an external function
       call get_group_dqdr(cache, list, order(x0 + 1:x0 + ng), nb, bloc, blist, &
          & qpos, pan, qcol)
-      if (ext) call get_group_dpdr(cache, list, d2fdq2, d2fdq2_list, qhinl, ng, &
-         & nb, bloc, blist, qpos, qcol, pan, pcol)
+      if (ext) call get_group_dpdr(cache, list, d2fdq2, d2fdq2_list, ng, nb, &
+         & bloc, blist, qpos, qcol, pan, pcol)
       call system_clock(tick(2))
 
       ! Union of the atoms y >= x in the upper triangles of the rows of the
@@ -2052,9 +2034,11 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times, &
       nu = 0
       do i = 1, ng
          xat = order(x0 + i)
-         hoff = list%inl(xat) - cache%hinl(xat)
-         do hat = cache%hinl(xat), cache%hinl(xat + 1) - 1
-            yat = list%nlat(hat + hoff)
+         nfin = list%inl(xat + 1) - 1
+         nlow = findloc(list%nlat(list%inl(xat) + 1:nfin) < xat, .true., dim=1)
+         if (nlow > 0) nfin = list%inl(xat) + nlow - 1
+         do hat = list%inl(xat), nfin
+            yat = list%nlat(hat)
             if (hloc(yat) == 0) then
                nu = nu + 1
                hloc(yat) = nu
@@ -2278,8 +2262,8 @@ end subroutine get_external_hessian_dense
 !> atoms x and y, sum_b G(b, y) dq_b/dR_x + B(b, y) dp_b/dR_x with the mixed
 !> derivatives G = d2f/dRdq - dA/dR*p and the derivatives of the adjoint
 !> vector dp/dR = S (G + d2f/dq2 dq/dR), plus the explicit part
-!> p^T (d2X/dR2 - d2A/dR2*q). The inverse S and the Hessian are kept in the
-!> half storage of the neighborlist, the dense rank-2 term of the charge
+!> p^T (d2X/dR2 - d2A/dR2*q). The inverse S and the Hessian are kept on the
+!> upper triangle of the neighborlist, the dense rank-2 term of the charge
 !> constraint in its factors. The derivatives of f are taken at the charges of
 !> the structure, the second derivative d2f/dR2 at fixed charges is added by
 !> the caller. The cache has to hold the solve on the neighborlist, update it
@@ -2306,7 +2290,7 @@ subroutine get_external_hessian_list(self, mol, solver, cache, error, dfdq, &
    real(wp), intent(in) :: dfdq(:)
 
    !> Second derivative of the external function w.r.t. atomic charges, the
-   !> upper triangle of the symmetric matrix in the half storage of its list
+   !> symmetric matrix on the upper triangle of its list
    real(wp), intent(in), contiguous :: d2fdq2(:)
 
    !> Sorted complete list of the second derivative w.r.t. atomic charges
@@ -2336,7 +2320,6 @@ subroutine get_external_hessian_list(self, mol, solver, cache, error, dfdq, &
    integer :: print_unit, verbosity_hess
    real(wp) :: tgroup(2)
    integer, allocatable :: order(:)
-   integer(i8), allocatable :: qhinl(:)
    real(wp), allocatable :: padj(:), fuvec(:), tvec(:)
    type(timer_type) :: timer
 
@@ -2345,7 +2328,6 @@ subroutine get_external_hessian_list(self, mol, solver, cache, error, dfdq, &
    call check_external_derivs(mol, dfdq, d2fdq2, d2fdq2_list, dfdrdq, &
       & dfdrdq_list, error)
    if (allocated(error)) return
-   call get_half_offsets(d2fdq2_list, qhinl)
 
    print_unit = output_unit
    if (present(unit)) print_unit = unit
@@ -2359,7 +2341,7 @@ subroutine get_external_hessian_list(self, mol, solver, cache, error, dfdq, &
    call get_adjoint_vector(mol, solver, cache, error, dfdq, padj, list, unit, &
       & verbosity)
    if (.not. allocated(error)) call get_constraint_response(mol, solver, cache, &
-      & list, d2fdq2, d2fdq2_list, qhinl, fuvec, tvec, print_unit, error)
+      & list, d2fdq2, d2fdq2_list, fuvec, tvec, print_unit, error)
    call timer%pop
    if (allocated(error)) return
 
@@ -2385,7 +2367,7 @@ subroutine get_external_hessian_list(self, mol, solver, cache, error, dfdq, &
    if (allocated(error)) return
    deallocate(cache%alist)
 
-   call new_hessian_blocks(hessian, cache%hinl)
+   call new_hessian_blocks(hessian, list)
    call get_external_constraint_factors(mol, cache, list, fuvec, tvec, hessian)
 
    ! Response of the charges and of the adjoint vector,
@@ -2422,7 +2404,7 @@ subroutine check_external_derivs(mol, dfdq, d2fdq2, d2fdq2_list, dfdrdq, &
    !> Derivative of the external function w.r.t. atomic charges
    real(wp), intent(in) :: dfdq(:)
 
-   !> Second derivative w.r.t. atomic charges in the half storage of its list
+   !> Second derivative w.r.t. atomic charges on the upper triangle of its list
    real(wp), intent(in) :: d2fdq2(:)
 
    !> Sorted complete list of the second derivative w.r.t. atomic charges
@@ -2437,17 +2419,14 @@ subroutine check_external_derivs(mol, dfdq, d2fdq2, d2fdq2_list, dfdrdq, &
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
-   integer(i8) :: nhalf
-
    if (.not. (d2fdq2_list%complete .and. dfdrdq_list%complete)) then
       call fatal_error(error, "The external Hessian on a neighborlist requires "// &
          & "sorted complete lists")
       return
    end if
 
-   ! Each pair is held once in the half storage and twice in the complete list
-   nhalf = (d2fdq2_list%inl(size(d2fdq2_list%inl)) - 1 + mol%nat) / 2
-   if (size(dfdq) /= mol%nat .or. size(d2fdq2, kind=i8) /= nhalf &
+   if (size(dfdq) /= mol%nat &
+      & .or. size(d2fdq2, kind=i8) /= size(d2fdq2_list%nlat, kind=i8) &
       & .or. size(dfdrdq, 1) /= 3 &
       & .or. size(dfdrdq, 2, kind=i8) /= size(dfdrdq_list%nlat, kind=i8)) then
       call fatal_error(error, "External partial derivatives are wrong size")
@@ -2461,7 +2440,7 @@ end subroutine check_external_derivs
 !> function, F u = d2f/dq2 u with the constraint response u = A^-1 1 and
 !> t = A^-1 F u, which give the factors of the charge constraint term
 subroutine get_constraint_response(mol, solver, cache, list, d2fdq2, &
-   & d2fdq2_list, qhinl, fuvec, tvec, unit, error)
+   & d2fdq2_list, fuvec, tvec, unit, error)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
@@ -2469,21 +2448,17 @@ subroutine get_constraint_response(mol, solver, cache, list, d2fdq2, &
    !> Solver instance
    class(mchrg_solver_type), intent(in) :: solver
 
-   !> Cache with the coefficient matrix in the half storage of the list and
-   !> the constraint response
+   !> Cache with the coefficient matrix on the list and the constraint response
    type(mchrg_cache), intent(in) :: cache
 
    !> Sorted complete neighborlist
    type(csr_list), intent(in) :: list
 
-   !> Second derivative w.r.t. atomic charges in the half storage of its list
+   !> Second derivative w.r.t. atomic charges on the upper triangle of its list
    real(wp), intent(in), contiguous :: d2fdq2(:)
 
    !> Sorted complete list of the second derivative w.r.t. atomic charges
    type(csr_list), intent(in) :: d2fdq2_list
-
-   !> Offsets of the half storage of the second derivative
-   integer(i8), intent(in) :: qhinl(:)
 
    !> Product F u
    real(wp), allocatable, intent(out) :: fuvec(:)
@@ -2500,11 +2475,12 @@ subroutine get_constraint_response(mol, solver, cache, list, d2fdq2, &
    integer :: iat
 
    allocate(fuvec(mol%nat), tvec(mol%nat))
-   call symv_half(d2fdq2_list, qhinl, d2fdq2, cache%uvec, fuvec)
+   call spsymv_csr(mol%nat, d2fdq2, d2fdq2_list%inl, d2fdq2_list%nlat, cache%uvec, &
+      & fuvec, uplo='U')
 
    ! Diagonal guess of the CG solve
    do iat = 1, mol%nat
-      tvec(iat) = fuvec(iat) / (cache%alist(cache%hinl(iat)) + eps)
+      tvec(iat) = fuvec(iat) / (cache%alist(list%inl(iat)) + eps)
    end do
    call solver%solve(alist=cache%alist, xvec=fuvec, vrhs=tvec, list=list, &
       & new_unit=unit, error=error)
@@ -2557,8 +2533,8 @@ subroutine get_adjoint_vector(mol, solver, cache, error, dfdq, padj, list, unit,
    !> Solver instance
    class(mchrg_solver_type), intent(in) :: solver
 
-   !> Cache with the coefficient matrix, in the half storage of the
-   !> neighborlist if present, and the constraint response of the CG solver
+   !> Cache with the coefficient matrix, on the neighborlist if present, and
+   !> the constraint response of the CG solver
    type(mchrg_cache), intent(in) :: cache
 
    !> Error handling
@@ -2570,7 +2546,7 @@ subroutine get_adjoint_vector(mol, solver, cache, error, dfdq, padj, list, unit,
    !> Adjoint vector, of the dimension of the linear system
    real(wp), allocatable, intent(out) :: padj(:)
 
-   !> Multicharge neighborlist type (half or sorted complete)
+   !> Multicharge neighborlist type (sorted complete)
    type(csr_list), intent(in), optional :: list
 
    !> Output unit
@@ -2594,7 +2570,7 @@ subroutine get_adjoint_vector(mol, solver, cache, error, dfdq, padj, list, unit,
       allocate(padj(mol%nat))
       if (present(list)) then
          do iat = 1, mol%nat
-            padj(iat) = dfdq(iat) / (cache%alist(cache%hinl(iat)) + eps)
+            padj(iat) = dfdq(iat) / (cache%alist(list%inl(iat)) + eps)
          end do
       else
          do iat = 1, mol%nat
@@ -2895,7 +2871,8 @@ subroutine get_displaced_gradient(self, mol, solver, error, gradient, sigma, &
    !> Virial
    real(wp), intent(out), contiguous :: sigma(:, :)
 
-   !> Reference neighborlist, only its settings and its kind are reused
+   !> Reference neighborlist, only its cutoff is reused for a sorted complete
+   !> neighborlist of the displaced structure
    type(csr_list), intent(in), optional :: list
 
    !> Output unit
@@ -2916,18 +2893,17 @@ subroutine get_displaced_gradient(self, mol, solver, error, gradient, sigma, &
 
    if (present(list)) then
       allocate(list_work)
-      if (list%complete .and. any(mol%periodic)) then
-         call new_sorted_list(list_work, mol, error, list%cutoff, cache%wsc)
-      else if (list%complete) then
-         call new_sorted_list(list_work, mol, error, list%cutoff)
-      else if (any(mol%periodic)) then
+      if (any(mol%periodic)) then
          call new_csr_list(list_work, screen, mol, error, cache%wsc, list%cutoff, &
-            & complete=.false.)
+            & complete=.true.)
+         if (allocated(error)) return
+         call sort_neighborlist(list_work, cache%wsc)
       else
          call new_csr_list(list_work, screen, mol, error, cutoff=list%cutoff, &
-            & complete=.false.)
+            & complete=.true.)
+         if (allocated(error)) return
+         call sort_neighborlist(list_work)
       end if
-      if (allocated(error)) return
    end if
 
    call self%update(mol, cache, trans, .true., list_work)

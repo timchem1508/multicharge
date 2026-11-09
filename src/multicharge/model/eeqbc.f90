@@ -33,14 +33,12 @@ module multicharge_model_eeqbc
    use mctc_io, only : structure_type
    use mctc_io_constants, only : pi
    use mctc_ncoord, only : cn_count, new_ncoord, ncoord_type
-   use mctc_csrlist, only : csr_list
+   use mctc_csrlist, only : csr_list, spsymv_csr
    use mctc_wignerseitz, only : wignerseitz_cell
    use multicharge_wignerseitz, only : new_wignerseitz_cell
    use multicharge_model_type, only : get_dir_trans, mchrg_model_type, mchrg_hessian
    use multicharge_blas, only : gemm, gemv, symv
    use multicharge_model_cache, only : mchrg_cache
-   use multicharge_atomsort, only : get_half_offsets, get_half_list, &
-      & get_pair_positions, symv_half
    implicit none
    private
 
@@ -224,7 +222,6 @@ subroutine update(self, mol, cache, trans, grad, list, dqdr, hess)
    logical, intent(in), optional :: hess
 
    logical :: deriv
-   type(csr_list) :: half
 
    ! The charge derivatives and the Hessian need the position and strain
    ! derivatives of the CN and the local charges
@@ -251,18 +248,9 @@ subroutine update(self, mol, cache, trans, grad, list, dqdr, hess)
    end if
 
    if (present(list)) then
-      ! The symmetric pair arrays keep the upper triangles of the rows of the
-      ! list in the half storage. The coordination numbers and their
-      ! derivatives are evaluated on a half list, for a sorted complete list on
-      ! the half list of its upper triangles, whose entries follow the half
-      ! storage.
-      call get_half_offsets(list, cache%hinl)
-      if (list%complete) then
-         call get_half_list(list, cache%hinl, half)
-         call update_ncoord_list(self, mol, cache, trans, deriv, half)
-      else
-         call update_ncoord_list(self, mol, cache, trans, deriv, list)
-      end if
+      ! The coordination numbers and their derivatives are evaluated on the
+      ! sorted complete list
+      call update_ncoord_list(self, mol, cache, trans, deriv, list)
    else
       if (deriv) then
          if (.not. allocated(cache%dcndr)) allocate(cache%dcndr(3, mol%nat, mol%nat))
@@ -284,9 +272,9 @@ subroutine update(self, mol, cache, trans, grad, list, dqdr, hess)
 
 end subroutine update
 
-!> Coordination numbers and local charges on a half list and, if requested,
-!> their position derivatives in the layout of the half list
-subroutine update_ncoord_list(self, mol, cache, trans, deriv, half)
+!> Coordination numbers and local charges on a sorted complete neighborlist
+!> and, if requested, their position derivatives on the list
+subroutine update_ncoord_list(self, mol, cache, trans, deriv, list)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Structure type
@@ -297,23 +285,23 @@ subroutine update_ncoord_list(self, mol, cache, trans, deriv, half)
    real(wp), intent(in) :: trans(:, :)
    !> Flag for the position and strain derivatives
    logical, intent(in) :: deriv
-   !> Half list
-   type(csr_list), intent(in) :: half
+   !> Sorted complete neighborlist
+   type(csr_list), intent(in) :: list
 
-   integer(i8) :: nhalf
+   integer(i8) :: nnz
 
    if (deriv) then
-      nhalf = size(half%nlat, kind=i8)
+      nnz = size(list%nlat, kind=i8)
       if (allocated(cache%dcndrlist)) deallocate(cache%dcndrlist)
       if (allocated(cache%dqlocdrlist)) deallocate(cache%dqlocdrlist)
-      allocate(cache%dcndrlist(3, nhalf), cache%dqlocdrlist(3, nhalf))
+      allocate(cache%dcndrlist(3, nnz), cache%dqlocdrlist(3, nnz))
       call self%ncoord%get_coordination_number(mol, trans, cache%cn, &
-         & dcndL=cache%dcndL, list=half, dcndrlist=cache%dcndrlist)
+         & dcndL=cache%dcndL, list=list, dcndrlist=cache%dcndrlist)
       call self%local_charge(mol, trans, cache%qloc, dqlocdL=cache%dqlocdL, &
-         & list=half, dqlocdrlist=cache%dqlocdrlist)
+         & list=list, dqlocdrlist=cache%dqlocdrlist)
    else
-      call self%ncoord%get_coordination_number(mol, trans, cache%cn, list=half)
-      call self%local_charge(mol, trans, cache%qloc, list=half)
+      call self%ncoord%get_coordination_number(mol, trans, cache%cn, list=list)
+      call self%local_charge(mol, trans, cache%qloc, list=list)
    end if
 
 end subroutine update_ncoord_list
@@ -342,13 +330,13 @@ subroutine get_capacitance_matrix(self, mol, ndim, cache, list)
    end if
 
    if (present(list)) then
-      ! Allocate cmat in the half storage of the list
+      ! Allocate cmat on the list, only its upper triangle is used
       if (allocated(cache%clist)) then
-         if (size(cache%clist, kind=i8) /= cache%hinl(mol%nat + 1) - 1) &
+         if (size(cache%clist, kind=i8) /= size(list%nlat, kind=i8)) &
             & deallocate(cache%clist)
       end if
       if (.not. allocated(cache%clist)) &
-         & allocate(cache%clist(cache%hinl(mol%nat + 1) - 1))
+         & allocate(cache%clist(size(list%nlat, kind=i8)))
       ! neighborlist routines
       if (any(mol%periodic)) then
          call get_cmat_3d_list(self, mol, list, cache)
@@ -442,7 +430,8 @@ subroutine get_xvec(self, mol, ndim, cache, list, efield)
    end if
 
    if (present(list)) then
-      call symv_half(list, cache%hinl, cache%clist, cache%xtmp, cache%xvec)
+      call spsymv_csr(mol%nat, cache%clist, list%inl, list%nlat, cache%xtmp, &
+         & cache%xvec, uplo='U')
    else
       call gemv(cache%cmat, cache%xtmp, cache%xvec)
    end if
@@ -689,12 +678,12 @@ subroutine get_xvec_derivs_0d_list(self, mol, list, cache, beta)
 
    integer :: iat, izp, jat, jzp, xat, nrow, ient, xent, kmax
    integer(i8) :: ist, cat
-   real(wp) :: vec(3), cij, dGc(3), dSc(3, 3), dcn(3)
+   real(wp) :: vec(3), cij, dGc(3), dSc(3, 3)
    real(wp), allocatable :: dtmpdL(:, :, :), drow(:, :)
    integer, allocatable :: pos(:)
    integer(i8), allocatable :: hpos(:), tpos(:)
 
-   call get_pair_positions(list, cache%hinl, hpos, tpos)
+   call get_pair_positions(list, hpos, tpos)
 
    allocate(dtmpdL(3, 3, mol%nat))
    !$omp parallel do default(none) schedule(runtime) &
@@ -710,12 +699,12 @@ subroutine get_xvec_derivs_0d_list(self, mol, list, cache, beta)
    ! Each iteration only forms the derivatives of component iat in drow, in the
    ! order of the row of iat, pos holds the index of each neighbor. The
    ! derivative w.r.t. atom x is added at the entry of iat in the row of x.
-   ! Without a maximum CN cutoff dCN_i/dR_j = -dCN_j/dR_i, the entry of a pair
-   ! holds the derivative of the CN of the atom with the higher index.
+   ! The entry of atom j in the row of atom x holds dCN_j/dR_x and
+   ! dqloc_j/dR_x, which is the transposed entry of x in the row of j.
    !$omp parallel default(none) &
    !$omp shared(cache, mol, list, self, beta, dtmpdL, hpos, tpos, kmax) &
    !$omp private(iat, izp, jat, jzp, xat, nrow, ient, xent, ist, cat, vec) &
-   !$omp private(cij, dGc, dSc, dcn, pos, drow)
+   !$omp private(cij, dGc, dSc, pos, drow)
    allocate(pos(mol%nat), source=0)
    allocate(drow(3, kmax))
    !$omp do schedule(runtime)
@@ -737,10 +726,9 @@ subroutine get_xvec_derivs_0d_list(self, mol, list, cache, beta)
             xat = list%nlat(cat)
             xent = pos(xat)
             if (xent == 0) cycle
-            dcn = cache%dcndrlist(:, hpos(cat))
-            if (jat < xat) dcn = -dcn
-            drow(:, xent) = drow(:, xent) + beta * cij * (self%kcnchi(jzp) * dcn &
-               & + self%kqchi(jzp) * cache%dqlocdrlist(:, hpos(cat)))
+            drow(:, xent) = drow(:, xent) + beta * cij &
+               & * (self%kcnchi(jzp) * cache%dcndrlist(:, tpos(cat)) &
+               & + self%kqchi(jzp) * cache%dqlocdrlist(:, tpos(cat)))
          end do
          cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) &
             & + beta * cij * dtmpdL(:, :, jat)
@@ -797,13 +785,13 @@ subroutine get_xvec_derivs_3d_list(self, mol, list, cache, beta)
    integer :: iat, izp, jat, jzp, xat, nrow, ient, xent, kmax
    integer(i8) :: ist, kat, cat, img
    real(wp) :: vec(3), rvdw, wsw, ctmp, cself, capi, capj
-   real(wp) :: dGc(3), dSc(3, 3), dcn(3)
+   real(wp) :: dGc(3), dSc(3, 3)
    real(wp), allocatable :: dtrans(:, :), dtmpdL(:, :, :), drow(:, :)
    integer, allocatable :: pos(:)
    integer(i8), allocatable :: hpos(:), tpos(:)
 
    call get_dir_trans(mol, dtrans, cutoff)
-   call get_pair_positions(list, cache%hinl, hpos, tpos)
+   call get_pair_positions(list, hpos, tpos)
 
    allocate(dtmpdL(3, 3, mol%nat))
    !$omp parallel do default(none) schedule(runtime) &
@@ -819,12 +807,12 @@ subroutine get_xvec_derivs_3d_list(self, mol, list, cache, beta)
    ! Each iteration only forms the derivatives of component iat in drow, in the
    ! order of the row of iat, pos holds the index of each neighbor. The
    ! derivative w.r.t. atom x is added at the entry of iat in the row of x.
-   ! Without a maximum CN cutoff dCN_i/dR_j = -dCN_j/dR_i, the entry of a pair
-   ! holds the derivative of the CN of the atom with the higher index.
+   ! The entry of atom j in the row of atom x holds dCN_j/dR_x and
+   ! dqloc_j/dR_x, which is the transposed entry of x in the row of j.
    !$omp parallel default(none) &
    !$omp shared(cache, mol, list, self, beta, dtrans, dtmpdL, hpos, tpos, kmax) &
    !$omp private(iat, izp, jat, jzp, xat, nrow, ient, xent, ist, kat, cat, img) &
-   !$omp private(vec, rvdw, wsw, ctmp, cself, capi, capj, dGc, dSc, dcn) &
+   !$omp private(vec, rvdw, wsw, ctmp, cself, capi, capj, dGc, dSc) &
    !$omp private(pos, drow)
    allocate(pos(mol%nat), source=0)
    allocate(drow(3, kmax))
@@ -846,11 +834,9 @@ subroutine get_xvec_derivs_3d_list(self, mol, list, cache, beta)
             xat = list%nlat(cat)
             xent = pos(xat)
             if (xent == 0) cycle
-            dcn = cache%dcndrlist(:, hpos(cat))
-            if (jat < xat) dcn = -dcn
             drow(:, xent) = drow(:, xent) + beta * cache%clist(hpos(ist + ient - 1)) &
-               & * (self%kcnchi(jzp) * dcn &
-               & + self%kqchi(jzp) * cache%dqlocdrlist(:, hpos(cat)))
+               & * (self%kcnchi(jzp) * cache%dcndrlist(:, tpos(cat)) &
+               & + self%kqchi(jzp) * cache%dqlocdrlist(:, tpos(cat)))
          end do
          cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) &
             & + beta * cache%clist(hpos(ist + ient - 1)) * dtmpdL(:, :, jat)
@@ -905,12 +891,10 @@ subroutine get_xvec_derivs_3d_list(self, mol, list, cache, beta)
 
       ! EN derivative through the self-image capacitance
       do ient = 1, nrow
-         xat = list%nlat(ist + ient - 1)
-         dcn = cache%dcndrlist(:, hpos(ist + ient - 1))
-         if (iat < xat) dcn = -dcn
+         kat = tpos(ist + ient - 1)
          drow(:, ient) = drow(:, ient) - beta * cself &
-            & * (self%kcnchi(izp) * dcn &
-            & + self%kqchi(izp) * cache%dqlocdrlist(:, hpos(ist + ient - 1)))
+            & * (self%kcnchi(izp) * cache%dcndrlist(:, kat) &
+            & + self%kqchi(izp) * cache%dqlocdrlist(:, kat))
       end do
       cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) &
          & - beta * cself * dtmpdL(:, :, iat)
@@ -1289,24 +1273,23 @@ subroutine get_damat_0d_list(self, mol, list, cache, alpha, p, dlist, dadL)
    integer(i8) :: ist, cat
    real(wp) :: vec(3), r1, r2, gam, arg, dtmp, norm_cn, hardi, wtmp, wcni, cij
    real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), dGc(3), dSc(3, 3)
-   real(wp) :: dcn(3)
    real(wp), allocatable :: drow(:, :)
    integer, allocatable :: pos(:)
    integer(i8), allocatable :: hpos(:), tpos(:)
 
-   call get_pair_positions(list, cache%hinl, hpos, tpos)
+   call get_pair_positions(list, hpos, tpos)
    kmax = int(maxval(list%inl(2:mol%nat + 1) - list%inl(:mol%nat)))
 
    ! Each iteration only forms the derivatives of component iat in drow, in the
    ! order of the row of iat, pos holds the index of each neighbor. The
    ! derivative w.r.t. atom x is added at the entry of iat in the row of x.
-   ! Without a maximum CN cutoff dCN_i/dR_j = -dCN_j/dR_i, the entry of a pair
-   ! holds the derivative of the CN of the atom with the higher index.
+   ! The entry of atom j in the row of atom x holds dCN_j/dR_x and
+   ! dqloc_j/dR_x, which is the transposed entry of x in the row of j.
    !$omp parallel default(none) &
    !$omp shared(cache, mol, list, self, alpha, p, dlist, dadL, hpos, tpos, kmax) &
    !$omp private(iat, izp, jat, jzp, xat, nrow, ient, xent, ist, cat, gam) &
    !$omp private(vec, r1, r2, dtmp, norm_cn, arg, hardi, wtmp, wcni, cij, radi) &
-   !$omp private(radj, dradi, dradj, dG, dS, dGc, dSc, dcn, pos, drow)
+   !$omp private(radj, dradi, dradj, dG, dS, dGc, dSc, pos, drow)
    allocate(pos(mol%nat), source=0)
    allocate(drow(3, kmax))
    !$omp do schedule(runtime)
@@ -1359,14 +1342,12 @@ subroutine get_damat_0d_list(self, mol, list, cache, alpha, p, dlist, dadL)
          wtmp = alpha * 2.0_wp * exp(-arg) / sqrtpi * p(jat) * cij
          wcni = wcni - wtmp * radi * dradi * gam**3
          dtmp = -wtmp * radj * dradj * gam**3
-         drow(:, ient) = drow(:, ient) + dtmp * cache%dcndrlist(:, cache%hinl(jat))
+         drow(:, ient) = drow(:, ient) + dtmp * cache%dcndrlist(:, list%inl(jat))
          do cat = list%inl(jat) + 1, list%inl(jat + 1) - 1
             xat = list%nlat(cat)
             xent = pos(xat)
             if (xent == 0) cycle
-            dcn = cache%dcndrlist(:, hpos(cat))
-            if (jat < xat) dcn = -dcn
-            drow(:, xent) = drow(:, xent) + dtmp * dcn
+            drow(:, xent) = drow(:, xent) + dtmp * cache%dcndrlist(:, tpos(cat))
          end do
          dadL(:, :, iat) = dadL(:, :, iat) + dtmp * cache%dcndL(:, :, jat)
 
@@ -1384,21 +1365,19 @@ subroutine get_damat_0d_list(self, mol, list, cache, alpha, p, dlist, dadL)
       ! Hardness derivative
       dtmp = alpha * self%kqeta_pre * self%kqeta(izp) &
       & / cosh(self%kqeta(izp) * cache%qloc(iat))**2 * p(iat) &
-      & * cache%clist(cache%hinl(iat))
+      & * cache%clist(ist)
       do ient = 1, nrow
-         drow(:, ient) = drow(:, ient) + dtmp * cache%dqlocdrlist(:, hpos(ist + ient - 1))
+         drow(:, ient) = drow(:, ient) + dtmp * cache%dqlocdrlist(:, tpos(ist + ient - 1))
       end do
       dadL(:, :, iat) = dadL(:, :, iat) + dtmp * cache%dqlocdL(:, :, iat)
 
       ! Effective charge width derivative
       dtmp = -alpha * sqrt2pi * dradi / (radi**2) * p(iat) &
-      & * cache%clist(cache%hinl(iat)) + wcni
-      drow(:, 1) = drow(:, 1) + dtmp * cache%dcndrlist(:, cache%hinl(iat))
+      & * cache%clist(ist) + wcni
+      drow(:, 1) = drow(:, 1) + dtmp * cache%dcndrlist(:, ist)
       do ient = 2, nrow
-         xat = list%nlat(ist + ient - 1)
-         dcn = cache%dcndrlist(:, hpos(ist + ient - 1))
-         if (iat < xat) dcn = -dcn
-         drow(:, ient) = drow(:, ient) + dtmp * dcn
+         drow(:, ient) = drow(:, ient) &
+            & + dtmp * cache%dcndrlist(:, tpos(ist + ient - 1))
       end do
       dadL(:, :, iat) = dadL(:, :, iat) + dtmp * cache%dcndL(:, :, iat)
 
@@ -1444,26 +1423,26 @@ subroutine get_damat_3d_list(self, mol, list, cache, alpha, p, dlist, dadL)
    integer(i8) :: ist, kat, cat, img
    real(wp) :: vec(3), gam, dtmp, norm_cn, rvdw, wsw, dgam, wgam, hardi, wcni
    real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), dGc(3), dSc(3, 3)
-   real(wp) :: capi, capj, dcn(3)
+   real(wp) :: capi, capj
    real(wp), allocatable :: dtrans(:, :), drow(:, :)
    integer, allocatable :: pos(:)
    integer(i8), allocatable :: hpos(:), tpos(:)
 
    call get_dir_trans(mol, dtrans, cutoff)
-   call get_pair_positions(list, cache%hinl, hpos, tpos)
+   call get_pair_positions(list, hpos, tpos)
    kmax = int(maxval(list%inl(2:mol%nat + 1) - list%inl(:mol%nat)))
 
    ! Each iteration only forms the derivatives of component iat in drow, in the
    ! order of the row of iat, pos holds the index of each neighbor. The
    ! derivative w.r.t. atom x is added at the entry of iat in the row of x.
-   ! Without a maximum CN cutoff dCN_i/dR_j = -dCN_j/dR_i, the entry of a pair
-   ! holds the derivative of the CN of the atom with the higher index.
+   ! The entry of atom j in the row of atom x holds dCN_j/dR_x and
+   ! dqloc_j/dR_x, which is the transposed entry of x in the row of j.
    !$omp parallel default(none) &
    !$omp shared(cache, mol, list, self, alpha, p, dlist, dadL, dtrans, hpos) &
    !$omp shared(tpos, kmax) &
    !$omp private(iat, izp, jat, jzp, xat, nrow, ient, xent, ist, kat, cat, img) &
    !$omp private(vec, gam, dtmp, norm_cn, rvdw, wsw, dgam, wgam, hardi, wcni) &
-   !$omp private(radi, radj, dradi, dradj, dG, dS, dGc, dSc, capi, capj, dcn) &
+   !$omp private(radi, radj, dradi, dradj, dG, dS, dGc, dSc, capi, capj) &
    !$omp private(pos, drow)
    allocate(pos(mol%nat), source=0)
    allocate(drow(3, kmax))
@@ -1535,14 +1514,12 @@ subroutine get_damat_3d_list(self, mol, list, cache, alpha, p, dlist, dadL)
          ! Effective charge width derivative, CN of i is collected in wcni
          wcni = wcni + wgam * p(jat) * radi * dradi * gam**3
          dtmp = wgam * p(jat) * radj * dradj * gam**3
-         drow(:, ient) = drow(:, ient) + dtmp * cache%dcndrlist(:, cache%hinl(jat))
+         drow(:, ient) = drow(:, ient) + dtmp * cache%dcndrlist(:, list%inl(jat))
          do cat = list%inl(jat) + 1, list%inl(jat + 1) - 1
             xat = list%nlat(cat)
             xent = pos(xat)
             if (xent == 0) cycle
-            dcn = cache%dcndrlist(:, hpos(cat))
-            if (jat < xat) dcn = -dcn
-            drow(:, xent) = drow(:, xent) + dtmp * dcn
+            drow(:, xent) = drow(:, xent) + dtmp * cache%dcndrlist(:, tpos(cat))
          end do
          dadL(:, :, iat) = dadL(:, :, iat) + dtmp * cache%dcndL(:, :, jat)
       end do
@@ -1573,21 +1550,19 @@ subroutine get_damat_3d_list(self, mol, list, cache, alpha, p, dlist, dadL)
       ! Hardness derivative
       dtmp = alpha * self%kqeta_pre * self%kqeta(izp) &
       & / cosh(self%kqeta(izp) * cache%qloc(iat))**2 * p(iat) &
-      & * cache%clist(cache%hinl(iat))
+      & * cache%clist(ist)
       do ient = 1, nrow
-         drow(:, ient) = drow(:, ient) + dtmp * cache%dqlocdrlist(:, hpos(ist + ient - 1))
+         drow(:, ient) = drow(:, ient) + dtmp * cache%dqlocdrlist(:, tpos(ist + ient - 1))
       end do
       dadL(:, :, iat) = dadL(:, :, iat) + dtmp * cache%dqlocdL(:, :, iat)
 
       ! Effective charge width derivative
       dtmp = -alpha * sqrt2pi * dradi / (radi**2) * p(iat) &
-      & * cache%clist(cache%hinl(iat)) + wcni
-      drow(:, 1) = drow(:, 1) + dtmp * cache%dcndrlist(:, cache%hinl(iat))
+      & * cache%clist(ist) + wcni
+      drow(:, 1) = drow(:, 1) + dtmp * cache%dcndrlist(:, ist)
       do ient = 2, nrow
-         xat = list%nlat(ist + ient - 1)
-         dcn = cache%dcndrlist(:, hpos(ist + ient - 1))
-         if (iat < xat) dcn = -dcn
-         drow(:, ient) = drow(:, ient) + dtmp * dcn
+         drow(:, ient) = drow(:, ient) &
+            & + dtmp * cache%dcndrlist(:, tpos(ist + ient - 1))
       end do
       dadL(:, :, iat) = dadL(:, :, iat) + dtmp * cache%dcndL(:, :, iat)
 
@@ -1622,13 +1597,13 @@ subroutine get_coulomb_matrix(self, mol, ndim, cache, list)
    type(csr_list), intent(in), optional :: list
 
    if (present(list)) then
-      ! Allocate amat in the half storage of the list
+      ! Allocate amat on the list, only its upper triangle is used
       if (allocated(cache%alist)) then
-         if (size(cache%alist, kind=i8) /= cache%hinl(mol%nat + 1) - 1) &
+         if (size(cache%alist, kind=i8) /= size(list%nlat, kind=i8)) &
             & deallocate(cache%alist)
       end if
       if (.not. allocated(cache%alist)) &
-         & allocate(cache%alist(cache%hinl(mol%nat + 1) - 1))
+         & allocate(cache%alist(size(list%nlat, kind=i8)))
       if (any(mol%periodic)) then
          call get_amat_3d_list(self, mol, list, cache)
       else
@@ -1707,20 +1682,20 @@ subroutine get_amat_0d(self, mol, cache)
 
 end subroutine get_amat_0d
 
-!> Build the Coulomb matrix for a non‑periodic system (0D) in the half
-!> storage of a half list or a sorted complete neighborlist
+!> Build the Coulomb matrix for a non‑periodic system (0D) on the upper
+!> triangle of a sorted complete neighborlist
 subroutine get_amat_0d_list(self, mol, list, cache)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
-   !> Multicharge neighborlist type (half or sorted complete)
+   !> Multicharge neighborlist type (sorted complete)
    type(csr_list), intent(in) :: list
    !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
 
-   integer(i8) :: hat, koff
-   integer :: iat, jat, izp, jzp
+   integer(i8) :: kat, nfin
+   integer :: iat, jat, izp, jzp, nlow
    real(wp) :: vec(3), r2, gam2, tmp, norm_cn, radi, radj
 
    ! Zero out global shared target arrays upfront
@@ -1728,7 +1703,7 @@ subroutine get_amat_0d_list(self, mol, list, cache)
 
    !$omp parallel default(none) &
    !$omp shared(cache, mol, self, list) &
-   !$omp private(iat, izp, jat, hat, koff, jzp, gam2, vec, r2, tmp, norm_cn) &
+   !$omp private(iat, izp, jat, kat, nfin, nlow, jzp, gam2, vec, r2, tmp, norm_cn) &
    !$omp private(radi, radj)
 
    !$omp do schedule(runtime)
@@ -1739,9 +1714,11 @@ subroutine get_amat_0d_list(self, mol, list, cache)
       radi = self%rad(izp) * exp(-self%kcnrad(izp) * norm_cn)
 
       ! Upper triangle of the row of iat
-      koff = list%inl(iat) - cache%hinl(iat)
-      do hat = cache%hinl(iat) + 1, cache%hinl(iat + 1) - 1
-         jat = list%nlat(hat + koff)
+      nfin = list%inl(iat + 1) - 1
+      nlow = findloc(list%nlat(list%inl(iat) + 1:nfin) < iat, .true., dim=1)
+      if (nlow > 0) nfin = list%inl(iat) + nlow - 1
+      do kat = list%inl(iat) + 1, nfin
+         jat = list%nlat(kat)
          jzp = mol%id(jat)
          vec = mol%xyz(:, jat) - mol%xyz(:, iat)
          r2 = vec(1)**2 + vec(2)**2 + vec(3)**2
@@ -1750,14 +1727,14 @@ subroutine get_amat_0d_list(self, mol, list, cache)
          radj = self%rad(jzp) * exp(-self%kcnrad(jzp) * norm_cn)
          ! Coulomb interaction of Gaussian charges
          gam2 = 1.0_wp / (radi**2 + radj**2)
-         tmp = erf(sqrt(r2 * gam2)) / sqrt(r2) * cache%clist(hat)
-         cache%alist(hat) = tmp
+         tmp = erf(sqrt(r2 * gam2)) / sqrt(r2) * cache%clist(kat)
+         cache%alist(kat) = tmp
       end do
 
       ! Effective hardness
       tmp = self%eta(izp) + self%kqeta_pre * tanh(self%kqeta(izp) * cache%qloc(iat)) &
       & + sqrt2pi / radi
-      cache%alist(cache%hinl(iat)) = tmp * cache%clist(cache%hinl(iat)) + 1.0_wp
+      cache%alist(list%inl(iat)) = tmp * cache%clist(list%inl(iat)) + 1.0_wp
    end do
    !$omp end do
    !$omp end parallel
@@ -1846,20 +1823,20 @@ subroutine get_amat_3d(self, mol, cache)
 
 end subroutine get_amat_3d
 
-!> Build the Coulomb matrix for a periodic system in the half storage of a
-!> half list or a sorted complete neighborlist with Wigner-Seitz images
+!> Build the Coulomb matrix for a periodic system on the upper triangle of a
+!> sorted complete neighborlist with Wigner-Seitz images
 subroutine get_amat_3d_list(self, mol, list, cache)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
-   !> Multicharge neighborlist type (half or sorted complete)
+   !> Multicharge neighborlist type (sorted complete)
    type(csr_list), intent(in) :: list
    !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
 
-   integer :: iat, jat, izp, jzp
-   integer(i8) :: kat, hat, koff, img
+   integer :: iat, jat, izp, jzp, nlow
+   integer(i8) :: kat, nfin, img
    real(wp) :: vec(3), gam, dtmp, capi, capj, radi, radj, norm_cn, rvdw, wsw
    real(wp) :: atmp, adiag_tmp
    real(wp), allocatable :: dtrans(:, :)
@@ -1871,7 +1848,7 @@ subroutine get_amat_3d_list(self, mol, list, cache)
 
    !$omp parallel default(none) &
    !$omp shared(cache, mol, self, list, dtrans) &
-   !$omp private(iat, izp, kat, hat, koff, jat, jzp, gam, vec, dtmp, norm_cn) &
+   !$omp private(iat, izp, kat, nfin, nlow, jat, jzp, gam, vec, dtmp, norm_cn) &
    !$omp private(radi, radj, capi, capj, rvdw, wsw, img, atmp, adiag_tmp)
 
    !$omp do schedule(runtime)
@@ -1885,9 +1862,10 @@ subroutine get_amat_3d_list(self, mol, list, cache)
       adiag_tmp = 0.0_wp
 
       ! Upper triangle of the row of iat, the images belong to the entry kat
-      koff = list%inl(iat) - cache%hinl(iat)
-      do hat = cache%hinl(iat) + 1, cache%hinl(iat + 1) - 1
-         kat = hat + koff
+      nfin = list%inl(iat + 1) - 1
+      nlow = findloc(list%nlat(list%inl(iat) + 1:nfin) < iat, .true., dim=1)
+      if (nlow > 0) nfin = list%inl(iat) + nlow - 1
+      do kat = list%inl(iat) + 1, nfin
          if (cache%wsc%nimg_list(kat) == 0) cycle
 
          jat = list%nlat(kat)
@@ -1909,7 +1887,7 @@ subroutine get_amat_3d_list(self, mol, list, cache)
             atmp = atmp + dtmp * wsw
          end do
 
-         cache%alist(hat) = atmp
+         cache%alist(kat) = atmp
       end do
 
       ! Diagonal Coulomb interaction terms
@@ -1930,7 +1908,7 @@ subroutine get_amat_3d_list(self, mol, list, cache)
       & * tanh(self%kqeta(izp) * cache%qloc(iat)) + sqrt2pi / radi
 
       ! Single safe direct write (iat is thread-exclusive)
-      cache%alist(cache%hinl(iat)) = adiag_tmp + cache%clist(cache%hinl(iat)) * dtmp &
+      cache%alist(list%inl(iat)) = adiag_tmp + cache%clist(list%inl(iat)) * dtmp &
          & + 1.0_wp
    end do
    !$omp end do
@@ -2108,20 +2086,20 @@ subroutine get_cmat_0d(self, mol, cmat)
 
 end subroutine get_cmat_0d
 
-!> Build the bond capacitance matrix for a non‑periodic system in the half
-!> storage of a half list or a sorted complete neighborlist
+!> Build the bond capacitance matrix for a non‑periodic system on the upper
+!> triangle of a sorted complete neighborlist
 subroutine get_cmat_0d_list(self, mol, list, cache)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
-   !> Multicharge neighborlist type (half or sorted complete)
+   !> Multicharge neighborlist type (sorted complete)
    type(csr_list), intent(in) :: list
    !> EEQBC cache
    type(mchrg_cache), intent(inout) :: cache
 
-   integer :: iat, jat, izp, jzp
-   integer(i8) :: hat, koff
+   integer :: iat, jat, izp, jzp, nlow
+   integer(i8) :: kat, nfin
    real(wp) :: vec(3), rvdw, tmp, capi, capj, r1
    real(wp) :: diag(mol%nat)
 
@@ -2130,16 +2108,18 @@ subroutine get_cmat_0d_list(self, mol, list, cache)
 
    !$omp parallel default(none) &
    !$omp shared(cache, mol, list, self, diag) &
-   !$omp private(iat, hat, koff, izp, jat, jzp, vec, r1, rvdw, tmp, capi, capj)
+   !$omp private(iat, kat, nfin, nlow, izp, jat, jzp, vec, r1, rvdw, tmp, capi, capj)
 
    ! Each pair of an upper triangle contributes to the diagonal of both atoms
    !$omp do schedule(runtime) reduction(+:diag)
    do iat = 1, mol%nat
       izp = mol%id(iat)
       capi = self%cap(izp)
-      koff = list%inl(iat) - cache%hinl(iat)
-      do hat = cache%hinl(iat) + 1, cache%hinl(iat + 1) - 1
-         jat = list%nlat(hat + koff)
+      nfin = list%inl(iat + 1) - 1
+      nlow = findloc(list%nlat(list%inl(iat) + 1:nfin) < iat, .true., dim=1)
+      if (nlow > 0) nfin = list%inl(iat) + nlow - 1
+      do kat = list%inl(iat) + 1, nfin
+         jat = list%nlat(kat)
          jzp = mol%id(jat)
          vec = mol%xyz(:, jat) - mol%xyz(:, iat)
          r1 = norm2(vec)
@@ -2148,7 +2128,7 @@ subroutine get_cmat_0d_list(self, mol, list, cache)
 
          call get_cpair(self%kbc, tmp, r1, rvdw, capi, capj)
 
-         cache%clist(hat) = -tmp
+         cache%clist(kat) = -tmp
          diag(iat) = diag(iat) + tmp
          diag(jat) = diag(jat) + tmp
       end do
@@ -2157,7 +2137,7 @@ subroutine get_cmat_0d_list(self, mol, list, cache)
 
    !$omp do schedule(static)
    do iat = 1, mol%nat
-      cache%clist(cache%hinl(iat)) = diag(iat)
+      cache%clist(list%inl(iat)) = diag(iat)
    end do
    !$omp end do
 
@@ -2234,20 +2214,20 @@ subroutine get_cmat_3d(self, mol, wsc, cmat)
 
 end subroutine get_cmat_3d
 
-!> Build the bond capacitance matrix for a periodic system in the half storage
-!> of a half list or a sorted complete neighborlist with Wigner-Seitz images
+!> Build the bond capacitance matrix for a periodic system on the upper
+!> triangle of a sorted complete neighborlist with Wigner-Seitz images
 subroutine get_cmat_3d_list(self, mol, list, cache)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
-   !> Multicharge neighborlist type (half or sorted complete)
+   !> Multicharge neighborlist type (sorted complete)
    type(csr_list), intent(in) :: list
    !> EEQBC cache
    type(mchrg_cache), intent(inout) :: cache
 
-   integer :: iat, jat, izp, jzp
-   integer(i8) :: kat, hat, koff, img
+   integer :: iat, jat, izp, jzp, nlow
+   integer(i8) :: kat, nfin, img
    real(wp) :: vec(3), rvdw, tmp, capi, capj, wsw, ctmp
    real(wp), allocatable :: dtrans(:, :)
    real(wp) :: diag(mol%nat)
@@ -2259,7 +2239,7 @@ subroutine get_cmat_3d_list(self, mol, list, cache)
 
    !$omp parallel default(none) &
    !$omp shared(cache, mol, list, self, dtrans, diag) &
-   !$omp private(iat, izp, jat, kat, hat, koff, jzp, img) &
+   !$omp private(iat, izp, jat, kat, nfin, nlow, jzp, img) &
    !$omp private(vec, rvdw, tmp, capi, capj, wsw, ctmp)
 
    !$omp do schedule(runtime) reduction(+:diag)
@@ -2269,9 +2249,10 @@ subroutine get_cmat_3d_list(self, mol, list, cache)
 
       ! 1. Off-diagonal neighbor pairs (jat > iat) of the upper triangle, each
       ! contributes to the diagonal of both atoms
-      koff = list%inl(iat) - cache%hinl(iat)
-      do hat = cache%hinl(iat) + 1, cache%hinl(iat + 1) - 1
-         kat = hat + koff
+      nfin = list%inl(iat + 1) - 1
+      nlow = findloc(list%nlat(list%inl(iat) + 1:nfin) < iat, .true., dim=1)
+      if (nlow > 0) nfin = list%inl(iat) + nlow - 1
+      do kat = list%inl(iat) + 1, nfin
          if (cache%wsc%nimg_list(kat) == 0) cycle
 
          jat = list%nlat(kat)
@@ -2293,7 +2274,7 @@ subroutine get_cmat_3d_list(self, mol, list, cache)
             diag(jat) = diag(jat) + tmp * wsw
          end do
 
-         cache%clist(hat) = ctmp
+         cache%clist(kat) = ctmp
 
       end do
 
@@ -2314,7 +2295,7 @@ subroutine get_cmat_3d_list(self, mol, list, cache)
 
    !$omp do schedule(static)
    do iat = 1, mol%nat
-      cache%clist(cache%hinl(iat)) = diag(iat)
+      cache%clist(list%inl(iat)) = diag(iat)
    end do
    !$omp end do
 
@@ -2467,20 +2448,20 @@ subroutine get_dcmat_0d(self, mol, dcdr, dcdL)
 end subroutine get_dcmat_0d
 
 !> Build the diagonal derivatives of the bond capacitance matrix for a
-!> non‑periodic system from the upper triangles of a half list or a sorted
-!> complete neighborlist
+!> non‑periodic system from the upper triangles of a sorted complete
+!> neighborlist
 subroutine get_dcmat_0d_list(self, mol, list, cache)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
-   !> Multicharge neighborlist type (half or sorted complete)
+   !> Multicharge neighborlist type (sorted complete)
    type(csr_list), intent(in) :: list
    !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
 
-   integer :: iat, jat, izp, jzp
-   integer(i8) :: hat, koff
+   integer :: iat, jat, izp, jzp, nlow
+   integer(i8) :: kat, nfin
 
    real(wp) :: vec(3), rvdw, dG(3), dS(3, 3), capi, capj
 
@@ -2495,7 +2476,7 @@ subroutine get_dcmat_0d_list(self, mol, list, cache)
 
    !$omp parallel default(none) &
    !$omp shared(cache, mol, list, self) &
-   !$omp private(iat, izp, jat, hat, koff, jzp, vec, rvdw) &
+   !$omp private(iat, izp, jat, kat, nfin, nlow, jzp, vec, rvdw) &
    !$omp private(dG, dS, capi, capj) &
    !$omp reduction(+:dcdrdiag, dcdL)
 
@@ -2504,9 +2485,11 @@ subroutine get_dcmat_0d_list(self, mol, list, cache)
    do iat = 1, mol%nat
       izp = mol%id(iat)
       capi = self%cap(izp)
-      koff = list%inl(iat) - cache%hinl(iat)
-      do hat = cache%hinl(iat) + 1, cache%hinl(iat + 1) - 1
-         jat = list%nlat(hat + koff)
+      nfin = list%inl(iat + 1) - 1
+      nlow = findloc(list%nlat(list%inl(iat) + 1:nfin) < iat, .true., dim=1)
+      if (nlow > 0) nfin = list%inl(iat) + nlow - 1
+      do kat = list%inl(iat) + 1, nfin
+         jat = list%nlat(kat)
          jzp = mol%id(jat)
          capj = self%cap(jzp)
          rvdw = self%rvdw(izp, jzp)
@@ -2605,20 +2588,20 @@ subroutine get_dcmat_3d(self, mol, wsc, dcdr, dcdL)
 end subroutine get_dcmat_3d
 
 !> Build the diagonal derivatives of the bond capacitance matrix for a
-!> periodic system from the upper triangles of a half list or a sorted
-!> complete neighborlist with Wigner-Seitz images
+!> periodic system from the upper triangles of a sorted complete neighborlist
+!> with Wigner-Seitz images
 subroutine get_dcmat_3d_list(self, mol, list, cache)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
-   !> Multicharge neighborlist type (half or sorted complete)
+   !> Multicharge neighborlist type (sorted complete)
    type(csr_list), intent(in) :: list
    !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
 
-   integer :: iat, jat, izp, jzp
-   integer(i8) :: kat, hat, koff, img
+   integer :: iat, jat, izp, jzp, nlow
+   integer(i8) :: kat, nfin, img
    real(wp) :: vec(3), rvdw, dG(3), dS(3, 3), capi, capj, wsw
    real(wp), allocatable :: dtrans(:, :)
    real(wp), allocatable :: dcdrdiag_acc(:, :), dcdL_acc(:, :, :)
@@ -2633,7 +2616,7 @@ subroutine get_dcmat_3d_list(self, mol, list, cache)
 
    !$omp parallel default(none) &
    !$omp shared(mol, cache, list, self, dtrans) &
-   !$omp private(iat, izp, jat, kat, hat, koff, jzp, vec, rvdw, dG, dS, capi) &
+   !$omp private(iat, izp, jat, kat, nfin, nlow, jzp, vec, rvdw, dG, dS, capi) &
    !$omp private(capj, wsw, img) &
    !$omp reduction(+:dcdrdiag_acc, dcdL_acc)
 
@@ -2643,9 +2626,10 @@ subroutine get_dcmat_3d_list(self, mol, list, cache)
       izp = mol%id(iat)
       capi = self%cap(izp)
 
-      koff = list%inl(iat) - cache%hinl(iat)
-      do hat = cache%hinl(iat) + 1, cache%hinl(iat + 1) - 1
-         kat = hat + koff
+      nfin = list%inl(iat + 1) - 1
+      nlow = findloc(list%nlat(list%inl(iat) + 1:nfin) < iat, .true., dim=1)
+      if (nlow > 0) nfin = list%inl(iat) + nlow - 1
+      do kat = list%inl(iat) + 1, nfin
          if (cache%wsc%nimg_list(kat) == 0) cycle
 
          jat = list%nlat(kat)
@@ -2763,13 +2747,13 @@ subroutine get_grad(self, mol, cache, p, gradient, sigma, alpha, beta, list)
 end subroutine get_grad
 
 !> Accumulate gradient and stress contributions for a non-periodic system on
-!> the upper triangles of a half list or a sorted complete neighborlist
+!> the upper triangles of a sorted complete neighborlist
 subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain, betain)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
-   !> Multicharge neighborlist type (half or sorted complete)
+   !> Multicharge neighborlist type (sorted complete)
    type(csr_list), intent(in) :: list
    !> Multicharge cache
    type(mchrg_cache), intent(in) :: cache
@@ -2785,8 +2769,8 @@ subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain,
    real(wp), optional, intent(in) :: betain
 
    real(wp) :: alpha, beta
-   integer :: iat, jat, izp, jzp
-   integer(i8) :: hat, koff
+   integer :: iat, jat, izp, jzp, nlow
+   integer(i8) :: kat, nfin
    real(wp) :: vec(3), r2, gam, arg, dtmp, norm_cn
    real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3)
    real(wp) :: W_ii, W_jj, W_ij
@@ -2805,14 +2789,14 @@ subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain,
    cnacc = 0.0_wp
 
    allocate(v(mol%nat))
-   call symv_half(list, cache%hinl, cache%clist, p, v)
+   call spsymv_csr(mol%nat, cache%clist, list%inl, list%nlat, p, v, uplo='U')
 
    allocate(gradient_local(3, mol%nat), source=0.0_wp)
    allocate(sigma_local(3, 3), source=0.0_wp)
 
    !$omp parallel do default(none) schedule(runtime) &
    !$omp shared(cache, mol, self, p, v, list, alpha, beta) &
-   !$omp private(iat, jat, hat, koff, izp, jzp, gam, vec, r2, dtmp, norm_cn, arg) &
+   !$omp private(iat, jat, kat, nfin, nlow, izp, jzp, gam, vec, r2, dtmp, norm_cn, arg) &
    !$omp private(radi, radj, dradi, dradj, dG, dS, W_ii, W_jj, W_ij) &
    !$omp reduction(+:cnacc, qlocacc, gradient_local, sigma_local)
 
@@ -2825,9 +2809,11 @@ subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain,
       W_ii = p(iat) * cache%vrhs(iat)
 
       ! Each pair once from the upper triangle of the row of iat
-      koff = list%inl(iat) - cache%hinl(iat)
-      do hat = cache%hinl(iat) + 1, cache%hinl(iat + 1) - 1
-         jat = list%nlat(hat + koff)
+      nfin = list%inl(iat + 1) - 1
+      nlow = findloc(list%nlat(list%inl(iat) + 1:nfin) < iat, .true., dim=1)
+      if (nlow > 0) nfin = list%inl(iat) + nlow - 1
+      do kat = list%inl(iat) + 1, nfin
+         jat = list%nlat(kat)
          jzp = mol%id(jat)
          vec = mol%xyz(:, jat) - mol%xyz(:, iat)
          r2 = dot_product(vec, vec)
@@ -2845,9 +2831,9 @@ subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain,
 
          ! Accumulate scalar weights for CN derivatives
          cnacc(iat) = cnacc(iat) - (dtmp * radi * dradi * gam**3.0_wp) &
-         & * cache%clist(hat) * W_ij * alpha
+         & * cache%clist(kat) * W_ij * alpha
          cnacc(jat) = cnacc(jat) - (dtmp * radj * dradj * gam**3.0_wp) &
-         & * cache%clist(hat) * W_ij * alpha
+         & * cache%clist(kat) * W_ij * alpha
 
          ! 1. Explicit Geometry Derivative
          dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) - erf(sqrt(arg)) &
@@ -2856,10 +2842,10 @@ subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain,
          dS = spread(dG, 1, 3) * spread(vec, 2, 3)
 
          gradient_local(:, iat) = gradient_local(:, &
-         & iat) - dG * cache%clist(hat) * W_ij * alpha
+         & iat) - dG * cache%clist(kat) * W_ij * alpha
          gradient_local(:, jat) = gradient_local(:, &
-         & jat) + dG * cache%clist(hat) * W_ij * alpha
-         sigma_local(:, :)   = sigma_local(:, :)   + dS * cache%clist(hat) * W_ij * alpha
+         & jat) + dG * cache%clist(kat) * W_ij * alpha
+         sigma_local(:, :)   = sigma_local(:, :)   + dS * cache%clist(kat) * W_ij * alpha
 
          ! 3 & 4. Capacitance derivatives
          call get_dcpair(self%kbc, vec, self%rvdw(izp, jzp), self%cap(izp), &
@@ -2888,10 +2874,10 @@ subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain,
       ! 5. Diagonal weight accumulation
       qlocacc(iat) = qlocacc(iat) + self%kqeta_pre * self%kqeta(izp) &
          & / cosh(self%kqeta(izp) * cache%qloc(iat))**2 &
-         & * W_ii * cache%clist(cache%hinl(iat)) * alpha &
+         & * W_ii * cache%clist(list%inl(iat)) * alpha &
          & + v(iat) * self%kqchi(mol%id(iat)) * beta
       cnacc(iat) = cnacc(iat) - sqrt2pi * dradi / (radi**2) * W_ii &
-      & * cache%clist(cache%hinl(iat)) * alpha &
+      & * cache%clist(list%inl(iat)) * alpha &
          & + v(iat) * self%kcnchi(mol%id(iat)) * beta
 
       ! 6. Intrinsic capacitance
@@ -3083,14 +3069,14 @@ subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
 end subroutine get_grad_0d
 
 !> Accumulate gradient and stress contributions for a periodic system on the
-!> upper triangles of a half list or a sorted complete neighborlist with
-!> Wigner-Seitz images
+!> upper triangles of a sorted complete neighborlist with Wigner-Seitz
+!> images
 subroutine get_grad_3d_list(self, mol, list, cache, p, gradient, sigma, alphain, betain)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
-   !> Multicharge neighborlist type (half or sorted complete)
+   !> Multicharge neighborlist type (sorted complete)
    type(csr_list), intent(in) :: list
    !> Multicharge cache
    type(mchrg_cache), intent(in) :: cache
@@ -3106,8 +3092,8 @@ subroutine get_grad_3d_list(self, mol, list, cache, p, gradient, sigma, alphain,
    real(wp), optional, intent(in) :: betain
 
    real(wp) :: alpha, beta
-   integer :: iat, jat, izp, jzp
-   integer(i8) :: kat, hat, koff, img
+   integer :: iat, jat, izp, jzp, nlow
+   integer(i8) :: kat, nfin, img
    real(wp) :: vec(3), r2, gam, dtmp, capi, capj, dgam, rvdw, wsw
    real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), ctmp
    real(wp) :: W_ii, W_jj, W_ij, norm_cn
@@ -3128,11 +3114,11 @@ subroutine get_grad_3d_list(self, mol, list, cache, p, gradient, sigma, alphain,
    allocate(sigma_local(3, 3), source=0.0_wp)
 
    allocate(v(mol%nat))
-   call symv_half(list, cache%hinl, cache%clist, p, v)
+   call spsymv_csr(mol%nat, cache%clist, list%inl, list%nlat, p, v, uplo='U')
 
    !$omp parallel do default(none) schedule(runtime) &
    !$omp shared(cache, mol, list, self, p, v, dtrans, alpha, beta) &
-   !$omp private(iat, kat, hat, koff, izp, jat, jzp, gam, vec, r2) &
+   !$omp private(iat, kat, nfin, nlow, izp, jat, jzp, gam, vec, r2) &
    !$omp private(dtmp, radi, radj, dradi, dradj, dG, dS, norm_cn) &
    !$omp private(W_ii, W_jj, W_ij, wsw, capi, capj, rvdw, img, dgam, ctmp) &
    !$omp reduction(+:cnacc, qlocacc, gradient_local, sigma_local)
@@ -3145,9 +3131,10 @@ subroutine get_grad_3d_list(self, mol, list, cache, p, gradient, sigma, alphain,
       W_ii = p(iat) * cache%vrhs(iat)
 
       ! Each pair once from the upper triangle of the row of iat
-      koff = list%inl(iat) - cache%hinl(iat)
-      do hat = cache%hinl(iat) + 1, cache%hinl(iat + 1) - 1
-         kat = hat + koff
+      nfin = list%inl(iat + 1) - 1
+      nlow = findloc(list%nlat(list%inl(iat) + 1:nfin) < iat, .true., dim=1)
+      if (nlow > 0) nfin = list%inl(iat) + nlow - 1
+      do kat = list%inl(iat) + 1, nfin
          jat = list%nlat(kat)
          jzp = mol%id(jat)
          capj = self%cap(jzp)
@@ -3238,10 +3225,10 @@ subroutine get_grad_3d_list(self, mol, list, cache, p, gradient, sigma, alphain,
 
       qlocacc(iat) = qlocacc(iat) + self%kqeta_pre * self%kqeta(izp) / &
          & cosh(self%kqeta(izp) * cache%qloc(iat))**2 * W_ii &
-         & * cache%clist(cache%hinl(iat)) * alpha &
+         & * cache%clist(list%inl(iat)) * alpha &
          & + v(iat) * self%kqchi(izp) * beta
       cnacc(iat) = cnacc(iat) - sqrt2pi * dradi / (radi**2) * W_ii &
-      & * cache%clist(cache%hinl(iat)) * alpha &
+      & * cache%clist(list%inl(iat)) * alpha &
          & + v(iat) * self%kcnchi(izp) * beta
 
       dtmp = (self%eta(izp) + self%kqeta_pre &
@@ -3555,8 +3542,8 @@ subroutine get_d2cmat_0d_list(self, mol, list, cache)
    !> EEQBC cache
    type(mchrg_cache), intent(inout) :: cache
 
-   integer :: iat, jat, izp, jzp
-   integer(i8) :: hat, koff
+   integer :: iat, jat, izp, jzp, nlow
+   integer(i8) :: kat, nfin
    real(wp) :: vec(3), rvdw, d2cpair(3, 3), capi, capj
    real(wp), allocatable :: diagonal_local(:, :, :)
 
@@ -3564,16 +3551,18 @@ subroutine get_d2cmat_0d_list(self, mol, list, cache)
 
    !$omp parallel default(none) &
    !$omp shared(self, mol, cache, list) &
-   !$omp private(iat, jat, hat, koff, izp, jzp, vec) &
+   !$omp private(iat, jat, kat, nfin, nlow, izp, jzp, vec) &
    !$omp private(rvdw, d2cpair, capi, capj, diagonal_local)
    allocate(diagonal_local(3, 3, mol%nat), source=0.0_wp)
    !$omp do schedule(runtime)
    do iat = 1, mol%nat
       izp = mol%id(iat)
       capi = self%cap(izp)
-      koff = list%inl(iat) - cache%hinl(iat)
-      do hat = cache%hinl(iat) + 1, cache%hinl(iat + 1) - 1
-         jat = list%nlat(hat + koff)
+      nfin = list%inl(iat + 1) - 1
+      nlow = findloc(list%nlat(list%inl(iat) + 1:nfin) < iat, .true., dim=1)
+      if (nlow > 0) nfin = list%inl(iat) + nlow - 1
+      do kat = list%inl(iat) + 1, nfin
+         jat = list%nlat(kat)
          jzp = mol%id(jat)
          capj = self%cap(jzp)
          rvdw = self%rvdw(izp, jzp)
@@ -3628,10 +3617,10 @@ end subroutine get_explicit_hessian_dense
 
 !> Compute the explicit part of the molecular nuclear Hessian at fixed p and
 !> charges q on a sorted complete neighborlist. The cache has to hold the
-!> position derivatives of the CN and the local charges in the half storage of
-!> the list, computed by the update for the Hessian. The blocks are added to
-!> the compressed Hessian in the half storage of the list, the blocks of the
-!> second neighbors are dropped.
+!> position derivatives of the CN and the local charges on the list, computed
+!> by the update for the Hessian. The blocks are added to the compressed
+!> Hessian on the upper triangle of the list, the blocks of the second
+!> neighbors are dropped.
 subroutine get_explicit_hessian_list(self, mol, cache, p, hessian, error, list, &
    & alpha, beta)
    !> EEQBC model type
@@ -3655,7 +3644,7 @@ subroutine get_explicit_hessian_list(self, mol, cache, p, hessian, error, list, 
 
    if (.not. list%complete) then
       call fatal_error(error, "The Hessian on a neighborlist requires a sorted "// &
-         & "complete list, see new_sorted_list")
+         & "complete list, see sort_neighborlist")
       return
    end if
    if (.not. allocated(hessian%hesslist)) then
@@ -3663,9 +3652,9 @@ subroutine get_explicit_hessian_list(self, mol, cache, p, hessian, error, list, 
          & "allocated")
       return
    end if
-   if (size(hessian%hesslist, 3, kind=i8) /= cache%hinl(mol%nat + 1) - 1) then
-      call fatal_error(error, "The blocks of the Hessian are not in the half "// &
-         & "storage of the list")
+   if (size(hessian%hesslist, 3, kind=i8) /= size(list%nlat, kind=i8)) then
+      call fatal_error(error, "The blocks of the Hessian are not on the "// &
+         & "neighborlist")
       return
    end if
    if (.not. allocated(cache%d2cdr2diag)) allocate(cache%d2cdr2diag(3, 3, mol%nat))
@@ -3975,14 +3964,13 @@ end subroutine add_chain_products
 !> Compute the explicit part of the molecular nuclear Hessian,
 !> alpha * p^T d2A/dR2 q + beta * p^T d2X/dR2 at fixed p and charges q, using a
 !> sorted complete neighborlist. The Hessian keeps the blocks of the atoms
-!> y >= x in the upper triangles of the rows of the list, its half storage.
-!> Each pair is evaluated once in the row of the atom of lower index, which
-!> writes the off-diagonal block of the pair and the weights of the pair in the
-!> half storage, only the diagonal blocks and the weights of the atoms are
-!> reduced over the threads. The blocks of the second neighbors, which are not
-!> in the list of each other, are dropped. Without a maximum CN cutoff the entry
-!> of a pair holds the CN derivative of the atom of higher index,
-!> dCN_i/dR_j = -dCN_j/dR_i, and dqloc_i/dR_j = dqloc_j/dR_i.
+!> y >= x in the upper triangles of the rows of the list. Each pair is
+!> evaluated once in the row of the atom of lower index, which writes the
+!> off-diagonal block of the pair and the weights of the pair at its entry in
+!> the upper triangle, only the diagonal blocks and the weights of the atoms
+!> are reduced over the threads. The blocks of the second neighbors, which are
+!> not in the list of each other, are dropped. The entry of atom j in the row
+!> of atom x holds dCN_j/dR_x and dqloc_j/dR_x.
 subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    & alphain, betain)
    !> EEQBC model type
@@ -3994,14 +3982,13 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    !> Multicharge neighborlist type (sorted complete)
    type(csr_list), intent(in) :: list
 
-   !> Cache for intermediate quantities in the half storage of the list
+   !> Cache for intermediate quantities on the list
    type(mchrg_cache), intent(in) :: cache
 
    !> Charge-like contraction vector
    real(wp), intent(in) :: p(:)
 
-   !> Molecular nuclear Hessian with allocated blocks in the half storage of the
-   !> list
+   !> Molecular nuclear Hessian with allocated blocks on the list
    type(mchrg_hessian), intent(inout) :: hessian
 
    !> Alpha parameter
@@ -4011,8 +3998,8 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    real(wp), intent(in), optional :: betain
 
    real(wp) :: alpha, beta
-   integer :: iat, jat, kkat, xat, izp, jzp, kzp, ic, it, ntouch, ient
-   integer(i8) :: kat, ist, hat, hoff, cat
+   integer :: iat, jat, kkat, xat, izp, jzp, kzp, ic, it, ntouch, nlow
+   integer(i8) :: kat, ist, hat, cat, nfin
    real(wp) :: vec(3), evec(3), r1, r2, gam, arg, dtmp, norm_cn_i
    real(wp) :: radi, dradi, d2radi, capi, capj, rvdw
    real(wp) :: tqeta, hardi, dhdcni, d2hdcni2, detai, d2etai
@@ -4023,7 +4010,7 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    real(wp) :: dcn(3), dqloc(3), dx(3)
    real(wp), parameter :: dtrans(3, 1) = 0.0_wp
    integer, allocatable :: touch(:)
-   integer(i8), allocatable :: hmap(:), hpos(:)
+   integer(i8), allocatable :: hmap(:), hpos(:), tpos(:)
    logical, allocatable :: mark(:)
    real(wp), allocatable :: v(:), qlocacc(:), cnacc(:), kcnacc(:), kqlocacc(:)
    real(wp), allocatable :: dcnacc(:, :), dqlocacc(:, :), rdrad(:), wcn(:), wqloc(:)
@@ -4036,7 +4023,7 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    if (present(betain)) beta = betain
 
    allocate(v(mol%nat))
-   call symv_half(list, cache%hinl, cache%clist, p, v)
+   call spsymv_csr(mol%nat, cache%clist, list%inl, list%nlat, p, v, uplo='U')
 
    ! Weights of each atom, scalar weights of the second derivatives of its CN
    ! and its local charge, vector weights of dCN_i/dR_i and dqloc_i/dR_i, its
@@ -4057,14 +4044,14 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    ! of dqloc_k/dR_x is (wqloc(k) - beta*kqchi(k)*p(x)) * wpair(1), both times
    ! R_x - R_k. The second derivative w.r.t. the CNs of k and x is
    ! rdrad(k) * rdrad(x) * wpair(3). The scalars are symmetric in the pair and
-   ! kept in the half storage of the list.
-   allocate(wpair(3, cache%hinl(mol%nat + 1) - 1), source=0.0_wp)
+   ! kept on the upper triangle of the list.
+   allocate(wpair(3, size(list%nlat, kind=i8)), source=0.0_wp)
 
    ! Quantities of each atom and the terms of its own hardness and
    ! electronegativity, each iteration only updates the entries of iat
    !$omp parallel do default(none) schedule(static) &
    !$omp shared(cache, mol, self, p, v, alpha, beta, cnacc, qlocacc, kcnacc) &
-   !$omp shared(kqlocacc, rdrad, wcn, wqloc, radius, drdrad, wcap) &
+   !$omp shared(kqlocacc, rdrad, wcn, wqloc, radius, drdrad, wcap, list) &
    !$omp private(iat, izp, norm_cn_i, radi, dradi, d2radi, tqeta, hardi, dhdcni) &
    !$omp private(d2hdcni2, detai, d2etai, W_ii, cij)
    do iat = 1, mol%nat
@@ -4096,7 +4083,7 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
       ! Scalar weights for the CN and local charge second derivatives and the
       ! second derivatives w.r.t. the CN and the local charge from the hardness
       ! and the electronegativity
-      cij = cache%clist(cache%hinl(iat))
+      cij = cache%clist(list%inl(iat))
       cnacc(iat) = alpha * W_ii * cij * dhdcni + beta * self%kcnchi(izp) * v(iat)
       qlocacc(iat) = alpha * W_ii * cij * detai + beta * self%kqchi(izp) * v(iat)
       kcnacc(iat) = alpha * W_ii * cij * d2hdcni2
@@ -4105,12 +4092,12 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    !$omp end parallel do
 
    ! Each pair of the upper triangle of the row of iat writes its off-diagonal
-   ! block and its scalars at its entry in the half storage, the diagonal blocks
-   ! and the weights of the atoms are reduced
+   ! block and its scalars at its entry, the diagonal blocks and the weights of
+   ! the atoms are reduced
    !$omp parallel do default(none) schedule(runtime) &
    !$omp shared(cache, mol, self, list, p, alpha, beta, hessian, rdrad, wcn) &
    !$omp shared(wqloc, radius, drdrad, wcap, wpair) &
-   !$omp private(iat, jat, izp, jzp, ic, ient, kat, ist, hat, vec) &
+   !$omp private(iat, jat, izp, jzp, ic, kat, ist, nfin, nlow, vec) &
    !$omp private(evec, r1, r2, gam, arg, capi, capj, rvdw, W_ij, pchi, cij) &
    !$omp private(gtmp, dgdgam, dgdr, d2gdr2, d2gdrdgam, d2gdgam2, dgamdcni) &
    !$omp private(dgamdcnj, dcdr, dvdr, dtmp, dcpair, dS, d2cpair, d2J, d2pair) &
@@ -4120,9 +4107,10 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
       ist = list%inl(iat)
       capi = self%cap(izp)
 
-      do ient = 2, int(cache%hinl(iat + 1) - cache%hinl(iat))
-         kat = ist + ient - 1
-         hat = cache%hinl(iat) + ient - 1
+      nfin = list%inl(iat + 1) - 1
+      nlow = findloc(list%nlat(ist + 1:nfin) < iat, .true., dim=1)
+      if (nlow > 0) nfin = ist + nlow - 1
+      do kat = ist + 1, nfin
          jat = list%nlat(kat)
          jzp = mol%id(jat)
          vec = mol%xyz(:, jat) - mol%xyz(:, iat)
@@ -4137,7 +4125,7 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
          ! Weight of the off-diagonal capacitance C_ij in the electronegativity
          ! term
          pchi = beta * (p(iat) * cache%xtmp(jat) + p(jat) * cache%xtmp(iat))
-         cij = cache%clist(hat)
+         cij = cache%clist(kat)
 
          ! Coulomb interaction of Gaussian charges g = erf(gam*r)/r and its
          ! derivatives w.r.t. the distance and gam
@@ -4178,7 +4166,7 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
          ! block of j > i is in the upper triangle of the row of i.
          diagonal(:, :, iat) = diagonal(:, :, iat) + d2pair + wcap(jat) * d2cpair
          diagonal(:, :, jat) = diagonal(:, :, jat) + d2pair + wcap(iat) * d2cpair
-         hessian%hesslist(:, :, hat) = hessian%hesslist(:, :, hat) &
+         hessian%hesslist(:, :, kat) = hessian%hesslist(:, :, kat) &
             & - d2pair - (wcap(iat) + wcap(jat)) * d2cpair
 
          ! Accumulate scalar weights for the CN second derivatives
@@ -4209,10 +4197,10 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
          kcnacc(jat) = kcnacc(jat) + alpha * W_ij * cij * (d2gdgam2 * dgamdcnj**2 &
             & + dgdgam * (3.0_wp * rdrad(jat)**2 * gam**5 - drdrad(jat) * gam**3))
 
-         ! Scalars of the pair in the half storage
-         wpair(1, hat) = dcdr
-         wpair(2, hat) = gam**3 * dvdr
-         wpair(3, hat) = alpha * W_ij * cij * gam**5 &
+         ! Scalars of the pair at its entry
+         wpair(1, kat) = dcdr
+         wpair(2, kat) = gam**3 * dvdr
+         wpair(3, kat) = alpha * W_ij * cij * gam**5 &
             & * (gam * d2gdgam2 + 3.0_wp * dgdgam)
       end do
    end do
@@ -4220,17 +4208,17 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
 
    ! Diagonal blocks with the own diagonal capacitance C_ii
    !$omp parallel do default(none) schedule(static) &
-   !$omp shared(mol, cache, hessian, diagonal, wcap) &
+   !$omp shared(mol, cache, list, hessian, diagonal, wcap) &
    !$omp private(iat, hat)
    do iat = 1, mol%nat
-      hat = cache%hinl(iat)
+      hat = list%inl(iat)
       hessian%hesslist(:, :, hat) = hessian%hesslist(:, :, hat) &
          & + diagonal(:, :, iat) + wcap(iat) * cache%d2cdr2diag(:, :, iat)
    end do
    !$omp end parallel do
    deallocate(radius, drdrad, wcap, diagonal)
 
-   call get_pair_positions(list, cache%hinl, hpos)
+   call get_pair_positions(list, hpos, tpos)
 
    ! Products of the CN and local charge derivatives with their weights, as in
    ! the dense variant the block of the atoms jat and xat collects
@@ -4241,12 +4229,13 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    ! products with K are only formed for row jat, so the first product takes
    ! them in full and the second product only the weights of the pairs. Each
    ! iteration only updates the row of atom jat of the Hessian, hmap holds the
-   ! position of the block of each atom in the upper triangle of this row in
-   ! the half storage, zero for the atoms outside of the list of jat.
+   ! position of the block of each atom in the upper triangle of this row, zero
+   ! for the atoms outside of the list of jat.
    !$omp parallel default(none) &
    !$omp shared(mol, self, list, cache, p, beta, hessian, dcnacc, dqlocacc) &
-   !$omp shared(kcnacc, kqlocacc, rdrad, wcn, wqloc, wpair, hpos) &
-   !$omp private(iat, jat, kkat, xat, kzp, ic, it, ntouch, kat, hat, hoff, cat) &
+   !$omp shared(kcnacc, kqlocacc, rdrad, wcn, wqloc, wpair, hpos, tpos) &
+   !$omp private(iat, jat, kkat, xat, kzp, ic, it, ntouch, kat, hat, cat, nfin) &
+   !$omp private(nlow) &
    !$omp private(wk, wq, dcn, dqloc, dx, gcn, gqloc, mark, touch, hmap)
    allocate(gcn(3, mol%nat), gqloc(3, mol%nat), source=0.0_wp)
    allocate(mark(mol%nat), source=.false.)
@@ -4254,9 +4243,11 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    hmap(:) = 0_i8
    !$omp do schedule(runtime)
    do jat = 1, mol%nat
-      hoff = list%inl(jat) - cache%hinl(jat)
-      do hat = cache%hinl(jat), cache%hinl(jat + 1) - 1
-         hmap(list%nlat(hat + hoff)) = hat
+      nfin = list%inl(jat + 1) - 1
+      nlow = findloc(list%nlat(list%inl(jat) + 1:nfin) < jat, .true., dim=1)
+      if (nlow > 0) nfin = list%inl(jat) + nlow - 1
+      do hat = list%inl(jat), nfin
+         hmap(list%nlat(hat)) = hat
       end do
 
       ! Weights gcn(:, k) of dCN_k/dR_jat, first sum_l K(k, l) dCN_l/dR_jat
@@ -4265,8 +4256,7 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
       ntouch = 0
       do cat = list%inl(jat), list%inl(jat + 1) - 1
          iat = list%nlat(cat)
-         dcn = cache%dcndrlist(:, hpos(cat))
-         if (iat < jat) dcn = -dcn
+         dcn = cache%dcndrlist(:, cat)
          if (.not. mark(iat)) then
             mark(iat) = .true.
             ntouch = ntouch + 1
@@ -4291,7 +4281,7 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
       ! charges
       gcn(:, jat) = gcn(:, jat) + dcnacc(:, jat)
       gqloc(:, jat) = dqlocacc(:, jat) &
-         & + kqlocacc(jat) * cache%dqlocdrlist(:, cache%hinl(jat))
+         & + kqlocacc(jat) * cache%dqlocdrlist(:, list%inl(jat))
       do kat = list%inl(jat) + 1, list%inl(jat + 1) - 1
          kkat = list%nlat(kat)
          hat = hpos(kat)
@@ -4302,7 +4292,7 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
          wq = (wqloc(kkat) - beta * self%kqchi(kzp) * p(jat)) * wpair(1, hat)
          gcn(:, kkat) = gcn(:, kkat) + wk * dx
          gqloc(:, kkat) = wq * dx &
-            & + kqlocacc(kkat) * cache%dqlocdrlist(:, hat)
+            & + kqlocacc(kkat) * cache%dqlocdrlist(:, kat)
       end do
 
       ! First product, dCN_k/dR_xat gcn(:, k)^T and dqloc_k/dR_xat gqloc(:, k)^T
@@ -4314,9 +4304,8 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
             if (cat > list%inl(kkat) .and. xat < jat) exit
             hat = hmap(xat)
             if (hat == 0) cycle
-            dcn = cache%dcndrlist(:, hpos(cat))
-            if (kkat < xat) dcn = -dcn
-            dqloc = cache%dqlocdrlist(:, hpos(cat))
+            dcn = cache%dcndrlist(:, tpos(cat))
+            dqloc = cache%dqlocdrlist(:, tpos(cat))
             do ic = 1, 3
                hessian%hesslist(:, ic, hat) = hessian%hesslist(:, ic, hat) &
                   & + dcn * gcn(ic, kkat) + dqloc * gqloc(ic, kkat)
@@ -4333,9 +4322,8 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
       do cat = list%inl(jat), list%inl(jat + 1) - 1
          kkat = list%nlat(cat)
          kzp = mol%id(kkat)
-         dcn = cache%dcndrlist(:, hpos(cat))
-         if (kkat < jat) dcn = -dcn
-         dqloc = cache%dqlocdrlist(:, hpos(cat))
+         dcn = cache%dcndrlist(:, cat)
+         dqloc = cache%dqlocdrlist(:, cat)
          hat = hmap(kkat)
          if (hat > 0) then
             do ic = 1, 3
@@ -4359,8 +4347,8 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
          end do
       end do
 
-      do hat = cache%hinl(jat), cache%hinl(jat + 1) - 1
-         hmap(list%nlat(hat + hoff)) = 0
+      do hat = list%inl(jat), nfin
+         hmap(list%nlat(hat)) = 0
       end do
    end do
    !$omp end do
@@ -4368,13 +4356,71 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    !$omp end parallel
 
    call self%ncoord%add_coordination_number_hessian_list(mol, dtrans, cnacc, &
-      & list=list, hesslist=hessian%hesslist, hinl=cache%hinl)
+      & list, hessian%hesslist)
    call self%ncoord_en%add_coordination_number_hessian_list(mol, dtrans, &
-      & qlocacc, list=list, hesslist=hessian%hesslist, hinl=cache%hinl)
+      & qlocacc, list, hessian%hesslist)
 
    deallocate(v, cnacc, qlocacc, dcnacc, dqlocacc, kcnacc, kqlocacc, rdrad, wcn, &
-      & wqloc, wpair, hpos)
+      & wqloc, wpair, hpos, tpos)
 
 end subroutine get_explicit_hessian_0d_list
+
+
+!> Positions of the pairs of the entries of a sorted complete neighborlist in
+!> the upper triangle of the list and, if requested, the transposed positions
+!> of the atoms in the rows of their neighbors. The pair of an entry of the
+!> upper triangle is held at the entry itself, the one of an entry of the lower
+!> triangle at its transposed entry. Iterating over the rows in descending
+!> order visits the upper-triangle pairs (i, j) with j > i in descending order
+!> of i, which matches the descending order of the lower triangle of row j.
+pure subroutine get_pair_positions(list, hpos, tpos)
+
+   !> Sorted complete neighborlist
+   type(csr_list), intent(in) :: list
+
+   !> Position of the pair of each entry in the upper triangle
+   integer(i8), allocatable, intent(out) :: hpos(:)
+
+   !> Position of the atom in the row of the neighbor for each entry
+   integer(i8), allocatable, intent(out), optional :: tpos(:)
+
+   integer :: iat, jat, nat, nlow
+   integer(i8) :: ist, kat, tat, nfin
+   integer(i8), allocatable :: next_low(:)
+
+   nat = size(list%inl) - 1
+   allocate(hpos(list%inl(nat + 1) - 1))
+   if (present(tpos)) allocate(tpos(list%inl(nat + 1) - 1))
+   allocate(next_low(nat))
+
+   ! The lower triangle of each row starts after its upper triangle
+   do iat = 1, nat
+      nfin = list%inl(iat + 1) - 1
+      nlow = findloc(list%nlat(list%inl(iat) + 1:nfin) < iat, .true., dim=1)
+      if (nlow > 0) nfin = list%inl(iat) + nlow - 1
+      next_low(iat) = nfin + 1
+   end do
+
+   do iat = nat, 1, -1
+      ist = list%inl(iat)
+      hpos(ist) = ist
+      if (present(tpos)) tpos(ist) = ist
+      nfin = list%inl(iat + 1) - 1
+      nlow = findloc(list%nlat(ist + 1:nfin) < iat, .true., dim=1)
+      if (nlow > 0) nfin = ist + nlow - 1
+      do kat = ist + 1, nfin
+         jat = list%nlat(kat)
+         tat = next_low(jat)
+         next_low(jat) = tat + 1
+         hpos(kat) = kat
+         hpos(tat) = kat
+         if (present(tpos)) then
+            tpos(kat) = tat
+            tpos(tat) = kat
+         end if
+      end do
+   end do
+
+end subroutine get_pair_positions
 
 end module multicharge_model_eeqbc

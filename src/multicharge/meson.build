@@ -18,7 +18,6 @@ subdir('param')
 subdir('solver')
 
 srcs += files(
-  'atomsort.f90',
   'blas.F90',
   'charge.f90',
   'ewald.f90',

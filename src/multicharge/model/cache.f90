@@ -19,7 +19,7 @@
 
 !> Cache for charge models
 module multicharge_model_cache
-   use mctc_env, only : wp, i8
+   use mctc_env, only : wp
    use mctc_io, only : structure_type
    use mctc_wignerseitz, only : wignerseitz_cell
    implicit none
@@ -39,10 +39,8 @@ module multicharge_model_cache
       !> Coordination number derivatives w.r.t. lattice vectors
       real(wp), allocatable :: dcndL(:, :, :)
 
-      !> Coordination number derivatives w.r.t. positions in the half storage of
-      !> the neighborlist, the entry of atom j >= i in the upper
-      !> triangle of the row of atom i holds dCN_j/dR_i. Without a maximum CN
-      !> cutoff dCN_i/dR_j = -dCN_j/dR_i.
+      !> Coordination number derivatives w.r.t. positions on the sorted complete
+      !> neighborlist, the entry of atom j in the row of atom i holds dCN_j/dR_i
       real(wp), allocatable :: dcndrlist(:, :)
 
       !> Ewald separation parameter
@@ -63,20 +61,15 @@ module multicharge_model_cache
       !> Local charge derivatives w.r.t. lattice vectors
       real(wp), allocatable :: dqlocdL(:, :, :)
 
-      !> Local charge derivatives w.r.t. positions in the half storage of the
-      !> neighborlist, the entry of atom j >= i in the upper
-      !> triangle of the row of atom i holds dqloc_j/dR_i. Without a maximum CN
-      !> cutoff dqloc_i/dR_j = dqloc_j/dR_i.
+      !> Local charge derivatives w.r.t. positions on the sorted complete
+      !> neighborlist, the entry of atom j in the row of atom i holds
+      !> dqloc_j/dR_i
       real(wp), allocatable :: dqlocdrlist(:, :)
-
-      !> Offsets of the upper triangles of the rows of the neighborlist in the
-      !> half storage of the symmetric pair arrays, the row offsets of a half list
-      integer(i8), allocatable :: hinl(:)
 
       !> Full Maxwell capacitance matrix
       real(wp), allocatable :: cmat(:, :)
 
-      !> Capacitance matrix in the half storage of the neighborlist
+      !> Capacitance matrix on the upper triangle of the neighborlist
       real(wp), allocatable :: clist(:)
 
       !> Store tmp array from xvec calculation for reuse
@@ -88,13 +81,13 @@ module multicharge_model_cache
       !> Coulomb matrix
       real(wp), allocatable :: amat(:, :)
 
-      !> Coulomb matrix in the half storage of the neighborlist
+      !> Coulomb matrix on the upper triangle of the neighborlist
       real(wp), allocatable :: alist(:)
 
       !> Inversed amat
       real(wp), allocatable :: ainv(:, :)
 
-      !> Inverse of amat on the pattern of the neighborlist in its half storage,
+      !> Inverse of amat on the upper triangle of the neighborlist,
       !> the charge constraint part -uvec*uvec^T/sum(uvec) is not stored
       real(wp), allocatable :: ainvlist(:)
 

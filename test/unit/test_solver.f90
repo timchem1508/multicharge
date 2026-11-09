@@ -26,7 +26,6 @@ module test_solver
    use multicharge_solver_direct, only : direct_solver, new_direct_solver, direct_input
    use multicharge_solver_cg, only : cg_solver, new_cg_solver, cg_input
    use mctc_csrlist, only : csr_list
-   use multicharge_atomsort, only : get_half_offsets
    implicit none
    private
 
@@ -680,7 +679,7 @@ subroutine test_block_cg_dense(error)
 end subroutine test_block_cg_dense
 
 
-!> Test: Block CG with a matrix in the half storage of a sorted complete list
+!> Test: Block CG with a matrix on the upper triangle of a sorted complete list
 !> against the dense solve
 subroutine test_block_cg_sparse(error)
 
@@ -756,7 +755,7 @@ end subroutine test_cg_invert_dense
 
 
 !> Test: Block-CG inversion on a sorted complete list keeps the upper triangle
-!> of the inverse in the half storage
+!> of the inverse
 subroutine test_cg_invert_list_half(error)
 
    !> Error handling
@@ -784,7 +783,8 @@ subroutine test_cg_invert_list_half(error)
 
    dev = list_deviation(list, ainvlist, adense) * maxval(abs(adense))
    if (dev > thr1) then
-      call test_failed(error, "Inverse on the half storage differs from the dense inverse")
+      call test_failed(error, &
+         & "Inverse on the upper triangle differs from the dense inverse")
       print '(a, es12.4)', "Max deviation: ", dev
    end if
 
@@ -833,14 +833,14 @@ subroutine test_cg_invert_list_local(error)
 end subroutine test_cg_invert_list_local
 
 
-!> Largest deviation of the inverse in the half storage of a sorted complete
+!> Largest deviation of the inverse on the upper triangle of a sorted complete
 !> list from the dense inverse, relative to its largest element
 function list_deviation(list, ainvlist, adense) result(dev)
 
    !> Sorted complete neighborlist
    type(csr_list), intent(in) :: list
 
-   !> Inverse in the half storage of the list
+   !> Inverse on the upper triangle of the list
    real(wp), intent(in) :: ainvlist(:)
 
    !> Dense inverse
@@ -849,16 +849,16 @@ function list_deviation(list, ainvlist, adense) result(dev)
    !> Relative deviation
    real(wp) :: dev
 
-   integer :: iat
-   integer(i8) :: hat, koff
-   integer(i8), allocatable :: hinl(:)
+   integer :: iat, nlow
+   integer(i8) :: kat, nfin
 
-   call get_half_offsets(list, hinl)
    dev = 0.0_wp
    do iat = 1, size(adense, 1)
-      koff = list%inl(iat) - hinl(iat)
-      do hat = hinl(iat), hinl(iat + 1) - 1
-         dev = max(dev, abs(ainvlist(hat) - adense(list%nlat(hat + koff), iat)))
+      nfin = list%inl(iat + 1) - 1
+      nlow = findloc(list%nlat(list%inl(iat) + 1:nfin) < iat, .true., dim=1)
+      if (nlow > 0) nfin = list%inl(iat) + nlow - 1
+      do kat = list%inl(iat), nfin
+         dev = max(dev, abs(ainvlist(kat) - adense(list%nlat(kat), iat)))
       end do
    end do
    dev = dev / maxval(abs(adense))
@@ -969,38 +969,36 @@ end subroutine grouped_spd
 !> Sorted complete compressed-row storage of the nonzero pattern of a symmetric
 !> matrix with a nonzero diagonal, the diagonal element first in each row and
 !> the other elements in descending order, and the upper triangle of the
-!> matrix in the half storage of the list
+!> matrix on the list, the lower triangles are zero
 subroutine dense_to_csr(amat, alist, list)
 
    !> Dense symmetric matrix
    real(wp), intent(in) :: amat(:, :)
 
-   !> Upper triangle of the matrix in the half storage of the list
+   !> Upper triangle of the matrix on the list
    real(wp), allocatable, intent(out) :: alist(:)
 
    !> Sorted complete compressed-row index of the matrix
    type(csr_list), intent(out) :: list
 
-   integer :: n, iat, jat, nnz, nhalf
+   integer :: n, iat, jat, nnz
 
    n = size(amat, 1)
    nnz = count(abs(amat) > 0.0_wp)
    list%complete = .true.
-   allocate(list%inl(n + 1), list%nlat(nnz), alist((nnz + n) / 2))
+   allocate(list%inl(n + 1), list%nlat(nnz))
+   allocate(alist(nnz), source=0.0_wp)
    nnz = 0
-   nhalf = 0
    do iat = 1, n
       list%inl(iat) = nnz + 1
       nnz = nnz + 1
       list%nlat(nnz) = iat
-      nhalf = nhalf + 1
-      alist(nhalf) = amat(iat, iat)
+      alist(nnz) = amat(iat, iat)
       do jat = n, iat + 1, -1
          if (.not. abs(amat(jat, iat)) > 0.0_wp) cycle
          nnz = nnz + 1
          list%nlat(nnz) = jat
-         nhalf = nhalf + 1
-         alist(nhalf) = amat(jat, iat)
+         alist(nnz) = amat(jat, iat)
       end do
       do jat = iat - 1, 1, -1
          if (.not. abs(amat(jat, iat)) > 0.0_wp) cycle

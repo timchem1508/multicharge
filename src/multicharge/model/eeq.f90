@@ -837,7 +837,7 @@ subroutine get_explicit_hessian_list(self, mol, cache, p, hessian, error, list, 
    type(mchrg_hessian), intent(inout) :: hessian
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
-   !> Multicharge neighborlist type (half)
+   !> Multicharge neighborlist type (sorted complete)
    type(csr_list), intent(in) :: list
    !> Optional Coulomb matrix prefactor
    real(wp), intent(in), optional :: alpha
