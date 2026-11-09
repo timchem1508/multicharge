@@ -45,10 +45,12 @@ module multicharge_model_type
       & hess_index, get_dqdr_row, new_partial_derivs, new_hessian_blocks
 
 
-   !> Molecular nuclear Hessian in compressed-row storage on a sorted complete
-   !> neighborlist of its own, which keeps the blocks of the atoms y >= x in the
-   !> upper triangle of the row of x in its half storage, the block of y and x
-   !> is the transpose. The charge constraint couples all atoms by a dense term,
+   !> Molecular nuclear Hessian in compressed-row storage in the half storage of
+   !> the sorted complete neighborlist of the charges, which keeps the blocks of
+   !> the atoms y >= x in the upper triangle of the row of x, the block of y and
+   !> x is the transpose. The list itself is not kept, it is passed along with
+   !> the Hessian. Blocks of atoms outside of the list of each other, the second
+   !> neighbors, are dropped. The charge constraint couples all atoms by a dense term,
    !> which is kept in its factors, the block of the atoms x and y in the layout
    !> of hesslist is hesslist(:, :, (x, y))
    !> + weight * dlambda(:, y) dlambda(:, x)^T - wvec(:, y) dlambda(:, x)^T
@@ -56,10 +58,6 @@ module multicharge_model_type
    !> electrostatic energy, without wvec, and of rank two for an external
    !> function of the charges.
    type :: mchrg_hessian
-
-      !> Sorted complete neighborlist of the atom pairs with a stored block, the
-      !> first entry of each row is the atom itself
-      type(csr_list) :: list
 
       !> Offsets of the upper triangles of the rows of the list in the half
       !> storage of the blocks
@@ -429,7 +427,7 @@ module multicharge_model_type
 
       !> Explicit part of the molecular nuclear Hessian at fixed p and charges q
       !> on a sorted complete neighborlist, added to the blocks of the compressed
-      !> Hessian on the pattern of its own list
+      !> Hessian in the half storage of the list
       subroutine get_explicit_hessian_list(self, mol, cache, p, hessian, error, &
          & list, alpha, beta)
          import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, &
@@ -448,8 +446,8 @@ module multicharge_model_type
          !> Charge-like contraction vector
          real(wp), intent(in) :: p(:)
 
-         !> Molecular nuclear Hessian in compressed storage with its list and
-         !> allocated blocks
+         !> Molecular nuclear Hessian in compressed storage with allocated
+         !> blocks in the half storage of the list
          type(mchrg_hessian), intent(inout) :: hessian
 
          !> Error handling
@@ -1715,13 +1713,12 @@ end subroutine get_hessian_dense
 
 !> Compute the molecular nuclear Hessian of the electrostatic energy on a
 !> sorted complete neighborlist, which requires the CG solver with
-!> neighborlist support. The Hessian is kept in compressed storage on the upper
-!> triangles of its own sorted complete list, which keeps the blocks of the
-!> atoms y >= x, and the dense charge constraint term in its factors. Without a
-!> neighborlist the list of the Hessian serves as neighborlist, with a
-!> neighborlist the list of the Hessian is a copy of it unless it is set up on
-!> entry. The cache has to hold the solve on the neighborlist, update it with
-!> hess and solve first.
+!> neighborlist support. The Hessian is kept in compressed storage in the half
+!> storage of the neighborlist, which keeps the blocks of the atoms y >= x, and
+!> the dense charge constraint term in its factors. The implicit part is formed
+!> first from the inverse and the partial derivatives, which are freed before
+!> the explicit part. The cache has to hold the solve on the neighborlist,
+!> update it with hess and solve first.
 subroutine get_hessian_list(self, mol, solver, cache, error, hessian, list, &
    & unit, verbosity)
 
@@ -1740,70 +1737,11 @@ subroutine get_hessian_list(self, mol, solver, cache, error, hessian, list, &
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
-   !> Molecular nuclear Hessian in compressed storage, the pattern of an
-   !> allocated list is kept
+   !> Molecular nuclear Hessian in compressed storage on the neighborlist
    type(mchrg_hessian), intent(inout) :: hessian
 
-   !> Multicharge neighborlist type (sorted complete), the list of the Hessian
-   !> is used if absent
-   type(csr_list), intent(in), optional :: list
-
-   !> Output unit
-   integer, intent(in), optional :: unit
-
-   !> Verbosity level
-   integer, intent(in), optional :: verbosity
-
-   if (any(mol%periodic)) then
-      call fatal_error(error, &
-         & "Analytical Hessian is not available for periodic systems")
-      return
-   end if
-
-   if (present(list)) then
-      if (.not. allocated(hessian%list%inl)) hessian%list = list
-      call get_hessian_csr(self, mol, solver, cache, error, hessian, list, &
-         & unit, verbosity)
-   else
-      if (.not. allocated(hessian%list%inl)) then
-         call fatal_error(error, "The Hessian on a neighborlist requires a "// &
-            & "neighborlist or the list of the Hessian")
-         return
-      end if
-      ! The list of the Hessian is only read, its blocks are written
-      call get_hessian_csr(self, mol, solver, cache, error, hessian, &
-         & hessian%list, unit, verbosity)
-   end if
-
-end subroutine get_hessian_list
-
-
-!> Compressed molecular nuclear Hessian on a sorted complete neighborlist with
-!> the sorted complete list of the Hessian. The implicit part is formed first
-!> from the inverse and the partial derivatives, which are freed before the
-!> explicit part.
-subroutine get_hessian_csr(self, mol, solver, cache, error, hessian, list, &
-   & unit, verbosity)
-
-   !> Electronegativity-equilibration model
-   class(mchrg_model_type), intent(in) :: self
-
-   !> Molecular structure data
-   type(structure_type), intent(in) :: mol
-
-   !> Solver instance
-   class(mchrg_solver_type), intent(in) :: solver
-
-   !> Cache handling
-   type(mchrg_cache), intent(inout) :: cache
-
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
-
-   !> Molecular nuclear Hessian in compressed storage with its list
-   type(mchrg_hessian), intent(inout) :: hessian
-
-   !> Multicharge neighborlist type (sorted complete)
+   !> Multicharge neighborlist type (sorted complete) of the update and the
+   !> solve
    type(csr_list), intent(in) :: list
 
    !> Output unit
@@ -1816,28 +1754,13 @@ subroutine get_hessian_csr(self, mol, solver, cache, error, hessian, list, &
    type(timer_type) :: timer
    integer :: print_unit, verbosity_hess
 
+   call check_hessian_setup(mol, solver, cache, list, error)
+   if (allocated(error)) return
+
    print_unit = output_unit
    if (present(unit)) print_unit = unit
    verbosity_hess = 0
    if (present(verbosity)) verbosity_hess = verbosity
-
-   if (.not. (list%complete .and. hessian%list%complete)) then
-      call fatal_error(error, "The Hessian on a neighborlist requires sorted "// &
-         & "complete lists of the charges and of the Hessian")
-      return
-   end if
-   select type (solver)
-   class is (cg_solver)
-   class default
-      call fatal_error(error, "The Hessian on a neighborlist requires the CG solver")
-      return
-   end select
-
-   if (.not. allocated(cache%vrhs) .or. .not. allocated(cache%dcndrlist)) then
-      call fatal_error(error, "Charges and CN derivatives on the list are not "// &
-         & "in the cache, update the cache with hess and solve first")
-      return
-   end if
 
    call timer%push("total")
 
@@ -1858,7 +1781,7 @@ subroutine get_hessian_csr(self, mol, solver, cache, error, hessian, list, &
    if (allocated(error)) return
    deallocate(cache%alist)
 
-   call new_hessian_blocks(hessian)
+   call new_hessian_blocks(hessian, cache%hinl)
 
    ! Response of the charges, -(dX/dR - dA/dR*q)^T dq/dR
    call timer%push("implicit")
@@ -1876,22 +1799,79 @@ subroutine get_hessian_csr(self, mol, solver, cache, error, hessian, list, &
 
    if (verbosity_hess > 0) call print_hessian_stages(print_unit, timer, tgroup)
 
-end subroutine get_hessian_csr
+end subroutine get_hessian_list
 
 
-!> Allocate the zero blocks of a compressed Hessian in the half storage of its
-!> sorted complete list
-subroutine new_hessian_blocks(hessian)
+!> Allocate the zero blocks of a compressed Hessian in the half storage of the
+!> sorted complete neighborlist
+subroutine new_hessian_blocks(hessian, hinl)
 
-   !> Molecular nuclear Hessian in compressed storage with its list
+   !> Molecular nuclear Hessian in compressed storage
    type(mchrg_hessian), intent(inout) :: hessian
 
-   call get_half_offsets(hessian%list, hessian%hinl)
+   !> Offsets of the upper triangles of the rows of the list in the half
+   !> storage
+   integer(i8), intent(in) :: hinl(:)
+
+   hessian%hinl = hinl
    if (allocated(hessian%hesslist)) deallocate(hessian%hesslist)
-   allocate(hessian%hesslist(3, 3, hessian%hinl(size(hessian%hinl)) - 1), &
-      & source=0.0_wp)
+   allocate(hessian%hesslist(3, 3, hinl(size(hinl)) - 1), source=0.0_wp)
 
 end subroutine new_hessian_blocks
+
+
+!> Check the setup of the Hessian on a neighborlist: a molecular structure, a
+!> sorted complete list, the CG solver and a cache with the solve and the CN
+!> derivatives in the half storage of this list
+subroutine check_hessian_setup(mol, solver, cache, list, error)
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Solver instance
+   class(mchrg_solver_type), intent(in) :: solver
+
+   !> Cache updated with the list
+   type(mchrg_cache), intent(in) :: cache
+
+   !> Sorted complete neighborlist
+   type(csr_list), intent(in) :: list
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   if (any(mol%periodic)) then
+      call fatal_error(error, &
+         & "Analytical Hessian is not available for periodic systems")
+      return
+   end if
+   if (.not. list%complete) then
+      call fatal_error(error, "The Hessian on a neighborlist requires a sorted "// &
+         & "complete list, see new_sorted_list")
+      return
+   end if
+   select type (solver)
+   class is (cg_solver)
+   class default
+      call fatal_error(error, "The Hessian on a neighborlist requires the CG solver")
+      return
+   end select
+   if (.not. allocated(cache%vrhs) .or. .not. allocated(cache%dcndrlist) &
+      & .or. .not. allocated(cache%hinl)) then
+      call fatal_error(error, "Charges and CN derivatives on the list are not "// &
+         & "in the cache, update the cache with hess and solve first")
+      return
+   end if
+
+   ! Each pair is held once in the half storage and twice in the complete list
+   if (size(cache%hinl) /= mol%nat + 1 .or. size(list%inl) /= mol%nat + 1 &
+      & .or. 2 * (cache%hinl(mol%nat + 1) - 1) - mol%nat &
+      & /= list%inl(mol%nat + 1) - 1) then
+      call fatal_error(error, "The cache was updated with a different neighborlist")
+      return
+   end if
+
+end subroutine check_hessian_setup
 
 
 !> Compute the implicit part of the molecular nuclear Hessian of the
@@ -1932,7 +1912,7 @@ end subroutine get_implicit_hessian_dense
 !> formed for groups of atoms x close to each other and used at once, they are
 !> not stored. The block of y and x is the transpose and the diagonal blocks are
 !> symmetrized, so this part is symmetric. The blocks are added on the upper
-!> triangles of the list of the Hessian, which only keeps the blocks of y >= x.
+!> triangles of the rows of the list, which only keeps the blocks of y >= x.
 !> The charge constraint gives the dense rank-1 term
 !> sum(u) * vec(dlambda) vec(dlambda)^T, which is kept in its factors.
 subroutine get_implicit_hessian_list(self, mol, cache, hessian, list, times)
@@ -1946,8 +1926,8 @@ subroutine get_implicit_hessian_list(self, mol, cache, hessian, list, times)
    !> Cache handling
    type(mchrg_cache), intent(in) :: cache
 
-   !> Molecular nuclear Hessian in compressed storage with its list and
-   !> allocated blocks
+   !> Molecular nuclear Hessian in compressed storage with allocated blocks in
+   !> the half storage of the list
    type(mchrg_hessian), intent(inout) :: hessian
 
    !> Multicharge neighborlist type (sorted complete)
@@ -1984,8 +1964,8 @@ end subroutine get_implicit_hessian_list
 !> dp/dR = S (G + d2f/dq2 dq/dR). The derivatives of a group are contracted
 !> with the column y of B and G at once, which is the row of y of the list, so
 !> each column is read once per group. The Hessian keeps the blocks of y >= x
-!> in the upper triangles of its list, only the group of atom x writes the
-!> blocks (x, y), so the groups are independent.
+!> in the upper triangles of the rows of the list, only the group of atom x
+!> writes the blocks (x, y), so the groups are independent.
 subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times, &
    & d2fdq2, d2fdq2_list)
 
@@ -2029,8 +2009,8 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times, &
    ngrp = (mol%nat + max_group - 1) / max_group
    if (ngrp < 1) return
    nbmax = min(mol%nat, max_group * get_max_neighbors(mol%nat, list))
-   numax = min(mol%nat, max_group * int(maxval(hessian%hinl(2:mol%nat + 1) &
-      & - hessian%hinl(:mol%nat))))
+   numax = min(mol%nat, max_group * int(maxval(cache%hinl(2:mol%nat + 1) &
+      & - cache%hinl(:mol%nat))))
    ext = present(d2fdq2) .and. present(d2fdq2_list)
    scale = -1.0_wp
    if (ext) scale = 1.0_wp
@@ -2072,9 +2052,9 @@ subroutine add_implicit_blocks_list(mol, cache, hessian, list, order, times, &
       nu = 0
       do i = 1, ng
          xat = order(x0 + i)
-         hoff = hessian%list%inl(xat) - hessian%hinl(xat)
-         do hat = hessian%hinl(xat), hessian%hinl(xat + 1) - 1
-            yat = hessian%list%nlat(hat + hoff)
+         hoff = list%inl(xat) - cache%hinl(xat)
+         do hat = cache%hinl(xat), cache%hinl(xat + 1) - 1
+            yat = list%nlat(hat + hoff)
             if (hloc(yat) == 0) then
                nu = nu + 1
                hloc(yat) = nu
@@ -2292,20 +2272,18 @@ end subroutine get_external_hessian_dense
 !> charges on a sorted complete neighborlist, which requires the CG solver with
 !> neighborlist support. The second derivatives d2f/dq2 and the mixed
 !> derivatives d2f/dRdq are given on sorted complete lists of their own, the
-!> mixed derivatives of the pairs outside of the neighborlist are dropped. With the
-!> adjoint vector p = S df/dq, the response of the gradient df/dR + p^T B with
-!> the partial derivatives B = dX/dR - dA/dR*q gives the block of the atoms x
-!> and y, sum_b G(b, y) dq_b/dR_x + B(b, y) dp_b/dR_x with the mixed
+!> mixed derivatives of the pairs outside of the neighborlist are dropped. With
+!> the adjoint vector p = S df/dq, the response of the gradient df/dR + p^T B
+!> with the partial derivatives B = dX/dR - dA/dR*q gives the block of the
+!> atoms x and y, sum_b G(b, y) dq_b/dR_x + B(b, y) dp_b/dR_x with the mixed
 !> derivatives G = d2f/dRdq - dA/dR*p and the derivatives of the adjoint
 !> vector dp/dR = S (G + d2f/dq2 dq/dR), plus the explicit part
-!> p^T (d2X/dR2 - d2A/dR2*q). The inverse S is kept on the pattern of the
-!> neighborlist, the dense rank-2 term of the charge constraint in its factors,
-!> where w = G^T u + B^T A^-1 d2f/dq2 u is exact with one further solve. The
-!> list of the Hessian is a copy of the neighborlist unless it is set up on
-!> entry. The derivatives of f are taken at the charges of the structure, the
-!> second derivative d2f/dR2 at fixed charges is added by the caller. The cache
-!> has to hold the solve on the neighborlist, update it with hess and solve
-!> first.
+!> p^T (d2X/dR2 - d2A/dR2*q). The inverse S and the Hessian are kept in the
+!> half storage of the neighborlist, the dense rank-2 term of the charge
+!> constraint in its factors. The derivatives of f are taken at the charges of
+!> the structure, the second derivative d2f/dR2 at fixed charges is added by
+!> the caller. The cache has to hold the solve on the neighborlist, update it
+!> with hess and solve first.
 subroutine get_external_hessian_list(self, mol, solver, cache, error, dfdq, &
    & d2fdq2, d2fdq2_list, dfdrdq, dfdrdq_list, hessian, list, unit, verbosity)
 
@@ -2342,10 +2320,11 @@ subroutine get_external_hessian_list(self, mol, solver, cache, error, dfdq, &
    type(csr_list), intent(in) :: dfdrdq_list
 
    !> Molecular nuclear Hessian of the external function without d2f/dR2 in
-   !> compressed storage, the pattern of an allocated list is kept
+   !> compressed storage on the neighborlist
    type(mchrg_hessian), intent(inout) :: hessian
 
-   !> Multicharge neighborlist type (sorted complete)
+   !> Multicharge neighborlist type (sorted complete) of the update and the
+   !> solve
    type(csr_list), intent(in) :: list
 
    !> Output unit
@@ -2354,68 +2333,33 @@ subroutine get_external_hessian_list(self, mol, solver, cache, error, dfdq, &
    !> Verbosity level
    integer, intent(in), optional :: verbosity
 
-   integer :: iat, print_unit, verbosity_hess
+   integer :: print_unit, verbosity_hess
    real(wp) :: tgroup(2)
    integer, allocatable :: order(:)
    integer(i8), allocatable :: qhinl(:)
    real(wp), allocatable :: padj(:), fuvec(:), tvec(:)
    type(timer_type) :: timer
 
-   if (any(mol%periodic)) then
-      call fatal_error(error, &
-         & "Analytical Hessian is not available for periodic systems")
-      return
-   end if
-
-   if (.not. allocated(hessian%list%inl)) hessian%list = list
-   if (.not. (list%complete .and. hessian%list%complete &
-      & .and. d2fdq2_list%complete .and. dfdrdq_list%complete)) then
-      call fatal_error(error, "The external Hessian on a neighborlist requires "// &
-         & "sorted complete lists")
-      return
-   end if
-
+   call check_hessian_setup(mol, solver, cache, list, error)
+   if (allocated(error)) return
+   call check_external_derivs(mol, dfdq, d2fdq2, d2fdq2_list, dfdrdq, &
+      & dfdrdq_list, error)
+   if (allocated(error)) return
    call get_half_offsets(d2fdq2_list, qhinl)
-   if (size(dfdq) /= mol%nat &
-      & .or. size(d2fdq2, kind=i8) /= qhinl(size(qhinl)) - 1 &
-      & .or. size(dfdrdq, 1) /= 3 &
-      & .or. size(dfdrdq, 2, kind=i8) /= size(dfdrdq_list%nlat, kind=i8)) then
-      call fatal_error(error, "External partial derivatives are wrong size")
-      return
-   end if
-   select type (solver)
-   class is (cg_solver)
-   class default
-      call fatal_error(error, "The Hessian on a neighborlist requires the CG solver")
-      return
-   end select
 
    print_unit = output_unit
    if (present(unit)) print_unit = unit
    verbosity_hess = 0
    if (present(verbosity)) verbosity_hess = verbosity
 
-   if (.not. allocated(cache%vrhs) .or. .not. allocated(cache%dcndrlist)) then
-      call fatal_error(error, "Charges and CN derivatives on the list are not "// &
-         & "in the cache, update the cache with hess and solve first")
-      return
-   end if
-
    call timer%push("total")
 
-   ! Adjoint vector p = S df/dq and the response t = A^-1 d2f/dq2 u of the
-   ! factor w of the charge constraint term
+   ! Adjoint vector p = S df/dq and the response of the charge constraint
    call timer%push("adjoint")
    call get_adjoint_vector(mol, solver, cache, error, dfdq, padj, list, unit, &
       & verbosity)
-   if (allocated(error)) return
-   allocate(fuvec(mol%nat), tvec(mol%nat))
-   call symv_half(d2fdq2_list, qhinl, d2fdq2, cache%uvec, fuvec)
-   do iat = 1, mol%nat
-      tvec(iat) = fuvec(iat) / (cache%alist(cache%hinl(iat)) + eps)
-   end do
-   call solver%solve(alist=cache%alist, xvec=fuvec, vrhs=tvec, list=list, &
-      & new_unit=print_unit, error=error)
+   if (.not. allocated(error)) call get_constraint_response(mol, solver, cache, &
+      & list, d2fdq2, d2fdq2_list, qhinl, fuvec, tvec, print_unit, error)
    call timer%pop
    if (allocated(error)) return
 
@@ -2441,16 +2385,8 @@ subroutine get_external_hessian_list(self, mol, solver, cache, error, dfdq, &
    if (allocated(error)) return
    deallocate(cache%alist)
 
-   ! Charge constraint term -(w dlambda^T + dlambda w^T) + phi dlambda dlambda^T
-   ! with dlambda = B^T u / sum(u), w = G^T u + B^T t and phi = u^T d2f/dq2 u
-   call get_constraint_factors(mol, cache, list, hessian%dlambda)
-   if (allocated(hessian%wvec)) deallocate(hessian%wvec)
-   allocate(hessian%wvec(3, mol%nat), source=0.0_wp)
-   call add_transposed_product(list, cache%dafdrlist, cache%uvec, hessian%wvec)
-   call add_transposed_product(list, cache%dabdrlist, tvec, hessian%wvec)
-   hessian%weight = dot_product(cache%uvec, fuvec)
-
-   call new_hessian_blocks(hessian)
+   call new_hessian_blocks(hessian, cache%hinl)
+   call get_external_constraint_factors(mol, cache, list, fuvec, tvec, hessian)
 
    ! Response of the charges and of the adjoint vector,
    ! sum_b G(b, y) dq_b/dR_x + B(b, y) dp_b/dR_x
@@ -2473,6 +2409,142 @@ subroutine get_external_hessian_list(self, mol, solver, cache, error, dfdq, &
       & adjoint=.true.)
 
 end subroutine get_external_hessian_list
+
+
+!> Check the derivatives of an external function on their sorted complete
+!> lists
+subroutine check_external_derivs(mol, dfdq, d2fdq2, d2fdq2_list, dfdrdq, &
+   & dfdrdq_list, error)
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Derivative of the external function w.r.t. atomic charges
+   real(wp), intent(in) :: dfdq(:)
+
+   !> Second derivative w.r.t. atomic charges in the half storage of its list
+   real(wp), intent(in) :: d2fdq2(:)
+
+   !> Sorted complete list of the second derivative w.r.t. atomic charges
+   type(csr_list), intent(in) :: d2fdq2_list
+
+   !> Mixed derivative w.r.t. positions and charges on its list
+   real(wp), intent(in) :: dfdrdq(:, :)
+
+   !> Sorted complete list of the mixed derivative w.r.t. positions and charges
+   type(csr_list), intent(in) :: dfdrdq_list
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   integer(i8) :: nhalf
+
+   if (.not. (d2fdq2_list%complete .and. dfdrdq_list%complete)) then
+      call fatal_error(error, "The external Hessian on a neighborlist requires "// &
+         & "sorted complete lists")
+      return
+   end if
+
+   ! Each pair is held once in the half storage and twice in the complete list
+   nhalf = (d2fdq2_list%inl(size(d2fdq2_list%inl)) - 1 + mol%nat) / 2
+   if (size(dfdq) /= mol%nat .or. size(d2fdq2, kind=i8) /= nhalf &
+      & .or. size(dfdrdq, 1) /= 3 &
+      & .or. size(dfdrdq, 2, kind=i8) /= size(dfdrdq_list%nlat, kind=i8)) then
+      call fatal_error(error, "External partial derivatives are wrong size")
+      return
+   end if
+
+end subroutine check_external_derivs
+
+
+!> Response of the charge constraint to the second derivatives of an external
+!> function, F u = d2f/dq2 u with the constraint response u = A^-1 1 and
+!> t = A^-1 F u, which give the factors of the charge constraint term
+subroutine get_constraint_response(mol, solver, cache, list, d2fdq2, &
+   & d2fdq2_list, qhinl, fuvec, tvec, unit, error)
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Solver instance
+   class(mchrg_solver_type), intent(in) :: solver
+
+   !> Cache with the coefficient matrix in the half storage of the list and
+   !> the constraint response
+   type(mchrg_cache), intent(in) :: cache
+
+   !> Sorted complete neighborlist
+   type(csr_list), intent(in) :: list
+
+   !> Second derivative w.r.t. atomic charges in the half storage of its list
+   real(wp), intent(in), contiguous :: d2fdq2(:)
+
+   !> Sorted complete list of the second derivative w.r.t. atomic charges
+   type(csr_list), intent(in) :: d2fdq2_list
+
+   !> Offsets of the half storage of the second derivative
+   integer(i8), intent(in) :: qhinl(:)
+
+   !> Product F u
+   real(wp), allocatable, intent(out) :: fuvec(:)
+
+   !> Response t = A^-1 F u
+   real(wp), allocatable, intent(out) :: tvec(:)
+
+   !> Output unit
+   integer, intent(in) :: unit
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   integer :: iat
+
+   allocate(fuvec(mol%nat), tvec(mol%nat))
+   call symv_half(d2fdq2_list, qhinl, d2fdq2, cache%uvec, fuvec)
+
+   ! Diagonal guess of the CG solve
+   do iat = 1, mol%nat
+      tvec(iat) = fuvec(iat) / (cache%alist(cache%hinl(iat)) + eps)
+   end do
+   call solver%solve(alist=cache%alist, xvec=fuvec, vrhs=tvec, list=list, &
+      & new_unit=unit, error=error)
+
+end subroutine get_constraint_response
+
+
+!> Factors of the charge constraint term of the Hessian of an external
+!> function, -(w dlambda^T + dlambda w^T) + phi dlambda dlambda^T with
+!> dlambda = B^T u / sum(u), w = G^T u + B^T t and phi = u^T F u
+subroutine get_external_constraint_factors(mol, cache, list, fuvec, tvec, &
+   & hessian)
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Cache with the partial and the mixed derivatives on the list and the
+   !> constraint response
+   type(mchrg_cache), intent(in) :: cache
+
+   !> Sorted complete neighborlist
+   type(csr_list), intent(in) :: list
+
+   !> Product F u of the second derivatives w.r.t. the charges
+   real(wp), intent(in) :: fuvec(:)
+
+   !> Response t = A^-1 F u
+   real(wp), intent(in) :: tvec(:)
+
+   !> Molecular nuclear Hessian, receives the factors
+   type(mchrg_hessian), intent(inout) :: hessian
+
+   call get_constraint_factors(mol, cache, list, hessian%dlambda)
+   if (allocated(hessian%wvec)) deallocate(hessian%wvec)
+   allocate(hessian%wvec(3, mol%nat), source=0.0_wp)
+   call add_transposed_product(list, cache%dafdrlist, cache%uvec, hessian%wvec)
+   call add_transposed_product(list, cache%dabdrlist, tvec, hessian%wvec)
+   hessian%weight = dot_product(cache%uvec, fuvec)
+
+end subroutine get_external_constraint_factors
 
 
 !> Adjoint vector p = S df/dq of an external function of the charges.

@@ -3630,8 +3630,8 @@ end subroutine get_explicit_hessian_dense
 !> charges q on a sorted complete neighborlist. The cache has to hold the
 !> position derivatives of the CN and the local charges in the half storage of
 !> the list, computed by the update for the Hessian. The blocks are added to
-!> the compressed Hessian on the upper triangles of its own sorted complete
-!> list, blocks outside of the pattern of this list are dropped.
+!> the compressed Hessian in the half storage of the list, the blocks of the
+!> second neighbors are dropped.
 subroutine get_explicit_hessian_list(self, mol, cache, p, hessian, error, list, &
    & alpha, beta)
    !> EEQBC model type
@@ -3653,14 +3653,19 @@ subroutine get_explicit_hessian_list(self, mol, cache, p, hessian, error, list, 
    !> Optional electronegativity prefactor
    real(wp), intent(in), optional :: beta
 
-   if (.not. (list%complete .and. hessian%list%complete)) then
-      call fatal_error(error, "The Hessian on a neighborlist requires sorted "// &
-         & "complete lists of the charges and of the Hessian")
+   if (.not. list%complete) then
+      call fatal_error(error, "The Hessian on a neighborlist requires a sorted "// &
+         & "complete list, see new_sorted_list")
       return
    end if
-   if (.not. (allocated(hessian%hinl) .and. allocated(hessian%hesslist))) then
-      call fatal_error(error, "The blocks of the Hessian on its list are not "// &
+   if (.not. allocated(hessian%hesslist)) then
+      call fatal_error(error, "The blocks of the Hessian on the list are not "// &
          & "allocated")
+      return
+   end if
+   if (size(hessian%hesslist, 3, kind=i8) /= cache%hinl(mol%nat + 1) - 1) then
+      call fatal_error(error, "The blocks of the Hessian are not in the half "// &
+         & "storage of the list")
       return
    end if
    if (.not. allocated(cache%d2cdr2diag)) allocate(cache%d2cdr2diag(3, 3, mol%nat))
@@ -3970,12 +3975,12 @@ end subroutine add_chain_products
 !> Compute the explicit part of the molecular nuclear Hessian,
 !> alpha * p^T d2A/dR2 q + beta * p^T d2X/dR2 at fixed p and charges q, using a
 !> sorted complete neighborlist. The Hessian keeps the blocks of the atoms
-!> y >= x in the upper triangles of the rows of its own sorted complete list.
+!> y >= x in the upper triangles of the rows of the list, its half storage.
 !> Each pair is evaluated once in the row of the atom of lower index, which
 !> writes the off-diagonal block of the pair and the weights of the pair in the
-!> half storage of the list, only the diagonal blocks and the weights of the
-!> atoms are reduced over the threads. Blocks outside of the pattern of the
-!> list of the Hessian are dropped. Without a maximum CN cutoff the entry
+!> half storage, only the diagonal blocks and the weights of the atoms are
+!> reduced over the threads. The blocks of the second neighbors, which are not
+!> in the list of each other, are dropped. Without a maximum CN cutoff the entry
 !> of a pair holds the CN derivative of the atom of higher index,
 !> dCN_i/dR_j = -dCN_j/dR_i, and dqloc_i/dR_j = dqloc_j/dR_i.
 subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
@@ -3995,7 +4000,8 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    !> Charge-like contraction vector
    real(wp), intent(in) :: p(:)
 
-   !> Molecular nuclear Hessian with allocated blocks
+   !> Molecular nuclear Hessian with allocated blocks in the half storage of the
+   !> list
    type(mchrg_hessian), intent(inout) :: hessian
 
    !> Alpha parameter
@@ -4099,32 +4105,24 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    !$omp end parallel do
 
    ! Each pair of the upper triangle of the row of iat writes its off-diagonal
-   ! block in the row of iat of the Hessian and its scalars in the half storage,
-   ! the diagonal blocks and the weights of the atoms are reduced. hmap holds
-   ! the position of the block of each atom in the upper triangle of the row of
-   ! the Hessian.
-   !$omp parallel default(none) &
+   ! block and its scalars at its entry in the half storage, the diagonal blocks
+   ! and the weights of the atoms are reduced
+   !$omp parallel do default(none) schedule(runtime) &
    !$omp shared(cache, mol, self, list, p, alpha, beta, hessian, rdrad, wcn) &
    !$omp shared(wqloc, radius, drdrad, wcap, wpair) &
-   !$omp private(iat, jat, izp, jzp, ic, ient, kat, ist, hat, hoff, vec) &
+   !$omp private(iat, jat, izp, jzp, ic, ient, kat, ist, hat, vec) &
    !$omp private(evec, r1, r2, gam, arg, capi, capj, rvdw, W_ij, pchi, cij) &
    !$omp private(gtmp, dgdgam, dgdr, d2gdr2, d2gdrdgam, d2gdgam2, dgamdcni) &
    !$omp private(dgamdcnj, dcdr, dvdr, dtmp, dcpair, dS, d2cpair, d2J, d2pair) &
-   !$omp private(hmap) &
    !$omp reduction(+:cnacc, dcnacc, dqlocacc, kcnacc, diagonal)
-   allocate(hmap(mol%nat), source=0_i8)
-   !$omp do schedule(runtime)
    do iat = 1, mol%nat
       izp = mol%id(iat)
       ist = list%inl(iat)
-      hoff = hessian%list%inl(iat) - hessian%hinl(iat)
-      do hat = hessian%hinl(iat), hessian%hinl(iat + 1) - 1
-         hmap(hessian%list%nlat(hat + hoff)) = hat
-      end do
       capi = self%cap(izp)
 
       do ient = 2, int(cache%hinl(iat + 1) - cache%hinl(iat))
          kat = ist + ient - 1
+         hat = cache%hinl(iat) + ient - 1
          jat = list%nlat(kat)
          jzp = mol%id(jat)
          vec = mol%xyz(:, jat) - mol%xyz(:, iat)
@@ -4139,7 +4137,7 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
          ! Weight of the off-diagonal capacitance C_ij in the electronegativity
          ! term
          pchi = beta * (p(iat) * cache%xtmp(jat) + p(jat) * cache%xtmp(iat))
-         cij = cache%clist(cache%hinl(iat) + ient - 1)
+         cij = cache%clist(hat)
 
          ! Coulomb interaction of Gaussian charges g = erf(gam*r)/r and its
          ! derivatives w.r.t. the distance and gam
@@ -4180,8 +4178,7 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
          ! block of j > i is in the upper triangle of the row of i.
          diagonal(:, :, iat) = diagonal(:, :, iat) + d2pair + wcap(jat) * d2cpair
          diagonal(:, :, jat) = diagonal(:, :, jat) + d2pair + wcap(iat) * d2cpair
-         hat = hmap(jat)
-         if (hat > 0) hessian%hesslist(:, :, hat) = hessian%hesslist(:, :, hat) &
+         hessian%hesslist(:, :, hat) = hessian%hesslist(:, :, hat) &
             & - d2pair - (wcap(iat) + wcap(jat)) * d2cpair
 
          ! Accumulate scalar weights for the CN second derivatives
@@ -4213,27 +4210,20 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
             & + dgdgam * (3.0_wp * rdrad(jat)**2 * gam**5 - drdrad(jat) * gam**3))
 
          ! Scalars of the pair in the half storage
-         hat = cache%hinl(iat) + ient - 1
          wpair(1, hat) = dcdr
          wpair(2, hat) = gam**3 * dvdr
          wpair(3, hat) = alpha * W_ij * cij * gam**5 &
             & * (gam * d2gdgam2 + 3.0_wp * dgdgam)
       end do
-
-      do hat = hessian%hinl(iat), hessian%hinl(iat + 1) - 1
-         hmap(hessian%list%nlat(hat + hoff)) = 0
-      end do
    end do
-   !$omp end do
-   deallocate(hmap)
-   !$omp end parallel
+   !$omp end parallel do
 
    ! Diagonal blocks with the own diagonal capacitance C_ii
    !$omp parallel do default(none) schedule(static) &
    !$omp shared(mol, cache, hessian, diagonal, wcap) &
    !$omp private(iat, hat)
    do iat = 1, mol%nat
-      hat = hessian%hinl(iat)
+      hat = cache%hinl(iat)
       hessian%hesslist(:, :, hat) = hessian%hesslist(:, :, hat) &
          & + diagonal(:, :, iat) + wcap(iat) * cache%d2cdr2diag(:, :, iat)
    end do
@@ -4251,7 +4241,8 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    ! products with K are only formed for row jat, so the first product takes
    ! them in full and the second product only the weights of the pairs. Each
    ! iteration only updates the row of atom jat of the Hessian, hmap holds the
-   ! position of the block of each atom in the upper triangle of this row.
+   ! position of the block of each atom in the upper triangle of this row in
+   ! the half storage, zero for the atoms outside of the list of jat.
    !$omp parallel default(none) &
    !$omp shared(mol, self, list, cache, p, beta, hessian, dcnacc, dqlocacc) &
    !$omp shared(kcnacc, kqlocacc, rdrad, wcn, wqloc, wpair, hpos) &
@@ -4263,9 +4254,9 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    hmap(:) = 0_i8
    !$omp do schedule(runtime)
    do jat = 1, mol%nat
-      hoff = hessian%list%inl(jat) - hessian%hinl(jat)
-      do hat = hessian%hinl(jat), hessian%hinl(jat + 1) - 1
-         hmap(hessian%list%nlat(hat + hoff)) = hat
+      hoff = list%inl(jat) - cache%hinl(jat)
+      do hat = cache%hinl(jat), cache%hinl(jat + 1) - 1
+         hmap(list%nlat(hat + hoff)) = hat
       end do
 
       ! Weights gcn(:, k) of dCN_k/dR_jat, first sum_l K(k, l) dCN_l/dR_jat
@@ -4368,8 +4359,8 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
          end do
       end do
 
-      do hat = hessian%hinl(jat), hessian%hinl(jat + 1) - 1
-         hmap(hessian%list%nlat(hat + hoff)) = 0
+      do hat = cache%hinl(jat), cache%hinl(jat + 1) - 1
+         hmap(list%nlat(hat + hoff)) = 0
       end do
    end do
    !$omp end do
@@ -4377,11 +4368,9 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    !$omp end parallel
 
    call self%ncoord%add_coordination_number_hessian_list(mol, dtrans, cnacc, &
-      & list=list, hesslist=hessian%hesslist, hlist=hessian%list, &
-      & hinl=hessian%hinl)
+      & list=list, hesslist=hessian%hesslist, hinl=cache%hinl)
    call self%ncoord_en%add_coordination_number_hessian_list(mol, dtrans, &
-      & qlocacc, list=list, hesslist=hessian%hesslist, hlist=hessian%list, &
-      & hinl=hessian%hinl)
+      & qlocacc, list=list, hesslist=hessian%hesslist, hinl=cache%hinl)
 
    deallocate(v, cnacc, qlocacc, dcnacc, dqlocacc, kcnacc, kqlocacc, rdrad, wcn, &
       & wqloc, wpair, hpos)

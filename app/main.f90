@@ -203,8 +203,7 @@ program main
       end if
    else if (analytic_hessian .and. use_nlist) then
       ! Compressed Hessian on the pattern of the neighborlist with the factored
-      ! charge constraint term, only expanded for the output. The neighborlist
-      ! moves into the Hessian, which then serves as the only list.
+      ! charge constraint term, only expanded for the output
       allocate(hesslist)
       call timer%push("hess")
       call model%solve(mol, solver, cache, error, energy, gradient, sigma, &
@@ -213,9 +212,7 @@ program main
          write(error_unit, '(a)') error%message
          error stop
       end if
-      hesslist%list = list
-      deallocate(list)
-      call model%get_hessian(mol, solver, cache, error, hesslist, &
+      call model%get_hessian(mol, solver, cache, error, hesslist, list, &
       & unit=output_unit, verbosity=verbosity)
       call timer%pop
       if (verbosity > 1) then

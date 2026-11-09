@@ -152,12 +152,12 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, h
    type(mchrg_cache), intent(in), optional :: cache
 
    !> Second derivative of the energy w.r.t. the Cartesian coordinates in
-   !> compressed storage with the factored charge constraint term, used if hess
-   !> is absent
+   !> compressed storage on the neighborlist with the factored charge
+   !> constraint term, used if hess is absent
    type(mchrg_hessian), intent(in), optional :: hessian
 
    !> Neighborlist of the compressed derivatives of the partial charges in the
-   !> cache
+   !> cache and of the compressed Hessian
    type(csr_list), intent(in), optional :: list
 
    integer :: iat, jat, isp, jsp, ic, jc
@@ -277,8 +277,8 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, h
       end do
       write(unit, '(78("-"))')
       write(unit, '(a)')
-   else if (present(hessian)) then
-      call write_ascii_hessian_list(unit, mol, hessian)
+   else if (present(hessian) .and. present(list)) then
+      call write_ascii_hessian_list(unit, mol, hessian, list)
    end if
 
    if (present(press)) then
@@ -318,14 +318,14 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, h
 end subroutine write_ascii_results
 
 
-!> Write the Hessian in compressed storage, the blocks on the pattern of its list
+!> Write the Hessian in compressed storage, the blocks on the pattern of the list
 !> including the charge constraint term and the factors of this term, which
 !> give the blocks outside of the pattern. The rows follow the order of the
 !> upper triangles of the list, which only hold the blocks of the atoms y >= x
 !> of each row x.
 !> The lines of each row are formatted in parallel, as the format of the dense
 !> Hessian, and the rows are written in order.
-subroutine write_ascii_hessian_list(unit, mol, hessian)
+subroutine write_ascii_hessian_list(unit, mol, hessian, list)
 
    !> Unit for output
    integer, intent(in) :: unit
@@ -336,6 +336,9 @@ subroutine write_ascii_hessian_list(unit, mol, hessian)
    !> Second derivative of the energy w.r.t. the Cartesian coordinates in
    !> compressed storage with the factored charge constraint term
    type(mchrg_hessian), intent(in) :: hessian
+
+   !> Sorted complete neighborlist of the Hessian
+   type(csr_list), intent(in) :: list
 
    integer :: iat, jat, isp, jsp, ic, pos
    integer(i8) :: hat, hoff
@@ -354,11 +357,11 @@ subroutine write_ascii_hessian_list(unit, mol, hessian)
    dnorm2 = sum(hessian%dlambda**2)
    hnorm = usum**2 * dnorm2**2
    !$omp parallel do default(none) schedule(runtime) reduction(+:hnorm) &
-   !$omp shared(mol, hessian, usum) private(iat, jat, ic, hat, hoff, hblk)
+   !$omp shared(mol, hessian, list, usum) private(iat, jat, ic, hat, hoff, hblk)
    do iat = 1, mol%nat
-      hoff = hessian%list%inl(iat) - hessian%hinl(iat)
+      hoff = list%inl(iat) - hessian%hinl(iat)
       do hat = hessian%hinl(iat), hessian%hinl(iat + 1) - 1
-         jat = hessian%list%nlat(hat + hoff)
+         jat = list%nlat(hat + hoff)
          do ic = 1, 3
             hblk(:, ic) = hessian%hesslist(:, ic, hat) &
                & + usum * hessian%dlambda(ic, iat) * hessian%dlambda(:, jat)
@@ -387,16 +390,16 @@ subroutine write_ascii_hessian_list(unit, mol, hessian)
    & "#", "Z", "#", "A", "component", "d2E/dxdR", "d2E/dydR", "d2E/dzdR"
    write(unit, '(78("-"))')
    !$omp parallel do default(none) ordered schedule(dynamic) &
-   !$omp shared(unit, mol, hessian) &
+   !$omp shared(unit, mol, hessian, list) &
    !$omp private(iat, jat, isp, jsp, ic, hat, hoff, pos, hrow, buffer)
    do iat = 1, mol%nat
       isp = mol%id(iat)
       allocate(character(len=3 * (hlen + 1) &
          & * (hessian%hinl(iat + 1) - hessian%hinl(iat))) :: buffer)
       pos = 0
-      hoff = hessian%list%inl(iat) - hessian%hinl(iat)
+      hoff = list%inl(iat) - hessian%hinl(iat)
       do hat = hessian%hinl(iat), hessian%hinl(iat + 1) - 1
-         jat = hessian%list%nlat(hat + hoff)
+         jat = list%nlat(hat + hoff)
          jsp = mol%id(jat)
          do ic = 1, 3
             hrow(:) = hessian%hesslist(:, ic, hat) + hessian%weight &
