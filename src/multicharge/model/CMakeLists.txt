@@ -21,6 +21,7 @@ list(
   "${dir}/eeq.f90"
   "${dir}/eeqbc.f90"
   "${dir}/type.F90"
+  "${dir}/hessian.f90"
   "${dir}/cache.f90"
 )
 
