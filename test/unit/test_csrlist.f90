@@ -144,9 +144,9 @@ end subroutine solver_maker
 
 
 !> Sorted complete neighbour list
-subroutine get_sorted_list(list, mol, error, lcutoff, wsc)
+subroutine get_sorted_list(list, mol, error, lcutoff, wsc, complete)
 
-   !> Sorted complete neighbour list
+   !> Sorted neighbour list, complete by default
    type(csr_list), intent(out) :: list
 
    !> Molecular structure data
@@ -161,9 +161,15 @@ subroutine get_sorted_list(list, mol, error, lcutoff, wsc)
    !> Wigner-Seitz cell, receives the images of the entries of a periodic list
    type(wignerseitz_cell), intent(inout), optional :: wsc
 
-   type(distance_screening) :: screen
+   !> Keep both entries of each pair, false for a half list
+   logical, intent(in), optional :: complete
 
-   call new_csr_list(list, screen, mol, error, wsc, lcutoff, complete=.true.)
+   type(distance_screening) :: screen
+   logical :: lcomplete
+
+   lcomplete = .true.
+   if (present(complete)) lcomplete = complete
+   call new_csr_list(list, screen, mol, error, wsc, lcutoff, complete=lcomplete)
    if (allocated(error)) return
    call sort_neighborlist(list, wsc)
 
@@ -1915,7 +1921,8 @@ subroutine test_implicit_hessian(error, mol, model, nlcutoff)
 end subroutine test_implicit_hessian
 
 
-!> Check the Hessian on a complete neighbour list against the dense one
+!> Check the Hessian on a complete neighbour list against the dense one, with the
+!> pair arrays and blocks on the complete list and on the sorted half list
 subroutine test_hessian(error, mol, model)
 
    !> Error handling
@@ -1929,12 +1936,14 @@ subroutine test_hessian(error, mol, model)
 
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
-   type(mchrg_cache), allocatable :: cache
-   type(csr_list), allocatable :: list
-   type(mchrg_hessian), allocatable :: sphess
-   integer :: ndim
+   type(mchrg_cache), allocatable :: cache, hcache
+   type(csr_list), allocatable :: list, half
+   type(mchrg_hessian), allocatable :: sphess, hlhess
+   integer :: ndim, iat, jat, pos
+   integer(i8) :: kat, hat
    real(wp), parameter :: trans(3, 1) = 0.0_wp
-   real(wp), allocatable :: hessian(:, :), refhess(:, :)
+   real(wp), allocatable :: hessian(:, :), refhess(:, :), hhessian(:, :)
+   real(wp), allocatable :: qvec(:), hqvec(:), dcn(:, :), dqloc(:, :)
 
    allocate(cg_input :: solver_input)
    select type (solver_input)
@@ -1948,7 +1957,8 @@ subroutine test_hessian(error, mol, model)
    if (allocated(error)) return
 
    ndim = 3*mol%nat
-   allocate(hessian(ndim, ndim), refhess(ndim, ndim))
+   allocate(hessian(ndim, ndim), refhess(ndim, ndim), hhessian(ndim, ndim))
+   allocate(qvec(mol%nat), hqvec(mol%nat))
 
    allocate(list)
    call get_sorted_list(list, mol, error, cutoff)
@@ -1971,20 +1981,72 @@ subroutine test_hessian(error, mol, model)
       deallocate(cache)
       allocate(cache, sphess)
       call model%update(mol, cache, trans, grad=.false., hess=.true., list=list)
-      call model%solve(mol, solver, cache, error, list=list)
+      call model%solve(mol, solver, cache, error, qvec=qvec, list=list)
       if (allocated(error)) return
       call model%get_hessian(mol, solver, cache, error, sphess, list=list)
+      if (allocated(error)) return
+
+      ! Pair arrays and blocks on the sorted half list, complete rows from list
+      allocate(hcache, hlhess, half)
+      call get_sorted_list(half, mol, error, cutoff, complete=.false.)
+      if (allocated(error)) return
+      call model%update(mol, hcache, trans, grad=.false., hess=.true., list=half)
+      call model%solve(mol, solver, hcache, error, qvec=hqvec, list=half)
+      if (allocated(error)) return
+      call move_alloc(half, hlhess%list)
+      call model%get_hessian(mol, solver, hcache, error, hlhess, list=list)
       if (allocated(error)) return
    class default
       call test_failed(error, "Analytical Hessian requires the EEQBC model")
       return
    end select
    call expand_hessian(mol, list, sphess, hessian)
+   call expand_hessian(mol, hlhess%list, hlhess, hhessian)
 
    if (any(abs(hessian - refhess) > thr2)) then
       call test_failed(error, "Hessian does not match the dense one")
       print'(a)', "diff:"
       print'(3es21.12)', hessian - refhess
+      return
+   end if
+
+   if (any(abs(hqvec - qvec) > thr)) then
+      call test_failed(error, "Charges on the half list do not match the complete list")
+      print'(3es21.12)', hqvec - qvec
+      return
+   end if
+
+   ! Each entry of the complete list is held once or as the mirrored entry,
+   ! dCN_j/dR_i = -dCN_i/dR_j and dqloc_j/dR_i = dqloc_i/dR_j
+   allocate(dcn(3, size(list%nlat)), dqloc(3, size(list%nlat)))
+   do iat = 1, mol%nat
+      do kat = list%inl(iat), list%inl(iat + 1) - 1
+         jat = list%nlat(kat)
+         if (jat >= iat) then
+            hat = kat - list%inl(iat) + hcache%hinl(iat)
+            dcn(:, kat) = hcache%dcndrlist(:, hat)
+            dqloc(:, kat) = hcache%dqlocdrlist(:, hat)
+         else
+            pos = findloc(hlhess%list%nlat(hlhess%list%inl(jat): &
+               & hlhess%list%inl(jat + 1) - 1), iat, dim=1)
+            hat = hlhess%list%inl(jat) + pos - 1
+            dcn(:, kat) = -hcache%dcndrlist(:, hat)
+            dqloc(:, kat) = hcache%dqlocdrlist(:, hat)
+         end if
+      end do
+   end do
+   if (any(abs(dcn - cache%dcndrlist) > thr) &
+      & .or. any(abs(dqloc - cache%dqlocdrlist) > thr)) then
+      call test_failed(error, "CN derivatives on the half list do not mirror "// &
+         & "the complete list")
+      return
+   end if
+
+   if (any(abs(hhessian - hessian) > thr1)) then
+      call test_failed(error, "Hessian on the half list does not match the "// &
+         & "complete list")
+      print'(a)', "diff:"
+      print'(3es21.12)', hhessian - hessian
       return
    end if
 
@@ -1998,7 +2060,8 @@ subroutine test_hessian(error, mol, model)
 end subroutine test_hessian
 
 
-!> Check the external Hessian on a complete list against the dense one
+!> Check the external Hessian on a complete list against the dense one, with the
+!> pair arrays and blocks on the complete list and on the sorted half list
 subroutine test_external_hessian(error, mol, model)
 
    !> Error handling
@@ -2012,13 +2075,13 @@ subroutine test_external_hessian(error, mol, model)
 
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
-   type(mchrg_cache), allocatable :: cache
-   type(csr_list), allocatable :: list, qlist, rlist
-   type(mchrg_hessian), allocatable :: sphess
+   type(mchrg_cache), allocatable :: cache, hcache
+   type(csr_list), allocatable :: list, qlist, rlist, half
+   type(mchrg_hessian), allocatable :: sphess, hlhess
    integer :: ndim
    real(wp), allocatable :: dfdq(:), d2fdq2(:, :), dfdrdq(:, :, :), qval(:)
    real(wp), parameter :: trans(3, 1) = 0.0_wp
-   real(wp), allocatable :: rval(:, :), hessian(:, :), refhess(:, :)
+   real(wp), allocatable :: rval(:, :), hessian(:, :), refhess(:, :), hhessian(:, :)
 
    allocate(cg_input :: solver_input)
    select type (solver_input)
@@ -2045,7 +2108,7 @@ subroutine test_external_hessian(error, mol, model)
    call get_external_derivs(mol, qlist, rlist, dfdq, d2fdq2, dfdrdq, qval, rval)
 
    ndim = 3*mol%nat
-   allocate(hessian(ndim, ndim), refhess(ndim, ndim))
+   allocate(hessian(ndim, ndim), refhess(ndim, ndim), hhessian(ndim, ndim))
    select type (model)
    type is (eeqbc_model)
       allocate(cache)
@@ -2065,16 +2128,37 @@ subroutine test_external_hessian(error, mol, model)
       call model%get_external_hessian(mol, solver, cache, error, dfdq, qval, &
          & qlist, rval, rlist, sphess, list)
       if (allocated(error)) return
+
+      ! Pair arrays and blocks on the sorted half list, complete rows from list
+      allocate(hcache, hlhess, half)
+      call get_sorted_list(half, mol, error, cutoff, complete=.false.)
+      if (allocated(error)) return
+      call model%update(mol, hcache, trans, grad=.false., hess=.true., list=half)
+      call model%solve(mol, solver, hcache, error, list=half)
+      if (allocated(error)) return
+      call move_alloc(half, hlhess%list)
+      call model%get_external_hessian(mol, solver, hcache, error, dfdq, qval, &
+         & qlist, rval, rlist, hlhess, list)
+      if (allocated(error)) return
    class default
       call test_failed(error, "Analytical Hessian requires the EEQBC model")
       return
    end select
    call expand_hessian(mol, list, sphess, hessian)
+   call expand_hessian(mol, hlhess%list, hlhess, hhessian)
 
    if (any(abs(hessian - refhess) > thr2)) then
       call test_failed(error, "External Hessian does not match the dense one")
       print'(a)', "diff:"
       print'(3es21.12)', hessian - refhess
+      return
+   end if
+
+   if (any(abs(hhessian - hessian) > thr1)) then
+      call test_failed(error, "External Hessian on the half list does not match "// &
+         & "the complete list")
+      print'(a)', "diff:"
+      print'(3es21.12)', hhessian - hessian
    end if
 
 end subroutine test_external_hessian

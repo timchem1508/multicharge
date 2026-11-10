@@ -716,17 +716,17 @@ end subroutine invert
 
 
 !> Invert a symmetric positive definite matrix on a neighborlist
-subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
+subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error, half)
    !> Conjugate-gradient solver instance
    class(cg_solver), intent(in) :: self
 
-   !> Coefficient matrix values on the upper triangle of the list
+   !> Coefficient matrix values on the upper triangle of the list of the values
    real(wp), intent(in) :: alist(:)
 
-   !> Sorted complete neighborlist representation of the matrix
-   type(csr_list), intent(in) :: list
+   !> Sorted complete neighborlist, its complete rows select the subsystems
+   type(csr_list), intent(in), target :: list
 
-   !> Inverse on the upper triangle of the list
+   !> Inverse on the upper triangle of the list of the values
    real(wp), intent(out) :: ainvlist(:)
 
    !> Cartesian coordinates for spatially compact blocks
@@ -738,12 +738,17 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
+   !> Sorted list of the values, each row starts with the upper triangle of the
+   !> same row of the complete list, absent for the complete list itself
+   type(csr_list), intent(in), optional, target :: half
+
    ! Size of the system, number of blocks and counters
    integer :: ndim, nblk, iblk, iat, max_nnz
    ! Atoms ordered into blocks of columns
    integer, allocatable :: order(:)
-   ! End of the upper triangle in each row of the neighborlist
-   integer(i8), allocatable :: ufin(:)
+   ! List of the values and the end of the upper triangle in each of its rows
+   type(csr_list), pointer :: hlist
+   integer(i8), allocatable :: hfin(:)
    ! Per-thread workspace for the subsystem matrix and block CG vectors
    integer, allocatable :: loc(:), col_id(:), sidx(:), subinl(:), subjat(:)
    real(wp), allocatable :: subdiag(:), prec(:), subval(:)
@@ -771,9 +776,18 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
          & "Inversion on a neighborlist requires one entry per atom pair.")
       return
    end if
+   if (present(half)) then
+      hlist => half
+   else
+      hlist => list
+   end if
    ndim = size(list%inl) - 1
-   if (size(ainvlist, kind=i8) /= size(list%nlat, kind=i8) &
-      & .or. size(alist, kind=i8) < size(list%nlat, kind=i8)) then
+   if (size(hlist%inl) /= ndim + 1) then
+      call fatal_error(error, "Dimension mismatch between the lists of the inverse.")
+      return
+   end if
+   if (size(ainvlist, kind=i8) /= size(hlist%nlat, kind=i8) &
+      & .or. size(alist, kind=i8) < size(hlist%nlat, kind=i8)) then
       call fatal_error(error, "Dimension mismatch between list and ainvlist.")
       return
    end if
@@ -800,12 +814,12 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    end if
    nblk = (ndim + block_size_def - 1) / block_size_def
 
-   ! Precompute upper-triangle row bounds once
-   allocate(ufin(ndim))
+   ! Precompute upper-triangle row bounds of the values once
+   allocate(hfin(ndim))
    max_nnz = 0
    do iat = 1, ndim
-      ufin(iat) = find_lower_start(list, iat) - 1_i8
-      max_nnz = max_nnz + int(ufin(iat) - list%inl(iat))
+      hfin(iat) = find_lower_start(hlist, iat) - 1_i8
+      max_nnz = max_nnz + int(hfin(iat) - hlist%inl(iat))
    end do
 
    call new_cg_solver(blksolver, cg_input(cgmiter=self%cgmiter, &
@@ -818,7 +832,7 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
    maxsub = 0
    maxiter = 0
    !$omp parallel default(none) &
-   !$omp shared(ndim, nblk, max_nnz, order, ufin, alist, list, ainvlist) &
+   !$omp shared(ndim, nblk, max_nnz, order, hfin, alist, list, hlist, ainvlist) &
    !$omp shared(blksolver, error, failed) &
    !$omp private(iblk, loc, col_id, sidx, subdiag, prec, subinl, subjat, subval) &
    !$omp private(work_x, work_r, work_z, work_p, work_q, nsub, niter, skip, tblk) &
@@ -834,7 +848,7 @@ subroutine invert_list(self, alist, list, ainvlist, xyz, new_unit, error)
       !$omp atomic read
       skip = failed
       if (skip) cycle
-      call invert_block(blksolver, alist, list, ufin, &
+      call invert_block(blksolver, alist, list, hlist, hfin, &
          & order((iblk - 1) * block_size_def + 1:min(iblk * block_size_def, ndim)), &
          & loc, col_id, sidx, subdiag, prec, subinl, subjat, subval, &
          & work_x, work_r, work_z, work_p, work_q, ainvlist, nsub, niter, &
@@ -869,20 +883,24 @@ end subroutine invert_list
 
 
 !> Solve a block of columns of the inverse on its subsystem
-subroutine invert_block(solver, alist, list, ufin, cols, loc, col_id, sidx, &
+subroutine invert_block(solver, alist, list, hlist, hfin, cols, loc, col_id, sidx, &
    & subdiag, prec, subinl, subjat, subval, work_x, work_r, work_z, work_p, &
    & work_q, ainvlist, nsub, niter, times, error, failed)
    !> Conjugate-gradient solver for the block
    type(cg_solver), intent(in) :: solver
 
-   !> Coefficient matrix values on the upper triangle of the list
+   !> Coefficient matrix values on the upper triangle of the list of the values
    real(wp), intent(in) :: alist(:)
 
-   !> Sorted complete neighborlist representation of the matrix
+   !> Sorted complete neighborlist, its complete rows select the subsystem
    type(csr_list), intent(in) :: list
 
-   !> End of the upper triangle in each row of the neighborlist
-   integer(i8), intent(in) :: ufin(:)
+   !> Sorted list of the values, each row starts with the upper triangle of the
+   !> same row of the complete list
+   type(csr_list), intent(in) :: hlist
+
+   !> End of the upper triangle in each row of the list of the values
+   integer(i8), intent(in) :: hfin(:)
 
    !> Atoms of the block columns
    integer, intent(in) :: cols(:)
@@ -915,7 +933,7 @@ subroutine invert_block(solver, alist, list, ufin, cols, loc, col_id, sidx, &
    real(wp), target, intent(inout) :: work_x(:), work_r(:), work_z(:)
    real(wp), target, intent(inout) :: work_p(:), work_q(:)
 
-   !> Inverse on the pattern of the list, the rows of the block atoms are set
+   !> Inverse on the list of the values, the rows of the block atoms are set
    real(wp), intent(inout) :: ainvlist(:)
 
    !> Number of atoms in the subsystem
@@ -963,7 +981,7 @@ subroutine invert_block(solver, alist, list, ufin, cols, loc, col_id, sidx, &
    xsub(1:ncol, 1:nsub) => work_x(1:ncol * nsub)
    rsub(1:ncol, 1:nsub) => work_r(1:ncol * nsub)
 
-   call solve_sub_block(solver, alist, list, ufin, cols, nsub, sidx, loc, &
+   call solve_sub_block(solver, alist, hlist, hfin, cols, nsub, sidx, loc, &
       & col_id, subdiag, prec, subinl, subjat, subval, xsub, rsub, work_z, &
       & work_p, work_q, niter, blkerror)
 
@@ -977,8 +995,8 @@ subroutine invert_block(solver, alist, list, ufin, cols, loc, col_id, sidx, &
    else
       do ivec = 1, ncol
          iat = cols(ivec)
-         do kat = list%inl(iat), ufin(iat)
-            ainvlist(kat) = xsub(ivec, loc(list%nlat(kat)))
+         do kat = hlist%inl(iat), hfin(iat)
+            ainvlist(kat) = xsub(ivec, loc(hlist%nlat(kat)))
          end do
       end do
    end if
@@ -1000,10 +1018,10 @@ subroutine solve_sub_block(self, alist, list, ufin, cols, nsub, sidx, loc, &
    !> Coefficient matrix values on the upper triangle of the neighborlist
    real(wp), intent(in) :: alist(:)
 
-   !> Sorted complete neighborlist representation of the matrix
+   !> Sorted list with the matrix on the upper triangle of its rows
    type(csr_list), intent(in) :: list
 
-   !> End of the upper triangle in each row of the neighborlist
+   !> End of the upper triangle in each row of the list
    integer(i8), intent(in) :: ufin(:)
 
    !> Atoms of the block columns
@@ -1205,10 +1223,10 @@ subroutine get_sub_matrix_and_res(alist, list, ufin, cols, nsub, sidx, loc, &
    !> Matrix values on the upper triangle of the list
    real(wp), intent(in) :: alist(:)
 
-   !> Sorted complete neighborlist representation of the matrix
+   !> Sorted list with the matrix on the upper triangle of its rows
    type(csr_list), intent(in) :: list
 
-   !> End of the upper triangle in each row of the neighborlist
+   !> End of the upper triangle in each row of the list
    integer(i8), intent(in) :: ufin(:)
 
    !> Atoms of the block columns

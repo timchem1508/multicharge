@@ -149,10 +149,10 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, h
    !> Cache with the compressed charge derivatives
    type(mchrg_cache), intent(in), optional :: cache
 
-   !> Hessian in compressed storage on the neighborlist
+   !> Hessian in compressed storage on its list
    type(mchrg_hessian), intent(in), optional :: hessian
 
-   !> Neighborlist of the compressed charge derivatives and Hessian
+   !> Neighborlist of the compressed charge derivatives
    type(csr_list), intent(in), optional :: list
 
    integer :: iat, jat, isp, jsp, ic, jc
@@ -272,8 +272,9 @@ subroutine write_ascii_results(unit, mol, energy, gradient, sigma, dqdr, dqdL, h
       end do
       write(unit, '(78("-"))')
       write(unit, '(a)')
-   else if (present(hessian) .and. present(list)) then
-      call write_ascii_hessian_list(unit, mol, hessian, list)
+   else if (present(hessian)) then
+      if (allocated(hessian%list)) &
+         & call write_ascii_hessian_list(unit, mol, hessian, hessian%list)
    end if
 
    if (present(press)) then
@@ -325,11 +326,11 @@ subroutine write_ascii_hessian_list(unit, mol, hessian, list)
    !> Hessian in compressed storage
    type(mchrg_hessian), intent(in) :: hessian
 
-   !> Sorted complete neighborlist of the Hessian
+   !> Sorted list of the blocks of the Hessian
    type(csr_list), intent(in) :: list
 
    integer :: iat, jat, isp, jsp, ic, pos
-   integer(i8) :: hat, nfin
+   integer(i8) :: hat, nfin, nblk
    real(wp) :: hblk(3, 3), dnorm2, hnorm, usum
    real(wp) :: hrow(3)
    character(len=:), allocatable :: buffer
@@ -340,11 +341,13 @@ subroutine write_ascii_hessian_list(unit, mol, hessian, list)
    usum = hessian%weight
    dnorm2 = sum(hessian%dlambda**2)
    hnorm = usum**2 * dnorm2**2
-   !$omp parallel do default(none) schedule(runtime) reduction(+:hnorm) &
+   nblk = 0
+   !$omp parallel do default(none) schedule(runtime) reduction(+:hnorm, nblk) &
    !$omp shared(mol, hessian, list, usum) &
    !$omp private(iat, jat, ic, hat, nfin, hblk)
    do iat = 1, mol%nat
       nfin = find_lower_start(list, iat) - 1
+      nblk = nblk + (nfin - list%inl(iat) + 1)
       do hat = list%inl(iat), nfin
          jat = list%nlat(hat)
          do ic = 1, 3
@@ -365,10 +368,9 @@ subroutine write_ascii_hessian_list(unit, mol, hessian, list)
 
    write(unit, '(a,":", t25, es20.13, 1x, a)') &
    & "Hessian matrix norm", sqrt(max(hnorm, 0.0_wp)), "Eh/a0^2"
-   ! Each pair of the complete list is held once in the upper triangles
+   ! Each pair of the list is held once in the upper triangles
    write(unit, '(a, 1x, i0, a, f0.1, a)') "Hessian blocks on the pattern:", &
-   & (size(list%nlat, kind=i8) + mol%nat) / 2, " (", &
-   & real((size(list%nlat, kind=i8) + mol%nat) / 2, wp) / mol%nat, " per atom)"
+   & nblk, " (", real(nblk, wp) / mol%nat, " per atom)"
    write(unit, '(a)') &
    & "Upper triangle, the block of A and # is the transpose of the block of # and A"
    write(unit, '(78("-"))')

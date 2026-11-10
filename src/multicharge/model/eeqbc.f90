@@ -107,6 +107,11 @@ module multicharge_model_eeqbc
    !> which their products in the partial derivatives and the Hessian are skipped
    real(wp), parameter :: cnthr = epsilon(1.0_wp)**2
 
+   !> Sign of a mirrored CN derivative, dCN_i/dR_j = -dCN_j/dR_i for the
+   !> symmetric erf count without CN cap. The EN-weighted count of the local
+   !> charges is antisymmetric, its mirrored derivative keeps the sign.
+   real(wp), parameter :: cn_mirror = -1.0_wp
+
    !> Default exponent of error function in bond capacitance
    real(wp), parameter :: default_kbc = 0.65_wp
 
@@ -278,32 +283,28 @@ subroutine update_ncoord_list(self, mol, cache, trans, deriv, list)
    real(wp), intent(in) :: trans(:, :)
    !> Flag for the position and strain derivatives
    logical, intent(in) :: deriv
-   !> Sorted neighborlist, complete for the derivatives
+   !> Sorted neighborlist, half or complete, holds the pair arrays of the cache
    type(csr_list), intent(in) :: list
 
    integer(i8) :: nnz
 
+   ! Derivatives of a previous update may belong to another list, the transposed
+   ! positions and CN entries on the complete list are formed on first use
+   if (allocated(cache%dcndrlist)) deallocate(cache%dcndrlist)
+   if (allocated(cache%dqlocdrlist)) deallocate(cache%dqlocdrlist)
+   if (allocated(cache%tpos)) deallocate(cache%tpos)
+   if (allocated(cache%cninl)) deallocate(cache%cninl)
+   if (allocated(cache%cnpos)) deallocate(cache%cnpos)
+   cache%hinl = list%inl
+
    if (deriv) then
       nnz = size(list%nlat, kind=i8)
-      if (allocated(cache%dcndrlist)) deallocate(cache%dcndrlist)
-      if (allocated(cache%dqlocdrlist)) deallocate(cache%dqlocdrlist)
-      if (allocated(cache%tpos)) deallocate(cache%tpos)
-      if (allocated(cache%cninl)) deallocate(cache%cninl)
-      if (allocated(cache%cnpos)) deallocate(cache%cnpos)
       allocate(cache%dcndrlist(3, nnz), cache%dqlocdrlist(3, nnz))
       call self%ncoord%get_coordination_number(mol, trans, cache%cn, &
          & dcndL=cache%dcndL, list=list, dcndrlist=cache%dcndrlist)
       call self%local_charge(mol, trans, cache%qloc, dqlocdL=cache%dqlocdL, &
          & list=list, dqlocdrlist=cache%dqlocdrlist)
-      call get_transposed_positions(list, cache%tpos)
-      call get_cn_entries_list(mol, list, cache, cache%tpos, cache%cninl, cache%cnpos)
    else
-      ! Derivatives of a previous update may belong to another list
-      if (allocated(cache%dcndrlist)) deallocate(cache%dcndrlist)
-      if (allocated(cache%dqlocdrlist)) deallocate(cache%dqlocdrlist)
-      if (allocated(cache%tpos)) deallocate(cache%tpos)
-      if (allocated(cache%cninl)) deallocate(cache%cninl)
-      if (allocated(cache%cnpos)) deallocate(cache%cnpos)
       call self%ncoord%get_coordination_number(mol, trans, cache%cn, list=list)
       call self%local_charge(mol, trans, cache%qloc, list=list)
    end if
@@ -679,12 +680,14 @@ subroutine get_xvec_derivs_0d_list(self, mol, list, cache, beta)
    real(wp), intent(in) :: beta
 
    integer :: iat, izp, jat, jzp, xat, nrow, xent, kmax
-   integer(i8) :: ist, kat, cat, cent
-   real(wp) :: vec(3), cij, dGc(3), dSc(3, 3)
+   integer(i8) :: ist, kat, cat, cent, hat
+   real(wp) :: vec(3), cij, dGc(3), dSc(3, 3), dcn(3)
    real(wp), allocatable :: dtmpdL(:, :, :), drow(:, :)
    integer, allocatable :: pos(:)
 
    if (.not. allocated(cache%tpos)) call get_transposed_positions(list, cache%tpos)
+   if (.not. allocated(cache%cninl)) call get_cn_entries_list(mol, list, cache, &
+      & cache%tpos, cache%cninl, cache%cnpos)
    allocate(dtmpdL(3, 3, mol%nat))
    !$omp parallel do default(none) schedule(runtime) &
    !$omp shared(self, mol, cache, dtmpdL) private(iat, izp)
@@ -696,9 +699,11 @@ subroutine get_xvec_derivs_0d_list(self, mol, list, cache, beta)
    !$omp end parallel do
    kmax = int(maxval(list%inl(2:mol%nat + 1) - list%inl(:mol%nat)))
 
+   ! The pair arrays of the cache hold each pair at its upper entry in the rows
+   ! cache%hinl of the list of the update, the half list or this list
    !$omp parallel default(none) &
    !$omp shared(cache, mol, list, self, beta, dtmpdL, kmax) &
-   !$omp private(cent) &
+   !$omp private(cent, hat, dcn) &
    !$omp private(iat, izp, jat, jzp, xat, nrow, xent, ist, kat, cat, vec) &
    !$omp private(cij, dGc, dSc, pos, drow)
    allocate(pos(mol%nat), source=0)
@@ -717,15 +722,27 @@ subroutine get_xvec_derivs_0d_list(self, mol, list, cache, beta)
       do kat = list%inl(iat), list%inl(iat + 1) - 1
          jat = list%nlat(kat)
          jzp = mol%id(jat)
-         cij = cache%clist(min(kat, cache%tpos(kat)))
+         if (jat >= iat) then
+            hat = kat - ist + cache%hinl(iat)
+         else
+            hat = cache%tpos(kat) - list%inl(jat) + cache%hinl(jat)
+         end if
+         cij = cache%clist(hat)
          do cent = cache%cninl(jat), cache%cninl(jat + 1) - 1
             cat = cache%cnpos(cent)
             xat = list%nlat(cat)
             xent = pos(xat)
             if (xent == 0) cycle
-            drow(:, xent) = drow(:, xent) + beta * cij &
-               & * (self%kcnchi(jzp) * cache%dcndrlist(:, cache%tpos(cat)) &
-               & + self%kqchi(jzp) * cache%dqlocdrlist(:, cache%tpos(cat)))
+            ! dCN_j/dR_x in the row of x, or mirrored from the row of j
+            if (jat >= xat) then
+               hat = cache%tpos(cat) - list%inl(xat) + cache%hinl(xat)
+               dcn = cache%dcndrlist(:, hat)
+            else
+               hat = cat - list%inl(jat) + cache%hinl(jat)
+               dcn = cn_mirror * cache%dcndrlist(:, hat)
+            end if
+            drow(:, xent) = drow(:, xent) + beta * cij * (self%kcnchi(jzp) * dcn &
+               & + self%kqchi(jzp) * cache%dqlocdrlist(:, hat))
          end do
          cache%dabdL(:, :, iat) = cache%dabdL(:, :, iat) &
             & + beta * cij * dtmpdL(:, :, jat)
@@ -787,6 +804,8 @@ subroutine get_xvec_derivs_3d_list(self, mol, list, cache, beta)
 
    call get_dir_trans(mol, dtrans, cutoff)
    if (.not. allocated(cache%tpos)) call get_transposed_positions(list, cache%tpos)
+   if (.not. allocated(cache%cninl)) call get_cn_entries_list(mol, list, cache, &
+      & cache%tpos, cache%cninl, cache%cnpos)
 
    allocate(dtmpdL(3, 3, mol%nat))
    !$omp parallel do default(none) schedule(runtime) &
@@ -945,6 +964,8 @@ subroutine get_coulomb_derivs(self, mol, ndim, cache, alpha, p, list, dafdr)
 
    if (present(list)) then
       if (.not. allocated(cache%tpos)) call get_transposed_positions(list, cache%tpos)
+      if (.not. allocated(cache%cninl)) call get_cn_entries_list(mol, list, cache, &
+         & cache%tpos, cache%cninl, cache%cnpos)
       if (any(mol%periodic)) then
          call get_damat_3d_list(self, mol, list, cache, alpha, p, dlist, dadL)
       else
@@ -1254,8 +1275,9 @@ subroutine get_damat_0d_list(self, mol, list, cache, alpha, p, dlist, dadL)
    real(wp), intent(inout) :: dadL(:, :, :)
 
    integer :: iat, izp, jat, jzp, xat, nrow, xent, kmax
-   integer(i8) :: ist, kat, cat, cent
+   integer(i8) :: ist, kat, cat, cent, hat
    real(wp) :: vec(3), r1, r2, gam, arg, dtmp, norm_cn, hardi, wtmp, wcni, cij
+   real(wp) :: dcn(3)
    real(wp) :: radi, radj, dradi, dradj, dG(3), dS(3, 3), dGc(3), dSc(3, 3)
    real(wp), allocatable :: rad(:), drad(:), drow(:, :)
    integer, allocatable :: pos(:)
@@ -1263,9 +1285,11 @@ subroutine get_damat_0d_list(self, mol, list, cache, alpha, p, dlist, dadL)
    allocate(rad(mol%nat), drad(mol%nat))
    kmax = int(maxval(list%inl(2:mol%nat + 1) - list%inl(:mol%nat)))
 
+   ! The pair arrays of the cache hold each pair at its upper entry in the rows
+   ! cache%hinl of the list of the update, the half list or this list
    !$omp parallel default(none) &
    !$omp shared(cache, mol, list, self, alpha, p, dlist, dadL, rad, drad, kmax) &
-   !$omp private(cent) &
+   !$omp private(cent, hat, dcn) &
    !$omp private(iat, izp, jat, jzp, xat, nrow, xent, ist, kat, cat, gam) &
    !$omp private(vec, r1, r2, dtmp, norm_cn, arg, hardi, wtmp, wcni, cij, radi) &
    !$omp private(radj, dradi, dradj, dG, dS, dGc, dSc, pos, drow)
@@ -1303,7 +1327,12 @@ subroutine get_damat_0d_list(self, mol, list, cache, alpha, p, dlist, dadL)
          vec = mol%xyz(:, jat) - mol%xyz(:, iat)
          r2 = vec(1)**2 + vec(2)**2 + vec(3)**2
          r1 = sqrt(r2)
-         cij = cache%clist(min(kat, cache%tpos(kat)))
+         if (jat >= iat) then
+            hat = kat - ist + cache%hinl(iat)
+         else
+            hat = cache%tpos(kat) - list%inl(jat) + cache%hinl(jat)
+         end if
+         cij = cache%clist(hat)
          ! Effective charge width of j
          radj = rad(jat)
          dradj = drad(jat)
@@ -1329,13 +1358,21 @@ subroutine get_damat_0d_list(self, mol, list, cache, alpha, p, dlist, dadL)
          wcni = wcni - wtmp * radi * dradi * gam**3
          dtmp = -wtmp * radj * dradj * gam**3
          drow(:, kat - ist + 1) = drow(:, kat - ist + 1) &
-            & + dtmp * cache%dcndrlist(:, list%inl(jat))
+            & + dtmp * cache%dcndrlist(:, cache%hinl(jat))
          do cent = cache%cninl(jat) + 1, cache%cninl(jat + 1) - 1
             cat = cache%cnpos(cent)
             xat = list%nlat(cat)
             xent = pos(xat)
             if (xent == 0) cycle
-            drow(:, xent) = drow(:, xent) + dtmp * cache%dcndrlist(:, cache%tpos(cat))
+            ! dCN_j/dR_x in the row of x, or mirrored from the row of j
+            if (jat >= xat) then
+               hat = cache%tpos(cat) - list%inl(xat) + cache%hinl(xat)
+               dcn = cache%dcndrlist(:, hat)
+            else
+               hat = cat - list%inl(jat) + cache%hinl(jat)
+               dcn = cn_mirror * cache%dcndrlist(:, hat)
+            end if
+            drow(:, xent) = drow(:, xent) + dtmp * dcn
          end do
          dadL(:, :, iat) = dadL(:, :, iat) + dtmp * cache%dcndL(:, :, jat)
 
@@ -1350,23 +1387,34 @@ subroutine get_damat_0d_list(self, mol, list, cache, alpha, p, dlist, dadL)
          drow(:, kat - ist + 1) = drow(:, kat - ist + 1) + dtmp * dGc
       end do
 
-      ! Hardness derivative
+      ! Hardness derivative, dqloc_i/dR_j in the row of j or mirrored from the row of i
       dtmp = alpha * self%kqeta_pre * self%kqeta(izp) &
          & / cosh(self%kqeta(izp) * cache%qloc(iat))**2 * p(iat) &
-         & * cache%clist(ist)
+         & * cache%clist(cache%hinl(iat))
       do kat = list%inl(iat), list%inl(iat + 1) - 1
+         jat = list%nlat(kat)
+         if (iat >= jat) then
+            hat = cache%tpos(kat) - list%inl(jat) + cache%hinl(jat)
+         else
+            hat = kat - ist + cache%hinl(iat)
+         end if
          drow(:, kat - ist + 1) = drow(:, kat - ist + 1) &
-            & + dtmp * cache%dqlocdrlist(:, cache%tpos(kat))
+            & + dtmp * cache%dqlocdrlist(:, hat)
       end do
       dadL(:, :, iat) = dadL(:, :, iat) + dtmp * cache%dqlocdL(:, :, iat)
 
-      ! Effective charge width derivative
+      ! Effective charge width derivative, dCN_i/dR_j in the row of j or mirrored
       dtmp = -alpha * sqrt2pi * dradi / (radi**2) * p(iat) &
-         & * cache%clist(ist) + wcni
-      drow(:, 1) = drow(:, 1) + dtmp * cache%dcndrlist(:, ist)
+         & * cache%clist(cache%hinl(iat)) + wcni
+      drow(:, 1) = drow(:, 1) + dtmp * cache%dcndrlist(:, cache%hinl(iat))
       do kat = list%inl(iat) + 1, list%inl(iat + 1) - 1
-         drow(:, kat - ist + 1) = drow(:, kat - ist + 1) &
-            & + dtmp * cache%dcndrlist(:, cache%tpos(kat))
+         jat = list%nlat(kat)
+         if (iat >= jat) then
+            dcn = cache%dcndrlist(:, cache%tpos(kat) - list%inl(jat) + cache%hinl(jat))
+         else
+            dcn = cn_mirror * cache%dcndrlist(:, kat - ist + cache%hinl(iat))
+         end if
+         drow(:, kat - ist + 1) = drow(:, kat - ist + 1) + dtmp * dcn
       end do
       dadL(:, :, iat) = dadL(:, :, iat) + dtmp * cache%dcndL(:, :, iat)
 
@@ -3596,20 +3644,51 @@ subroutine get_explicit_hessian_list(self, mol, cache, p, hessian, error, list, 
    !> Optional electronegativity prefactor
    real(wp), intent(in), optional :: beta
 
+   integer(i8), allocatable :: tpos(:)
+
    if (.not. list%complete) then
       call fatal_error(error, "The Hessian on a neighborlist requires a sorted "// &
          & "complete list, see sort_neighborlist")
       return
    end if
-   if (.not. allocated(hessian%hesslist)) then
+   if (.not. allocated(hessian%hesslist) .or. .not. allocated(hessian%list)) then
       call fatal_error(error, "The blocks of the Hessian on the list are not "// &
          & "allocated")
       return
    end if
-   if (size(hessian%hesslist, 3, kind=i8) /= size(list%nlat, kind=i8)) then
-      call fatal_error(error, "The blocks of the Hessian are not on the "// &
-         & "neighborlist")
+   if (size(hessian%hesslist, 3, kind=i8) /= size(hessian%list%nlat, kind=i8)) then
+      call fatal_error(error, "The blocks of the Hessian are not on its list")
       return
+   end if
+   if (.not. allocated(cache%hinl)) then
+      call fatal_error(error, "The cache was not updated on a neighborlist")
+      return
+   end if
+   if (size(cache%hinl) /= size(hessian%list%inl)) then
+      call fatal_error(error, "The blocks of the Hessian are not on the list "// &
+         & "of the update")
+      return
+   end if
+   if (any(cache%hinl /= hessian%list%inl)) then
+      call fatal_error(error, "The blocks of the Hessian are not on the list "// &
+         & "of the update")
+      return
+   end if
+   ! The pair arrays hold each pair once, the mirrored CN derivative is exact
+   ! only without CN cap
+   if (self%ncoord%cut > 0.0_wp .or. self%ncoord_en%cut > 0.0_wp) then
+      call fatal_error(error, "The Hessian on a neighborlist requires the "// &
+         & "coordination numbers without cap")
+      return
+   end if
+   if (.not. allocated(cache%cninl)) then
+      if (allocated(cache%tpos)) then
+         call get_cn_entries_list(mol, list, cache, cache%tpos, cache%cninl, &
+            & cache%cnpos)
+      else
+         call get_transposed_positions(list, tpos)
+         call get_cn_entries_list(mol, list, cache, tpos, cache%cninl, cache%cnpos)
+      end if
    end if
    call get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
       & alphain=alpha, betain=beta)
@@ -3943,7 +4022,8 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    !> Charge-like contraction vector
    real(wp), intent(in) :: p(:)
 
-   !> Molecular nuclear Hessian with allocated blocks on the list
+   !> Molecular nuclear Hessian with allocated blocks on its list, which holds
+   !> the rows cache%hinl of the pair arrays
    type(mchrg_hessian), intent(inout) :: hessian
 
    !> Alpha parameter
@@ -3954,7 +4034,7 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
 
    real(wp) :: alpha, beta
    integer :: iat, jat, kkat, xat, izp, jzp, ic, it, ntouch
-   integer(i8) :: kat, tat, hat, cat, cent, nfin
+   integer(i8) :: kat, tat, hat, cat, cent, nfin, hoff, pat
    real(wp) :: vec(3), norm_cn_i, radi, dradi, d2radi, capi, capj, rvdw
    real(wp) :: tqeta, hardi, dhdcni, d2hdcni2, detai, d2etai
    real(wp) :: W_ii, aWij, wcap_sum, cij, wcni, wcnj, wqloci, wqlocj
@@ -3976,7 +4056,8 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    if (present(betain)) beta = betain
 
    allocate(v(mol%nat))
-   call spsymv_csr(mol%nat, cache%clist, list%inl, list%nlat, p, v, uplo='U')
+   call spsymv_csr(mol%nat, cache%clist, hessian%list%inl, hessian%list%nlat, p, v, &
+      & uplo='U')
 
    allocate(cnacc(mol%nat), qlocacc(mol%nat), dcndiag(3, mol%nat), &
       & dqlocdiag(3, mol%nat), d2cndiag(mol%nat), d2qlocacc(mol%nat), &
@@ -4018,7 +4099,7 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
       wcn(iat) = alpha * W_ii * dhdcni + beta * p(iat) * self%kcnchi(izp)
       wqloc(iat) = alpha * W_ii * detai + beta * p(iat) * self%kqchi(izp)
 
-      cij = cache%clist(list%inl(iat))
+      cij = cache%clist(cache%hinl(iat))
       cnacc(iat) = alpha * W_ii * cij * dhdcni + beta * self%kcnchi(izp) * v(iat)
       qlocacc(iat) = alpha * W_ii * cij * detai + beta * self%kqchi(izp) * v(iat)
       d2cndiag(iat) = alpha * W_ii * cij * d2hdcni2
@@ -4026,11 +4107,12 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    end do
    !$omp end parallel do
 
-   ! Pairwise contributions from the upper triangle of the neighborlist
+   ! Pairwise contributions from the upper triangle of the neighborlist, the
+   ! blocks and the pair arrays of the cache share the rows cache%hinl
    !$omp parallel do default(none) schedule(runtime) &
    !$omp shared(cache, mol, self, list, p, alpha, beta, hessian, rdrad, wcn) &
    !$omp shared(wqloc, radius, drdrad, wcap, wpair, tpos) &
-   !$omp private(iat, jat, izp, jzp, kat, tat, nfin, vec, capi, capj, rvdw) &
+   !$omp private(iat, jat, izp, jzp, kat, tat, nfin, hoff, vec, capi, capj, rvdw) &
    !$omp private(aWij, wcap_sum, cij, wcni, wcnj, wqloci, wqlocj, cni, cnj) &
    !$omp private(wk_ij, wk_ji, wq_ij, wq_ji, kii, kjj, kij, d2pair) &
    !$omp reduction(+:cnacc, dcndiag, dqlocdiag, d2cndiag, diagonal)
@@ -4039,6 +4121,7 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
       capi = self%cap(izp)
 
       nfin = find_lower_start(list, iat) - 1
+      hoff = list%inl(iat) - cache%hinl(iat)
       do kat = list%inl(iat) + 1, nfin
          jat = list%nlat(kat)
          jzp = mol%id(jat)
@@ -4049,7 +4132,7 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
          aWij = alpha * (p(iat) * cache%vrhs(jat) + p(jat) * cache%vrhs(iat))
          wcap_sum = wcap(iat) + wcap(jat) &
             & - beta * (p(iat) * cache%xtmp(jat) + p(jat) * cache%xtmp(iat))
-         cij = cache%clist(kat)
+         cij = cache%clist(kat - hoff)
          wcni = wcn(iat) - beta * self%kcnchi(izp) * p(jat)
          wcnj = wcn(jat) - beta * self%kcnchi(jzp) * p(iat)
          wqloci = wqloc(iat) - beta * self%kqchi(izp) * p(jat)
@@ -4063,7 +4146,8 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
 
          diagonal(:, :, iat) = diagonal(:, :, iat) + d2pair
          diagonal(:, :, jat) = diagonal(:, :, jat) + d2pair
-         hessian%hesslist(:, :, kat) = hessian%hesslist(:, :, kat) - d2pair
+         hessian%hesslist(:, :, kat - hoff) = hessian%hesslist(:, :, kat - hoff) &
+            & - d2pair
 
          cnacc(iat) = cnacc(iat) + cni
          cnacc(jat) = cnacc(jat) + cnj
@@ -4090,10 +4174,10 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
 
    ! Add accumulated diagonal pair blocks
    !$omp parallel do default(none) schedule(static) &
-   !$omp shared(mol, list, hessian, diagonal) &
+   !$omp shared(mol, hessian, diagonal) &
    !$omp private(iat, hat)
    do iat = 1, mol%nat
-      hat = list%inl(iat)
+      hat = hessian%list%inl(iat)
       hessian%hesslist(:, :, hat) = hessian%hesslist(:, :, hat) + diagonal(:, :, iat)
    end do
    !$omp end parallel do
@@ -4104,6 +4188,7 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    !$omp shared(mol, list, cache, hessian, dcndiag, dqlocdiag) &
    !$omp shared(d2cndiag, d2qlocacc, wpair, tpos) &
    !$omp private(iat, jat, kkat, xat, ic, it, ntouch, nfin, kat, tat, hat, cat, cent) &
+   !$omp private(hoff, pat) &
    !$omp private(dcn, dqloc, dx, gcn, gqloc, mark, touch, hmap)
    allocate(gcn(3, mol%nat), gqloc(3, mol%nat), source=0.0_wp)
    allocate(mark(mol%nat), source=.false.)
@@ -4113,8 +4198,9 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    do jat = 1, mol%nat
       ! Map upper-triangle neighbors xat >= jat of row jat to their block index hat
       nfin = find_lower_start(list, jat) - 1
+      hoff = list%inl(jat) - cache%hinl(jat)
       do hat = list%inl(jat), nfin
-         hmap(list%nlat(hat)) = hat
+         hmap(list%nlat(hat)) = hat - hoff
       end do
 
       ! 1. Accumulate CN-CN second-derivative couplings into gcn(:, kkat) and
@@ -4123,8 +4209,15 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
       do cent = cache%cninl(jat), cache%cninl(jat + 1) - 1
          cat = cache%cnpos(cent)
          iat = list%nlat(cat)
-         dcn = cache%dcndrlist(:, cat)
-         dqloc = cache%dqlocdrlist(:, cat)
+         ! dCN_i/dR_j in the row of j, or mirrored from the row of i
+         if (iat >= jat) then
+            pat = cat - hoff
+            dcn = cache%dcndrlist(:, pat)
+         else
+            pat = tpos(cat) - list%inl(iat) + cache%hinl(iat)
+            dcn = cn_mirror * cache%dcndrlist(:, pat)
+         end if
+         dqloc = cache%dqlocdrlist(:, pat)
          if (.not. mark(iat)) then
             mark(iat) = .true.
             ntouch = ntouch + 1
@@ -4163,14 +4256,20 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
       ! 2. Add mixed position-CN/qloc weights to gcn and gqloc for neighbors of jat
       gcn(:, jat) = gcn(:, jat) + dcndiag(:, jat)
       gqloc(:, jat) = dqlocdiag(:, jat) &
-         & + d2qlocacc(jat) * cache%dqlocdrlist(:, list%inl(jat))
+         & + d2qlocacc(jat) * cache%dqlocdrlist(:, cache%hinl(jat))
       do kat = list%inl(jat) + 1, list%inl(jat + 1) - 1
          kkat = list%nlat(kat)
          tat = tpos(kat)
          dx = mol%xyz(:, jat) - mol%xyz(:, kkat)
          gcn(:, kkat) = gcn(:, kkat) + wpair(1, tat) * dx
+         ! dqloc_k/dR_j in the row of j, or mirrored from the row of k
+         if (kkat >= jat) then
+            pat = kat - hoff
+         else
+            pat = tat - list%inl(kkat) + cache%hinl(kkat)
+         end if
          gqloc(:, kkat) = wpair(2, tat) * dx &
-            & + d2qlocacc(kkat) * cache%dqlocdrlist(:, kat)
+            & + d2qlocacc(kkat) * cache%dqlocdrlist(:, pat)
       end do
 
       ! 3. Contract D * G^T into hesslist and reset touched workspace entries
@@ -4182,9 +4281,15 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
             if (cent > cache%cninl(kkat) .and. xat < jat) exit
             hat = hmap(xat)
             if (hat == 0) cycle
-            tat = tpos(cat)
-            dcn = cache%dcndrlist(:, tat)
-            dqloc = cache%dqlocdrlist(:, tat)
+            ! dCN_k/dR_x in the row of x, or mirrored from the row of k
+            if (kkat >= xat) then
+               pat = tpos(cat) - list%inl(xat) + cache%hinl(xat)
+               dcn = cache%dcndrlist(:, pat)
+            else
+               pat = cat - list%inl(kkat) + cache%hinl(kkat)
+               dcn = cn_mirror * cache%dcndrlist(:, pat)
+            end if
+            dqloc = cache%dqlocdrlist(:, pat)
             do ic = 1, 3
                hessian%hesslist(:, ic, hat) = hessian%hesslist(:, ic, hat) &
                   & + dcn * gcn(ic, kkat) + dqloc * gqloc(ic, kkat)
@@ -4206,9 +4311,9 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    deallocate(v, dcndiag, dqlocdiag, d2cndiag, d2qlocacc, wpair, tpos)
 
    call self%ncoord%add_coordination_number_hessian_list(mol, dtrans, cnacc, &
-      & list, hessian%hesslist)
+      & hessian%list, hessian%hesslist)
    call self%ncoord_en%add_coordination_number_hessian_list(mol, dtrans, &
-      & qlocacc, list, hessian%hesslist)
+      & qlocacc, hessian%list, hessian%hesslist)
 
    deallocate(cnacc, qlocacc)
 
@@ -4265,7 +4370,7 @@ subroutine get_cn_entries_list(mol, list, cache, tpos, cninl, cnpos)
    !> Sorted complete neighborlist
    type(csr_list), intent(in) :: list
 
-   !> Cache with the CN and local charge derivatives on the list
+   !> Cache with the CN and local charge derivatives on the list of the update
    type(mchrg_cache), intent(in) :: cache
 
    !> Position of the atom in the row of the neighbor for each entry
@@ -4274,26 +4379,32 @@ subroutine get_cn_entries_list(mol, list, cache, tpos, cninl, cnpos)
    !> Offsets of the rows of the entries
    integer(i8), allocatable, intent(out) :: cninl(:)
 
-   !> Positions of the entries in the list
+   !> Positions of the entries in the sorted complete list
    integer(i8), allocatable, intent(out) :: cnpos(:)
 
    integer :: iat
-   integer(i8) :: kat, tat, nfin, cnt
+   integer(i8) :: kat, tat, hat, hoff, nfin, cnt
+   logical :: half
    logical, allocatable :: keep(:)
+
+   ! On a half list both entries of a pair share the position of the upper one
+   half = cache%hinl(mol%nat + 1) /= list%inl(mol%nat + 1)
 
    allocate(cninl(mol%nat + 1))
    allocate(keep(size(list%nlat, kind=i8)))
    cninl(1) = 1
 
    !$omp parallel default(none) &
-   !$omp shared(mol, list, cache, tpos, keep, cninl) &
-   !$omp private(iat, kat, tat, nfin, cnt)
+   !$omp shared(mol, list, cache, tpos, keep, cninl, half) &
+   !$omp private(iat, kat, tat, hat, hoff, nfin, cnt)
    !$omp do schedule(runtime)
    do iat = 1, mol%nat
       nfin = find_lower_start(list, iat) - 1
+      hoff = list%inl(iat) - cache%hinl(iat)
       do kat = list%inl(iat) + 1, nfin
          tat = tpos(kat)
-         keep(kat) = is_cn_entry(cache, kat, tat)
+         hat = kat - hoff
+         keep(kat) = is_cn_entry(cache, hat, merge(hat, tat, half))
          keep(tat) = keep(kat)
       end do
    end do
@@ -4336,13 +4447,13 @@ end subroutine get_cn_entries_list
 !> derivatives above cnthr
 pure function is_cn_entry(cache, kat, tat) result(keep)
 
-   !> Cache with the CN and local charge derivatives on the list
+   !> Cache with the CN and local charge derivatives on the list of the update
    type(mchrg_cache), intent(in) :: cache
 
-   !> Position of the entry
+   !> Position of the entry in the derivative arrays
    integer(i8), intent(in) :: kat
 
-   !> Position of the transposed entry
+   !> Position of the transposed entry in the derivative arrays
    integer(i8), intent(in) :: tat
 
    !> Entry has derivatives above the threshold

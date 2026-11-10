@@ -39,7 +39,9 @@ module multicharge_model_cache
       !> Coordination number derivatives w.r.t. lattice vectors
       real(wp), allocatable :: dcndL(:, :, :)
 
-      !> Coordination number derivatives on the sorted complete neighborlist
+      !> Coordination number derivatives on the list of the update, the entry of
+      !> atom j in the row of atom i holds dCN_j/dR_i. On a half list each pair is
+      !> held once, the mirrored entry is dCN_i/dR_j = -dCN_j/dR_i.
       real(wp), allocatable :: dcndrlist(:, :)
 
       !> Ewald separation parameter
@@ -60,8 +62,15 @@ module multicharge_model_cache
       !> Local charge derivatives w.r.t. lattice vectors
       real(wp), allocatable :: dqlocdL(:, :, :)
 
-      !> Local charge derivatives on the sorted complete neighborlist
+      !> Local charge derivatives on the list of the update, the entry of atom j in
+      !> the row of atom i holds dqloc_j/dR_i. On a half list each pair is held
+      !> once, the mirrored entry is dqloc_i/dR_j = dqloc_j/dR_i.
       real(wp), allocatable :: dqlocdrlist(:, :)
+
+      !> Row offsets of the list of the update, which holds the pair arrays clist,
+      !> alist, ainvlist, dcndrlist and dqlocdrlist. Row i of a sorted half list is
+      !> the upper triangle of row i of the sorted complete list.
+      integer(i8), allocatable :: hinl(:)
 
       !> Transposed positions of the entries of the sorted complete neighborlist
       integer(i8), allocatable :: tpos(:)
@@ -69,13 +78,14 @@ module multicharge_model_cache
       !> Offsets of the rows of the CN and local-charge derivative entries on the list
       integer(i8), allocatable :: cninl(:)
 
-      !> Positions of the CN and local-charge derivative entries in the list
+      !> Positions of the CN and local-charge derivative entries in the sorted
+      !> complete list
       integer(i8), allocatable :: cnpos(:)
 
       !> Full Maxwell capacitance matrix
       real(wp), allocatable :: cmat(:, :)
 
-      !> Capacitance matrix on the upper triangle of the neighborlist
+      !> Capacitance matrix on the upper triangle of the list of the update
       real(wp), allocatable :: clist(:)
 
       !> Store tmp array from xvec calculation for reuse
@@ -87,13 +97,13 @@ module multicharge_model_cache
       !> Coulomb matrix
       real(wp), allocatable :: amat(:, :)
 
-      !> Coulomb matrix on the upper triangle of the neighborlist
+      !> Coulomb matrix on the upper triangle of the list of the update
       real(wp), allocatable :: alist(:)
 
       !> Inversed amat
       real(wp), allocatable :: ainv(:, :)
 
-      !> Inverse of amat on the upper triangle of the neighborlist
+      !> Inverse of amat on the upper triangle of the list of the update
       real(wp), allocatable :: ainvlist(:)
 
       !> Solution of the ES equation

@@ -38,7 +38,7 @@ program main
    integer :: stat, unit, model_id, idx, jdx
    type(error_type), allocatable :: error
    type(structure_type) :: mol
-   type(csr_list), allocatable :: list
+   type(csr_list), allocatable :: list, full
    type(wignerseitz_cell), allocatable :: wsc
    class(mchrg_model_type), allocatable :: model
    type(mchrg_cache), allocatable :: cache
@@ -87,7 +87,6 @@ program main
    if (qgrad) full_list = .true.
 
    if (analytic_hessian) then
-      full_list = .true.
       if (model_id == mchrg_model%eeq2019 .and. use_nlist) then
          call fatal_error(error, &
          & "Analytical Hessian of the EEQ model is not available on a neighborlist")
@@ -133,6 +132,17 @@ program main
       else
          call new_csr_list(list, screen, mol, error, cutoff=cutoff, complete=full_list)
          if (.not. allocated(error)) call sort_neighborlist(list)
+         ! The analytical Hessian keeps its pair arrays on the half list and
+         ! walks the complete rows of a second, sorted complete list
+         if (analytic_hessian .and. .not. full_list .and. .not. allocated(error)) then
+            allocate(full)
+            call new_csr_list(full, screen, mol, error, cutoff=cutoff, complete=.true.)
+            if (.not. allocated(error)) call sort_neighborlist(full)
+         end if
+      end if
+      if (allocated(error)) then
+         write(error_unit, '(a)') error%message
+         error stop
       end if
       call timer%pop
       write(output_unit, '(a, 1x, a)') "Neighborlist generation time :", &
@@ -198,10 +208,6 @@ program main
          & format_time(timer%get("numhess"))
       end if
    else if (analytic_hessian .and. use_nlist) then
-      if (.not. list%complete) then
-         call fatal_error(error, "Neighborlist must be complete for analytical Hessian")
-         return
-      end if
       allocate(hesslist)
       call timer%push("hess")
       call model%solve(mol, solver, cache, error, energy, gradient, sigma, &
@@ -210,8 +216,16 @@ program main
          write(error_unit, '(a)') error%message
          error stop
       end if
-      call model%get_hessian(mol, solver, cache, error, hesslist, list, &
-      & unit=output_unit, verbosity=verbosity)
+      if (allocated(full)) then
+         ! The blocks are formed on the half list of the update
+         call move_alloc(list, hesslist%list)
+         call model%get_hessian(mol, solver, cache, error, hesslist, full, &
+         & unit=output_unit, verbosity=verbosity)
+         deallocate(full)
+      else
+         call model%get_hessian(mol, solver, cache, error, hesslist, list, &
+         & unit=output_unit, verbosity=verbosity)
+      end if
       call timer%pop
       if (verbosity > 1) then
          write(output_unit, '(a, 1x, a)') "Get analytical Hessian time : ", &
