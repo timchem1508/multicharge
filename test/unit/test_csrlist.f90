@@ -2024,19 +2024,19 @@ subroutine test_hessian(error, mol, model)
          jat = list%nlat(kat)
          if (jat >= iat) then
             hat = kat - list%inl(iat) + hcache%hinl(iat)
-            dcn(:, kat) = hcache%dcndrlist(:, hat)
-            dqloc(:, kat) = hcache%dqlocdrlist(:, hat)
+            dcn(:, kat) = hcache%dcndrlist(:, hcache%cnmap(hat))
+            dqloc(:, kat) = hcache%dqlocdrlist(:, hcache%cnmap(hat))
          else
             pos = findloc(hlhess%list%nlat(hlhess%list%inl(jat): &
                & hlhess%list%inl(jat + 1) - 1), iat, dim=1)
             hat = hlhess%list%inl(jat) + pos - 1
-            dcn(:, kat) = -hcache%dcndrlist(:, hat)
-            dqloc(:, kat) = hcache%dqlocdrlist(:, hat)
+            dcn(:, kat) = -hcache%dcndrlist(:, hcache%cnmap(hat))
+            dqloc(:, kat) = hcache%dqlocdrlist(:, hcache%cnmap(hat))
          end if
       end do
    end do
-   if (any(abs(dcn - cache%dcndrlist) > thr) &
-      & .or. any(abs(dqloc - cache%dqlocdrlist) > thr)) then
+   if (any(abs(dcn - cache%dcndrlist(:, cache%cnmap)) > thr) &
+      & .or. any(abs(dqloc - cache%dqlocdrlist(:, cache%cnmap)) > thr)) then
       call test_failed(error, "CN derivatives on the half list do not mirror "// &
          & "the complete list")
       return

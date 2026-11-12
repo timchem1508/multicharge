@@ -205,7 +205,7 @@ subroutine check_hessian_setup(self, mol, solver, cache, hessian, list, error)
       return
    end if
    if (any(cache%hinl /= hessian%list%inl) &
-      & .or. size(cache%dcndrlist, 2, kind=i8) /= size(hessian%list%nlat, kind=i8)) &
+      & .or. size(cache%cnmap, kind=i8) /= size(hessian%list%nlat, kind=i8)) &
       & then
       call fatal_error(error, "The cache was updated with a different neighborlist")
       return

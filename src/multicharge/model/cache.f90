@@ -39,10 +39,12 @@ module multicharge_model_cache
       !> Coordination number derivatives w.r.t. lattice vectors
       real(wp), allocatable :: dcndL(:, :, :)
 
-      !> Coordination number derivatives on the list of the update, the entry of
-      !> atom j in the row of atom i holds dCN_j/dR_i. On a half list each pair is
-      !> held once, the mirrored entry is dCN_i/dR_j = -dCN_j/dR_i.
+      !> Coordination number derivatives
       real(wp), allocatable :: dcndrlist(:, :)
+
+      !> Column of each entry of the list of the update in dcndrlist and
+      !> dqlocdrlist, 0 for entries without CN or local charge derivatives
+      integer, allocatable :: cnmap(:)
 
       !> Ewald separation parameter
       real(wp) :: alpha
@@ -62,9 +64,7 @@ module multicharge_model_cache
       !> Local charge derivatives w.r.t. lattice vectors
       real(wp), allocatable :: dqlocdL(:, :, :)
 
-      !> Local charge derivatives on the list of the update, the entry of atom j in
-      !> the row of atom i holds dqloc_j/dR_i. On a half list each pair is held
-      !> once, the mirrored entry is dqloc_i/dR_j = dqloc_j/dR_i.
+      !> Local charge derivatives on the list
       real(wp), allocatable :: dqlocdrlist(:, :)
 
       !> Row offsets of the list of the update, which holds the pair arrays clist,
