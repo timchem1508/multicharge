@@ -220,6 +220,10 @@ subroutine new_pme_operator(self, mol, error, input, rad, eta, alpha_ref)
    else
       call setup_free_grid(self, mol, spacing)
    end if
+
+   ! The work grids of the real transforms are allocated after the setup
+   ! released its temporary grids, which lowers the peak memory
+   call new_fft_rplan(self%rplan, self%ngrid, self%active)
    call setup_splines(self)
 
    ! Real-space part with the self-interaction of the smooth kernel removed
@@ -352,7 +356,6 @@ subroutine setup_periodic_grid(self, mol, spacing, alpha_ref)
    self%shift = pi / self%volume * (1.0_wp / alpha_ref**2 - 1.0_wp / self%alpha**2)
 
    call new_fft_plan(self%plan, self%ngrid)
-   call new_fft_rplan(self%rplan, self%ngrid, self%active)
    call get_bspline_moduli(self%order, self%ngrid, bsp)
 
    fac = 4.0_wp * pi / self%volume
@@ -418,7 +421,6 @@ subroutine setup_free_grid(self, mol, spacing)
    self%shift = 0.0_wp
 
    call new_fft_plan(self%plan, self%ngrid)
-   call new_fft_rplan(self%rplan, self%ngrid, self%active)
    call get_bspline_moduli(self%order, self%ngrid, bsp)
 
    ! Positions and ramp weights of the kernel and its periodic image
@@ -808,6 +810,32 @@ subroutine apply_influence(self, cgrid)
 end subroutine apply_influence
 
 
+!> Set the real or the imaginary part of a complex grid
+subroutine set_grid_part(grid, part, imaginary)
+   !> Complex grid
+   complex(wp), intent(inout) :: grid(:, :, :)
+   !> Values of the part
+   real(wp), intent(in) :: part(:, :, :)
+   !> Set the imaginary instead of the real part
+   logical, intent(in) :: imaginary
+
+   integer :: i2, i3
+
+   !$omp parallel do default(none) collapse(2) schedule(static) &
+   !$omp shared(grid, part, imaginary) private(i2, i3)
+   do i3 = 1, size(grid, 3)
+      do i2 = 1, size(grid, 2)
+         if (imaginary) then
+            grid(:, i2, i3) = cmplx(real(grid(:, i2, i3), wp), part(:, i2, i3), wp)
+         else
+            grid(:, i2, i3) = cmplx(part(:, i2, i3), 0.0_wp, wp)
+         end if
+      end do
+   end do
+
+end subroutine set_grid_part
+
+
 !> Add the potential of a grid at the atoms
 subroutine gather_potential(self, grid, yvec)
    !> Instance of the operator
@@ -955,16 +983,13 @@ subroutine add_gradient(self, pvec, qvec, gradient, sigma, scale, error)
    call add_pair_gradient(self%list, self%xyz, self%id, self%gam, self%alpha, &
       & pvec, qvec, scale, grad_loc, sigma_loc)
 
-   ! Both vectors are transformed together, Z = Q_q + i Q_p
+   ! Both vectors are transformed together, Z = Q_q + i Q_p, the real work
+   ! grid of the operator holds each charge grid in turn
    allocate(grid(self%ngrid(1), self%ngrid(2), self%ngrid(3)))
-   block
-      real(wp), allocatable :: qgrid(:, :, :), pgrid(:, :, :)
-      allocate(qgrid(self%ngrid(1), self%ngrid(2), self%ngrid(3)))
-      allocate(pgrid(self%ngrid(1), self%ngrid(2), self%ngrid(3)))
-      call spread_charges(self, qvec, qgrid)
-      call spread_charges(self, pvec, pgrid)
-      grid(:, :, :) = cmplx(qgrid, pgrid, wp)
-   end block
+   call spread_charges(self, qvec, self%rplan%work%rgrid)
+   call set_grid_part(grid, self%rplan%work%rgrid, .false.)
+   call spread_charges(self, pvec, self%rplan%work%rgrid)
+   call set_grid_part(grid, self%rplan%work%rgrid, .true.)
    call fft_3d(self%plan, grid, .false., self%active)
 
    ! Reciprocal strain derivative from the structure factors of both vectors
