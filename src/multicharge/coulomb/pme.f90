@@ -43,6 +43,8 @@ module multicharge_coulomb_pme
    use multicharge_coulomb_type, only : coulomb_operator, coulomb_input
    use multicharge_ewald, only : get_dir_cutoff
    use multicharge_fft, only : fft_plan, new_fft_plan, fft_3d, good_fft_size
+   use multicharge_fft_real, only : fft_rplan, new_fft_rplan, fft_rwork, &
+      & fft_r2c_3d, fft_c2r_3d
    implicit none
    private
 
@@ -84,8 +86,11 @@ module multicharge_coulomb_pme
       !> Constant added to all elements to match the reference Ewald parameter
       real(wp) :: shift = 0.0_wp
 
-      !> Plan of the grid transformation
+      !> Plan of the complex grid transformation
       type(fft_plan) :: plan
+
+      !> Plan of the real grid transformation applying the operator
+      type(fft_rplan) :: rplan
 
       !> Influence function on the grid, including the B-spline moduli
       real(wp), allocatable :: influence(:, :, :)
@@ -126,10 +131,12 @@ module multicharge_coulomb_pme
       !> Real-space part in the CSR list layout
       real(wp), allocatable :: val(:)
    contains
-      !> Apply the Coulomb matrix to a vector
-      procedure :: apply
+      !> Multiply the Coulomb matrix with a trial vector
+      procedure :: multiply
       !> Diagonal of the Coulomb matrix for preconditioning
       procedure :: get_diagonal
+      !> Approximate dense block of the Coulomb matrix for preconditioning
+      procedure :: get_block
       !> Contract the operator derivatives with two charge-like vectors
       procedure :: add_gradient
       !> Write a summary of the operator setup
@@ -345,6 +352,7 @@ subroutine setup_periodic_grid(self, mol, spacing, alpha_ref)
    self%shift = pi / self%volume * (1.0_wp / alpha_ref**2 - 1.0_wp / self%alpha**2)
 
    call new_fft_plan(self%plan, self%ngrid)
+   call new_fft_rplan(self%rplan, self%ngrid, self%active)
    call get_bspline_moduli(self%order, self%ngrid, bsp)
 
    fac = 4.0_wp * pi / self%volume
@@ -410,6 +418,7 @@ subroutine setup_free_grid(self, mol, spacing)
    self%shift = 0.0_wp
 
    call new_fft_plan(self%plan, self%ngrid)
+   call new_fft_rplan(self%rplan, self%ngrid, self%active)
    call get_bspline_moduli(self%order, self%ngrid, bsp)
 
    ! Positions and ramp weights of the kernel and its periodic image
@@ -689,31 +698,27 @@ subroutine setup_splines(self)
 end subroutine setup_splines
 
 
-!> Assign a charge-like vector to the grid, the imaginary part optionally
-!> receives a second vector
-subroutine spread_charges(self, qvec, grid, pvec)
+!> Assign a charge-like vector to the grid
+subroutine spread_charges(self, qvec, grid)
    !> Instance of the operator
    type(pme_operator), intent(in) :: self
-   !> Charge-like vector assigned to the real part
+   !> Charge-like vector
    real(wp), intent(in) :: qvec(:)
    !> Charge grid
-   complex(wp), intent(out) :: grid(:, :, :)
-   !> Charge-like vector assigned to the imaginary part
-   real(wp), intent(in), optional :: pvec(:)
+   real(wp), intent(out) :: grid(:, :, :)
 
    integer :: icolor, ib, ia, iat, i1, i2, i3, n, i3w, i2w
    integer :: idx(self%order, 3)
-   real(wp) :: w3, w23
-   complex(wp) :: chrg
+   real(wp) :: w3, w23, chrg
 
    n = self%order
    !$omp parallel default(none) &
-   !$omp shared(self, qvec, pvec, grid, n) &
+   !$omp shared(self, qvec, grid, n) &
    !$omp private(icolor, ib, ia, iat, i1, i2, i3, i2w, i3w, idx, w3, w23, chrg)
    !$omp do collapse(2) schedule(static)
    do i3 = 1, size(grid, 3)
       do i2 = 1, size(grid, 2)
-         grid(:, i2, i3) = (0.0_wp, 0.0_wp)
+         grid(:, i2, i3) = 0.0_wp
       end do
    end do
    !$omp end do
@@ -723,11 +728,7 @@ subroutine spread_charges(self, qvec, grid, pvec)
          if (self%block_color(ib) /= icolor) cycle
          do ia = self%block_start(ib), self%block_start(ib + 1) - 1
             iat = self%block_atom(ia)
-            if (present(pvec)) then
-               chrg = cmplx(qvec(iat), pvec(iat), wp)
-            else
-               chrg = cmplx(qvec(iat), 0.0_wp, wp)
-            end if
+            chrg = qvec(iat)
             call get_indices(self, iat, idx)
             do i3 = 1, n
                i3w = idx(i3, 3)
@@ -771,46 +772,54 @@ end subroutine get_indices
 
 
 !> Convolve the charge grid with the long-range kernel
-subroutine convolve(self, grid)
+subroutine convolve(self, work)
    !> Instance of the operator
    type(pme_operator), intent(in) :: self
    !> Charge grid on input, potential grid on output
-   complex(wp), intent(inout) :: grid(:, :, :)
+   type(fft_rwork), intent(inout) :: work
 
-   integer :: i2, i3
-
-   call fft_3d(self%plan, grid, .false., self%active)
-   !$omp parallel do default(none) collapse(2) schedule(static) &
-   !$omp shared(self, grid) private(i2, i3)
-   do i3 = 1, self%ngrid(3)
-      do i2 = 1, self%ngrid(2)
-         grid(:, i2, i3) = grid(:, i2, i3) * self%influence(:, i2, i3)
-      end do
-   end do
-   call fft_3d(self%plan, grid, .true., self%active)
+   call fft_r2c_3d(self%rplan, work)
+   call apply_influence(self, work%cgrid)
+   call fft_c2r_3d(self%rplan, work)
 
 end subroutine convolve
 
 
-!> Apply the Coulomb matrix to a vector
-subroutine apply(self, xvec, yvec)
+!> Multiply the spectrum with the influence function. The influence function
+!> is even, the half spectrum of a real transform uses its leading part along
+!> the first dimension.
+subroutine apply_influence(self, cgrid)
    !> Instance of the operator
-   class(pme_operator), intent(in) :: self
-   !> Input vector
-   real(wp), intent(in) :: xvec(:)
-   !> Operator-vector product
-   real(wp), intent(out) :: yvec(:)
+   type(pme_operator), intent(in) :: self
+   !> Spectrum of the charge grid
+   complex(wp), intent(inout) :: cgrid(:, :, :)
+
+   integer :: i2, i3, nspec
+
+   nspec = size(cgrid, 1)
+   !$omp parallel do default(none) collapse(2) schedule(static) &
+   !$omp shared(self, cgrid, nspec) private(i2, i3)
+   do i3 = 1, self%ngrid(3)
+      do i2 = 1, self%ngrid(2)
+         cgrid(:, i2, i3) = cgrid(:, i2, i3) * self%influence(:nspec, i2, i3)
+      end do
+   end do
+
+end subroutine apply_influence
+
+
+!> Add the potential of a grid at the atoms
+subroutine gather_potential(self, grid, yvec)
+   !> Instance of the operator
+   type(pme_operator), intent(in) :: self
+   !> Potential grid
+   real(wp), intent(in) :: grid(:, :, :)
+   !> Potential at the atoms, the grid potential is added
+   real(wp), intent(inout) :: yvec(:)
 
    integer :: iat, i1, i2, i3, n
    integer :: idx(self%order, 3)
    real(wp) :: phi, w3, w23
-   complex(wp), allocatable :: grid(:, :, :)
-
-   call spsymv_csr(self%nat, self%val, self%list%inl, self%list%nlat, xvec, yvec)
-
-   allocate(grid(self%ngrid(1), self%ngrid(2), self%ngrid(3)))
-   call spread_charges(self, xvec, grid)
-   call convolve(self, grid)
 
    n = self%order
    !$omp parallel do default(none) schedule(static) &
@@ -824,16 +833,36 @@ subroutine apply(self, xvec, yvec)
             w23 = w3 * self%theta(i2, 2, iat)
             do i1 = 1, n
                phi = phi + w23 * self%theta(i1, 1, iat) &
-                  & * real(grid(idx(i1, 1), idx(i2, 2), idx(i3, 3)), wp)
+                  & * grid(idx(i1, 1), idx(i2, 2), idx(i3, 3))
             end do
          end do
       end do
       yvec(iat) = yvec(iat) + phi
    end do
 
+end subroutine gather_potential
+
+
+!> Multiply the Coulomb matrix with a trial vector
+subroutine multiply(self, xvec, yvec)
+   !> Instance of the operator
+   class(pme_operator), intent(in) :: self
+   !> Input vector
+   real(wp), intent(in) :: xvec(:)
+   !> Operator-vector product
+   real(wp), intent(out) :: yvec(:)
+
+   call spsymv_csr(self%nat, self%val, self%list%inl, self%list%nlat, xvec, yvec)
+
+   ! The work arrays of the plan are reused, products of the same operator
+   ! must not run concurrently
+   call spread_charges(self, xvec, self%rplan%work%rgrid)
+   call convolve(self, self%rplan%work)
+   call gather_potential(self, self%rplan%work%rgrid, yvec)
+
    if (self%periodic) yvec(:) = yvec + self%shift * sum(xvec)
 
-end subroutine apply
+end subroutine multiply
 
 
 !> Diagonal of the Coulomb matrix without the small lattice sums
@@ -846,6 +875,50 @@ subroutine get_diagonal(self, diag)
    diag(:) = self%diag
 
 end subroutine get_diagonal
+
+
+!> Dense block of the Coulomb matrix without lattice sums.
+!>
+!> The pairs interact with erf(gam_ij r_ij)/r_ij, for periodic systems at the
+!> minimum image distance. The block is exact for molecules and an
+!> approximation for periodic systems, which remains positive definite as the
+!> Gaussian Coulomb kernel is positive definite.
+subroutine get_block(self, idx, block)
+   !> Instance of the operator
+   class(pme_operator), intent(in) :: self
+   !> Row and column indices of the block
+   integer, intent(in) :: idx(:)
+   !> Matrix elements of the block
+   real(wp), intent(out) :: block(:, :)
+
+   integer :: ii, jj, iat, jat
+   real(wp) :: lattice(3, 3), inv_lat(3, 3), vec(3), r
+
+   if (self%periodic) then
+      inv_lat = transpose(self%rec_lat)
+      lattice = matinv_3x3(inv_lat)
+   end if
+   do jj = 1, size(idx)
+      jat = idx(jj)
+      block(jj, jj) = self%diag(jat)
+      do ii = 1, jj - 1
+         iat = idx(ii)
+         vec = self%xyz(:, iat) - self%xyz(:, jat)
+         if (self%periodic) then
+            vec = matmul(inv_lat, vec)
+            vec = matmul(lattice, vec - real(nint(vec), wp))
+         end if
+         r = norm2(vec)
+         if (r > 1.0e-10_wp) then
+            block(ii, jj) = erf(self%gam(self%id(iat), self%id(jat)) * r) / r
+         else
+            block(ii, jj) = 2.0_wp * self%gam(self%id(iat), self%id(jat)) / sqrtpi
+         end if
+         block(jj, ii) = block(ii, jj)
+      end do
+   end do
+
+end subroutine get_block
 
 
 !> Add scale * sum_ij p_i q_j dA_ij/dR to the gradient and the strain
@@ -884,7 +957,14 @@ subroutine add_gradient(self, pvec, qvec, gradient, sigma, scale, error)
 
    ! Both vectors are transformed together, Z = Q_q + i Q_p
    allocate(grid(self%ngrid(1), self%ngrid(2), self%ngrid(3)))
-   call spread_charges(self, qvec, grid, pvec)
+   block
+      real(wp), allocatable :: qgrid(:, :, :), pgrid(:, :, :)
+      allocate(qgrid(self%ngrid(1), self%ngrid(2), self%ngrid(3)))
+      allocate(pgrid(self%ngrid(1), self%ngrid(2), self%ngrid(3)))
+      call spread_charges(self, qvec, qgrid)
+      call spread_charges(self, pvec, pgrid)
+      grid(:, :, :) = cmplx(qgrid, pgrid, wp)
+   end block
    call fft_3d(self%plan, grid, .false., self%active)
 
    ! Reciprocal strain derivative from the structure factors of both vectors
@@ -993,6 +1073,7 @@ subroutine write_info(self, unit)
    write(unit, "(a, t32, i12)") "B-spline order", self%order
    write(unit, '(a, t32, 3(i0, :, " x "))') "Grid points", self%ngrid
    write(unit, '(a, t32, 3(i0, :, " x "))') "Grid points with charge", self%active
+   write(unit, "(a, t32, a)") "Fourier transform", self%rplan%backend
    write(unit, "(a, t32, i12)") "Real-space pairs", size(self%list%nlat) - self%nat
 
 end subroutine write_info

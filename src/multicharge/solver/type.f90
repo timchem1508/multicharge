@@ -18,25 +18,13 @@
 
 !> Base types for the linear system solvers
 module multicharge_solver_type
-   use mctc_csrlist, only : csr_list
    use mctc_env, only : error_type, wp
+   use multicharge_solver_precond, only : precond_kind, precond_type
+   use multicharge_solver_trialprod, only : trialprod
    implicit none
    private
 
-   public :: mchrg_solver_type, mchrg_solver_input, mchrg_operator_type
-
-
-   !> Abstract linear operator for matrix-free iterative solvers
-   type, abstract :: mchrg_operator_type
-   contains
-
-      !> Apply the operator to a vector
-      procedure(apply_operator), deferred :: apply
-
-      !> Diagonal of the operator used for preconditioning
-      procedure(get_operator_diagonal), deferred :: get_diagonal
-
-   end type mchrg_operator_type
+   public :: mchrg_solver_type, mchrg_solver_input
 
 
    !> Abstract base type for multicharge solvers
@@ -47,6 +35,13 @@ module multicharge_solver_type
 
       !> Whether the solver enforces the total charge by projection
       logical :: projected = .false.
+
+      !> Preconditioner requested from the caller, see precond_kind, by default
+      !> the charge model selects its preferred preconditioner
+      integer :: precond = precond_kind%auto
+
+      !> Neighbour cutoff of the sparse approximate inverse in Bohr
+      real(wp) :: precond_cutoff = 10.0_wp
    contains
 
       !> Solve the linear system
@@ -56,43 +51,16 @@ module multicharge_solver_type
 
 
    abstract interface
-      !> Product of the linear operator with a vector
-      subroutine apply_operator(self, xvec, yvec)
-         import :: mchrg_operator_type, wp
-
-         !> Linear operator
-         class(mchrg_operator_type), intent(in) :: self
-
-         !> Input vector
-         real(wp), intent(in) :: xvec(:)
-
-         !> Operator-vector product
-         real(wp), intent(out) :: yvec(:)
-
-      end subroutine apply_operator
-
-      !> Diagonal elements of the linear operator
-      subroutine get_operator_diagonal(self, diag)
-         import :: mchrg_operator_type, wp
-
-         !> Linear operator
-         class(mchrg_operator_type), intent(in) :: self
-
-         !> Diagonal of the operator
-         real(wp), intent(out) :: diag(:)
-
-      end subroutine get_operator_diagonal
-
       !> Solve the linear system of equations
-      subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, op, qtot, &
-         & lambda, new_unit, error)
-         import :: mchrg_solver_type, mchrg_operator_type, error_type, wp, csr_list
+      subroutine solve(self, tprod, xvec, vrhs, ainv, qtot, lambda, prec, &
+         & new_unit, error)
+         import :: mchrg_solver_type, trialprod, precond_type, error_type, wp
 
          !> Solver instance
          class(mchrg_solver_type), intent(in) :: self
 
-         !> Dense coefficient matrix of the linear system
-         real(wp), intent(in), optional :: amat(:, :)
+         !> Trial product operator representing the linear system matrix
+         class(trialprod), intent(in) :: tprod
 
          !> Right-hand side vector
          real(wp), intent(in) :: xvec(:)
@@ -103,21 +71,15 @@ module multicharge_solver_type
          !> Inverse matrix, requested by passing the argument
          real(wp), intent(out), optional :: ainv(:, :)
 
-         !> Coefficient matrix values in the sparsity pattern of the CSR list
-         real(wp), intent(in), optional :: alist(:)
-
-         !> CSR neighbour list, selects the sparse representation of the matrix
-         type(csr_list), intent(in), optional :: list
-
-         !> Matrix-free linear operator, selects the operator representation
-         class(mchrg_operator_type), intent(in), optional :: op
-
          !> Total sum of the solution, solves the system with a Lagrange
          !> multiplier enforcing the constraint by projection
          real(wp), intent(in), optional :: qtot
 
          !> Lagrange multiplier of the projected system
          real(wp), intent(out), optional :: lambda
+
+         !> Preconditioner of iterative solvers, defaults to the Jacobi one
+         class(precond_type), intent(in), optional, target :: prec
 
          !> Output unit
          integer, intent(in), optional :: new_unit

@@ -33,6 +33,22 @@ if(NOT TARGET "OpenMP::OpenMP_Fortran" AND MULTICHARGE_WITH_OpenMP)
   find_package("OpenMP" REQUIRED)
 endif()
 
+# FFTW for the transforms of the particle mesh Ewald operator, the in-house
+# transform is used otherwise
+set(MULTICHARGE_USE_FFTW FALSE)
+if(MULTICHARGE_WITH_FFTW)
+  find_package(PkgConfig QUIET)
+  if(PkgConfig_FOUND)
+    pkg_check_modules(FFTW3 QUIET IMPORTED_TARGET GLOBAL fftw3)
+  endif()
+  if(TARGET PkgConfig::FFTW3)
+    set(MULTICHARGE_USE_FFTW TRUE)
+    message(STATUS "Using FFTW ${FFTW3_VERSION} for the PME transforms")
+  else()
+    message(STATUS "FFTW not found, using the in-house Fourier transform")
+  endif()
+endif()
+
 # Find Lapack
 if(MULTICHARGE_WITH_ILP64)
   message(STATUS "Using LAPACK/BLAS ILP64 interface")
@@ -115,6 +131,17 @@ if(MULTICHARGE_WITH_OpenMP)
     "${PROJECT_NAME}-lib"
     PUBLIC
     "OpenMP::OpenMP_Fortran"
+  )
+endif()
+if(MULTICHARGE_USE_FFTW)
+  target_link_libraries(
+    "${PROJECT_NAME}-lib"
+    PUBLIC
+    "PkgConfig::FFTW3"
+  )
+  target_compile_definitions(
+    "${PROJECT_NAME}-lib"
+    PRIVATE -DWITH_FFTW
   )
 endif()
 if(MULTICHARGE_WITH_ILP64)

@@ -289,7 +289,7 @@ end subroutine write_json_array
 
 
 !> Print header for CG solver
-subroutine print_cg_header(unit, verbosity, maxit, tol, timer)
+subroutine print_cg_header(unit, verbosity, maxit, tol, precond, timer)
 
    !> Output unit
    integer, intent(in) :: unit
@@ -303,6 +303,9 @@ subroutine print_cg_header(unit, verbosity, maxit, tol, timer)
    !> Convergence tolerance
    real(wp), intent(in) :: tol
 
+   !> Name of the preconditioner
+   character(len=*), intent(in) :: precond
+
    !> Timer holding the accumulated initialization time
    type(timer_type), intent(in), optional :: timer
 
@@ -311,7 +314,7 @@ subroutine print_cg_header(unit, verbosity, maxit, tol, timer)
       write(unit, "(a)")
       write(unit, "(a, 1x, i6)") "Max iterations : ", maxit
       write(unit, "(a, 1x, es10.2)") "Tolerance      : ", tol
-      write(unit, "(a)") "Preconditioner : Jacobi (Diagonal)"
+      write(unit, "(a, 1x, a)") "Preconditioner : ", precond
       write(unit, "(a, 1x, a)") "Initialisation time:", &
          & format_time(timer%get("initialization"))
       write(unit, "(a)") ""
@@ -322,7 +325,7 @@ subroutine print_cg_header(unit, verbosity, maxit, tol, timer)
       write(unit, "(a)")
       write(unit, "(a, 1x, i6)") "Max iterations : ", maxit
       write(unit, "(a, 1x, es10.2)") "Tolerance      : ", tol
-      write(unit, "(a)") "Preconditioner : Jacobi (Diagonal)"
+      write(unit, "(a, 1x, a)") "Preconditioner : ", precond
       write(unit, "(a)") ""
       write(unit, "(2X,A,6X,A,8X,A,6X,A)") &
          & "iter", "|residual|", "step", "relative residual"

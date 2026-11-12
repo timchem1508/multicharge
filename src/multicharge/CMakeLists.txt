@@ -27,6 +27,7 @@ list(
   "${dir}/coulomb.f90"
   "${dir}/ewald.f90"
   "${dir}/fft.f90"
+  "${dir}/fft_real.F90"
   "${dir}/lapack.F90"
   "${dir}/model.f90"
   "${dir}/output.f90"

@@ -20,13 +20,14 @@
 !> Conjugate gradient solver
 module multicharge_solver_cg
    use, intrinsic :: iso_fortran_env, only : output_unit
-   use mctc_csrlist, only : csr_list, spgemv_csr, spsymv_csr
    use mctc_env, only : error_type, fatal_error, timer_type, wp
-   use multicharge_blas, only : axpy, dot, scal, symv
+   use multicharge_blas, only : axpy, dot, scal
    use multicharge_output, only : print_cg_convergence, print_cg_final, &
       & print_cg_header, print_cg_iteration
-   use multicharge_solver_type, only : mchrg_operator_type, mchrg_solver_input, &
-      & mchrg_solver_type
+   use multicharge_solver_precond, only : jacobi_precond, new_jacobi_precond, &
+      & precond_type
+   use multicharge_solver_trialprod, only : trialprod
+   use multicharge_solver_type, only : mchrg_solver_input, mchrg_solver_type
    implicit none
    private
 
@@ -48,9 +49,15 @@ module multicharge_solver_cg
       !> Enforce the total charge by projection in a single CG solve
       logical, allocatable :: projected
 
+      !> Preconditioner built by the caller, see precond_kind
+      integer, allocatable :: precond
+
+      !> Neighbour cutoff of the sparse approximate inverse in Bohr
+      real(wp), allocatable :: precond_cutoff
+
    end type cg_input
 
-   !> Conjugate-gradient solver with a Jacobi preconditioner
+   !> Preconditioned conjugate-gradient solver
    type, extends(mchrg_solver_type) :: cg_solver
 
       !> Maximum number of iterations
@@ -111,25 +118,27 @@ subroutine new_cg_solver(self, input)
       self%verbosity = verbosity_def
    end if
    if (allocated(input%projected)) self%projected = input%projected
+   if (allocated(input%precond)) self%precond = input%precond
+   if (allocated(input%precond_cutoff)) self%precond_cutoff = input%precond_cutoff
 
 end subroutine new_cg_solver
 
 
-!> Solve a linear system with a diagonally preconditioned CG method.
+!> Solve a linear system with a preconditioned CG method.
 !>
 !> With the total sum of the solution given, the system A v + lambda 1 = b with
 !> sum(v) = qtot is solved instead. The iterates are kept on the constraint
 !> plane and the preconditioner is projected onto it. The constant part of the
 !> residual is irrelevant for the projected iteration, it is removed after each
 !> update to avoid cancellation and accumulated into the Lagrange multiplier.
-subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, op, qtot, lambda, &
-   & new_unit, error)
+subroutine solve(self, tprod, xvec, vrhs, ainv, qtot, lambda, prec, new_unit, &
+   & error)
 
    !> Conjugate-gradient solver instance
    class(cg_solver), intent(in) :: self
 
-   !> Dense coefficient matrix of the linear system
-   real(wp), intent(in), optional :: amat(:, :)
+   !> Trial product operator representing the linear system matrix
+   class(trialprod), intent(in) :: tprod
 
    !> Right-hand side vector
    real(wp), intent(in) :: xvec(:)
@@ -140,20 +149,14 @@ subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, op, qtot, lambda, &
    !> Inverse matrix, not available for the iterative solver
    real(wp), intent(out), optional :: ainv(:, :)
 
-   !> Coefficient matrix values in the sparsity pattern of the CSR list
-   real(wp), intent(in), optional :: alist(:)
-
-   !> CSR neighbour list, selects the sparse representation of the matrix
-   type(csr_list), intent(in), optional :: list
-
-   !> Matrix-free linear operator, selects the operator representation
-   class(mchrg_operator_type), intent(in), optional :: op
-
    !> Total sum of the solution, enforced by projection
    real(wp), intent(in), optional :: qtot
 
    !> Lagrange multiplier of the projected system
    real(wp), intent(out), optional :: lambda
+
+   !> Preconditioner, the Jacobi preconditioner is used if absent
+   class(precond_type), intent(in), optional, target :: prec
 
    !> Output unit
    integer, intent(in), optional :: new_unit
@@ -161,11 +164,13 @@ subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, op, qtot, lambda, &
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
-   integer :: maxit, it, iat, ndim, unit
-   logical :: converged, sparse, matfree, projected
+   integer :: maxit, it, ndim, unit
+   logical :: converged, projected
    real(wp) :: tol, tol_square, xvecnorm, resnorm, rel_resnorm
    real(wp) :: denom, step, updfact, resdot_old, resdot_new, precsum, lamacc
-   real(wp), allocatable :: dir(:), res(:), prec(:), precres(:), adir(:)
+   real(wp), allocatable :: dir(:), res(:), precres(:), adir(:), pone(:)
+   type(jacobi_precond), target :: jacobi
+   class(precond_type), pointer :: mprec
    type(timer_type) :: timer
 
    ! CG cannot compute the inverse matrix
@@ -198,65 +203,37 @@ subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, op, qtot, lambda, &
       return
    end if
 
-   sparse = present(list)
-   matfree = present(op)
    projected = present(qtot)
-   if (sparse .and. matfree) then
-      call fatal_error(error, "Either the CSR list or the matrix-free operator "//&
-         & "can represent the coefficient matrix, not both.")
-      return
-   end if
-   if (sparse) then
-      if (.not. present(alist)) then
-         call fatal_error(error, "Coefficient matrix values of the CSR list are missing.")
-         return
-      end if
-      if (size(list%inl) /= ndim + 1 .or. size(alist) /= size(list%nlat)) then
-         call fatal_error(error, "Dimension mismatch of the CSR coefficient matrix.")
-         return
-      end if
-   else if (.not. matfree) then
-      if (.not. present(amat)) then
-         call fatal_error(error, "Coefficient matrix is missing.")
-         return
-      end if
-      if (size(amat, 1) /= ndim .or. size(amat, 2) /= ndim) then
-         call fatal_error(error, "Dimension mismatch of the coefficient matrix.")
-         return
-      end if
-   end if
 
    tol = self%cgtol
    tol_square = tol**2
    maxit = self%cgmiter
 
-   allocate(res(ndim), dir(ndim), precres(ndim), adir(ndim), prec(ndim))
+   allocate(res(ndim), dir(ndim), precres(ndim), adir(ndim), pone(ndim))
 
    if (self%verbosity > 1) call timer%push("total")
    if (self%verbosity > 1) call timer%push("initialization")
 
-   ! Diagonal preconditioner, the CSR list stores the diagonal first in each row
-   if (sparse) then
-      do iat = 1, ndim
-         prec(iat) = 1.0_wp / (alist(list%inl(iat)) + eps)
-      end do
-   else if (matfree) then
-      call op%get_diagonal(prec)
-      prec(:) = 1.0_wp / (prec + eps)
+   ! Preconditioner, the Jacobi preconditioner is built if none is given
+   if (present(prec)) then
+      mprec => prec
    else
-      do iat = 1, ndim
-         prec(iat) = 1.0_wp / (amat(iat, iat) + eps)
-      end do
+      call new_jacobi_precond(jacobi, tprod, ndim)
+      mprec => jacobi
    end if
-   precsum = sum(prec)
+
+   ! Preconditioned unit vector spans the correction to the constraint plane
+   precres(:) = 1.0_wp
+   call mprec%apply(precres, pone)
+   precsum = sum(pone)
 
    ! Move the initial guess onto the constraint plane along the preconditioner
    if (projected) then
-      vrhs(:) = vrhs + (qtot - sum(vrhs)) / precsum * prec
+      vrhs(:) = vrhs + (qtot - sum(vrhs)) / precsum * pone
    end if
 
    ! Initial residual
-   call matvec(vrhs, adir)
+   call tprod%multiply(vrhs, adir)
    res(:) = xvec(:) - adir(:)
    lamacc = 0.0_wp
    call remove_constant(res)
@@ -277,7 +254,7 @@ subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, op, qtot, lambda, &
    if (self%verbosity > 1) call timer%pop
 
    ! Print header
-   call print_cg_header(unit, self%verbosity, maxit, tol, timer)
+   call print_cg_header(unit, self%verbosity, maxit, tol, mprec%get_name(), timer)
 
    ! Main CG iteration loop
    it = 0
@@ -287,7 +264,7 @@ subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, op, qtot, lambda, &
          if (self%verbosity > 1) call timer%push("iteration")
 
          ! Matrix-vector product
-         call matvec(dir, adir)
+         call tprod%multiply(dir, adir)
 
          ! Non-positive curvature breaks down the iteration, unless the
          ! search direction vanished for an already converged residual
@@ -360,35 +337,15 @@ subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, op, qtot, lambda, &
 
 contains
 
-   !> Product of the coefficient matrix with a vector in either representation
-   subroutine matvec(xv, yv)
-      !> Input vector
-      real(wp), intent(in) :: xv(:)
-      !> Matrix-vector product
-      real(wp), intent(out) :: yv(:)
-
-      if (sparse) then
-         if (list%complete) then
-            call spgemv_csr(ndim, alist, list%inl, list%nlat, xv, yv)
-         else
-            call spsymv_csr(ndim, alist, list%inl, list%nlat, xv, yv)
-         end if
-      else if (matfree) then
-         call op%apply(xv, yv)
-      else
-         call symv(amat, xv, yv, alpha=1.0_wp, beta=0.0_wp)
-      end if
-   end subroutine matvec
-
-   !> Diagonal preconditioner, projected onto the constraint plane if requested
+   !> Apply the preconditioner, projected onto the constraint plane if requested
    subroutine precondition(rv, zv)
       !> Residual vector
       real(wp), intent(in) :: rv(:)
       !> Preconditioned residual
       real(wp), intent(out) :: zv(:)
 
-      zv(:) = prec * rv
-      if (projected) zv(:) = zv - sum(zv) / precsum * prec
+      call mprec%apply(rv, zv)
+      if (projected) zv(:) = zv - sum(zv) / precsum * pone
    end subroutine precondition
 
    !> Squared norm of the residual

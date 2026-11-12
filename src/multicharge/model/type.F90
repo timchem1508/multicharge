@@ -20,7 +20,7 @@
 module multicharge_model_type
 
    use, intrinsic :: iso_fortran_env, only : output_unit
-   use mctc_csrlist, only: csr_list, spgemv_csr, spsymv_csr
+   use mctc_csrlist, only: csr_list, new_csr_list, spgemv_csr, spsymv_csr
    use mctc_cutoff, only: get_lattice_points
    use mctc_env, only : timer_type, format_time, error_type, fatal_error, wp
    use mctc_io, only: structure_type
@@ -30,6 +30,10 @@ module multicharge_model_type
    use multicharge_blas, only: symv, gemm
    use multicharge_model_cache, only : mchrg_cache, ensure_shape
    use multicharge_model_hessian, only : add_symmetric_product
+   use multicharge_solver_precond, only : fsai_precond, identity_precond, &
+      & jacobi_precond, new_fsai_precond, new_jacobi_precond, precond_kind
+   use multicharge_solver_trialprod, only : dense_trialprod, csr_trialprod, &
+      & new_dense_trialprod, new_csr_trialprod, trialprod
    use multicharge_solver_type, only : mchrg_solver_type
    implicit none
    private
@@ -56,6 +60,9 @@ module multicharge_model_type
       class(ncoord_type), allocatable :: ncoord
       !> Electronegativity weighted CN for local charge
       class(ncoord_type), allocatable :: ncoord_en
+      !> Preconditioner of the iterative solver if the solver leaves the choice
+      !> to the model, the Jacobi preconditioner suits a varying diagonal
+      integer :: precond = precond_kind%jacobi
    contains
       !> Solve linear equations for the charge model
       procedure :: solve
@@ -420,6 +427,13 @@ subroutine solve(self, mol, solver, cache, error, &
    call self%get_xvec(mol, ndim, cache, list)
    call ensure_shape(cache%vrhs, mol%nat + 1)
 
+   ! Preconditioner of the iterative solver, shared by all solves of the cache
+   if (allocated(cache%prec)) deallocate(cache%prec)
+   if (solver%need_pos_def) then
+      call setup_preconditioner(self, solver, mol, cache, error, list)
+      if (allocated(error)) return
+   end if
+
    ! pop setup timer
    call timer%pop
 
@@ -430,13 +444,12 @@ subroutine solve(self, mol, solver, cache, error, &
       if (cpq) then
          ! The inverse matrix is needed for the charge derivatives
          call ensure_shape(cache%ainv, ndim, ndim)
-         call solver%solve(amat=cache%amat, xvec=cache%xvec, &
-            & vrhs=cache%vrhs, ainv=cache%ainv, new_unit=print_unit, &
-            & error=error)
+         call solve_linear(solver, cache, cache%xvec, cache%vrhs, print_unit, &
+            & error, ainv=cache%ainv)
       else
          if (allocated(cache%ainv)) deallocate(cache%ainv)
-         call solver%solve(amat=cache%amat, xvec=cache%xvec, &
-            & vrhs=cache%vrhs, new_unit=print_unit, error=error)
+         call solve_linear(solver, cache, cache%xvec, cache%vrhs, print_unit, &
+            & error)
       end if
       if (allocated(error)) return
 
@@ -494,7 +507,7 @@ subroutine solve(self, mol, solver, cache, error, &
       call timer%push("energy")
       if (use_op) then
          allocate(avec(mol%nat))
-         call cache%coulomb%apply(cache%vrhs(:mol%nat), avec)
+         call cache%coulomb%multiply(cache%vrhs(:mol%nat), avec)
          cache%xvec(:mol%nat) = 0.5_wp * avec - cache%xvec(:mol%nat)
       else if (present(list)) then
          allocate(avec(mol%nat))
@@ -782,8 +795,7 @@ subroutine get_adjoint(self, mol, solver, cache, error, &
 
       ! Bordered system: A*yvec = (dfdq, 0)
       call print_adjoint_message(unit, verbosity)
-      call solver%solve(amat=cache%amat, xvec=rhs, vrhs=yvec, &
-         & new_unit=unit, error=error)
+      call solve_linear(solver, cache, rhs, yvec, unit, error)
       if (allocated(error)) return
       padj(:) = yvec(:mol%nat)
    end if
@@ -1012,13 +1024,15 @@ subroutine get_coulomb_operator(self, mol, cache, error)
 end subroutine get_coulomb_operator
 
 
-!> Solve a linear system with the Coulomb matrix in the representation
-!> held by the cache
-subroutine solve_linear(solver, cache, rhs, sol, unit, error, list, qtot, lambda)
+!> Solve a linear system with the trial product of the Coulomb matrix in the
+!> representation held by the cache
+subroutine solve_linear(solver, cache, rhs, sol, unit, error, list, qtot, &
+   & lambda, ainv)
    !> Solver instance
    class(mchrg_solver_type), intent(in) :: solver
-   !> Multicharge cache holding the Coulomb matrix
-   type(mchrg_cache), intent(in) :: cache
+   !> Multicharge cache holding the Coulomb matrix, referenced by the trial
+   !> product for the duration of the solve
+   type(mchrg_cache), intent(in), target :: cache
    !> Right-hand side vector
    real(wp), intent(in) :: rhs(:)
    !> On input: initial guess; on output: solution
@@ -1028,24 +1042,108 @@ subroutine solve_linear(solver, cache, rhs, sol, unit, error, list, qtot, lambda
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
    !> Optional CSR neighbour list, selects the sparse matrix representation
-   type(csr_list), intent(in), optional :: list
+   type(csr_list), intent(in), optional, target :: list
    !> Total sum of the solution, enforced by projection
    real(wp), intent(in), optional :: qtot
    !> Lagrange multiplier of the projected system
    real(wp), intent(out), optional :: lambda
+   !> Inverse matrix, requested by passing the argument
+   real(wp), intent(out), optional :: ainv(:, :)
 
-   if (allocated(cache%coulomb)) then
-      call solver%solve(op=cache%coulomb, xvec=rhs, vrhs=sol, qtot=qtot, &
-         & lambda=lambda, new_unit=unit, error=error)
-   else if (present(list)) then
-      call solver%solve(alist=cache%alist, list=list, xvec=rhs, vrhs=sol, &
-         & qtot=qtot, lambda=lambda, new_unit=unit, error=error)
-   else
-      call solver%solve(amat=cache%amat, xvec=rhs, vrhs=sol, qtot=qtot, &
-         & lambda=lambda, new_unit=unit, error=error)
-   end if
+   type(dense_trialprod), target :: dense
+   type(csr_trialprod), target :: sparse
+   class(trialprod), pointer :: tprod
+
+   call get_trialprod(cache, dense, sparse, tprod, list)
+   call solver%solve(tprod, rhs, sol, ainv=ainv, qtot=qtot, lambda=lambda, &
+      & prec=cache%prec, new_unit=unit, error=error)
 
 end subroutine solve_linear
+
+
+!> Trial product of the Coulomb matrix in the representation held by the cache
+subroutine get_trialprod(cache, dense, sparse, tprod, list)
+   !> Multicharge cache holding the Coulomb matrix
+   type(mchrg_cache), intent(in), target :: cache
+   !> Storage of a dense trial product
+   type(dense_trialprod), intent(out), target :: dense
+   !> Storage of a sparse trial product
+   type(csr_trialprod), intent(out), target :: sparse
+   !> Trial product of the matrix representation in use
+   class(trialprod), pointer, intent(out) :: tprod
+   !> Optional CSR neighbour list, selects the sparse matrix representation
+   type(csr_list), intent(in), optional, target :: list
+
+   if (allocated(cache%coulomb)) then
+      tprod => cache%coulomb
+   else if (present(list)) then
+      call new_csr_trialprod(sparse, cache%alist, list)
+      tprod => sparse
+   else
+      call new_dense_trialprod(dense, cache%amat)
+      tprod => dense
+   end if
+
+end subroutine get_trialprod
+
+
+!> Setup the preconditioner requested by the iterative solver in the cache
+subroutine setup_preconditioner(self, solver, mol, cache, error, list)
+   !> Charge model providing the preferred preconditioner
+   class(mchrg_model_type), intent(in) :: self
+   !> Solver instance selecting the preconditioner
+   class(mchrg_solver_type), intent(in) :: solver
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+   !> Multicharge cache holding the Coulomb matrix and the preconditioner
+   type(mchrg_cache), intent(inout), target :: cache
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+   !> Optional CSR neighbour list, selects the sparse matrix representation
+   type(csr_list), intent(in), optional, target :: list
+
+   type(dense_trialprod), target :: dense
+   type(csr_trialprod), target :: sparse
+   class(trialprod), pointer :: tprod
+   type(csr_list) :: pattern
+   integer :: precond
+
+   call get_trialprod(cache, dense, sparse, tprod, list)
+
+   precond = solver%precond
+   if (precond == precond_kind%auto) precond = self%precond
+
+   select case (precond)
+   case (precond_kind%none)
+      allocate(identity_precond :: cache%prec)
+   case (precond_kind%jacobi)
+      block
+         type(jacobi_precond), allocatable :: jacobi
+         allocate(jacobi)
+         call new_jacobi_precond(jacobi, tprod, mol%nat)
+         call move_alloc(jacobi, cache%prec)
+      end block
+   case (precond_kind%fsai)
+      if (.not. solver%precond_cutoff > 0.0_wp) then
+         call fatal_error(error, "Cutoff of the FSAI preconditioner must be positive")
+         return
+      end if
+      call new_csr_list(pattern, mol, error, cutoff=solver%precond_cutoff)
+      if (allocated(error)) return
+
+      block
+         type(fsai_precond), allocatable :: fsai
+         allocate(fsai)
+         call new_fsai_precond(fsai, tprod, pattern, error)
+         if (allocated(error)) return
+
+         call move_alloc(fsai, cache%prec)
+      end block
+   case default
+      call fatal_error(error, "Unknown preconditioner of the iterative solver")
+   end select
+
+end subroutine setup_preconditioner
 
 
 !> Product of a symmetric matrix in the CSR list layout with a vector

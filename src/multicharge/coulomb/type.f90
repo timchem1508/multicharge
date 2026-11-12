@@ -23,7 +23,7 @@
 !> on the diagonal, with gam_ij = 1/sqrt(rad_i^2 + rad_j^2).
 module multicharge_coulomb_type
    use mctc_env, only : error_type, wp
-   use multicharge_solver_type, only : mchrg_operator_type
+   use multicharge_solver_trialprod, only : trialprod
    implicit none
    private
 
@@ -61,7 +61,7 @@ module multicharge_coulomb_type
    end type coulomb_input
 
    !> Abstract matrix-free Coulomb operator
-   type, abstract, extends(mchrg_operator_type) :: coulomb_operator
+   type, abstract, extends(trialprod) :: coulomb_operator
       !> Number of atoms
       integer :: nat = 0
    contains

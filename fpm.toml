@@ -23,4 +23,6 @@ ignore = [
 ]
 per-file-ignores."src/multicharge/blas.F90" = ["C071"]
 per-file-ignores."src/multicharge/lapack.F90" = ["C071"]
+# The FFTW interface declarations require the complete C binding module
+per-file-ignores."src/multicharge/fft_real.F90" = ["C121"]
 line-length = 132

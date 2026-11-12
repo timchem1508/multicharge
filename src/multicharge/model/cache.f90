@@ -22,6 +22,7 @@ module multicharge_model_cache
    use mctc_env, only : wp
    use mctc_wignerseitz, only : wignerseitz_cell
    use multicharge_coulomb_type, only : coulomb_operator
+   use multicharge_solver_precond, only : precond_type
    implicit none
    private
 
@@ -111,6 +112,9 @@ module multicharge_model_cache
 
       !> Matrix-free Coulomb operator replacing the dense Coulomb matrix
       class(coulomb_operator), allocatable :: coulomb
+
+      !> Preconditioner of the iterative solver for the Coulomb matrix
+      class(precond_type), allocatable :: prec
 
       !> Neighbour list of the coordination number for the matrix-free operator
       type(csr_list), allocatable :: cnlist

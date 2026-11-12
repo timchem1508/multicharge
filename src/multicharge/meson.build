@@ -24,6 +24,7 @@ srcs += files(
   'coulomb.f90',
   'ewald.f90',
   'fft.f90',
+  'fft_real.F90',
   'lapack.F90',
   'model.f90',
   'output.f90',

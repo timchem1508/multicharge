@@ -20,6 +20,8 @@ list(
   APPEND srcs
   "${dir}/cg.f90"
   "${dir}/direct.f90"
+  "${dir}/precond.f90"
+  "${dir}/trialprod.f90"
   "${dir}/type.f90"
 )
 

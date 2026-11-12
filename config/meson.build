@@ -51,6 +51,14 @@ if get_option('openmp')
   lib_deps += omp_dep
 endif
 
+# FFTW for the transforms of the particle mesh Ewald operator, the in-house
+# transform is used otherwise
+fftw_dep = dependency('fftw3', required: get_option('fftw'))
+if fftw_dep.found()
+  lib_deps += fftw_dep
+  add_project_arguments('-DWITH_FFTW', language: 'fortran')
+endif
+
 lapack_vendor = get_option('lapack')
 if lapack_vendor == 'auto'
   if fc_id == 'intel'

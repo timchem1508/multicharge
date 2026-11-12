@@ -36,6 +36,7 @@ module multicharge_model_eeq
    use multicharge_model_cache, only: mchrg_cache, ensure_shape
    use multicharge_model_hessian, only: coulomb_kernel, radial_hessian, add_pair_hessian, add_pair_block
    use multicharge_model_type, only: mchrg_model_type, get_rec_trans
+   use multicharge_solver_precond, only: precond_kind
    implicit none
    private
 
@@ -116,6 +117,11 @@ subroutine new_eeq_model(self, mol, error, chi, rad, eta, kcnchi, &
    self%rad = rad
    self%eta = eta
    self%kcnchi = kcnchi
+
+   ! The nearly uniform diagonal of the Coulomb matrix renders the Jacobi
+   ! preconditioner ineffective, the sparse approximate inverse captures the
+   ! coupling of neighbouring atoms
+   self%precond = precond_kind%fsai
 
    call new_ncoord(self%ncoord, mol, cn_count%erf, error, &
       & cutoff=cutoff, kcn=cn_exp, rcov=rcov, cut=cn_max)

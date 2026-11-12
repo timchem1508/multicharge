@@ -20,13 +20,13 @@
 !> Direct linear system solver
 module multicharge_solver_direct
    use, intrinsic :: iso_fortran_env, only : output_unit
-   use mctc_csrlist, only : csr_list
    use mctc_env, only : error_type, fatal_error, timer_type, wp
    use multicharge_blas, only : symv
    use multicharge_lapack, only : sytrf, sytri, sytrs
    use multicharge_output, only : print_direct_final, write_direct_solver
-   use multicharge_solver_type, only : mchrg_operator_type, mchrg_solver_input, &
-      & mchrg_solver_type
+   use multicharge_solver_precond, only : precond_type
+   use multicharge_solver_trialprod, only : dense_trialprod, trialprod
+   use multicharge_solver_type, only : mchrg_solver_input, mchrg_solver_type
    implicit none
    private
 
@@ -78,14 +78,14 @@ end subroutine new_direct_solver
 
 
 !> Solve a dense symmetric linear system using LAPACK
-subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, op, qtot, lambda, &
-   & new_unit, error)
+subroutine solve(self, tprod, xvec, vrhs, ainv, qtot, lambda, prec, new_unit, &
+   & error)
 
    !> Direct solver instance
    class(direct_solver), intent(in) :: self
 
-   !> Dense coefficient matrix of the linear system
-   real(wp), intent(in), optional :: amat(:, :)
+   !> Trial product operator, the direct solver requires the dense matrix
+   class(trialprod), intent(in) :: tprod
 
    !> Right-hand side vector
    real(wp), intent(in) :: xvec(:)
@@ -96,20 +96,56 @@ subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, op, qtot, lambda, &
    !> Inverse coefficient matrix, requested by passing the argument
    real(wp), intent(out), optional :: ainv(:, :)
 
-   !> Coefficient matrix values in the CSR list, not supported by this solver
-   real(wp), intent(in), optional :: alist(:)
-
-   !> CSR neighbour list, not supported by this solver
-   type(csr_list), intent(in), optional :: list
-
-   !> Matrix-free linear operator, not supported by the direct solver
-   class(mchrg_operator_type), intent(in), optional :: op
-
    !> Total sum of the solution, not supported by the direct solver
    real(wp), intent(in), optional :: qtot
 
    !> Lagrange multiplier of the projected system, not supported
    real(wp), intent(out), optional :: lambda
+
+   !> Preconditioner, not used by the direct solver
+   class(precond_type), intent(in), optional, target :: prec
+
+   !> Output unit (optional)
+   integer, intent(in), optional :: new_unit
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   if (present(qtot) .or. present(lambda)) then
+      call fatal_error(error, "The direct solver handles the total charge "//&
+         & "constraint in the bordered matrix, projection is not supported.")
+      return
+   end if
+
+   ! The factorization needs the explicit matrix
+   select type (tprod)
+   type is (dense_trialprod)
+      call solve_dense(self, tprod%amat, xvec, vrhs, ainv, new_unit, error)
+   class default
+      call fatal_error(error, "The direct solver requires a dense coefficient "//&
+         & "matrix, use the CG solver for sparse or matrix-free operators.")
+   end select
+
+end subroutine solve
+
+
+!> Solve a dense symmetric linear system by Bunch-Kaufman factorization
+subroutine solve_dense(self, amat, xvec, vrhs, ainv, new_unit, error)
+
+   !> Direct solver instance
+   class(direct_solver), intent(in) :: self
+
+   !> Dense coefficient matrix of the linear system
+   real(wp), intent(in) :: amat(:, :)
+
+   !> Right-hand side vector
+   real(wp), intent(in) :: xvec(:)
+
+   !> On input: initial guess; on output: solution
+   real(wp), intent(inout) :: vrhs(:)
+
+   !> Inverse coefficient matrix, requested by passing the argument
+   real(wp), intent(out), optional :: ainv(:, :)
 
    !> Output unit (optional)
    integer, intent(in), optional :: new_unit
@@ -122,29 +158,6 @@ subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, op, qtot, lambda, &
 
    integer :: local_info, ndim, ic, jc, unit
    type(timer_type) :: timer
-
-   if (present(op)) then
-      call fatal_error(error, "The direct solver requires a dense coefficient "//&
-         & "matrix, use the CG solver for a matrix-free operator.")
-      return
-   end if
-
-   if (present(qtot) .or. present(lambda)) then
-      call fatal_error(error, "The direct solver handles the total charge "//&
-         & "constraint in the bordered matrix, projection is not supported.")
-      return
-   end if
-
-   if (present(list) .or. present(alist)) then
-      call fatal_error(error, "The direct solver requires a dense coefficient "//&
-         & "matrix, use the CG solver for the neighbour list representation.")
-      return
-   end if
-
-   if (.not. present(amat)) then
-      call fatal_error(error, "solve_direct: coefficient matrix is missing.")
-      return
-   end if
 
    if (self%verbosity > 1) call timer%push("total")
 
@@ -213,7 +226,7 @@ subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, op, qtot, lambda, &
    if (self%verbosity > 1) call timer%pop
    call print_direct_final(unit, timer, self%verbosity)
 
-end subroutine solve
+end subroutine solve_dense
 
 
 end module multicharge_solver_direct

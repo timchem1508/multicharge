@@ -14,12 +14,16 @@
 ! limitations under the License.
 
 module test_solver
-   use mctc_env, only : wp
+   use mctc_csrlist, only : csr_list
+   use mctc_env, only : i8, wp
    use mctc_env_testing, only : new_unittest, unittest_type, error_type, test_failed
    use multicharge_solver, only : new_mchrg_solver
    use multicharge_solver_cg, only : cg_solver, new_cg_solver, cg_input
    use multicharge_solver_direct, only : direct_solver, new_direct_solver, &
       & direct_input
+   use multicharge_solver_precond, only : fsai_precond, new_fsai_precond
+   use multicharge_solver_trialprod, only : csr_trialprod, dense_trialprod, &
+      & new_csr_trialprod, new_dense_trialprod
    use multicharge_solver_type, only : mchrg_solver_type, mchrg_solver_input
    implicit none
    private
@@ -60,11 +64,81 @@ subroutine collect_solver(testsuite)
       & new_unittest("direct-inverse", test_direct_inverse), &
       & new_unittest("direct-singular", test_direct_singular), &
       & new_unittest("direct-verbosity", test_direct_verbosity), &
+      & new_unittest("direct-sparse-unsupported", test_direct_sparse_unsupported), &
+      & new_unittest("trialprod-dense-csr", test_trialprod_dense_csr), &
+      & new_unittest("cg-csr-trialprod", test_cg_csr_trialprod), &
+      & new_unittest("fsai-exact-inverse", test_fsai_exact_inverse), &
+      & new_unittest("fsai-diagonal-pattern", test_fsai_diagonal_pattern), &
       & new_unittest("solver-factory", test_solver_factory), &
       & new_unittest("solver-factory-unknown", test_solver_factory_unknown) &
       & ]
 
 end subroutine collect_solver
+
+
+!> Trial product referencing a dense matrix, the matrix must be a target
+function dense_op(amat) result(tprod)
+
+   !> Dense symmetric matrix
+   real(wp), intent(in), target, contiguous :: amat(:, :)
+
+   !> Dense trial product operator
+   type(dense_trialprod) :: tprod
+
+   call new_dense_trialprod(tprod, amat)
+
+end function dense_op
+
+
+!> Upper triangular CSR representation of a dense symmetric matrix with the
+!> diagonal first in each row
+subroutine dense_to_csr(amat, list, val)
+
+   !> Dense symmetric matrix
+   real(wp), intent(in) :: amat(:, :)
+
+   !> CSR neighbour list of the upper triangle
+   type(csr_list), intent(out) :: list
+
+   !> Matrix values in the sparsity pattern of the list
+   real(wp), allocatable, intent(out) :: val(:)
+
+   integer :: n, i, j, k
+
+   n = size(amat, 1)
+   list%complete = .false.
+   allocate(list%inl(n + 1), list%nlat(n * (n + 1) / 2), val(n * (n + 1) / 2))
+   k = 0
+   do i = 1, n
+      list%inl(i) = int(k + 1, i8)
+      do j = i, n
+         k = k + 1
+         list%nlat(k) = j
+         val(k) = amat(i, j)
+      end do
+   end do
+   list%inl(n + 1) = int(k + 1, i8)
+
+end subroutine dense_to_csr
+
+
+!> Symmetric positive definite test matrix with a dominant diagonal
+subroutine get_spd_matrix(amat)
+
+   !> Symmetric positive definite matrix
+   real(wp), intent(out) :: amat(:, :)
+
+   integer :: i, j, n
+
+   n = size(amat, 1)
+   do j = 1, n
+      do i = 1, n
+         amat(i, j) = 1.0_wp / (1.0_wp + abs(real(i - j, wp)))
+      end do
+      amat(j, j) = amat(j, j) + real(n, wp) * 0.25_wp
+   end do
+
+end subroutine get_spd_matrix
 
 
 !> Check that a solution satisfies the linear system
@@ -104,7 +178,7 @@ subroutine test_cg_identity_2x2(error)
    type(error_type), allocatable, intent(out) :: error
 
    integer, parameter :: n = 2
-   real(wp) :: amat(n, n), xvec(n), vrhs(n)
+   real(wp), target :: amat(n, n), xvec(n), vrhs(n)
    real(wp) :: expected(n)
 
    ! Solver variables
@@ -136,7 +210,7 @@ subroutine test_cg_identity_2x2(error)
    vrhs = [0.0_wp, 0.0_wp]
 
    ! Solve iteratively
-   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
+   call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=vrhs, error=error)
    if (allocated(error)) return
 
    ! Reference direct solver
@@ -150,7 +224,7 @@ subroutine test_cg_identity_2x2(error)
    call new_mchrg_solver(solver, solver_input, error)
    if (allocated(error)) return
    expected = [0.0_wp, 0.0_wp]
-   call solver%solve(amat=amat, xvec=xvec, vrhs=expected, error=error)
+   call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=expected, error=error)
 
    ! Check solution
    if (any(abs(vrhs - expected) > thr)) then
@@ -171,7 +245,7 @@ subroutine test_cg_diagonal_5x5(error)
    type(error_type), allocatable, intent(out) :: error
 
    integer, parameter :: n = 5
-   real(wp) :: amat(n, n), xvec(n), vrhs(n)
+   real(wp), target :: amat(n, n), xvec(n), vrhs(n)
    real(wp) :: expected(n), diag(n)
    integer :: i
 
@@ -206,7 +280,7 @@ subroutine test_cg_diagonal_5x5(error)
    vrhs = [0.0_wp, 0.0_wp, 0.0_wp, 0.0_wp, 0.0_wp]
 
    ! Solve
-   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
+   call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=vrhs, error=error)
    if (allocated(error)) return
 
    ! Reference direct solver
@@ -220,7 +294,7 @@ subroutine test_cg_diagonal_5x5(error)
    call new_mchrg_solver(solver, solver_input, error)
    if (allocated(error)) return
    expected = [0.0_wp, 0.0_wp, 0.0_wp, 0.0_wp, 0.0_wp]
-   call solver%solve(amat=amat, xvec=xvec, vrhs=expected, error=error)
+   call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=expected, error=error)
 
    ! Check solution
    if (any(abs(vrhs - expected) > thr)) then
@@ -241,7 +315,7 @@ subroutine test_cg_spd_small(error)
    type(error_type), allocatable, intent(out) :: error
 
    integer, parameter :: n = 3
-   real(wp) :: amat(n, n), xvec(n), vrhs(n)
+   real(wp), target :: amat(n, n), xvec(n), vrhs(n)
    real(wp) :: expected(n)
 
    ! Solver variables
@@ -273,7 +347,7 @@ subroutine test_cg_spd_small(error)
    vrhs = [0.0_wp, 0.0_wp, 0.0_wp]
 
    ! Solve
-   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
+   call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=vrhs, error=error)
    if (allocated(error)) return
 
    ! Reference direct solver
@@ -287,7 +361,7 @@ subroutine test_cg_spd_small(error)
    call new_mchrg_solver(solver, solver_input, error)
    if (allocated(error)) return
    expected = [1.0_wp, 1.0_wp, 1.0_wp]
-   call solver%solve(amat=amat, xvec=xvec, vrhs=expected, error=error)
+   call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=expected, error=error)
 
    ! Check solution
    if (any(abs(vrhs - expected) > thr)) then
@@ -308,7 +382,7 @@ subroutine test_cg_spd_large(error)
    type(error_type), allocatable, intent(out) :: error
 
    integer, parameter :: n = 1000
-   real(wp), allocatable :: amat(:,:), xvec(:), vrhs(:)
+   real(wp), allocatable, target :: amat(:,:), xvec(:), vrhs(:)
    real(wp), allocatable :: expected(:), b(:)
    integer :: i, j
 
@@ -358,7 +432,7 @@ subroutine test_cg_spd_large(error)
    xvec = b
 
    ! Solve
-   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
+   call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=vrhs, error=error)
    if (allocated(error)) return
 
    ! Reference direct solver
@@ -373,7 +447,7 @@ subroutine test_cg_spd_large(error)
    if (allocated(error)) return
 
    ! Reference solution
-   call solver%solve(amat=amat, xvec=xvec, vrhs=expected, error=error)
+   call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=expected, error=error)
 
    ! Check solution
    if (any(abs(vrhs - expected) / max(1.0_wp, abs(expected)) > thr_rel)) then
@@ -394,7 +468,7 @@ subroutine test_cg_ill_conditioned(error)
    type(error_type), allocatable, intent(out) :: error
 
    integer, parameter :: n = 8
-   real(wp) :: amat(n, n), xvec(n), vrhs(n)
+   real(wp), target :: amat(n, n), xvec(n), vrhs(n)
    real(wp) :: expected(n), b(n)
    integer :: i
 
@@ -435,7 +509,7 @@ subroutine test_cg_ill_conditioned(error)
    xvec = b
 
    ! Solve
-   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
+   call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=vrhs, error=error)
    if (allocated(error)) return
 
    ! Reference direct solver
@@ -450,7 +524,7 @@ subroutine test_cg_ill_conditioned(error)
    if (allocated(error)) return
 
    ! Reference solution
-   call solver%solve(amat=amat, xvec=xvec, vrhs=expected, error=error)
+   call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=expected, error=error)
 
    ! Check solution
    if (any(abs(vrhs - expected) / max(1.0_wp, abs(expected)) > thr_rel)) then
@@ -471,7 +545,7 @@ subroutine test_cg_zero_rhs(error)
    type(error_type), allocatable, intent(out) :: error
 
    integer, parameter :: n = 5
-   real(wp) :: amat(n, n), xvec(n), vrhs(n)
+   real(wp), target :: amat(n, n), xvec(n), vrhs(n)
    real(wp) :: expected(n)
    integer :: i
 
@@ -510,7 +584,7 @@ subroutine test_cg_zero_rhs(error)
    expected = 0.0_wp
 
    ! Solve
-   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
+   call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=vrhs, error=error)
    if (allocated(error)) return
 
    ! Reference direct solver
@@ -525,7 +599,7 @@ subroutine test_cg_zero_rhs(error)
    if (allocated(error)) return
 
    ! Reference solution
-   call solver%solve(amat=amat, xvec=xvec, vrhs=expected, error=error)
+   call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=expected, error=error)
 
    ! Check solution
    if (any(abs(vrhs - expected) / max(1.0_wp, abs(expected)) > thr_rel)) then
@@ -546,7 +620,7 @@ subroutine test_cg_random_spd(error)
    type(error_type), allocatable, intent(out) :: error
 
    integer, parameter :: n = 100
-   real(wp), allocatable :: amat(:,:), xvec(:), vrhs(:)
+   real(wp), allocatable, target :: amat(:,:), xvec(:), vrhs(:)
    real(wp), allocatable :: expected(:), b(:), temp(:,:)
    integer :: i, j, k, seed_size
    integer, allocatable :: seed(:)
@@ -624,7 +698,7 @@ subroutine test_cg_random_spd(error)
    xvec = b
 
    ! Solve
-   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=error)
+   call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=vrhs, error=error)
    if (allocated(error)) return
 
    ! Reference direct solver
@@ -639,7 +713,7 @@ subroutine test_cg_random_spd(error)
    if (allocated(error)) return
 
    ! Reference solution
-   call solver%solve(amat=amat, xvec=xvec, vrhs=expected, error=error)
+   call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=expected, error=error)
 
    ! Check solution
    if (any(abs(vrhs - expected) / max(1.0_wp, abs(expected)) > thr_rel)) then
@@ -660,7 +734,7 @@ subroutine test_cg_invalid_input(error)
    type(error_type), allocatable, intent(out) :: error
 
    integer, parameter :: n = 3
-   real(wp) :: amat(n, n), xvec(n), vrhs(n), ainv(n, n)
+   real(wp), target :: amat(n, n), xvec(n), vrhs(n), ainv(n, n)
    type(cg_input) :: input
    type(cg_solver) :: solver
    type(error_type), allocatable :: solve_error
@@ -673,7 +747,7 @@ subroutine test_cg_invalid_input(error)
    input%cgmiter = 0
    call new_cg_solver(solver, input)
    vrhs = 0.0_wp
-   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=solve_error)
+   call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=vrhs, error=solve_error)
    if (.not. allocated(solve_error)) then
       call test_failed(error, "CG accepted a non-positive iteration limit")
       return
@@ -683,7 +757,7 @@ subroutine test_cg_invalid_input(error)
    input%cgtol = 0.0_wp
    call new_cg_solver(solver, input)
    vrhs = 0.0_wp
-   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=solve_error)
+   call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=vrhs, error=solve_error)
    if (.not. allocated(solve_error)) then
       call test_failed(error, "CG accepted a non-positive tolerance")
       return
@@ -692,7 +766,7 @@ subroutine test_cg_invalid_input(error)
    deallocate(input%cgtol)
    call new_cg_solver(solver, input)
    vrhs = 0.0_wp
-   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, ainv=ainv, &
+   call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=vrhs, ainv=ainv, &
       & error=solve_error)
    if (.not. allocated(solve_error)) then
       call test_failed(error, "CG returned an inverse matrix")
@@ -709,7 +783,7 @@ subroutine test_cg_not_converged(error)
    type(error_type), allocatable, intent(out) :: error
 
    integer, parameter :: n = 3
-   real(wp) :: amat(n, n), xvec(n), vrhs(n)
+   real(wp), target :: amat(n, n), xvec(n), vrhs(n)
    type(cg_input) :: input
    type(cg_solver) :: solver
    type(error_type), allocatable :: solve_error
@@ -722,7 +796,7 @@ subroutine test_cg_not_converged(error)
    input%cgmiter = 1
    call new_cg_solver(solver, input)
    vrhs = 0.0_wp
-   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=solve_error)
+   call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=vrhs, error=solve_error)
    if (.not. allocated(solve_error)) then
       call test_failed(error, "CG did not report a missing convergence")
    end if
@@ -737,7 +811,7 @@ subroutine test_cg_breakdown(error)
    type(error_type), allocatable, intent(out) :: error
 
    integer, parameter :: n = 2
-   real(wp) :: amat(n, n), xvec(n), vrhs(n)
+   real(wp), target :: amat(n, n), xvec(n), vrhs(n)
    type(cg_input) :: input
    type(cg_solver) :: solver
    type(error_type), allocatable :: solve_error
@@ -749,7 +823,7 @@ subroutine test_cg_breakdown(error)
       & 1.0_wp, 1.0_wp], [n, n])
    xvec = [1.0_wp, -1.0_wp]
    vrhs = 0.0_wp
-   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=solve_error)
+   call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=vrhs, error=solve_error)
    if (.not. allocated(solve_error)) then
       call test_failed(error, &
          & "CG did not report a breakdown for a singular matrix")
@@ -761,7 +835,7 @@ subroutine test_cg_breakdown(error)
       & 0.0_wp, -1.0_wp], [n, n])
    xvec = [1.0_wp, 1.0_wp]
    vrhs = 0.0_wp
-   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=solve_error)
+   call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=vrhs, error=solve_error)
    if (.not. allocated(solve_error)) then
       call test_failed(error, &
          & "CG did not report a breakdown for an indefinite matrix")
@@ -777,7 +851,7 @@ subroutine test_cg_verbosity(error)
    type(error_type), allocatable, intent(out) :: error
 
    integer, parameter :: n = 3
-   real(wp) :: amat(n, n), xvec(n), vrhs(n)
+   real(wp), target :: amat(n, n), xvec(n), vrhs(n)
    integer :: verbosity, unit
    type(cg_input) :: input
    type(cg_solver) :: solver
@@ -792,7 +866,7 @@ subroutine test_cg_verbosity(error)
       input%verbosity = verbosity
       call new_cg_solver(solver, input)
       vrhs = 0.0_wp
-      call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, new_unit=unit, &
+      call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=vrhs, new_unit=unit, &
          & error=error)
       if (allocated(error)) exit
       call check_residual(error, amat, xvec, vrhs, &
@@ -812,7 +886,7 @@ subroutine test_direct_inverse(error)
    type(error_type), allocatable, intent(out) :: error
 
    integer, parameter :: n = 4
-   real(wp) :: amat(n, n), xvec(n), vrhs(n), vref(n), ainv(n, n)
+   real(wp), target :: amat(n, n), xvec(n), vrhs(n), vref(n), ainv(n, n)
    real(wp) :: unity(n, n)
    integer :: i
    type(direct_input) :: input
@@ -826,9 +900,9 @@ subroutine test_direct_inverse(error)
    xvec = [1.0_wp, -2.0_wp, 0.5_wp, 0.0_wp]
 
    call new_direct_solver(solver, input)
-   call solver%solve(amat=amat, xvec=xvec, vrhs=vref, error=error)
+   call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=vref, error=error)
    if (allocated(error)) return
-   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, ainv=ainv, error=error)
+   call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=vrhs, ainv=ainv, error=error)
    if (allocated(error)) return
 
    unity = matmul(amat, ainv)
@@ -860,7 +934,7 @@ subroutine test_direct_singular(error)
    type(error_type), allocatable, intent(out) :: error
 
    integer, parameter :: n = 2
-   real(wp) :: amat(n, n), xvec(n), vrhs(n), ainv(n, n)
+   real(wp), target :: amat(n, n), xvec(n), vrhs(n), ainv(n, n)
    type(direct_input) :: input
    type(direct_solver) :: solver
    type(error_type), allocatable :: solve_error
@@ -871,14 +945,14 @@ subroutine test_direct_singular(error)
 
    call new_direct_solver(solver, input)
    vrhs = 0.0_wp
-   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, error=solve_error)
+   call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=vrhs, error=solve_error)
    if (.not. allocated(solve_error)) then
       call test_failed(error, "Direct solver accepted a singular matrix")
       return
    end if
 
    vrhs = 0.0_wp
-   call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, ainv=ainv, &
+   call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=vrhs, ainv=ainv, &
       & error=solve_error)
    if (.not. allocated(solve_error)) then
       call test_failed(error, "Direct solver inverted a singular matrix")
@@ -894,7 +968,7 @@ subroutine test_direct_verbosity(error)
    type(error_type), allocatable, intent(out) :: error
 
    integer, parameter :: n = 4
-   real(wp) :: amat(n, n), xvec(n), vrhs(n), ainv(n, n)
+   real(wp), target :: amat(n, n), xvec(n), vrhs(n), ainv(n, n)
    integer :: verbosity, unit
    type(direct_input) :: input
    type(direct_solver) :: solver
@@ -911,7 +985,7 @@ subroutine test_direct_verbosity(error)
       input%verbosity = verbosity
       call new_direct_solver(solver, input)
       vrhs = 0.0_wp
-      call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, new_unit=unit, &
+      call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=vrhs, new_unit=unit, &
          & error=error)
       if (allocated(error)) exit
       call check_residual(error, amat, xvec, vrhs, &
@@ -919,7 +993,7 @@ subroutine test_direct_verbosity(error)
       if (allocated(error)) exit
 
       vrhs = 0.0_wp
-      call solver%solve(amat=amat, xvec=xvec, vrhs=vrhs, ainv=ainv, &
+      call solver%solve(tprod=dense_op(amat), xvec=xvec, vrhs=vrhs, ainv=ainv, &
          & new_unit=unit, error=error)
       if (allocated(error)) exit
       call check_residual(error, amat, xvec, vrhs, &
@@ -930,6 +1004,253 @@ subroutine test_direct_verbosity(error)
    if (allocated(error)) print '("Verbosity: ", i0)', verbosity
 
 end subroutine test_direct_verbosity
+
+
+!> Test: The direct solver rejects a trial product without a dense matrix
+subroutine test_direct_sparse_unsupported(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   integer, parameter :: n = 4
+   real(wp) :: amat(n, n), xvec(n), vrhs(n)
+   real(wp), allocatable, target :: val(:)
+   type(csr_list), target :: list
+   type(csr_trialprod) :: tprod
+   type(direct_input) :: input
+   type(direct_solver) :: solver
+   type(error_type), allocatable :: solve_error
+
+   call get_spd_matrix(amat)
+   call dense_to_csr(amat, list, val)
+   call new_csr_trialprod(tprod, val, list)
+   xvec = 1.0_wp
+   vrhs = 0.0_wp
+
+   call new_direct_solver(solver, input)
+   call solver%solve(tprod, xvec, vrhs, error=solve_error)
+   if (.not. allocated(solve_error)) then
+      call test_failed(error, "Direct solver accepted a sparse trial product")
+   end if
+
+end subroutine test_direct_sparse_unsupported
+
+
+!> Test: Dense and CSR trial products agree in products and diagonals
+subroutine test_trialprod_dense_csr(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   integer, parameter :: n = 7
+   integer :: i
+   real(wp), target :: amat(n, n)
+   real(wp) :: xvec(n), ydense(n), ysparse(n), ddense(n), dsparse(n)
+   real(wp), allocatable, target :: val(:)
+   type(csr_list), target :: list
+   type(dense_trialprod) :: dense
+   type(csr_trialprod) :: sparse
+
+   call get_spd_matrix(amat)
+   call dense_to_csr(amat, list, val)
+   call new_dense_trialprod(dense, amat)
+   call new_csr_trialprod(sparse, val, list)
+   do i = 1, n
+      xvec(i) = sin(real(i, wp))
+   end do
+
+   call dense%multiply(xvec, ydense)
+   call sparse%multiply(xvec, ysparse)
+   if (any(abs(ydense - matmul(amat, xvec)) > thr)) then
+      call test_failed(error, "Dense trial product does not match matmul")
+      return
+   end if
+   if (any(abs(ysparse - ydense) > thr)) then
+      call test_failed(error, "CSR trial product does not match the dense one")
+      return
+   end if
+
+   call dense%get_diagonal(ddense)
+   call sparse%get_diagonal(dsparse)
+   do i = 1, n
+      if (abs(ddense(i) - amat(i, i)) > thr .or. abs(dsparse(i) - amat(i, i)) > thr) then
+         call test_failed(error, "Trial product diagonal does not match the matrix")
+         return
+      end if
+   end do
+
+end subroutine test_trialprod_dense_csr
+
+
+!> Test: CG gives the same solution with the dense and the CSR trial product
+subroutine test_cg_csr_trialprod(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   integer, parameter :: n = 9
+   integer :: i
+   real(wp), target :: amat(n, n)
+   real(wp) :: xvec(n), vdense(n), vsparse(n), lam_dense, lam_sparse
+   real(wp), allocatable, target :: val(:)
+   type(csr_list), target :: list
+   type(csr_trialprod) :: sparse
+   type(cg_input) :: input
+   type(cg_solver) :: solver
+
+   call get_spd_matrix(amat)
+   call dense_to_csr(amat, list, val)
+   call new_csr_trialprod(sparse, val, list)
+   do i = 1, n
+      xvec(i) = cos(real(i, wp))
+   end do
+
+   call new_cg_solver(solver, input)
+
+   vdense = 0.0_wp
+   call solver%solve(dense_op(amat), xvec, vdense, error=error)
+   if (allocated(error)) return
+
+   vsparse = 0.0_wp
+   call solver%solve(sparse, xvec, vsparse, error=error)
+   if (allocated(error)) return
+
+   call check_residual(error, amat, xvec, vsparse, "CG with CSR trial product failed")
+   if (allocated(error)) return
+
+   if (any(abs(vsparse - vdense) > thr1)) then
+      call test_failed(error, "Dense and CSR trial products give different solutions")
+      return
+   end if
+
+   ! Projected solve with a total sum constraint in both representations
+   vdense = 0.0_wp
+   call solver%solve(dense_op(amat), xvec, vdense, qtot=1.0_wp, &
+      & lambda=lam_dense, error=error)
+   if (allocated(error)) return
+
+   vsparse = 0.0_wp
+   call solver%solve(sparse, xvec, vsparse, qtot=1.0_wp, lambda=lam_sparse, &
+      & error=error)
+   if (allocated(error)) return
+
+   if (abs(sum(vsparse) - 1.0_wp) > thr1 .or. any(abs(vsparse - vdense) > thr1) &
+      & .or. abs(lam_sparse - lam_dense) > thr1) then
+      call test_failed(error, "Projected CG differs between trial products")
+   end if
+
+end subroutine test_cg_csr_trialprod
+
+
+!> Test: FSAI with a complete pattern is the exact inverse, CG converges in
+!> a single iteration
+subroutine test_fsai_exact_inverse(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   integer, parameter :: n = 8
+   integer :: i
+   real(wp), target :: amat(n, n)
+   real(wp) :: xvec(n), zvec(n), vrhs(n)
+   real(wp), allocatable :: val(:)
+   type(csr_list) :: pattern
+   type(fsai_precond) :: fsai
+   type(cg_input) :: input
+   type(cg_solver) :: solver
+   character(len=:), allocatable :: output
+   integer :: unit, iter, stat
+
+   call get_spd_matrix(amat)
+   call dense_to_csr(amat, pattern, val)
+   call new_fsai_precond(fsai, dense_op(amat), pattern, error)
+   if (allocated(error)) return
+
+   do i = 1, n
+      xvec(i) = sin(real(3 * i, wp))
+   end do
+
+   ! M^-1 A x = x for the exact inverse
+   call fsai%apply(matmul(amat, xvec), zvec)
+   if (any(abs(zvec - xvec) > thr1)) then
+      call test_failed(error, "FSAI with a complete pattern is not the inverse")
+      print "(a, es12.4)", "Largest deviation:", maxval(abs(zvec - xvec))
+      return
+   end if
+
+   input%verbosity = 1
+   call new_cg_solver(solver, input)
+   vrhs = 0.0_wp
+   open(newunit=unit, status="scratch", action="readwrite")
+   call solver%solve(dense_op(amat), xvec, vrhs, prec=fsai, new_unit=unit, &
+      & error=error)
+   if (allocated(error)) then
+      close(unit)
+      return
+   end if
+
+   ! Read the number of iterations from the convergence message
+   rewind(unit)
+   iter = -1
+   do
+      allocate(character(len=256) :: output)
+      read(unit, "(a)", iostat=stat) output
+      if (stat /= 0) exit
+      if (index(output, "CG converged in") > 0) then
+         read(output(index(output, "in") + 2:), *) iter
+      end if
+      deallocate(output)
+   end do
+   close(unit)
+
+   call check_residual(error, amat, xvec, vrhs, "CG with exact FSAI failed")
+   if (allocated(error)) return
+
+   if (iter /= 1) then
+      call test_failed(error, "CG with the exact inverse needs more than one iteration")
+      print "(a, i0)", "Iterations: ", iter
+   end if
+
+end subroutine test_fsai_exact_inverse
+
+
+!> Test: FSAI without neighbours reduces to the Jacobi preconditioner
+subroutine test_fsai_diagonal_pattern(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   integer, parameter :: n = 6
+   integer :: i
+   real(wp), target :: amat(n, n)
+   real(wp) :: xvec(n), zvec(n)
+   type(csr_list) :: pattern
+   type(fsai_precond) :: fsai
+
+   call get_spd_matrix(amat)
+   pattern%complete = .false.
+   allocate(pattern%inl(n + 1), pattern%nlat(n))
+   do i = 1, n
+      pattern%inl(i) = int(i, i8)
+      pattern%nlat(i) = i
+   end do
+   pattern%inl(n + 1) = int(n + 1, i8)
+
+   call new_fsai_precond(fsai, dense_op(amat), pattern, error)
+   if (allocated(error)) return
+
+   do i = 1, n
+      xvec(i) = real(i, wp)
+   end do
+   call fsai%apply(xvec, zvec)
+   do i = 1, n
+      if (abs(zvec(i) - xvec(i) / amat(i, i)) > thr) then
+         call test_failed(error, "Diagonal FSAI does not match the Jacobi preconditioner")
+         return
+      end if
+   end do
+
+end subroutine test_fsai_diagonal_pattern
 
 
 !> Test: The solver factory constructs the solver matching its input

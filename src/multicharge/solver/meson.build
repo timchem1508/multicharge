@@ -17,5 +17,7 @@
 srcs += files(
   'cg.f90',
   'direct.f90',
+  'precond.f90',
+  'trialprod.f90',
   'type.f90',
 )

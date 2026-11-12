@@ -45,3 +45,11 @@ option(
   yield: true,
   description: 'enable ILP64 LAPACK/BLAS',
 )
+
+option(
+  'fftw',
+  type: 'feature',
+  value: 'auto',
+  yield: true,
+  description: 'use FFTW for the real-to-complex transforms of the PME operator',
+)

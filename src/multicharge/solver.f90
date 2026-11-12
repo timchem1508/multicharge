@@ -25,6 +25,11 @@ module multicharge_solver
    use multicharge_solver_cg, only : cg_solver, new_cg_solver, cg_input
    use multicharge_solver_direct, only : direct_solver, new_direct_solver, &
       & direct_input
+   use multicharge_solver_precond, only : precond_type, precond_kind, &
+      & identity_precond, jacobi_precond, fsai_precond, new_jacobi_precond, &
+      & new_fsai_precond
+   use multicharge_solver_trialprod, only : trialprod, dense_trialprod, &
+      & csr_trialprod, new_dense_trialprod, new_csr_trialprod
    use multicharge_solver_type, only : mchrg_solver_type, mchrg_solver_input
    implicit none
    private
@@ -33,6 +38,10 @@ module multicharge_solver
    public :: direct_solver, new_direct_solver, direct_input
    public :: cg_solver, new_cg_solver, cg_input
    public :: new_mchrg_solver
+   public :: trialprod, dense_trialprod, csr_trialprod
+   public :: precond_type, precond_kind, identity_precond, jacobi_precond
+   public :: fsai_precond, new_jacobi_precond, new_fsai_precond
+   public :: new_dense_trialprod, new_csr_trialprod
 
 
 contains

@@ -26,7 +26,7 @@ program main
       & coulomb_input, coulomb_method
    use multicharge_output, only: json_results
    use multicharge_solver, only : new_mchrg_solver, mchrg_solver_type, &
-      & mchrg_solver_input, cg_input, direct_input
+      & mchrg_solver_input, cg_input, direct_input, precond_kind
    implicit none
    character(len=*), parameter :: prog_name = "multicharge"
    character(len=*), parameter :: json_output = "multicharge.json"
@@ -240,6 +240,11 @@ subroutine help(unit)
       & "Target accuracy of the PME operator (default: 1.0e-7)", &
       "-projected, --projected", &
       & "Enforce the total charge by projection in a single CG solve", &
+      "-precond, --precond <type>", &
+      & "Preconditioner of the cg solver: 'none', 'jacobi' or 'fsai' "//&
+      & "(default: 'fsai' for eeq, 'jacobi' for eeqbc)", &
+      "-precond-cutoff, --precond-cutoff <real>", &
+      & "Neighbour cutoff of the 'fsai' preconditioner in Bohr (default: 10.0)", &
       "-v, -verbose, --verbose", "Show more", &
       "-s, -silent, --silent", "Show less", &
       "-j, -json, --json", &
@@ -309,7 +314,8 @@ subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
    integer :: iarg, narg, iostat
    character(len=:), allocatable :: arg, solver_name
    integer, allocatable :: maxiter
-   real(wp), allocatable :: tol, nlist_cutoff, coulomb_acc
+   real(wp), allocatable :: tol, nlist_cutoff, coulomb_acc, precond_cutoff
+   integer, allocatable :: precond
    logical :: projected
 
    model_id = mchrg_model%eeq2019
@@ -481,6 +487,38 @@ subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
          end if
       case("-projected", "--projected")
          projected = .true.
+      case("-precond", "--precond")
+         iarg = iarg + 1
+         call get_argument(iarg, arg)
+         if (.not. allocated(arg)) then
+            call fatal_error(error, "Missing argument for the preconditioner")
+            exit
+         end if
+         if (.not. allocated(precond)) allocate(precond)
+         select case(arg)
+         case("none")
+            precond = precond_kind%none
+         case("jacobi")
+            precond = precond_kind%jacobi
+         case("fsai")
+            precond = precond_kind%fsai
+         case default
+            call fatal_error(error, "Unknown preconditioner '"//arg//"' requested")
+            exit
+         end select
+      case("-precond-cutoff", "--precond-cutoff")
+         if (.not. allocated(precond_cutoff)) allocate(precond_cutoff)
+         iarg = iarg + 1
+         call get_argument(iarg, arg)
+         if (.not. allocated(arg)) then
+            call fatal_error(error, "Missing argument for the preconditioner cutoff")
+            exit
+         end if
+         read(arg, *, iostat=iostat) precond_cutoff
+         if (iostat /= 0 .or. .not. precond_cutoff > 0.0_wp) then
+            call fatal_error(error, "Invalid preconditioner cutoff")
+            exit
+         end if
       end select
    end do
    if (allocated(error)) return
@@ -535,7 +573,14 @@ subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
          solver_input%verbosity = verbosity
       end if
       solver_input%projected = projected
+      if (allocated(precond)) solver_input%precond = precond
+      if (allocated(precond_cutoff)) solver_input%precond_cutoff = precond_cutoff
    type is (direct_input)
+      if (allocated(precond) .or. allocated(precond_cutoff)) then
+         call fatal_error(error, "Preconditioners can only be used with the "//&
+            & "cg solver.")
+         return
+      end if
       if (projected) then
          call fatal_error(error, "Projection of the total charge can only be "//&
             & "used with the cg solver.")
