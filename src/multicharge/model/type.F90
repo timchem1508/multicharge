@@ -455,8 +455,12 @@ subroutine solve(self, mol, solver, cache, error, &
 
    else if (solver%projected) then
       ! Single solve on the constraint plane: A*q + lambda*1 = xvec, sum(q) = Q
-      call get_amat_diagonal(mol, cache, adiag, list)
-      cache%vrhs(:mol%nat) = cache%xvec(:mol%nat) / (adiag + eps)
+      if (allocated(cache%prec)) then
+         call cache%prec%apply(cache%xvec(:mol%nat), cache%vrhs(:mol%nat))
+      else
+         call get_amat_diagonal(mol, cache, adiag, list)
+         cache%vrhs(:mol%nat) = cache%xvec(:mol%nat) / (adiag + eps)
+      end if
       call print_constrained_system_message(print_unit, verbosity_solve, "q")
       call solve_linear(solver, cache, cache%xvec(:mol%nat), cache%vrhs(:mol%nat), &
          & print_unit, error, list, qtot=mol%charge, lambda=lambda)
@@ -467,14 +471,18 @@ subroutine solve(self, mol, solver, cache, error, &
       call ensure_shape(cache%uvec, mol%nat)
       allocate(unitvec(mol%nat))
       allocate(vvec(mol%nat))
-      call get_amat_diagonal(mol, cache, adiag, list)
-      ! Initial guess
-      do iat = 1, mol%nat
-         cache%uvec(iat) = 1.0_wp / (adiag(iat) + eps)
-         vvec(iat) = - cache%xvec(iat) / (adiag(iat) + eps)
-      end do
-
       unitvec = 1.0_wp
+      ! Initial guess
+      if (allocated(cache%prec)) then
+         call cache%prec%apply(unitvec, cache%uvec)
+         call cache%prec%apply(-cache%xvec(:mol%nat), vvec)
+      else
+         call get_amat_diagonal(mol, cache, adiag, list)
+         do iat = 1, mol%nat
+            cache%uvec(iat) = 1.0_wp / (adiag(iat) + eps)
+            vvec(iat) = - cache%xvec(iat) / (adiag(iat) + eps)
+         end do
+      end if
 
       call print_constrained_system_message(print_unit, verbosity_solve, "u")
       ! Constrained response: A*uvec = 1
@@ -766,10 +774,14 @@ subroutine get_adjoint(self, mol, solver, cache, error, &
    if (solver%need_pos_def) then
       ! Initial guess
       allocate(yvec(mol%nat))
-      call get_amat_diagonal(mol, cache, adiag, list)
-      do iat = 1, mol%nat
-         yvec(iat) = dfdq(iat) / (adiag(iat) + eps)
-      end do
+      if (allocated(cache%prec)) then
+         call cache%prec%apply(dfdq, yvec)
+      else
+         call get_amat_diagonal(mol, cache, adiag, list)
+         do iat = 1, mol%nat
+            yvec(iat) = dfdq(iat) / (adiag(iat) + eps)
+         end do
+      end if
 
       call print_adjoint_message(unit, verbosity)
       if (solver%projected) then
@@ -1134,7 +1146,7 @@ subroutine setup_preconditioner(self, solver, mol, cache, error, list)
       block
          type(fsai_precond), allocatable :: fsai
          allocate(fsai)
-         call new_fsai_precond(fsai, tprod, pattern, error)
+         call new_fsai_precond(fsai, tprod, pattern, error, mol=mol)
          if (allocated(error)) return
 
          call move_alloc(fsai, cache%prec)

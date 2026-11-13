@@ -30,6 +30,10 @@
 module multicharge_solver_precond
    use mctc_csrlist, only : csr_list
    use mctc_env, only : error_type, fatal_error, i8, wp
+   use mctc_io, only : structure_type
+   use mctc_io_constants, only : pi
+   use mctc_io_math, only : matdet_3x3, matinv_3x3
+   use multicharge_blas, only : symv
    use multicharge_solver_trialprod, only : trialprod
    implicit none
    private
@@ -154,6 +158,15 @@ module multicharge_solver_precond
 
       !> Neighbour cutoff of the sparsity pattern in Bohr
       real(wp) :: cutoff = 0.0_wp
+
+      !> Number of coarse cells in the two-level correction
+      integer :: ncoarse = 0
+
+      !> Coarse cell index of each atom
+      integer, allocatable :: cidx(:)
+
+      !> Coarse correction matrix W^-1 - B^-1
+      real(wp), allocatable :: cmat(:, :)
    contains
 
       !> Apply G^T G to the residual vector
@@ -173,6 +186,11 @@ module multicharge_solver_precond
    !> Minimal number of rows to apply the factor in parallel, below the
    !> overhead of a parallel region exceeds the sparse products
    integer, parameter :: min_rows_apply = 4096
+
+   !> Maximum number of coarse cells per axis to bound coarse setup cost
+   integer, parameter :: max_coarse_grid = 8
+
+   real(wp), parameter :: sqrtpi = sqrt(pi)
 
 
 contains
@@ -203,7 +221,7 @@ end subroutine new_jacobi_precond
 !> pattern, its values solve A(J, J) g = e_i normalized to g_i = 1/sqrt(g_i).
 !> Rows with a block that is not positive definite fall back to the inverse
 !> square root of the diagonal.
-subroutine new_fsai_precond(self, tprod, pattern, error)
+subroutine new_fsai_precond(self, tprod, pattern, error, mol)
 
    !> Factorized sparse approximate inverse instance
    type(fsai_precond), intent(out) :: self
@@ -216,6 +234,9 @@ subroutine new_fsai_precond(self, tprod, pattern, error)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
+
+   !> Optional molecular structure for the two-level coarse correction
+   type(structure_type), intent(in), optional :: mol
 
    integer :: ndim, iat, nrow, info, kk
    integer(i8) :: ij
@@ -282,6 +303,9 @@ subroutine new_fsai_precond(self, tprod, pattern, error)
    !$omp end parallel
 
    call transpose_factor(self, ndim)
+   if (present(mol) .and. self%cutoff > 0.0_wp) then
+      call setup_coarse_correction(self, mol, ndim)
+   end if
 
 end subroutine new_fsai_precond
 
@@ -411,6 +435,247 @@ subroutine transpose_factor(self, ndim)
 end subroutine transpose_factor
 
 
+!> Construct the two-level coarse-space Woodbury correction W^-1 - B^-1
+subroutine setup_coarse_correction(self, mol, ndim)
+
+   !> Factorized sparse approximate inverse instance
+   type(fsai_precond), intent(inout) :: self
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Dimension of the linear system
+   integer, intent(in) :: ndim
+
+   integer :: iat, idir, ic, jc, nc, info
+   integer :: ngrid(3), ix(3), m1, m2, m3, mmax(3)
+   integer(i8) :: ij, kl
+   integer, allocatable :: raw_cid(:), map(:)
+   real(wp) :: hc, xmin(3), xmax(3), span(3), u(3), inv_lat(3, 3), rec_lat(3, 3)
+   real(wp) :: vol, alpha_c, r, gvec(3), g2, wg, val, dxyz(3)
+   real(wp), allocatable :: gmat(:, :), wmat(:, :), bmat(:, :), wvec(:)
+   real(wp), allocatable :: rcell(:, :), ref_xyz(:, :)
+   integer, allocatable :: cnt_cell(:)
+
+   if (ndim < 16 .or. mol%nat /= ndim) return
+   if (any(mol%periodic) .and. .not. all(mol%periodic)) return
+
+   hc = 0.8_wp * self%cutoff
+   if (all(mol%periodic)) then
+      inv_lat = matinv_3x3(mol%lattice)
+      do idir = 1, 3
+         span(idir) = norm2(mol%lattice(:, idir))
+         ngrid(idir) = max(1, min(max_coarse_grid, nint(span(idir) / hc)))
+      end do
+   else
+      xmin = minval(mol%xyz, dim=2)
+      xmax = maxval(mol%xyz, dim=2)
+      span = xmax - xmin
+      do idir = 1, 3
+         ngrid(idir) = max(1, min(max_coarse_grid, ceiling(span(idir) / hc)))
+      end do
+   end if
+
+   if (product(ngrid) <= 1) return
+
+   allocate(raw_cid(ndim))
+   do iat = 1, ndim
+      if (all(mol%periodic)) then
+         u = matmul(inv_lat, mol%xyz(:, iat))
+         u = u - floor(u)
+         do idir = 1, 3
+            ix(idir) = modulo(int(u(idir) * real(ngrid(idir), wp)), ngrid(idir))
+         end do
+      else
+         do idir = 1, 3
+            if (span(idir) > eps) then
+               u(idir) = (mol%xyz(idir, iat) - xmin(idir)) / span(idir)
+               ix(idir) = min(ngrid(idir) - 1, max(0, int(u(idir) * real(ngrid(idir), wp))))
+            else
+               ix(idir) = 0
+            end if
+         end do
+      end if
+      raw_cid(iat) = 1 + ix(1) + ngrid(1) * (ix(2) + ngrid(2) * ix(3))
+   end do
+
+   allocate(map(product(ngrid)), source=0)
+   nc = 0
+   do iat = 1, ndim
+      ic = raw_cid(iat)
+      if (map(ic) == 0) then
+         nc = nc + 1
+         map(ic) = nc
+      end if
+   end do
+
+   if (nc <= 1) return
+
+   self%ncoarse = nc
+   allocate(self%cidx(ndim))
+   do iat = 1, ndim
+      self%cidx(iat) = map(raw_cid(iat))
+   end do
+
+   ! Compute coarse cell centers and W = (G P_0)^T (G P_0)
+   allocate(rcell(3, nc), ref_xyz(3, nc), source=0.0_wp)
+   allocate(cnt_cell(nc), source=0)
+   do iat = 1, ndim
+      ic = self%cidx(iat)
+      if (cnt_cell(ic) == 0) then
+         ref_xyz(:, ic) = mol%xyz(:, iat)
+         rcell(:, ic) = mol%xyz(:, iat)
+      else if (all(mol%periodic)) then
+         dxyz = mol%xyz(:, iat) - ref_xyz(:, ic)
+         u = matmul(inv_lat, dxyz)
+         dxyz = matmul(mol%lattice, u - real(nint(u), wp))
+         rcell(:, ic) = rcell(:, ic) + ref_xyz(:, ic) + dxyz
+      else
+         rcell(:, ic) = rcell(:, ic) + mol%xyz(:, iat)
+      end if
+      cnt_cell(ic) = cnt_cell(ic) + 1
+   end do
+   do ic = 1, nc
+      rcell(:, ic) = rcell(:, ic) / real(cnt_cell(ic), wp)
+   end do
+
+   allocate(wmat(nc, nc), source=0.0_wp)
+   do iat = 1, ndim
+      do ij = self%gptr(iat), self%gptr(iat + 1) - 1
+         ic = self%cidx(self%gidx(ij))
+         val = self%gval(ij)
+         wmat(ic, ic) = wmat(ic, ic) + val * val
+         do kl = ij + 1, self%gptr(iat + 1) - 1
+            jc = self%cidx(self%gidx(kl))
+            if (ic == jc) then
+               wmat(ic, ic) = wmat(ic, ic) + 2.0_wp * val * self%gval(kl)
+            else
+               wmat(ic, jc) = wmat(ic, jc) + val * self%gval(kl)
+               wmat(jc, ic) = wmat(jc, ic) + val * self%gval(kl)
+            end if
+         end do
+      end do
+   end do
+
+   allocate(wvec(nc))
+   do ic = 1, nc
+      wvec(ic) = sum(wmat(:, ic))
+   end do
+
+   ! Build analytical coarse matrix B = W + D_w K_long D_w
+   allocate(bmat(nc, nc))
+   bmat(:, :) = wmat
+   alpha_c = 1.2_wp / self%cutoff
+
+   if (all(mol%periodic)) then
+      vol = abs(matdet_3x3(mol%lattice))
+      rec_lat = 2.0_wp * pi * transpose(inv_lat)
+      do idir = 1, 3
+         mmax(idir) = max(2, ceiling(3.5_wp * alpha_c * span(idir) / pi))
+      end do
+      do m3 = -mmax(3), mmax(3)
+         do m2 = -mmax(2), mmax(2)
+            do m1 = -mmax(1), mmax(1)
+               if (m1 == 0 .and. m2 == 0 .and. m3 == 0) cycle
+               gvec = matmul(rec_lat, real([m1, m2, m3], wp))
+               g2 = dot_product(gvec, gvec)
+               if (0.25_wp * g2 / (alpha_c * alpha_c) > 16.0_wp) cycle
+               wg = (4.0_wp * pi / vol) * exp(-0.25_wp * g2 / (alpha_c * alpha_c)) / g2
+               do jc = 1, nc
+                  do ic = 1, jc
+                     dxyz = rcell(:, ic) - rcell(:, jc)
+                     val = wg * wvec(ic) * wvec(jc) * cos(dot_product(gvec, dxyz))
+                     bmat(ic, jc) = bmat(ic, jc) + val
+                     if (ic /= jc) bmat(jc, ic) = bmat(ic, jc)
+                  end do
+               end do
+            end do
+         end do
+      end do
+   else
+      do jc = 1, nc
+         bmat(jc, jc) = bmat(jc, jc) + wvec(jc) * wvec(jc) * (2.0_wp * alpha_c / sqrtpi)
+         do ic = 1, jc - 1
+            r = norm2(rcell(:, ic) - rcell(:, jc))
+            if (r > 1.0e-10_wp) then
+               val = wvec(ic) * wvec(jc) * erf(alpha_c * r) / r
+            else
+               val = wvec(ic) * wvec(jc) * (2.0_wp * alpha_c / sqrtpi)
+            end if
+            bmat(ic, jc) = bmat(ic, jc) + val
+            bmat(jc, ic) = bmat(ic, jc)
+         end do
+      end do
+   end if
+
+   ! Invert W and B by Cholesky factorization: cmat = W^-1 - B^-1
+   allocate(self%cmat(nc, nc), gmat(nc, nc))
+   call invert_spd(wmat, self%cmat, info)
+   if (info /= 0) then
+      self%ncoarse = 0
+      deallocate(self%cidx, self%cmat)
+      return
+   end if
+   call invert_spd(bmat, gmat, info)
+   if (info /= 0) then
+      self%ncoarse = 0
+      deallocate(self%cidx, self%cmat)
+      return
+   end if
+   self%cmat(:, :) = self%cmat - gmat
+
+end subroutine setup_coarse_correction
+
+
+!> Invert a symmetric positive definite matrix by Cholesky factorization
+pure subroutine invert_spd(amat, ainv, info)
+
+   !> Matrix, overwritten by its Cholesky factor
+   real(wp), intent(inout) :: amat(:, :)
+
+   !> Inverse matrix
+   real(wp), intent(out) :: ainv(:, :)
+
+   !> Zero on success, otherwise the first non-positive pivot
+   integer, intent(out) :: info
+
+   integer :: ii, jj, nn
+   real(wp) :: piv
+
+   nn = size(amat, 1)
+   info = 0
+   do jj = 1, nn
+      piv = amat(jj, jj) - dot_product(amat(jj, :jj - 1), amat(jj, :jj - 1))
+      if (.not. piv > 0.0_wp) then
+         info = jj
+         return
+      end if
+      amat(jj, jj) = sqrt(piv)
+      do ii = jj + 1, nn
+         amat(ii, jj) = (amat(ii, jj) - dot_product(amat(ii, :jj - 1), &
+            & amat(jj, :jj - 1))) / amat(jj, jj)
+      end do
+   end do
+
+   ainv(:, :) = 0.0_wp
+   do jj = 1, nn
+      ainv(jj, jj) = 1.0_wp
+      do ii = jj, nn
+         ainv(ii, jj) = (ainv(ii, jj) - dot_product(amat(ii, jj:ii - 1), &
+            & ainv(jj:ii - 1, jj))) / amat(ii, ii)
+      end do
+      do ii = nn, 1, -1
+         ainv(ii, jj) = (ainv(ii, jj) - dot_product(amat(ii + 1:, ii), &
+            & ainv(ii + 1:, jj))) / amat(ii, ii)
+      end do
+      do ii = 1, jj - 1
+         ainv(ii, jj) = ainv(jj, ii)
+      end do
+   end do
+
+end subroutine invert_spd
+
+
 !> Copy the residual vector
 subroutine identity_apply(self, rvec, zvec)
 
@@ -445,7 +710,7 @@ subroutine jacobi_apply(self, rvec, zvec)
 end subroutine jacobi_apply
 
 
-!> Apply G^T G to the residual vector
+!> Apply G^T G and the optional two-level coarse correction to the residual vector
 subroutine fsai_apply(self, rvec, zvec)
 
    !> Factorized sparse approximate inverse instance
@@ -457,13 +722,47 @@ subroutine fsai_apply(self, rvec, zvec)
    !> Preconditioned residual vector
    real(wp), intent(out) :: zvec(:)
 
-   integer :: iat, ndim
-   integer(i8) :: ij
-   real(wp) :: tmp
-   real(wp), allocatable :: gres(:)
+   integer :: ndim
+   real(wp), allocatable :: gres(:), cvec(:), dvec(:), pvec(:), corr(:)
 
    ndim = size(self%gptr) - 1
    allocate(gres(ndim))
+
+   call fsai_raw_apply(self, ndim, rvec, gres, zvec)
+
+   if (self%ncoarse > 1) then
+      allocate(cvec(self%ncoarse), dvec(self%ncoarse), pvec(ndim), corr(ndim))
+      call restrict_coarse(self%cidx, ndim, self%ncoarse, zvec, cvec)
+      call symv(self%cmat, cvec, dvec)
+      call prolong_coarse(self%cidx, ndim, dvec, pvec)
+      call fsai_raw_apply(self, ndim, pvec, gres, corr)
+      zvec(:) = zvec - corr
+   end if
+
+end subroutine fsai_apply
+
+
+!> Apply G^T G to a vector
+subroutine fsai_raw_apply(self, ndim, rvec, gres, zvec)
+
+   !> Factorized sparse approximate inverse instance
+   type(fsai_precond), intent(in) :: self
+
+   !> Dimension of the linear system
+   integer, intent(in) :: ndim
+
+   !> Input vector
+   real(wp), intent(in) :: rvec(:)
+
+   !> Intermediate vector G * rvec
+   real(wp), intent(inout) :: gres(:)
+
+   !> Output vector G^T * gres
+   real(wp), intent(out) :: zvec(:)
+
+   integer :: iat
+   integer(i8) :: ij
+   real(wp) :: tmp
 
    !$omp parallel default(none) shared(self, rvec, zvec, gres, ndim) &
    !$omp private(iat, ij, tmp) if(ndim >= min_rows_apply)
@@ -487,7 +786,60 @@ subroutine fsai_apply(self, rvec, zvec)
    !$omp end do
    !$omp end parallel
 
-end subroutine fsai_apply
+end subroutine fsai_raw_apply
+
+
+!> Restrict a fine-grid vector to coarse cells by summation
+pure subroutine restrict_coarse(cidx, ndim, ncoarse, fvec, cvec)
+
+   !> Coarse cell index of each atom
+   integer, intent(in) :: cidx(:)
+
+   !> Number of atoms
+   integer, intent(in) :: ndim
+
+   !> Number of coarse cells
+   integer, intent(in) :: ncoarse
+
+   !> Fine-grid vector
+   real(wp), intent(in) :: fvec(:)
+
+   !> Coarse-grid vector
+   real(wp), intent(out) :: cvec(:)
+
+   integer :: iat, ic
+
+   cvec(:ncoarse) = 0.0_wp
+   do iat = 1, ndim
+      ic = cidx(iat)
+      cvec(ic) = cvec(ic) + fvec(iat)
+   end do
+
+end subroutine restrict_coarse
+
+
+!> Prolongate a coarse-grid vector to atoms
+pure subroutine prolong_coarse(cidx, ndim, cvec, fvec)
+
+   !> Coarse cell index of each atom
+   integer, intent(in) :: cidx(:)
+
+   !> Number of atoms
+   integer, intent(in) :: ndim
+
+   !> Coarse-grid vector
+   real(wp), intent(in) :: cvec(:)
+
+   !> Fine-grid vector
+   real(wp), intent(out) :: fvec(:)
+
+   integer :: iat
+
+   do iat = 1, ndim
+      fvec(iat) = cvec(cidx(iat))
+   end do
+
+end subroutine prolong_coarse
 
 
 !> Name of the identity preconditioner
