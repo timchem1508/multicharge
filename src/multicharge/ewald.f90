@@ -25,8 +25,7 @@ module multicharge_ewald
    real(wp), parameter :: sqrtpi = sqrt(pi)
    real(wp), parameter :: eps = sqrt(epsilon(0.0_wp))
 
-   !> Scaling of the balanced Ewald parameter, shifting work to the reciprocal
-   !> sum, whose terms are cheaper to evaluate than the real-space terms
+   !> Scaling of the Ewald parameter, shifting work to the reciprocal-space
    real(wp), parameter :: alpha_scale = 1.25_wp
 
    abstract interface
@@ -54,9 +53,6 @@ contains
 
 
 !> Ewald parameter balancing the cost of the real-space and reciprocal sums.
-!> With both sums converged to a fixed tolerance per term, the number of
-!> real-space terms scales as 1/(alpha^3 V) and the number of reciprocal terms
-!> as alpha^3 V, which balance for alpha = sqrt(pi) / V^(1/3).
 subroutine get_alpha(lattice, alpha)
    !> Lattice vectors
    real(wp), intent(in) :: lattice(:, :)
@@ -68,8 +64,7 @@ subroutine get_alpha(lattice, alpha)
 end subroutine get_alpha
 
 
-!> Real-space cutoff beyond which every term of the direct Ewald sum stays
-!> below the given tolerance
+!> Real-space cutoff
 pure function get_dir_cutoff(alpha, conv) result(cutoff)
    !> Parameter of the Ewald summation
    real(wp), intent(in) :: alpha
@@ -83,8 +78,7 @@ pure function get_dir_cutoff(alpha, conv) result(cutoff)
 end function get_dir_cutoff
 
 
-!> Reciprocal-space cutoff beyond which every term of the reciprocal Ewald sum
-!> stays below the given tolerance
+!> Reciprocal-space cutoff
 pure function get_rec_cutoff(alpha, volume, conv) result(cutoff)
    !> Parameter of the Ewald summation
    real(wp), intent(in) :: alpha
@@ -100,9 +94,7 @@ pure function get_rec_cutoff(alpha, volume, conv) result(cutoff)
 end function get_rec_cutoff
 
 
-!> Find the vector length beyond which a monotonically decaying Ewald term
-!> stays below the given tolerance. The upper bound of the bisection is
-!> returned, such that the term is guaranteed to be converged at the cutoff.
+!> Find the cutoff for an Ewald term
 pure function search_cutoff(get_term, alpha, volume, conv) result(cutoff)
    !> Procedure to evaluate the Ewald term
    procedure(get_term_gen) :: get_term
@@ -139,8 +131,7 @@ pure function search_cutoff(get_term, alpha, volume, conv) result(cutoff)
 end function search_cutoff
 
 
-!> Returns the max. value of a term in the real space part of the Ewald summation
-!> for a given vector length.
+!> Returns the max. value of a term in the real space
 pure function get_dir_term(rr, alpha, vol) result(dval)
 
    !> Length of the real space vector
@@ -160,8 +151,7 @@ pure function get_dir_term(rr, alpha, vol) result(dval)
 end function get_dir_term
 
 
-!> Returns the max. value of a term in the reciprocal space part of the Ewald
-!> summation for a given vector length.
+!> Returns the max. value of a term in the reciprocal space
 pure function get_rec_term_3d(gg, alpha, vol) result(rval)
 
    !> Length of the reciprocal space vector
