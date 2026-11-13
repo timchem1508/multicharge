@@ -188,7 +188,10 @@ module multicharge_solver_precond
    integer, parameter :: min_rows_apply = 4096
 
    !> Maximum number of coarse cells per axis to bound coarse setup cost
-   integer, parameter :: max_coarse_grid = 8
+   integer, parameter :: max_coarse_grid = 256
+
+   !> Target maximum total number of coarse cells in 3D
+   integer, parameter :: max_coarse_cells = 300
 
    real(wp), parameter :: sqrtpi = sqrt(pi)
 
@@ -262,6 +265,8 @@ subroutine new_fsai_precond(self, tprod, pattern, error, mol)
       cnt(iat) = nrow
    end do
    !$omp end do
+   deallocate(mark)
+   if (allocated(idx)) deallocate(idx)
    !$omp end parallel
 
    allocate(self%gptr(ndim + 1))
@@ -300,6 +305,9 @@ subroutine new_fsai_precond(self, tprod, pattern, error, mol)
       end do
    end do
    !$omp end do
+   deallocate(mark)
+   if (allocated(idx)) deallocate(idx)
+   if (allocated(block)) deallocate(block, gvec)
    !$omp end parallel
 
    call transpose_factor(self, ndim)
@@ -452,9 +460,9 @@ subroutine setup_coarse_correction(self, mol, ndim)
    integer(i8) :: ij, kl
    integer, allocatable :: raw_cid(:), map(:)
    real(wp) :: hc, xmin(3), xmax(3), span(3), u(3), inv_lat(3, 3), rec_lat(3, 3)
-   real(wp) :: vol, alpha_c, r, gvec(3), g2, wg, val, dxyz(3)
+   real(wp) :: vol, alpha_c, r, gvec(3), g2, wg, val, dxyz(3), scale_grid
    real(wp), allocatable :: gmat(:, :), wmat(:, :), bmat(:, :), wvec(:)
-   real(wp), allocatable :: rcell(:, :), ref_xyz(:, :)
+   real(wp), allocatable :: rcell(:, :), ref_xyz(:, :), cphase(:), sphase(:)
    integer, allocatable :: cnt_cell(:)
 
    if (ndim < 16 .or. mol%nat /= ndim) return
@@ -465,14 +473,25 @@ subroutine setup_coarse_correction(self, mol, ndim)
       inv_lat = matinv_3x3(mol%lattice)
       do idir = 1, 3
          span(idir) = norm2(mol%lattice(:, idir))
-         ngrid(idir) = max(1, min(max_coarse_grid, nint(span(idir) / hc)))
+         ngrid(idir) = max(1, nint(span(idir) / hc))
       end do
    else
       xmin = minval(mol%xyz, dim=2)
       xmax = maxval(mol%xyz, dim=2)
       span = xmax - xmin
       do idir = 1, 3
-         ngrid(idir) = max(1, min(max_coarse_grid, ceiling(span(idir) / hc)))
+         ngrid(idir) = max(1, ceiling(span(idir) / hc))
+      end do
+   end if
+
+   if (product(ngrid) > max_coarse_cells) then
+      scale_grid = (real(max_coarse_cells, wp) / real(product(ngrid), wp))**(1.0_wp / 3.0_wp)
+      do idir = 1, 3
+         ngrid(idir) = max(1, min(max_coarse_grid, nint(real(ngrid(idir), wp) * scale_grid)))
+      end do
+   else
+      do idir = 1, 3
+         ngrid(idir) = min(max_coarse_grid, ngrid(idir))
       end do
    end if
 
@@ -571,23 +590,24 @@ subroutine setup_coarse_correction(self, mol, ndim)
       vol = abs(matdet_3x3(mol%lattice))
       rec_lat = 2.0_wp * pi * transpose(inv_lat)
       do idir = 1, 3
-         mmax(idir) = max(2, ceiling(3.5_wp * alpha_c * span(idir) / pi))
+         mmax(idir) = max(2, min(6, ceiling(2.5_wp * alpha_c * span(idir) / pi)))
       end do
+      allocate(cphase(nc), sphase(nc))
       do m3 = -mmax(3), mmax(3)
          do m2 = -mmax(2), mmax(2)
             do m1 = -mmax(1), mmax(1)
                if (m1 == 0 .and. m2 == 0 .and. m3 == 0) cycle
                gvec = matmul(rec_lat, real([m1, m2, m3], wp))
                g2 = dot_product(gvec, gvec)
-               if (0.25_wp * g2 / (alpha_c * alpha_c) > 16.0_wp) cycle
+               if (0.25_wp * g2 / (alpha_c * alpha_c) > 10.0_wp) cycle
                wg = (4.0_wp * pi / vol) * exp(-0.25_wp * g2 / (alpha_c * alpha_c)) / g2
+               do ic = 1, nc
+                  val = dot_product(gvec, rcell(:, ic))
+                  cphase(ic) = wvec(ic) * cos(val)
+                  sphase(ic) = wvec(ic) * sin(val)
+               end do
                do jc = 1, nc
-                  do ic = 1, jc
-                     dxyz = rcell(:, ic) - rcell(:, jc)
-                     val = wg * wvec(ic) * wvec(jc) * cos(dot_product(gvec, dxyz))
-                     bmat(ic, jc) = bmat(ic, jc) + val
-                     if (ic /= jc) bmat(jc, ic) = bmat(ic, jc)
-                  end do
+                  bmat(:, jc) = bmat(:, jc) + wg * (cphase(jc) * cphase(:) + sphase(jc) * sphase(:))
                end do
             end do
          end do
