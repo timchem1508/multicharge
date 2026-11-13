@@ -140,7 +140,7 @@ pure function get_dir_term(rr, alpha, vol) result(dval)
    !> Parameter of the Ewald summation
    real(wp), intent(in) :: alpha
 
-   !> Volume of the real space unit cell, unused but required by the interface
+   !> Volume of the real space
    real(wp), intent(in) :: vol
 
    !> Real space term
