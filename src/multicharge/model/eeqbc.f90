@@ -1038,6 +1038,7 @@ subroutine get_coulomb_derivs(self, mol, ndim, cache, alpha, p, list, dafdr)
    if (ext) then
       call move_alloc(dadr, cache%dafdr)
       call move_alloc(dlist, cache%dafdrlist)
+      call move_alloc(dadL, cache%dafdL)
    else
       call move_alloc(dadr, cache%dabdr)
       call move_alloc(dlist, cache%dabdrlist)
@@ -3778,6 +3779,7 @@ subroutine get_explicit_hessian_0d(self, mol, cache, p, hessian, alphain, betain
    real(wp), intent(in), optional :: betain
 
    real(wp) :: alpha, beta
+   real(wp) :: elst(3, 3, 3, 3)
    integer :: iat, jat, izp, jzp, ii, jj
    real(wp) :: vec(3), norm_cn_i, radi, dradi, d2radi, capi, capj, rvdw
    real(wp) :: tqeta, hardi, dhdcni, d2hdcni2, detai, d2etai
@@ -3936,9 +3938,11 @@ subroutine get_explicit_hessian_0d(self, mol, cache, p, hessian, alphain, betain
    call add_chain_products(cache%dcndr, dcnacc, hessian)
    call add_chain_products(cache%dqlocdr, dqlocacc, hessian)
 
-   call self%ncoord%add_coordination_number_hessian(mol, dtrans, cnacc, hessian)
+   ! The strain Hessian of the contraction is evaluated by the caller
+   elst(:, :, :, :) = 0.0_wp
+   call self%ncoord%add_coordination_number_hessian(mol, dtrans, cnacc, hessian, elst)
    call self%ncoord_en%add_coordination_number_hessian(mol, dtrans, qlocacc, &
-      & hessian)
+      & hessian, elst)
 
    deallocate(qlocacc, cnacc, dcnacc, dqlocacc, d2cnacc, d2cndiag, d2qlocacc, &
       & diagonal, dcndiag, dqlocdiag, dtrans, v, ptmp)

@@ -133,6 +133,10 @@ module multicharge_model_cache
       !> Coulomb matrix derivatives contracted with an external vector
       real(wp), allocatable :: dafdr(:, :, :)
 
+      !> Strain derivative of the Coulomb matrix contracted with an external
+      !> vector, set together with dafdr
+      real(wp), allocatable :: dafdL(:, :, :)
+
       !> Derivatives dafdr on the sorted complete neighborlist
       real(wp), allocatable :: dafdrlist(:, :)
 

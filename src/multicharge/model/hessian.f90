@@ -603,12 +603,17 @@ end subroutine add_column_products_ext
 module procedure get_external_hessian_dense
 
    real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :), padj(:)
-   integer :: ndim
+   real(wp), allocatable :: gmat(:, :), dqmat(:, :), work9(:, :), hess9(:, :)
+   real(wp) :: eps(3, 3), sigma(3, 3, 2), gradient(3, mol%nat, 2)
+   real(wp), parameter :: step = 1.0e-5_wp
+   type(structure_type) :: displaced
+   integer :: ndim, ic, id, ix, isgn, iat
 
    ndim = 3 * mol%nat
    if (size(dfdq) /= mol%nat .or. any(shape(d2fdq2) /= [mol%nat, mol%nat]) &
       & .or. any(shape(dfdrdq) /= [3, mol%nat, mol%nat]) &
-      & .or. any(shape(hessian) /= [ndim, ndim])) then
+      & .or. any(shape(hessian) /= [ndim, ndim]) &
+      & .or. any(shape(elst) /= [3, 3, 3, 3])) then
       call fatal_error(error, "External partial derivatives are wrong size")
       return
    end if
@@ -648,12 +653,105 @@ module procedure get_external_hessian_dense
       & beta=1.0_wp)
    deallocate(cache%dafdr)
 
+   ! Strain Hessian from the same terms, G = -dA/deps*p, strain responses dq/deps
+   gmat = reshape(cache%dafdL(:, :, :mol%nat), [9, mol%nat])
+   dqmat = reshape(dqdL, [9, mol%nat])
+   allocate(work9(9, mol%nat), hess9(9, 9))
+   work9(:, :) = gmat
+   call gemm(dqmat, d2fdq2, work9, beta=1.0_wp)
+   call gemm(gmat, dqmat, hess9, transb='t')
+   call gemm(dqmat, work9, hess9, transb='t', beta=1.0_wp)
+   elst(:, :, :, :) = elst + reshape(hess9, [3, 3, 3, 3])
+   deallocate(cache%dafdL)
+
    ! Second derivatives of p^T (X - A*q) at fixed charges and adjoint vector
    call self%get_explicit_hessian(mol, cache, padj(:mol%nat), hessian, &
       & error, alpha=-1.0_wp, beta=1.0_wp)
-   if (allocated(error)) return
+   displaced = mol
+   if (allocated(error)) then
+      ! Without an analytical periodic explicit Hessian use central differences of
+      ! the gradient at fixed charges
+      if (.not. any(mol%periodic)) return
+      deallocate(error)
+      do iat = 1, mol%nat
+         do ic = 1, 3
+            do isgn = 1, 2
+               displaced%xyz(ic, iat) = mol%xyz(ic, iat) + merge(step, -step, isgn == 1)
+               call get_fixed_charge_grad(self, displaced, cache, padj(:mol%nat), &
+                  & gradient(:, :, isgn), sigma(:, :, isgn), error)
+               if (allocated(error)) return
+            end do
+            displaced%xyz(ic, iat) = mol%xyz(ic, iat)
+            hessian(:, 3*(iat - 1) + ic) = hessian(:, 3*(iat - 1) + ic) &
+               & + 0.5_wp * reshape(gradient(:, :, 1) - gradient(:, :, 2), &
+               & [3*mol%nat]) / step
+         end do
+      end do
+   end if
+
+   ! Strain derivative of the explicit term from central differences of its virial
+   do id = 1, 3
+      do ic = 1, 3
+         do isgn = 1, 2
+            eps(:, :) = 0.0_wp
+            do ix = 1, 3
+               eps(ix, ix) = 1.0_wp
+            end do
+            eps(ic, id) = eps(ic, id) + merge(step, -step, isgn == 1)
+            displaced%xyz(:, :) = matmul(eps, mol%xyz)
+            if (any(mol%periodic)) displaced%lattice(:, :) = matmul(eps, mol%lattice)
+            call get_fixed_charge_grad(self, displaced, cache, padj(:mol%nat), &
+               & gradient(:, :, isgn), sigma(:, :, isgn), error)
+            if (allocated(error)) return
+         end do
+         elst(:, :, ic, id) = elst(:, :, ic, id) &
+            & + 0.5_wp * (sigma(:, :, 1) - sigma(:, :, 2)) / step
+      end do
+   end do
 
 end procedure get_external_hessian_dense
+
+
+!> Gradient and virial of p^T (X - A*q) of a displaced structure at the fixed
+!> charges q of the reference cache
+subroutine get_fixed_charge_grad(self, displaced, cache, p, gradient, sigma, error)
+
+   !> Electronegativity-equilibration model
+   class(mchrg_model_type), intent(in) :: self
+
+   !> Displaced molecular structure data
+   type(structure_type), intent(in) :: displaced
+
+   !> Multicharge cache of the reference structure holding the charges
+   type(mchrg_cache), intent(in) :: cache
+
+   !> Charge-like contraction vector
+   real(wp), intent(in) :: p(:)
+
+   !> Gradient
+   real(wp), intent(out) :: gradient(:, :)
+
+   !> Virial
+   real(wp), intent(out) :: sigma(:, :)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(mchrg_cache) :: work
+   real(wp), allocatable :: trans(:, :)
+
+   call get_lattice_points(displaced%periodic, displaced%lattice, &
+      & self%ncoord%cutoff, trans)
+   call self%update(displaced, work, trans, .true.)
+   call self%get_capacitance_matrix(displaced, displaced%nat, work)
+   call self%get_coulomb_matrix(displaced, displaced%nat, work)
+   call self%get_xvec(displaced, displaced%nat, work)
+   work%vrhs = cache%vrhs
+   gradient(:, :) = 0.0_wp
+   sigma(:, :) = 0.0_wp
+   call self%get_grad(displaced, work, p, gradient, sigma, alpha=-1.0_wp, beta=1.0_wp)
+
+end subroutine get_fixed_charge_grad
 
 
 !> Compute the nuclear Hessian of an external function on a list

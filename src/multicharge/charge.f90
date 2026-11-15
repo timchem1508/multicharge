@@ -122,7 +122,7 @@ end subroutine get_charges
 
 !> Add the Hessian of an external function of the charges (dense)
 subroutine add_charge_hessian_dense(mchrg_model, mol, error, weights, d2fdq2, &
-   & dfdrdq, hessian, cache)
+   & dfdrdq, hessian, elst, cache)
 
    !> Multicharge model
    class(mchrg_model_type), intent(in) :: mchrg_model
@@ -145,6 +145,9 @@ subroutine add_charge_hessian_dense(mchrg_model, mol, error, weights, d2fdq2, &
    !> Nuclear Hessian of shape (3*nat, 3*nat), the contraction is added
    real(wp), intent(inout) :: hessian(:, :)
 
+   !> Strain Hessian of shape (3, 3, 3, 3), the contraction is added
+   real(wp), intent(inout) :: elst(:, :, :, :)
+
    !> Cache retained by get_charges, holds partial derivatives afterwards
    type(mchrg_cache), intent(inout) :: cache
 
@@ -163,7 +166,7 @@ subroutine add_charge_hessian_dense(mchrg_model, mol, error, weights, d2fdq2, &
 
    allocate(whess(3 * mol%nat, 3 * mol%nat))
    call mchrg_model%get_external_hessian(mol, solver, cache, error, weights, &
-      & d2fdq2, dfdrdq, whess)
+      & d2fdq2, dfdrdq, whess, elst)
    if (allocated(error)) return
    hessian(:, :) = hessian + whess
 

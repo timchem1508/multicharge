@@ -527,6 +527,7 @@ subroutine get_coulomb_derivs(self, mol, ndim, cache, alpha, p, list, dafdr)
 
    if (ext) then
       call move_alloc(dadr, cache%dafdr)
+      call move_alloc(dadL, cache%dafdL)
    else
       call move_alloc(dadr, cache%dabdr)
       call move_alloc(dadL, cache%dabdL)
@@ -814,6 +815,7 @@ subroutine get_explicit_hessian_dense(self, mol, cache, p, hessian, error, alpha
    integer :: iat, izp, ii, nat
    real(wp) :: alp, bet, sqcn
    real(wp), allocatable :: dEdcn(:), work(:, :), diagonal(:, :, :)
+   real(wp) :: elst(3, 3, 3, 3)
 
    alp = 1.0_wp
    if (present(alpha)) alp = alpha
@@ -838,8 +840,10 @@ subroutine get_explicit_hessian_dense(self, mol, cache, p, hessian, error, alpha
          & / sqcn**3 * cache%dcndr(:, :, iat), [3 * nat])
    end do
    !$omp end parallel do
+   ! The strain Hessian of the contraction is evaluated by the caller
+   elst(:, :, :, :) = 0.0_wp
    call self%ncoord%add_coordination_number_hessian(mol, cache%trans, dEdcn, &
-      & hessian)
+      & hessian, elst)
    call gemm(work, reshape(cache%dcndr, [3 * nat, nat]), hessian, transb='t', &
       & beta=1.0_wp)
    deallocate(work, dEdcn)

@@ -548,7 +548,7 @@ module multicharge_model_type
 
       !> Compute the nuclear Hessian of an external function of the charges
       module subroutine get_external_hessian_dense(self, mol, solver, cache, &
-         & error, dfdq, d2fdq2, dfdrdq, hessian, unit, verbosity)
+         & error, dfdq, d2fdq2, dfdrdq, hessian, elst, unit, verbosity)
 
          !> Electronegativity-equilibration model
          class(mchrg_model_type), intent(in) :: self
@@ -576,6 +576,9 @@ module multicharge_model_type
 
          !> Nuclear Hessian of the external function without d2f/dR2
          real(wp), intent(out) :: hessian(:, :)
+
+         !> Strain Hessian x -> (1 + eps) x, element (a, b, c, d) is eps_ab, eps_cd
+         real(wp), intent(inout) :: elst(:, :, :, :)
 
          !> Output unit
          integer, intent(in), optional :: unit

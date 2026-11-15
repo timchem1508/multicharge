@@ -1838,6 +1838,9 @@ subroutine test_external_hessian(error, mol, model, cg)
    real(wp), allocatable :: dfdr(:, :), d2fdr2(:, :)
    logical :: use_cg
 
+   real(wp) :: elst(3, 3, 3, 3)
+
+   elst(:, :, :, :) = 0.0_wp
    allocate(direct_input :: solver_input)
    select type (solver_input)
     type is (direct_input)
@@ -1894,7 +1897,7 @@ subroutine test_external_hessian(error, mol, model, cg)
    call model%solve(mol, solver, cache, error, dqdr=dqdr, dqdL=dqdL)
    if (allocated(error)) return
    call model%get_external_hessian(mol, solver, cache, error, dfdq, d2fdq2, &
-      & dfdrdq, hessian)
+      & dfdrdq, hessian, elst)
    if (allocated(error)) return
    hessian(:, :) = hessian + d2fdr2
 
@@ -1939,6 +1942,9 @@ subroutine test_charge_hessian(error, mol, model)
    real(wp), allocatable :: gr(:, :), gl(:, :), hessian(:, :), numhess(:, :)
    real(wp), allocatable :: d2fdq2(:, :), dfdrdq(:, :, :)
 
+   real(wp) :: elst(3, 3, 3, 3)
+
+   elst(:, :, :, :) = 0.0_wp
    ndim = 3*mol%nat
    allocate(d2fdq2(mol%nat, mol%nat), dfdrdq(3, mol%nat, mol%nat), source=0.0_wp)
    allocate(qvec(mol%nat), weights(mol%nat), dqdr(3, mol%nat, mol%nat), &
@@ -1969,7 +1975,7 @@ subroutine test_charge_hessian(error, mol, model)
    if (allocated(error)) return
    ! f = weights^T q without second and mixed derivatives
    call add_charge_hessian(model, mol, error, weights, d2fdq2, dfdrdq, hessian, &
-      & cache)
+      & elst, cache)
    if (allocated(error)) return
    hessian(:, :) = hessian - 1.0_wp
 

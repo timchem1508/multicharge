@@ -2083,6 +2083,9 @@ subroutine test_external_hessian(error, mol, model)
    real(wp), parameter :: trans(3, 1) = 0.0_wp
    real(wp), allocatable :: rval(:, :), hessian(:, :), refhess(:, :), hhessian(:, :)
 
+   real(wp) :: elst(3, 3, 3, 3)
+
+   elst(:, :, :, :) = 0.0_wp
    allocate(cg_input :: solver_input)
    select type (solver_input)
    type is (cg_input)
@@ -2116,7 +2119,7 @@ subroutine test_external_hessian(error, mol, model)
       call model%solve(mol, solver, cache, error)
       if (allocated(error)) return
       call model%get_external_hessian(mol, solver, cache, error, dfdq, d2fdq2, &
-         & dfdrdq, refhess)
+         & dfdrdq, refhess, elst)
       if (allocated(error)) return
 
       ! Compressed Hessian on the neighbour list
@@ -2183,6 +2186,9 @@ subroutine test_charge_hessian(error, mol, model)
    real(wp), allocatable :: qvec(:), weights(:), hessian(:, :), refhess(:, :)
    real(wp), allocatable :: d2fdq2(:, :), dfdrdq(:, :, :), qval(:), rval(:, :)
 
+   real(wp) :: elst(3, 3, 3, 3)
+
+   elst(:, :, :, :) = 0.0_wp
    allocate(list)
    call get_sorted_list(list, mol, error, cutoff)
    if (allocated(error)) return
@@ -2206,7 +2212,7 @@ subroutine test_charge_hessian(error, mol, model)
    call get_charges(model, mol, error, qvec, cache=cache)
    if (allocated(error)) return
    call add_charge_hessian(model, mol, error, weights, d2fdq2, dfdrdq, refhess, &
-      & cache)
+      & elst, cache)
    if (allocated(error)) return
 
    ! Compressed Hessian on the neighbour list
