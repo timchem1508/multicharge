@@ -4467,7 +4467,7 @@ subroutine get_cn_entries_list(mol, list, cache, tpos, cninl, cnpos)
       do kat = list%inl(iat) + 1, nfin
          tat = tpos(kat)
          hat = kat - hoff
-         keep(kat) = is_cn_entry(cache, hat, merge(hat, tat, half))
+         keep(kat) = cache%cnmap(hat) > 0 .or. cache%cnmap(merge(hat, tat, half)) > 0
          keep(tat) = keep(kat)
       end do
    end do
@@ -4505,25 +4505,5 @@ subroutine get_cn_entries_list(mol, list, cache, tpos, cninl, cnpos)
    deallocate(keep)
 
 end subroutine get_cn_entries_list
-
-!> Whether an entry or its transposed entry holds CN or local charge
-!> derivatives above cnthr, kept by compress_cn_derivs
-pure function is_cn_entry(cache, kat, tat) result(keep)
-
-   !> Cache with the CN and local charge derivatives on the list of the update
-   type(mchrg_cache), intent(in) :: cache
-
-   !> Position of the entry in the derivative arrays
-   integer(i8), intent(in) :: kat
-
-   !> Position of the transposed entry in the derivative arrays
-   integer(i8), intent(in) :: tat
-
-   !> Entry has derivatives above the threshold
-   logical :: keep
-
-   keep = cache%cnmap(kat) > 0 .or. cache%cnmap(tat) > 0
-
-end function is_cn_entry
 
 end module multicharge_model_eeqbc
