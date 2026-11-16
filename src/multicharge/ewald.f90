@@ -14,7 +14,7 @@
 ! limitations under the License.
 
 module multicharge_ewald
-   use mctc_env, only : wp
+   use mctc_env, only : error_type, fatal_error, wp
    use mctc_io_constants, only : pi
    use mctc_io_math, only : matdet_3x3
    implicit none
@@ -53,13 +53,22 @@ contains
 
 
 !> Ewald parameter balancing the cost of the real-space and reciprocal sums.
-subroutine get_alpha(lattice, alpha)
+subroutine get_alpha(lattice, alpha, error)
    !> Lattice vectors
    real(wp), intent(in) :: lattice(:, :)
    !> Parameter of the Ewald summation
    real(wp), intent(out) :: alpha
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
 
-   alpha = alpha_scale * sqrtpi / abs(matdet_3x3(lattice))**(1.0_wp / 3.0_wp)
+   real(wp) :: vol
+
+   vol = abs(matdet_3x3(lattice))
+   if (vol < eps) then
+      call fatal_error(error, "Lattice vectors are singular or degenerate")
+      return
+   end if
+   alpha = alpha_scale * sqrtpi / vol**(1.0_wp / 3.0_wp)
 
 end subroutine get_alpha
 

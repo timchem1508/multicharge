@@ -180,7 +180,8 @@ subroutine solve_model(error, mol, model, cache, energy, qvec, gradient, sigma, 
 
    call new_cg_solver(solver, input)
    call get_lattice_points(mol%periodic, mol%lattice, model%ncoord%cutoff, trans)
-   call model%update(mol, cache, trans, present(gradient), list)
+   call model%update(mol, error, cache, trans, present(gradient), list)
+   if (allocated(error)) return
    call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, &
       & gradient=gradient, sigma=sigma, list=list)
 
@@ -256,7 +257,7 @@ subroutine gen_test_components(error, mol)
    class(mchrg_model_type), allocatable :: model
    type(mchrg_cache) :: dense, sparse
    type(csr_list) :: list
-   real(wp), allocatable :: cmat(:, :), amat(:, :)
+   real(wp), allocatable :: cmat(:, :), amat(:, :), xdense(:), xsparse(:)
 
    call new_eeqbc2025_model(mol, model, error)
    if (allocated(error)) return
@@ -276,7 +277,11 @@ subroutine gen_test_components(error, mol)
       & reshape(dense%cmat, [size(dense%cmat)]), thr)
    call check_array(error, "Coulomb matrix", reshape(amat, [size(amat)]), &
       & reshape(dense%amat, [size(dense%amat)]), thr)
-   call check_array(error, "Electronegativity vector", sparse%xvec, dense%xvec, thr)
+   ! The right-hand side is not cached, rebuild it from the cached CN and charges
+   allocate(xdense(mol%nat), xsparse(mol%nat))
+   call model%get_xvec(mol, mol%nat, dense, xdense)
+   call model%get_xvec(mol, mol%nat, sparse, xsparse, list)
+   call check_array(error, "Electronegativity vector", xsparse, xdense, thr)
 
 end subroutine gen_test_components
 
@@ -698,7 +703,8 @@ subroutine test_direct_list_error(error)
    call build_list(error, mol, cache, list)
    if (allocated(error)) return
    call get_lattice_points(mol%periodic, mol%lattice, model%ncoord%cutoff, trans)
-   call model%update(mol, cache, trans, .false., list)
+   call model%update(mol, error, cache, trans, .false., list)
+   if (allocated(error)) return
    call model%solve(mol, solver, cache, error, qvec=qvec, list=list)
 
 end subroutine test_direct_list_error

@@ -286,7 +286,8 @@ subroutine get_weighted_charge(error, mol, model, trans, weights, wq)
    allocate(qvec(mol%nat))
    call new_direct_solver(solver, solver_input)
 
-   call model%update(mol, cache, trans, .false.)
+   call model%update(mol, error, cache, trans, .false.)
+   if (allocated(error)) return
    call model%solve(mol, solver, cache, error, qvec=qvec)
    if (allocated(error)) return
    wq = dot_product(weights, qvec)
@@ -768,7 +769,8 @@ subroutine test_cg_cache_error(error)
 
    call get_lattice_points(mol%periodic, mol%lattice, model%ncoord%cutoff, &
       & trans)
-   call model%update(mol, cache, trans, .true.)
+   call model%update(mol, error, cache, trans, .true.)
+   if (allocated(error)) return
    call model%solve(mol, solver, cache, error, qvec=qvec)
    if (allocated(error)) return
    gradient(:, :) = 0.0_wp

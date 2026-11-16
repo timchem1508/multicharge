@@ -100,7 +100,8 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, cache, list)
    if (present(cache)) then
       ! The charge Hessian needs the full inverse and the Cartesian response
       allocate(dqdr_resp(3, mol%nat, mol%nat), dqdL_resp(3, 3, mol%nat))
-      call mchrg_model%update(mol, cache, trans, .true.)
+      call mchrg_model%update(mol, error, cache, trans, .true.)
+      if (allocated(error)) return
       call mchrg_model%solve(mol, solver, cache, error, &
          & qvec=qvec, dqdr=dqdr_resp, dqdL=dqdL_resp, &
          & unit=output_unit)
@@ -110,7 +111,8 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, cache, list)
       call move_alloc(dqdr_resp, cache%dqdr)
    else
       allocate(local_cache)
-      call mchrg_model%update(mol, local_cache, trans, grad)
+      call mchrg_model%update(mol, error, local_cache, trans, grad)
+      if (allocated(error)) return
       call mchrg_model%solve(mol, solver, local_cache, error, &
          & qvec=qvec, dqdr=dqdr, dqdL=dqdL, unit=output_unit)
    end if
@@ -148,7 +150,8 @@ subroutine get_list_charges(mchrg_model, mol, trans, list, error, qvec)
    call new_cg_solver(solver, solver_input)
 
    allocate(cache)
-   call mchrg_model%update(mol, cache, trans, .false., list=list)
+   call mchrg_model%update(mol, error, cache, trans, .false., list=list)
+   if (allocated(error)) return
    call mchrg_model%solve(mol, solver, cache, error, qvec=qvec, list=list, &
       & unit=output_unit)
 
@@ -232,6 +235,7 @@ subroutine get_eeq_charges(mol, error, qvec, dqdr, dqdL)
    class(mchrg_model_type), allocatable :: eeq_model
 
    call new_eeq2019_model(mol, eeq_model, error)
+   if (allocated(error)) return
 
    call get_charges(eeq_model, mol, error, qvec, dqdr, dqdL)
 
@@ -262,6 +266,7 @@ subroutine get_eeqbc_charges(mol, error, qvec, dqdr, dqdL, list)
    class(mchrg_model_type), allocatable :: eeqbc_model
 
    call new_eeqbc2025_model(mol, eeqbc_model, error)
+   if (allocated(error)) return
 
    call get_charges(eeqbc_model, mol, error, qvec, dqdr, dqdL, list=list)
 

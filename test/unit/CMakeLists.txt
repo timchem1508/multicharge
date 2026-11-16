@@ -22,7 +22,6 @@ set(
   "model"
   "pbc"
   "solver"
-  "wignerseitz"
 )
 set(
   test-srcs

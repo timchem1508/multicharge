@@ -159,8 +159,12 @@ program main
    end if
 
    call timer%push("update")
-   call model%update(mol, cache, trans, grad, list)
+   call model%update(mol, error, cache, trans, grad, list)
    call timer%pop
+   if (allocated(error)) then
+      write(error_unit, "(a)") error%message
+      error stop
+   end if
    if (verbosity > 1) then
       write(output_unit, "(a, 1x, a)") "Get coordination number time : ", &
          & format_time(timer%get("update"))

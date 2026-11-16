@@ -18,8 +18,8 @@
 
 !> Base types for the linear system solvers
 module multicharge_solver_type
-   use mctc_csrlist, only : csr_list
    use mctc_env, only : error_type, wp
+   use multicharge_solver_trialprod, only : trialprod
    implicit none
    private
 
@@ -41,14 +41,14 @@ module multicharge_solver_type
 
    abstract interface
       !> Solve the linear system of equations
-      subroutine solve(self, amat, xvec, vrhs, ainv, alist, list, new_unit, error)
-         import :: mchrg_solver_type, error_type, wp, csr_list
+      subroutine solve(self, tprod, xvec, vrhs, prec, ainv, new_unit, error)
+         import :: mchrg_solver_type, trialprod, error_type, wp
 
          !> Solver instance
          class(mchrg_solver_type), intent(in) :: self
 
-         !> Dense coefficient matrix of the linear system
-         real(wp), intent(in), optional :: amat(:, :)
+         !> Trial product operator representing the linear system matrix
+         class(trialprod), intent(inout) :: tprod
 
          !> Right-hand side vector
          real(wp), intent(in) :: xvec(:)
@@ -56,14 +56,11 @@ module multicharge_solver_type
          !> On input: initial guess; on output: solution
          real(wp), intent(inout), contiguous :: vrhs(:)
 
+         !> Precomputed preconditioner, required by iterative solvers
+         real(wp), intent(in), optional :: prec(:)
+
          !> Inverse matrix, requested by passing the argument
          real(wp), intent(out), optional :: ainv(:, :)
-
-         !> Coefficient matrix values in the sparsity pattern of the CSR list
-         real(wp), intent(in), optional :: alist(:)
-
-         !> CSR neighbour list, selects the sparse representation of the matrix
-         type(csr_list), intent(in), optional :: list
 
          !> Output unit
          integer, intent(in), optional :: new_unit

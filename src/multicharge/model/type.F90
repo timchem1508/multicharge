@@ -16,13 +16,17 @@
 !> @file multicharge/model/type.f90
 !> Provides a general base class for the charge models
 
+#ifndef IK
+#define IK i4
+#endif
+
 !> General charge model
 module multicharge_model_type
 
    use, intrinsic :: iso_fortran_env, only : output_unit
    use mctc_csrlist, only: csr_list, spgemv_csr, spsymv_csr
    use mctc_cutoff, only: get_lattice_points
-   use mctc_env, only : timer_type, format_time, error_type, fatal_error, wp
+   use mctc_env, only : timer_type, format_time, error_type, fatal_error, wp, ik => IK
    use mctc_io, only: structure_type
    use mctc_io_constants, only: pi
    use mctc_io_math, only: matinv_3x3
@@ -30,6 +34,7 @@ module multicharge_model_type
    use multicharge_blas, only: symv, gemm
    use multicharge_model_cache, only : mchrg_cache, ensure_shape
    use multicharge_model_hessian, only : add_symmetric_product
+   use multicharge_solver_trialprod, only : trialprod, dense_trialprod, csr_trialprod
    use multicharge_solver_type, only : mchrg_solver_type
    implicit none
    private
@@ -90,14 +95,18 @@ module multicharge_model_type
    abstract interface
 
       !> Update model-dependent quantities and cache
-      subroutine update(self, mol, cache, trans, grad, list)
-         import :: mchrg_model_type, structure_type, mchrg_cache, wp, csr_list
+      subroutine update(self, mol, error, cache, trans, grad, list)
+         import :: mchrg_model_type, structure_type, error_type, mchrg_cache, wp, &
+            & csr_list
 
          !> Multicharge model type
          class(mchrg_model_type), intent(in) :: self
 
          !> Structure type
          type(structure_type), intent(in) :: mol
+
+         !> Error handling
+         type(error_type), allocatable, intent(out) :: error
 
          !> Multicharge cache with CN, local charges, and Wigner-Seitz cell
          type(mchrg_cache), intent(inout) :: cache
@@ -153,7 +162,7 @@ module multicharge_model_type
       end subroutine get_coulomb_matrix
 
       !> Coulomb matrix derivatives contracted with charges
-      subroutine get_coulomb_derivs(self, mol, ndim, cache)
+      subroutine get_coulomb_derivs(self, mol, ndim, cache, qvec, dadr, dadL)
          import :: mchrg_model_type, structure_type, mchrg_cache, wp
 
          !> Multicharge model type
@@ -165,12 +174,21 @@ module multicharge_model_type
          !> System size
          integer, intent(in) :: ndim
 
-         !> Multicharge cache holding Coulomb-matrix derivatives
+         !> Multicharge cache with CN, local charges, and capacitance data
          type(mchrg_cache), intent(inout) :: cache
+
+         !> Charges contracted with the Coulomb-matrix derivatives
+         real(wp), intent(in) :: qvec(:)
+
+         !> Coulomb matrix derivatives w.r.t positions
+         real(wp), intent(out), contiguous :: dadr(:, :, :)
+
+         !> Coulomb matrix derivatives w.r.t lattice vectors
+         real(wp), intent(out), contiguous :: dadL(:, :, :)
       end subroutine get_coulomb_derivs
 
       !> Electronegativity vector construction
-      subroutine get_xvec(self, mol, ndim, cache, list)
+      subroutine get_xvec(self, mol, ndim, cache, xvec, list)
          import :: mchrg_model_type, mchrg_cache, structure_type, wp, csr_list
 
          !> Multicharge model type
@@ -182,15 +200,18 @@ module multicharge_model_type
          !> System size
          integer, intent(in) :: ndim
 
-         !> Multicharge cache holding the electronegativity vector
+         !> Multicharge cache with CN, local charges, and capacitance data
          type(mchrg_cache), intent(inout) :: cache
+
+         !> Electronegativity vector
+         real(wp), intent(out) :: xvec(:)
 
          !> Optional CSR neighbour list, selects the sparse matrix representation
          type(csr_list), intent(in), optional :: list
       end subroutine get_xvec
 
       !> Derivatives of electronegativity vector
-      subroutine get_xvec_derivs(self, mol, ndim, cache)
+      subroutine get_xvec_derivs(self, mol, ndim, cache, dxdr, dxdL)
          import :: mchrg_model_type, structure_type, mchrg_cache, wp
 
          !> Multicharge model type
@@ -202,8 +223,14 @@ module multicharge_model_type
          !> System size
          integer, intent(in) :: ndim
 
-         !> Multicharge cache holding electronegativity-vector derivatives
+         !> Multicharge cache with CN, local charges, and capacitance data
          type(mchrg_cache), intent(inout) :: cache
+
+         !> Electronegativity derivatives w.r.t positions
+         real(wp), intent(out), contiguous :: dxdr(:, :, :)
+
+         !> Electronegativity derivatives w.r.t lattice vectors
+         real(wp), intent(out), contiguous :: dxdL(:, :, :)
       end subroutine get_xvec_derivs
 
       !> Contract the explicit Coulomb matrix and electronegativity derivatives
@@ -314,7 +341,7 @@ subroutine solve(self, mol, solver, cache, error, &
    !> The solver instance
    class(mchrg_solver_type), intent(in) :: solver
    !> Cache handling
-   type(mchrg_cache), intent(inout) :: cache
+   type(mchrg_cache), intent(inout), target :: cache
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -334,7 +361,7 @@ subroutine solve(self, mol, solver, cache, error, &
    !> Optional CSR neighbour list, selects the sparse matrix representation.
    !> For periodic systems the list must be generated together with the
    !> Wigner-Seitz cell of the cache, see check_list.
-   type(csr_list), intent(in), optional :: list
+   type(csr_list), intent(in), target, optional :: list
 
    !> Optional print verbosity level
    integer, intent(in), optional :: verbosity
@@ -344,22 +371,35 @@ subroutine solve(self, mol, solver, cache, error, &
 
    integer :: iat, ndim
 
-   real(wp), allocatable :: unitvec(:), adiag(:), avec(:)
+   real(wp), allocatable :: unitvec(:)
    real(wp), allocatable :: vvec(:)
+   real(wp), allocatable :: prec(:)
+   real(wp), allocatable :: avec(:)
    real(wp) :: uvecsum
    real(wp) :: vvecsum
    real(wp) :: lambda
    real(wp), allocatable :: daqxdr(:, :, :)
    real(wp), allocatable :: daqxdL(:, :, :)
+   real(wp), allocatable :: xvec(:)
+   real(wp), allocatable :: dadr(:, :, :), dadL(:, :, :)
+   real(wp), allocatable :: dxdr(:, :, :), dxdL(:, :, :)
 
    logical :: grad, cpq
    logical :: add_lagr
    type(timer_type) :: timer
+   class(trialprod), allocatable :: tprod
    integer :: print_unit, verbosity_solve
 
    ! Calculate gradient if the respective arrays are present
    grad = present(gradient) .and. present(sigma)
    cpq = present(dqdr) .and. present(dqdL)
+
+   ! Derivatives need a cache updated with CN and local charge derivatives
+   if ((grad .or. cpq) .and. .not. cache%grad) then
+      call fatal_error(error, "Gradients and charge derivatives require "//&
+         & "a cache updated with derivatives (grad=.true.)")
+      return
+   end if
 
    if (.not. present(verbosity)) then
       verbosity_solve = 0
@@ -398,8 +438,12 @@ subroutine solve(self, mol, solver, cache, error, &
    ! Setup the system matrices and vectors
    call self%get_capacitance_matrix(mol, ndim, cache, list)
    call self%get_coulomb_matrix(mol, ndim, cache, list)
-   call self%get_xvec(mol, ndim, cache, list)
+   allocate(xvec(ndim))
+   call self%get_xvec(mol, ndim, cache, xvec, list)
    call ensure_shape(cache%vrhs, mol%nat + 1)
+
+   ! Trial product operator referencing the matrix in the cache
+   call new_trialprod(tprod, cache, list)
 
    ! pop setup timer
    call timer%pop
@@ -411,12 +455,12 @@ subroutine solve(self, mol, solver, cache, error, &
       if (cpq) then
          ! The inverse matrix is needed for the charge derivatives
          call ensure_shape(cache%ainv, ndim, ndim)
-         call solver%solve(amat=cache%amat, xvec=cache%xvec, &
+         call solver%solve(tprod=tprod, xvec=xvec, &
             & vrhs=cache%vrhs, ainv=cache%ainv, new_unit=print_unit, &
             & error=error)
       else
          if (allocated(cache%ainv)) deallocate(cache%ainv)
-         call solver%solve(amat=cache%amat, xvec=cache%xvec, &
+         call solver%solve(tprod=tprod, xvec=xvec, &
             & vrhs=cache%vrhs, new_unit=print_unit, error=error)
       end if
       if (allocated(error)) return
@@ -425,35 +469,27 @@ subroutine solve(self, mol, solver, cache, error, &
       call ensure_shape(cache%uvec, mol%nat)
       allocate(unitvec(mol%nat))
       allocate(vvec(mol%nat))
-      call get_amat_diagonal(mol, cache, adiag, list)
+
+      ! Diagonal (Jacobi) preconditioner for the iterative solver
+      call get_amat_diagonal(mol, cache, prec, list)
+      prec(:) = 1.0_wp / (prec + eps)
+
       ! Initial guess
-      do iat = 1, mol%nat
-         cache%uvec(iat) = 1.0_wp / (adiag(iat) + eps)
-         vvec(iat) = - cache%xvec(iat) / (adiag(iat) + eps)
-      end do
+      cache%uvec(:) = prec
+      vvec(:) = - xvec(:mol%nat) * prec
 
       unitvec = 1.0_wp
 
       call print_constrained_system_message(print_unit, verbosity_solve, "u")
       ! Constrained response: A*uvec = 1
-      if (present(list)) then
-         call solver%solve(alist=cache%alist, list=list, xvec=unitvec, &
-            & vrhs=cache%uvec, new_unit=print_unit, error=error)
-      else
-         call solver%solve(amat=cache%amat, xvec=unitvec, &
-            & vrhs=cache%uvec, new_unit=print_unit, error=error)
-      end if
+      call solver%solve(tprod=tprod, xvec=unitvec, vrhs=cache%uvec, prec=prec, &
+         & new_unit=print_unit, error=error)
       if (allocated(error)) return
       call print_constrained_system_message(print_unit, verbosity_solve, "v")
 
       ! Unconstrained response: A*vvec = -xvec
-      if (present(list)) then
-         call solver%solve(alist=cache%alist, list=list, xvec=-cache%xvec, &
-            & vrhs=vvec, new_unit=print_unit, error=error)
-      else
-         call solver%solve(amat=cache%amat, xvec=-cache%xvec, &
-            & vrhs=vvec, new_unit=print_unit, error=error)
-      end if
+      call solver%solve(tprod=tprod, xvec=-xvec, vrhs=vvec, prec=prec, &
+         & new_unit=print_unit, error=error)
       if (allocated(error)) return
       uvecsum = sum(cache%uvec)
       vvecsum = sum(vvec)
@@ -474,30 +510,25 @@ subroutine solve(self, mol, solver, cache, error, &
    ! Electrostatic energy if present
    if (present(energy)) then
       call timer%push("energy")
-      if (present(list)) then
-         allocate(avec(mol%nat))
-         call csr_matvec(mol%nat, cache%alist, list, cache%vrhs, avec)
-         cache%xvec(:mol%nat) = 0.5_wp * avec - cache%xvec(:mol%nat)
-      else
-         call symv(cache%amat, cache%vrhs(:ndim), cache%xvec(:ndim), &
-            & alpha=0.5_wp, beta=-1.0_wp, uplo="l")
-      end if
+      allocate(avec(ndim))
+      call tprod%multiply(cache%vrhs(:ndim), avec)
+      xvec(:) = 0.5_wp * avec - xvec
       if (ndim > mol%nat) then
          ! Correct xvec to exclude constraint term
-         cache%xvec(:mol%nat) = cache%xvec(:mol%nat) &
-            & - 0.5_wp * cache%vrhs(mol%nat + 1)
+         xvec(:mol%nat) = xvec(:mol%nat) - 0.5_wp * cache%vrhs(mol%nat + 1)
       end if
-      energy(:) = energy(:) + cache%vrhs(:mol%nat) * cache%xvec(:mol%nat)
+      energy(:) = energy(:) + cache%vrhs(:mol%nat) * xvec(:mol%nat)
       call timer%pop
       call print_energy_time(print_unit, verbosity_solve, timer%get("energy"))
    end if
 
-   ! Allocate and get amat and xvec derivatives, the neighbour list gradient
-   ! is contracted directly and does not require the dense derivatives
-   if (cpq .or. (grad .and. .not. present(list))) then
+   ! Allocate and get amat and xvec derivatives, only the charge derivatives
+   ! need them, the gradient is contracted directly
+   if (cpq) then
       call timer%push("setup_gradient")
       call timer%push("dxdr_setup")
-      call self%get_xvec_derivs(mol, ndim, cache)
+      allocate(dxdr(3, mol%nat, ndim), dxdL(3, 3, ndim))
+      call self%get_xvec_derivs(mol, ndim, cache, dxdr, dxdL)
       call timer%pop
       if (verbosity_solve > 1) then
          write(print_unit, "(a, 1x, a)") &
@@ -506,7 +537,8 @@ subroutine solve(self, mol, solver, cache, error, &
          write(print_unit, "(a)") ""
       end if
       call timer%push("dadr_setup")
-      call self%get_coulomb_derivs(mol, ndim, cache)
+      allocate(dadr(3, mol%nat, ndim), dadL(3, 3, ndim))
+      call self%get_coulomb_derivs(mol, ndim, cache, cache%vrhs(:ndim), dadr, dadL)
       call timer%pop
       if (verbosity_solve > 1) then
          write(print_unit, "(a, 1x, a)") &
@@ -524,6 +556,7 @@ subroutine solve(self, mol, solver, cache, error, &
    ! Calculate gradients if requested
    if (grad) then
       call timer%push("gradient")
+      gradient = 0.0_wp
       call self%get_grad(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, &
          & alpha=0.5_wp, beta=-1.0_wp, error=error, list=list)
       if (allocated(error)) return
@@ -540,8 +573,8 @@ subroutine solve(self, mol, solver, cache, error, &
 
       call timer%push("cpq")
       do iat = 1, mol%nat
-         daqxdr(:, :, iat) = cache%dxdr(:, :, iat) - cache%dadr(:, :, iat)
-         daqxdL(:, :, iat) = cache%dxdL(:, :, iat) - cache%dadL(:, :, iat)
+         daqxdr(:, :, iat) = dxdr(:, :, iat) - dadr(:, :, iat)
+         daqxdL(:, :, iat) = dxdL(:, :, iat) - dadL(:, :, iat)
       end do
       call gemm(daqxdr, cache%ainv(:, :mol%nat), dqdr, alpha=1.0_wp)
       call gemm(daqxdL, cache%ainv(:, :mol%nat), dqdL, alpha=1.0_wp)
@@ -572,7 +605,7 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
    class(mchrg_solver_type), intent(in) :: solver
 
    !> Response cache from a previous solve
-   type(mchrg_cache), intent(inout) :: cache
+   type(mchrg_cache), intent(inout), target :: cache
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -587,7 +620,7 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
    real(wp), intent(inout) :: dfdL(:, :)
 
    !> Optional CSR neighbour list, must match the one used to build the cache
-   type(csr_list), intent(in), optional :: list
+   type(csr_list), intent(in), target, optional :: list
 
    !> Optional print verbosity level
    integer, intent(in), optional :: verbosity
@@ -656,7 +689,7 @@ subroutine get_adjoint(self, mol, solver, cache, error, &
    class(mchrg_solver_type), intent(in) :: solver
 
    !> Response cache from a previous solve
-   type(mchrg_cache), intent(inout) :: cache
+   type(mchrg_cache), intent(inout), target :: cache
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -668,7 +701,7 @@ subroutine get_adjoint(self, mol, solver, cache, error, &
    real(wp), intent(inout) :: padj(:)
 
    !> Optional CSR neighbour list, must match the one used to build the cache
-   type(csr_list), intent(in), optional :: list
+   type(csr_list), intent(in), target, optional :: list
 
    !> Optional print verbosity level
    integer, intent(in), optional :: verbosity
@@ -676,9 +709,10 @@ subroutine get_adjoint(self, mol, solver, cache, error, &
    !> Output unit
    integer, intent(in), optional :: unit
 
-   integer :: iat, ndim
-   real(wp), allocatable :: yvec(:), rhs(:), adiag(:)
+   integer :: ndim
+   real(wp), allocatable :: yvec(:), rhs(:), prec(:)
    real(wp) :: uvecsum, yvecsum
+   class(trialprod), allocatable :: tprod
 
    if (solver%need_pos_def) then
       ndim = mol%nat
@@ -717,23 +751,19 @@ subroutine get_adjoint(self, mol, solver, cache, error, &
       end if
    end if
 
+   call new_trialprod(tprod, cache, list)
+
    if (solver%need_pos_def) then
-      ! Initial guess
+      ! Diagonal (Jacobi) preconditioner and initial guess
+      call get_amat_diagonal(mol, cache, prec, list)
+      prec(:) = 1.0_wp / (prec + eps)
       allocate(yvec(mol%nat))
-      call get_amat_diagonal(mol, cache, adiag, list)
-      do iat = 1, mol%nat
-         yvec(iat) = dfdq(iat) / (adiag(iat) + eps)
-      end do
+      yvec(:) = dfdq * prec
 
       ! Unconstrained response: A*yvec = dfdq
       call print_adjoint_message(unit, verbosity)
-      if (present(list)) then
-         call solver%solve(alist=cache%alist, list=list, xvec=dfdq, vrhs=yvec, &
-            & new_unit=unit, error=error)
-      else
-         call solver%solve(amat=cache%amat, xvec=dfdq, vrhs=yvec, &
-            & new_unit=unit, error=error)
-      end if
+      call solver%solve(tprod=tprod, xvec=dfdq, vrhs=yvec, prec=prec, &
+         & new_unit=unit, error=error)
       if (allocated(error)) return
 
       ! Project out the total charge constraint
@@ -747,7 +777,7 @@ subroutine get_adjoint(self, mol, solver, cache, error, &
 
       ! Bordered system: A*yvec = (dfdq, 0)
       call print_adjoint_message(unit, verbosity)
-      call solver%solve(amat=cache%amat, xvec=rhs, vrhs=yvec, &
+      call solver%solve(tprod=tprod, xvec=rhs, vrhs=yvec, &
          & new_unit=unit, error=error)
       if (allocated(error)) return
       padj(:) = yvec(:mol%nat)
@@ -768,7 +798,7 @@ subroutine add_charge_hessian(self, mol, error, weights, hessian, cache)
    type(mchrg_cache), intent(inout) :: cache
 
    integer :: nat
-   real(wp), allocatable :: adj(:), rhs(:), qvec(:)
+   real(wp), allocatable :: adj(:), rhs(:)
    real(wp), allocatable :: dadr(:, :, :), dadL(:, :, :)
 
    nat = mol%nat
@@ -799,16 +829,10 @@ subroutine add_charge_hessian(self, mol, error, weights, hessian, cache)
    if (allocated(error)) return
 
    ! Reuse the first derivative action with the adjoint in place of the charges
-   call move_alloc(cache%vrhs, qvec)
-   call move_alloc(cache%dadr, dadr)
-   call move_alloc(cache%dadL, dadL)
-   cache%vrhs = adj
-   call self%get_coulomb_derivs(mol, nat + 1, cache)
-   call add_symmetric_product(reshape(cache%dadr(:, :, :nat), [3 * nat, nat]), &
+   allocate(dadr(3, nat, nat + 1), dadL(3, 3, nat + 1))
+   call self%get_coulomb_derivs(mol, nat + 1, cache, adj, dadr, dadL)
+   call add_symmetric_product(reshape(dadr(:, :, :nat), [3 * nat, nat]), &
       & reshape(cache%dqdr, [3 * nat, nat]), hessian, alpha=-1.0_wp)
-   call move_alloc(qvec, cache%vrhs)
-   call move_alloc(dadr, cache%dadr)
-   call move_alloc(dadL, cache%dadL)
 end subroutine add_charge_hessian
 
 
@@ -837,9 +861,9 @@ subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL, list)
    !> Local atomic partial charges
    real(wp), intent(out) :: qloc(:)
    !> Optional derivative of local atomic partial charges w.r.t. atomic positions
-   real(wp), intent(out), optional :: dqlocdr(3, mol%nat, mol%nat)
+   real(wp), intent(out), optional :: dqlocdr(:, :, :)
    !> Optional derivative of local atomic partial charges w.r.t. lattice vectors
-   real(wp), intent(out), optional :: dqlocdL(3, 3, mol%nat)
+   real(wp), intent(out), optional :: dqlocdL(:, :, :)
    !> Optional CSR neighbour list for the electronegativity weighted CN
    type(csr_list), intent(in), optional :: list
 
@@ -862,6 +886,29 @@ subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL, list)
    qloc = qloc + mol%charge / real(mol%nat, wp)
 
 end subroutine local_charge
+
+
+!> Trial product operator for the dense or the CSR representation of the matrix
+subroutine new_trialprod(tprod, cache, list)
+   !> Trial product operator
+   class(trialprod), allocatable, intent(out) :: tprod
+   !> Multicharge cache holding the Coulomb matrix
+   type(mchrg_cache), intent(in), target :: cache
+   !> Optional CSR neighbour list, selects the sparse representation
+   type(csr_list), intent(in), target, optional :: list
+
+   type(csr_trialprod), allocatable :: csr_tprod
+
+   if (present(list)) then
+      allocate(csr_tprod)
+      csr_tprod%list => list
+      call move_alloc(csr_tprod, tprod)
+   else
+      allocate(dense_trialprod :: tprod)
+   end if
+   tprod%cache => cache
+
+end subroutine new_trialprod
 
 
 !> Concrete models override this query when they implement the CSR neighbour

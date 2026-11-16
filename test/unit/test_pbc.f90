@@ -131,7 +131,8 @@ subroutine gen_test(error, mol, model, qref, eref)
       allocate(qvec(mol%nat))
    end if
 
-   call model%update(mol, cache, trans, grad=.false.)
+   call model%update(mol, error, cache, trans, grad=.false.)
+   if (allocated(error)) return
    call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, unit=output_unit)
    if (allocated(error)) return
 
@@ -256,14 +257,16 @@ subroutine test_numgrad(error, mol, model)
       do ic = 1, 3
          energy(:) = 0.0_wp
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
-         call model%update(mol, cache, trans, grad=.false.)
+         call model%update(mol, error, cache, trans, grad=.false.)
+         if (allocated(error)) return
          call model%solve(mol, solver, cache, error,energy=energy, unit=output_unit)
          if (allocated(error)) exit lp
          er = sum(energy)
 
          energy(:) = 0.0_wp
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - 2 * step
-         call model%update(mol, cache, trans, grad=.false.)
+         call model%update(mol, error, cache, trans, grad=.false.)
+         if (allocated(error)) return
          call model%solve(mol, solver, cache, error, energy=energy, unit=output_unit)
          if (allocated(error)) exit lp
          el = sum(energy)
@@ -274,9 +277,10 @@ subroutine test_numgrad(error, mol, model)
    end do lp
    if (allocated(error)) return
 
-   call model%update(mol, cache, trans, grad)
+   call model%update(mol, error, cache, trans, grad)
+   if (allocated(error)) return
    call model%solve(mol, solver, cache, error, &
-   & gradient=gradient, sigma=sigma, unit=output_unit)
+      & gradient=gradient, sigma=sigma, unit=output_unit)
    if (allocated(error)) return
 
    if (any(abs(gradient(:, :) - numgrad(:, :)) > thr2)) then
@@ -348,7 +352,8 @@ subroutine test_numsigma(error, mol, model)
          mol%xyz(:, :) = matmul(eps, xyz)
          mol%lattice(:, :) = matmul(eps, lattice)
          lattr(:, :) = matmul(eps, trans)
-         call model%update(mol, cache, lattr, grad=.false.)
+         call model%update(mol, error, cache, lattr, grad=.false.)
+         if (allocated(error)) return
          call model%solve(mol, solver, cache, error, energy=energy, unit=output_unit)
          if (allocated(error)) exit lp
          er = sum(energy)
@@ -358,7 +363,8 @@ subroutine test_numsigma(error, mol, model)
          mol%xyz(:, :) = matmul(eps, xyz)
          mol%lattice(:, :) = matmul(eps, lattice)
          lattr(:, :) = matmul(eps, trans)
-         call model%update(mol, cache, lattr, grad=.false.)
+         call model%update(mol, error, cache, lattr, grad=.false.)
+         if (allocated(error)) return
          call model%solve(mol, solver, cache, error, energy=energy, unit=output_unit)
          if (allocated(error)) exit lp
          el = sum(energy)
@@ -373,10 +379,11 @@ subroutine test_numsigma(error, mol, model)
    if (allocated(error)) return
 
    energy(:) = 0.0_wp
-   call model%update(mol, cache, trans, grad)
+   call model%update(mol, error, cache, trans, grad)
+   if (allocated(error)) return
    call model%get_capacitance_matrix(mol, ndim, cache)
    call model%solve(mol, solver, cache, error, &
-   & gradient=gradient, sigma=sigma, unit=output_unit)
+      & gradient=gradient, sigma=sigma, unit=output_unit)
    if (allocated(error)) return
 
    if (any(abs(sigma(:, :) - numsigma(:, :)) > thr2)) then
@@ -432,7 +439,7 @@ subroutine test_dbdr(error, mol, model)
    allocate(cache)
 
    allocate (xvecr(mol%nat), xvecl(mol%nat), numgrad(3, mol%nat, mol%nat), &
-   & dbdr(3, mol%nat, mol%nat), dbdL(3, 3, mol%nat))
+      & dbdr(3, mol%nat, mol%nat), dbdL(3, 3, mol%nat))
 
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
@@ -441,18 +448,18 @@ subroutine test_dbdr(error, mol, model)
          ! Right-hand side
          xvecr(:) = 0.0_wp
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
-         call model%update(mol, cache, trans, grad=.false.)
+         call model%update(mol, error, cache, trans, grad=.false.)
+         if (allocated(error)) return
          call model%get_capacitance_matrix(mol, ndim, cache)
-         call model%get_xvec(mol, ndim, cache)
-         xvecr = cache%xvec
+         call model%get_xvec(mol, ndim, cache, xvecr)
 
          ! Left-hand side
          xvecl(:) = 0.0_wp
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - 2 * step
-         call model%update(mol, cache, trans, grad=.false.)
+         call model%update(mol, error, cache, trans, grad=.false.)
+         if (allocated(error)) return
          call model%get_capacitance_matrix(mol, ndim, cache)
-         call model%get_xvec(mol, ndim, cache)
-         xvecl = cache%xvec
+         call model%get_xvec(mol, ndim, cache, xvecl)
 
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
          numgrad(ic, iat, :) = 0.5_wp * (xvecr(:) - xvecl(:)) / step
@@ -460,12 +467,11 @@ subroutine test_dbdr(error, mol, model)
    end do lp
 
    ! Analytical gradient
-   call model%update(mol, cache, trans, grad)
+   call model%update(mol, error, cache, trans, grad)
+   if (allocated(error)) return
    call model%get_capacitance_matrix(mol, ndim, cache)
-   call model%get_xvec(mol, ndim, cache) ! need to call this for xtmp in cache (eeqbc)
-   call model%get_xvec_derivs(mol, ndim, cache)
-
-   dbdr = cache%dxdr
+   call model%get_xvec(mol, ndim, cache, xvecl) ! need to call this for xtmp in cache (eeqbc)
+   call model%get_xvec_derivs(mol, ndim, cache, dbdr, dbdL)
 
    if (any(abs(dbdr(:, :, :) - numgrad(:, :, :)) > thr2)) then
       call test_failed(error, "Derivative of the b vector does not match")
@@ -523,7 +529,7 @@ subroutine test_dbdL(error, mol, model)
    allocate(cache)
 
    allocate (xvecr(mol%nat), xvecl(mol%nat), numsigma(3, 3, mol%nat), &
-   & dbdr(3, mol%nat, mol%nat), dbdL(3, 3, mol%nat), xyz(3, mol%nat), lattice(3, 3))
+      & dbdr(3, mol%nat, mol%nat), dbdL(3, 3, mol%nat), xyz(3, mol%nat), lattice(3, 3))
 
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
@@ -541,10 +547,10 @@ subroutine test_dbdL(error, mol, model)
          mol%xyz(:, :) = matmul(eps, xyz)
          mol%lattice(:, :) = matmul(eps, lattice)
          lattr(:, :) = matmul(eps, trans)
-         call model%update(mol, cache, lattr, grad=.false.)
+         call model%update(mol, error, cache, lattr, grad=.false.)
+         if (allocated(error)) return
          call model%get_capacitance_matrix(mol, ndim, cache)
-         call model%get_xvec(mol, ndim, cache)
-         xvecr = cache%xvec
+         call model%get_xvec(mol, ndim, cache, xvecr)
 
          ! Left-hand side
          xvecl(:) = 0.0_wp
@@ -552,10 +558,10 @@ subroutine test_dbdL(error, mol, model)
          mol%xyz(:, :) = matmul(eps, xyz)
          mol%lattice(:, :) = matmul(eps, lattice)
          lattr(:, :) = matmul(eps, trans)
-         call model%update(mol, cache, lattr, grad=.false.)
+         call model%update(mol, error, cache, lattr, grad=.false.)
+         if (allocated(error)) return
          call model%get_capacitance_matrix(mol, ndim, cache)
-         call model%get_xvec(mol, ndim, cache)
-         xvecl = cache%xvec
+         call model%get_xvec(mol, ndim, cache, xvecl)
 
          eps(jc, ic) = eps(jc, ic) + step
          mol%xyz(:, :) = xyz
@@ -568,12 +574,11 @@ subroutine test_dbdL(error, mol, model)
    end do lp
 
    ! Analytical gradient
-   call model%update(mol, cache, trans, grad)
+   call model%update(mol, error, cache, trans, grad)
+   if (allocated(error)) return
    call model%get_capacitance_matrix(mol, ndim, cache)
-   call model%get_xvec(mol, ndim, cache) ! need to call this for xtmp in cache (eeqbc)
-   call model%get_xvec_derivs(mol, ndim, cache)
-
-   dbdL = cache%dxdL
+   call model%get_xvec(mol, ndim, cache, xvecl) ! need to call this for xtmp in cache (eeqbc)
+   call model%get_xvec_derivs(mol, ndim, cache, dbdr, dbdL)
 
    if (any(abs(dbdL(:, :, :) - numsigma(:, :, :)) > thr2)) then
       call test_failed(error, "Derivative of the b vector does not match")
@@ -613,6 +618,7 @@ subroutine test_dadr(error, mol, model)
    real(wp), allocatable :: qvec(:), numgrad(:, :, :),  numtrace(:, :)
    real(wp), allocatable :: amatr1(:, :), amatr2(:, :), amatl1(:, :), amatl2(:, :)
    type(mchrg_cache), allocatable :: cache
+   real(wp), allocatable :: dadr(:, :, :), dadL(:, :, :)
    logical, parameter :: grad = .true.
 
    allocate(cg_input :: solver_input)
@@ -643,7 +649,8 @@ subroutine test_dadr(error, mol, model)
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
    ! Obtain the vector of charges
-   call model%update(mol, cache, trans, grad=.false.)
+   call model%update(mol, error, cache, trans, grad=.false.)
+   if (allocated(error)) return
    call model%solve(mol, solver, cache, error, qvec=qvec, unit=output_unit)
    if (allocated(error)) return
 
@@ -658,14 +665,16 @@ subroutine test_dadr(error, mol, model)
 
          ! First right-hand side (x+h)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
-         call model%update(mol, cache, trans, grad=.false.)
+         call model%update(mol, error, cache, trans, grad=.false.)
+         if (allocated(error)) return
          call model%get_capacitance_matrix(mol, ndim, cache)
          call model%get_coulomb_matrix(mol, ndim, cache)
          amatr1 = cache%amat
 
          ! Second right-hand side (x+2h)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
-         call model%update(mol, cache, trans, grad=.false.)
+         call model%update(mol, error, cache, trans, grad=.false.)
+         if (allocated(error)) return
          call model%get_capacitance_matrix(mol, ndim, cache)
          call model%get_coulomb_matrix(mol, ndim, cache)
          amatr2 = cache%amat
@@ -675,14 +684,16 @@ subroutine test_dadr(error, mol, model)
 
          ! First left-hand side (x-h)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - step
-         call model%update(mol, cache, trans, grad=.false.)
+         call model%update(mol, error, cache, trans, grad=.false.)
+         if (allocated(error)) return
          call model%get_capacitance_matrix(mol, ndim, cache)
          call model%get_coulomb_matrix(mol, ndim, cache)
          amatl1 = cache%amat
 
          ! Second left-hand side (x-2h)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - step
-         call model%update(mol, cache, trans, grad=.false.)
+         call model%update(mol, error, cache, trans, grad=.false.)
+         if (allocated(error)) return
          call model%get_capacitance_matrix(mol, ndim, cache)
          call model%get_coulomb_matrix(mol, ndim, cache)
          amatl2 = cache%amat
@@ -695,26 +706,28 @@ subroutine test_dadr(error, mol, model)
                ! Numerical gradient using 4-step central difference formula
                ! f'(x) ≈ [f(x-2h) - 8f(x-h) + 8f(x+h) - f(x+2h)]/(12h)
                numgrad(ic, iat, kat) = numgrad(ic, iat, kat) + &
-               & qvec(jat)*(amatl2(kat, jat) - 8.0_wp*amatl1(kat, jat) + &
-               & 8.0_wp*amatr1(kat, jat) - amatr2(kat, jat))/(12.0_wp*step)
+                  & qvec(jat)*(amatl2(kat, jat) - 8.0_wp*amatl1(kat, jat) + &
+                  & 8.0_wp*amatr1(kat, jat) - amatr2(kat, jat))/(12.0_wp*step)
             end do
          end do
       end do
    end do lp
 
    ! Analytical gradient
-   call model%update(mol, cache, trans, grad)
+   call model%update(mol, error, cache, trans, grad)
+   if (allocated(error)) return
    call model%get_capacitance_matrix(mol, ndim, cache)
-   call model%get_coulomb_derivs(mol, ndim, cache)
+   allocate(dadr(3, mol%nat, ndim), dadL(3, 3, ndim))
+   call model%get_coulomb_derivs(mol, ndim, cache, qvec, dadr, dadL)
 
-   if (any(abs(cache%dadr(:, :, :) - numgrad(:, :, :)) > thr2_local)) then
+   if (any(abs(dadr(:, :, :) - numgrad(:, :, :)) > thr2_local)) then
       call test_failed(error, "Derivative of the A matrix does not match")
       print"(a)", "dadr:"
-      print"(3es21.12)", cache%dadr
+      print"(3es21.12)", dadr
       print"(a)", "numgrad:"
       print"(3es21.12)", numgrad
       print"(a)", "diff:"
-      print"(3es21.12)", cache%dadr - numgrad
+      print"(3es21.12)", dadr - numgrad
    end if
 
 end subroutine test_dadr
@@ -747,6 +760,7 @@ subroutine test_dadL(error, mol, model)
    real(wp), allocatable :: qvec(:), numsigma(:, :, :), amatr(:, :), amatl(:, :)
    real(wp) :: eps(3, 3)
    type(mchrg_cache), allocatable :: cache
+   real(wp), allocatable :: dadr(:, :, :), dadL(:, :, :)
    logical, parameter :: grad = .true.
 
    allocate(cg_input :: solver_input)
@@ -763,7 +777,7 @@ subroutine test_dadL(error, mol, model)
    allocate(cache)
 
    allocate (amatr(ndim, ndim), amatl(ndim, ndim), xyz(3, mol%nat), &
-   & numsigma(3, 3, ndim), qvec(mol%nat), lattice(3, 3))
+      & numsigma(3, 3, ndim), qvec(mol%nat), lattice(3, 3))
 
    ! Set tolerance higher if testing eeqbc model
    select type (model)
@@ -775,7 +789,8 @@ subroutine test_dadL(error, mol, model)
 
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
-   call model%update(mol, cache, trans, grad=.false.)
+   call model%update(mol, error, cache, trans, grad=.false.)
+   if (allocated(error)) return
    call model%solve(mol, solver, cache, error, qvec=qvec, unit=output_unit)
    if (allocated(error)) return
 
@@ -792,7 +807,8 @@ subroutine test_dadL(error, mol, model)
          mol%xyz(:, :) = matmul(eps, xyz)
          mol%lattice(:, :) = matmul(eps, lattice)
          lattr(:, :) = matmul(eps, trans)
-         call model%update(mol, cache, lattr, grad=.false.)
+         call model%update(mol, error, cache, lattr, grad=.false.)
+         if (allocated(error)) return
          call model%get_capacitance_matrix(mol, ndim, cache)
          call model%get_coulomb_matrix(mol, ndim, cache)
          if (allocated(error)) exit lp
@@ -803,7 +819,8 @@ subroutine test_dadL(error, mol, model)
          mol%xyz(:, :) = matmul(eps, xyz)
          mol%lattice(:, :) = matmul(eps, lattice)
          lattr(:, :) = matmul(eps, trans)
-         call model%update(mol, cache, lattr, grad=.false.)
+         call model%update(mol, error, cache, lattr, grad=.false.)
+         if (allocated(error)) return
          call model%get_capacitance_matrix(mol, ndim, cache)
          call model%get_coulomb_matrix(mol, ndim, cache)
          if (allocated(error)) exit lp
@@ -816,25 +833,27 @@ subroutine test_dadL(error, mol, model)
          do iat = 1, mol%nat
             ! Numerical sigma of the a matrix
             numsigma(jc, ic, :) = numsigma(jc, ic, :) + &
-            & 0.5_wp*qvec(iat)*(amatr(iat, :) - amatl(iat, :))/step
+               & 0.5_wp*qvec(iat)*(amatr(iat, :) - amatl(iat, :))/step
          end do
       end do
    end do lp
    if (allocated(error)) return
 
-   call model%update(mol, cache, trans, grad)
+   call model%update(mol, error, cache, trans, grad)
+   if (allocated(error)) return
    call model%get_capacitance_matrix(mol, ndim, cache)
-   call model%get_coulomb_derivs(mol, ndim, cache)
+   allocate(dadr(3, mol%nat, ndim), dadL(3, 3, ndim))
+   call model%get_coulomb_derivs(mol, ndim, cache, qvec, dadr, dadL)
    if (allocated(error)) return
 
-   if (any(abs(cache%dadL(:, :, :) - numsigma(:, :, :)) > thr2_local)) then
+   if (any(abs(dadL(:, :, :) - numsigma(:, :, :)) > thr2_local)) then
       call test_failed(error, "Derivative of the A matrix does not match")
       print"(a)", "dadL:"
-      print"(3es21.12)", cache%dadL
+      print"(3es21.12)", dadL
       print"(a)", "numsigma:"
       print"(3es21.12)", numsigma
       print"(a)", "diff:"
-      print"(3es21.12)", cache%dadL - numsigma
+      print"(3es21.12)", dadL - numsigma
    end if
 
 end subroutine test_dadL
@@ -877,19 +896,21 @@ subroutine test_numdqdr(error, mol, model)
    allocate (cache)
 
    allocate (ql(mol%nat), qr(mol%nat), dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat), &
-   & numdr(3, mol%nat, mol%nat))
+      & numdr(3, mol%nat, mol%nat))
 
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
    lp: do iat = 1, mol%nat
       do ic = 1, 3
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
-         call model%update(mol, cache, trans, grad=.false.)
+         call model%update(mol, error, cache, trans, grad=.false.)
+         if (allocated(error)) return
          call model%solve(mol, solver, cache, error, qvec=qr, unit=output_unit)
          if (allocated(error)) exit lp
 
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - 2 * step
-         call model%update(mol, cache, trans, grad=.false.)
+         call model%update(mol, error, cache, trans, grad=.false.)
+         if (allocated(error)) return
          call model%solve(mol, solver, cache, error, qvec=ql, unit=output_unit)
          if (allocated(error)) exit lp
 
@@ -899,9 +920,10 @@ subroutine test_numdqdr(error, mol, model)
    end do lp
    if (allocated(error)) return
 
-   call model%update(mol, cache, trans, grad)
+   call model%update(mol, error, cache, trans, grad)
+   if (allocated(error)) return
    call model%solve(mol, solver, cache, error, &
-   & dqdr=dqdr, dqdL=dqdL, unit=output_unit)
+      & dqdr=dqdr, dqdL=dqdL, unit=output_unit)
    if (allocated(error)) return
 
    if (any(abs(dqdr(:, :, :) - numdr(:, :, :)) > thr2)) then
@@ -956,7 +978,7 @@ subroutine test_numdqdL(error, mol, model)
    allocate (cache)
 
    allocate (qr(mol%nat), ql(mol%nat), dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat), &
-   & xyz(3, mol%nat), lattice(3, 3), numdL(3, 3, mol%nat))
+      & xyz(3, mol%nat), lattice(3, 3), numdL(3, 3, mol%nat))
 
    call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
 
@@ -972,7 +994,8 @@ subroutine test_numdqdL(error, mol, model)
          mol%xyz(:, :) = matmul(eps, xyz)
          mol%lattice(:, :) = matmul(eps, lattice)
          lattr(:, :) = matmul(eps, trans)
-         call model%update(mol, cache, lattr, grad=.false.)
+         call model%update(mol, error, cache, lattr, grad=.false.)
+         if (allocated(error)) return
          call model%solve(mol, solver, cache, error, qvec=qr, unit=output_unit)
          if (allocated(error)) exit lp
 
@@ -980,7 +1003,8 @@ subroutine test_numdqdL(error, mol, model)
          mol%xyz(:, :) = matmul(eps, xyz)
          mol%lattice(:, :) = matmul(eps, lattice)
          lattr(:, :) = matmul(eps, trans)
-         call model%update(mol, cache, lattr, grad=.false.)
+         call model%update(mol, error, cache, lattr, grad=.false.)
+         if (allocated(error)) return
          call model%solve(mol, solver, cache, error, qvec=ql, unit=output_unit)
          if (allocated(error)) exit lp
 
@@ -993,9 +1017,10 @@ subroutine test_numdqdL(error, mol, model)
    end do lp
    if (allocated(error)) return
 
-   call model%update(mol, cache, trans, grad)
+   call model%update(mol, error, cache, trans, grad)
+   if (allocated(error)) return
    call model%solve(mol, solver, cache, error, &
-   & dqdr=dqdr, dqdL=dqdL, unit=output_unit)
+      & dqdr=dqdr, dqdL=dqdL, unit=output_unit)
    if (allocated(error)) return
 
    if (any(abs(dqdL(:, :, :) - numdL(:, :, :)) > thr2)) then
@@ -1076,7 +1101,8 @@ subroutine test_dfdr(error, mol, dfdq, model)
 
    ! Solve with the direct solver to get dqdr
    allocate(cache)
-   call model%update(mol, cache, trans, grad)
+   call model%update(mol, error, cache, trans, grad)
+   if (allocated(error)) return
    call model%solve(mol, solver_dqdr, cache, error, &
       & dqdr=dqdr, dqdL=dqdL, unit=output_unit)
    if (allocated(error)) return
@@ -1087,7 +1113,8 @@ subroutine test_dfdr(error, mol, dfdq, model)
    ! Solve with the CG solver and evaluate the adjoint gradient
    deallocate(cache)
    allocate(cache)
-   call model%update(mol, cache, trans, grad)
+   call model%update(mol, error, cache, trans, grad)
+   if (allocated(error)) return
    call model%solve(mol, solver_dfdr, cache, error)
    if (allocated(error)) return
    gradient(:, :) = 0.0_wp
