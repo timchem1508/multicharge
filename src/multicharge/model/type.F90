@@ -430,7 +430,7 @@ module multicharge_model_type
    end interface
 
    interface
-      !> Compute the molecular nuclear Hessian of the electrostatic energy
+      !> Compute the nuclear Hessian of the electrostatic energy
       module subroutine get_hessian_dense(self, mol, solver, cache, error, &
          & hessian, unit, verbosity)
 

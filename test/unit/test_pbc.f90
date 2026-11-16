@@ -18,7 +18,7 @@ module test_pbc
    use mctc_env, only: wp
    use mctc_env_testing, only: new_unittest, unittest_type, error_type, &
    & test_failed
-   use mctc_io_structure, only: structure_type
+   use mctc_io_structure, only: structure_type, new
    use mctc_cutoff, only: get_lattice_points
    use mstore, only: get_structure
    use multicharge_blas, only: gemv
@@ -61,6 +61,7 @@ subroutine collect_pbc(testsuite)
    & new_unittest("eeq-dqdr-urea", test_eeq_dqdr_urea), &
    & new_unittest("eeq-dqdL-oxacb", test_eeq_dqdL_oxacb), &
    & new_unittest("eeq-dfdr-urea", test_eeq_dfdr_urea), &
+   & new_unittest("eeq-hess-co2", test_eeq_hess_co2), &
    & new_unittest("eeqbc-dbdr-co2", test_eeqbc_dbdr_co2), &
    & new_unittest("eeqbc-dbdL-co2", test_eeqbc_dbdL_co2), &
    & new_unittest("eeqbc-dadr-ice", test_eeqbc_dadr_ice), &
@@ -69,7 +70,12 @@ subroutine collect_pbc(testsuite)
    & new_unittest("eeqbc-sigma-ice", test_eeqbc_s_ice), &
    & new_unittest("eeqbc-dqdr-urea", test_eeqbc_dqdr_urea), &
    & new_unittest("eeqbc-dqdL-oxacb", test_eeqbc_dqdL_oxacb), &
-   & new_unittest("eeqbc-dfdr-urea", test_eeqbc_dfdr_urea) &
+   & new_unittest("eeqbc-dfdr-urea", test_eeqbc_dfdr_urea), &
+   & new_unittest("eeqbc-hess-expl-co2", test_eeqbc_hexpl_co2), &
+   & new_unittest("eeqbc-hess-co2", test_eeqbc_hess_co2), &
+   & new_unittest("eeq-hess-cho", test_eeq_hess_cho), &
+   & new_unittest("eeqbc-hess-expl-cho", test_eeqbc_hexpl_cho), &
+   & new_unittest("eeqbc-hess-cho", test_eeqbc_hess_cho) &
    & ]
 
 end subroutine collect_pbc
@@ -1091,6 +1097,295 @@ subroutine test_dfdr(error, mol, dfdq, model)
 
 end subroutine test_dfdr
 
+!> Check the explicit Hessian at fixed p and charges against finite differences
+subroutine test_explicit_hessian(error, mol, model, alpha, beta, pvec)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular structure data
+   type(structure_type), intent(inout) :: mol
+
+   !> Electronegativity equilibration model
+   class(mchrg_model_type), intent(in) :: model
+
+   !> Prefactor of the Coulomb matrix term
+   real(wp), intent(in) :: alpha
+
+   !> Prefactor of the electronegativity term
+   real(wp), intent(in) :: beta
+
+   !> Contraction vector
+   real(wp), intent(in) :: pvec(:)
+
+   class(mchrg_solver_type), allocatable :: solver
+   class(mchrg_solver_input), allocatable :: solver_input
+   type(mchrg_cache), allocatable :: cache
+   integer :: iat, ic, ndim
+   real(wp), parameter :: cutoff = 25.0_wp
+   real(wp), parameter :: step = 1.0e-4_wp
+   real(wp) :: xorig
+   real(wp), allocatable :: trans(:, :), qvec(:), hessian(:, :), numhess(:, :)
+   real(wp), allocatable :: gr1(:, :), gr2(:, :), gl1(:, :), gl2(:, :)
+
+   allocate(cg_input :: solver_input)
+   select type (solver_input)
+    type is (cg_input)
+      solver_input%cgtol = 1.0e-15_wp
+      solver_input%cgmiter = 1000
+      solver_input%verbosity = 0
+   end select
+   call solver_maker(solver, solver_input, error)
+   if (allocated(error)) return
+
+   ndim = 3*mol%nat
+   allocate(qvec(mol%nat), hessian(ndim, ndim), numhess(ndim, ndim))
+   allocate(gr1(3, mol%nat), gr2(3, mol%nat), gl1(3, mol%nat), gl2(3, mol%nat))
+   call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
+
+   ! Charges and cache of the reference structure
+   allocate(cache)
+   call model%update(mol, cache, trans, grad=.true., hess=.true.)
+   call model%solve(mol, solver, cache, error, qvec=qvec, unit=output_unit)
+   if (allocated(error)) return
+
+   hessian(:, :) = 0.0_wp
+   call model%get_explicit_hessian(mol, cache, pvec, hessian, error, &
+      & alpha=alpha, beta=beta)
+   if (allocated(error)) return
+
+   ! Central differences of the analytical gradient at fixed charges
+   do iat = 1, mol%nat
+      do ic = 1, 3
+         xorig = mol%xyz(ic, iat)
+         mol%xyz(ic, iat) = xorig + step
+         call fixed_charge_gradient(mol, model, trans, qvec, pvec, alpha, beta, gr1)
+         mol%xyz(ic, iat) = xorig + 2*step
+         call fixed_charge_gradient(mol, model, trans, qvec, pvec, alpha, beta, gr2)
+         mol%xyz(ic, iat) = xorig - step
+         call fixed_charge_gradient(mol, model, trans, qvec, pvec, alpha, beta, gl1)
+         mol%xyz(ic, iat) = xorig - 2*step
+         call fixed_charge_gradient(mol, model, trans, qvec, pvec, alpha, beta, gl2)
+         mol%xyz(ic, iat) = xorig
+
+         ! f'(x) ≈ [f(x-2h) - 8f(x-h) + 8f(x+h) - f(x+2h)]/(12h)
+         numhess(:, 3*(iat - 1) + ic) = reshape((gl2 - 8.0_wp*gl1 + 8.0_wp*gr1 &
+            & - gr2)/(12.0_wp*step), [ndim])
+      end do
+   end do
+
+   call check_hessian(error, "Explicit Hessian", hessian, numhess)
+
+end subroutine test_explicit_hessian
+
+
+!> Gradient at fixed p and charges for a displaced structure
+subroutine fixed_charge_gradient(mol, model, trans, qvec, p, alpha, beta, gradient)
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Electronegativity equilibration model
+   class(mchrg_model_type), intent(in) :: model
+
+   !> Lattice points of the coordination numbers
+   real(wp), intent(in) :: trans(:, :)
+
+   !> Fixed atomic partial charges
+   real(wp), intent(in) :: qvec(:)
+
+   !> Contraction vector
+   real(wp), intent(in) :: p(:)
+
+   !> Prefactor of the Coulomb matrix term
+   real(wp), intent(in) :: alpha
+
+   !> Prefactor of the electronegativity term
+   real(wp), intent(in) :: beta
+
+   !> Gradient of the expression
+   real(wp), intent(out) :: gradient(:, :)
+
+   type(mchrg_cache), allocatable :: cache
+   real(wp) :: sigma(3, 3)
+
+   allocate(cache)
+   call model%update(mol, cache, trans, grad=.true.)
+   call model%get_capacitance_matrix(mol, mol%nat, cache)
+   call model%get_coulomb_matrix(mol, mol%nat, cache)
+   call model%get_xvec(mol, mol%nat, cache)
+   cache%vrhs = qvec
+
+   gradient(:, :) = 0.0_wp
+   sigma(:, :) = 0.0_wp
+   call model%get_grad(mol, cache, p, gradient, sigma, alpha=alpha, beta=beta)
+
+end subroutine fixed_charge_gradient
+
+
+!> Check the electrostatic energy Hessian against finite differences
+subroutine test_hessian(error, mol, model)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Molecular structure data
+   type(structure_type), intent(inout) :: mol
+
+   !> Electronegativity equilibration model
+   class(mchrg_model_type), intent(in) :: model
+
+   class(mchrg_solver_type), allocatable :: solver
+   class(mchrg_solver_input), allocatable :: solver_input
+   type(mchrg_cache), allocatable :: cache
+   integer :: iat, ic, ndim
+   real(wp), parameter :: cutoff = 25.0_wp
+   real(wp), parameter :: step = 1.0e-6_wp
+   real(wp) :: xorig, sigma(3, 3)
+   real(wp), allocatable :: trans(:, :), energy(:), gr(:, :), gl(:, :)
+   real(wp), allocatable :: hessian(:, :), numhess(:, :), dqdr(:, :, :), dqdL(:, :, :)
+
+   allocate(direct_input :: solver_input)
+   select type (solver_input)
+    type is (direct_input)
+      solver_input%verbosity = 0
+   end select
+   call solver_maker(solver, solver_input, error)
+   if (allocated(error)) return
+
+   ndim = 3*mol%nat
+   allocate(energy(mol%nat), gr(3, mol%nat), gl(3, mol%nat), hessian(ndim, ndim), &
+      & numhess(ndim, ndim), dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat))
+   call get_lattice_points(mol%periodic, mol%lattice, cutoff, trans)
+
+   ! Central differences of the analytical gradient
+   allocate(cache)
+   lp: do iat = 1, mol%nat
+      do ic = 1, 3
+         xorig = mol%xyz(ic, iat)
+         energy(:) = 0.0_wp
+         gr(:, :) = 0.0_wp
+         mol%xyz(ic, iat) = xorig + step
+         call model%update(mol, cache, trans, grad=.true.)
+         call model%solve(mol, solver, cache, error, energy=energy, &
+            & gradient=gr, sigma=sigma, unit=output_unit)
+         if (allocated(error)) exit lp
+
+         energy(:) = 0.0_wp
+         gl(:, :) = 0.0_wp
+         mol%xyz(ic, iat) = xorig - step
+         call model%update(mol, cache, trans, grad=.true.)
+         call model%solve(mol, solver, cache, error, energy=energy, &
+            & gradient=gl, sigma=sigma, unit=output_unit)
+         if (allocated(error)) exit lp
+
+         mol%xyz(ic, iat) = xorig
+         numhess(:, 3*(iat - 1) + ic) = reshape(0.5_wp*(gr - gl)/step, [ndim])
+      end do
+   end do lp
+   if (allocated(error)) return
+
+   ! The direct solver keeps its factorization only with the charge derivatives
+   deallocate(cache)
+   allocate(cache)
+   call model%update(mol, cache, trans, grad=.false., hess=.true.)
+   call model%solve(mol, solver, cache, error, dqdr=dqdr, dqdL=dqdL)
+   if (allocated(error)) return
+
+   call model%get_hessian(mol, solver, cache, error, hessian)
+   if (allocated(error)) return
+
+   call check_hessian(error, "Hessian", hessian, numhess)
+
+end subroutine test_hessian
+
+
+!> Compare a Hessian with its finite-difference reference, its symmetry, and
+!> its translational invariance
+subroutine check_hessian(error, label, hessian, numhess)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Name of the Hessian in the messages
+   character(len=*), intent(in) :: label
+
+   !> Analytical Hessian
+   real(wp), intent(in) :: hessian(:, :)
+
+   !> Finite-difference Hessian
+   real(wp), intent(in) :: numhess(:, :)
+
+   integer :: ic
+
+   if (any(abs(hessian - numhess) > thr2)) then
+      call test_failed(error, label//" does not match")
+      print'(a)', "hessian:"
+      print'(3es21.12)', hessian
+      print'(a)', "numhess:"
+      print'(3es21.12)', numhess
+      print'(a)', "diff:"
+      print'(3es21.12)', hessian - numhess
+      return
+   end if
+
+   if (any(abs(hessian - transpose(hessian)) > thr1)) then
+      call test_failed(error, label//" is not symmetric")
+      print'(a)', "asymmetry:"
+      print'(3es21.12)', hessian - transpose(hessian)
+      return
+   end if
+
+   ! A rigid translation of all atoms leaves the expression unchanged
+   do ic = 1, 3
+      if (any(abs(sum(hessian(ic::3, :), dim=1)) > thr1)) then
+         call test_failed(error, label//" is not translationally invariant")
+         print'(a)', "sum over atoms:"
+         print'(3es21.12)', sum(hessian(ic::3, :), dim=1)
+         return
+      end if
+   end do
+
+end subroutine check_hessian
+
+
+!> CO2 crystal displaced from its symmetric positions
+subroutine get_displaced_co2(mol)
+
+   !> Molecular structure data
+   type(structure_type), intent(out) :: mol
+
+   integer :: iat
+
+   call get_structure(mol, "X23", "CO2")
+   do iat = 1, mol%nat
+      mol%xyz(:, iat) = mol%xyz(:, iat) &
+         & + 0.1_wp * [sin(real(iat, wp)), cos(real(2*iat, wp)), sin(real(3*iat, wp))]
+   end do
+
+end subroutine get_displaced_co2
+
+!> Small orthorhombic C/O/H cell with two pairs on faces of the Wigner-Seitz
+!> cell and short lattice vectors
+subroutine get_small_cell(mol)
+
+   !> Molecular structure data
+   type(structure_type), intent(out) :: mol
+
+   real(wp), parameter :: lattice(3, 3) = reshape([ &
+      & 4.2_wp, 0.0_wp, 0.0_wp, &
+      & 0.0_wp, 5.0_wp, 0.0_wp, &
+      & 0.0_wp, 0.0_wp, 5.6_wp], [3, 3])
+   real(wp), parameter :: xyz(3, 3) = reshape([ &
+      & 0.0_wp, 0.0_wp, 0.0_wp, &
+      & 2.1_wp, 0.3_wp, 0.2_wp, &
+      & 0.4_wp, 2.5_wp, 1.1_wp], [3, 3])
+
+   ! C-O has two images along x, C-H two images along y
+   call new(mol, [6, 8, 1], xyz, lattice=lattice)
+
+end subroutine get_small_cell
+
 subroutine test_eeq_q_cyanamide(error)
 
    !> Error handling
@@ -1428,5 +1723,102 @@ subroutine test_eeqbc_dfdr_urea(error)
    call test_dfdr(error, mol, dfdq, model)
 
 end subroutine test_eeqbc_dfdr_urea
+
+subroutine test_eeq_hess_co2(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_displaced_co2(mol)
+   call new_eeq2019_model(mol, model, error)
+   if (allocated(error)) return
+   call test_hessian(error, mol, model)
+
+end subroutine test_eeq_hess_co2
+
+subroutine test_eeqbc_hexpl_co2(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   real(wp), allocatable :: pvec(:)
+   integer :: iat
+
+   call get_displaced_co2(mol)
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   allocate(pvec(mol%nat))
+   do iat = 1, mol%nat
+      pvec(iat) = 0.4_wp * cos(real(5*iat, wp)) - 0.1_wp
+   end do
+   call test_explicit_hessian(error, mol, model, 0.7_wp, -1.3_wp, pvec)
+
+end subroutine test_eeqbc_hexpl_co2
+
+subroutine test_eeqbc_hess_co2(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_displaced_co2(mol)
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_hessian(error, mol, model)
+
+end subroutine test_eeqbc_hess_co2
+
+subroutine test_eeq_hess_cho(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_small_cell(mol)
+   call new_eeq2019_model(mol, model, error)
+   if (allocated(error)) return
+   call test_hessian(error, mol, model)
+
+end subroutine test_eeq_hess_cho
+
+subroutine test_eeqbc_hexpl_cho(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_small_cell(mol)
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_explicit_hessian(error, mol, model, 0.7_wp, -1.3_wp, &
+      & [0.3_wp, -0.5_wp, 0.15_wp])
+
+end subroutine test_eeqbc_hexpl_cho
+
+subroutine test_eeqbc_hess_cho(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_small_cell(mol)
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_hessian(error, mol, model)
+
+end subroutine test_eeqbc_hess_cho
 
 end module test_pbc

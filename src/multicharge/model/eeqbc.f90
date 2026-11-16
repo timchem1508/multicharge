@@ -3673,12 +3673,17 @@ subroutine get_explicit_hessian_dense(self, mol, cache, p, hessian, error, alpha
    real(wp), intent(in), optional :: beta
 
    if (any(mol%periodic)) then
-      call fatal_error(error, &
-         & "Analytical Hessian is not available for periodic systems")
-      return
+      if (.not. allocated(cache%wsc%nimg)) then
+         call fatal_error(error, "The Wigner-Seitz cell is not in the cache, "// &
+            & "update the cache without neighborlist first")
+         return
+      end if
+      call get_explicit_hessian_3d(self, mol, cache, p, hessian, alphain=alpha, &
+         & betain=beta)
+   else
+      call get_explicit_hessian_0d(self, mol, cache, p, hessian, alphain=alpha, &
+         & betain=beta)
    end if
-   call get_explicit_hessian_0d(self, mol, cache, p, hessian, alphain=alpha, &
-      & betain=beta)
 
 end subroutine get_explicit_hessian_dense
 
@@ -3949,6 +3954,235 @@ subroutine get_explicit_hessian_0d(self, mol, cache, p, hessian, alphain, betain
 
 end subroutine get_explicit_hessian_0d
 
+!> Explicit part of the nuclear Hessian of a periodic system (dense kernel)
+subroutine get_explicit_hessian_3d(self, mol, cache, p, hessian, alphain, betain)
+   !> EEQBC model type
+   class(eeqbc_model), intent(in) :: self
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Cache for intermediate quantities with the Wigner-Seitz cell
+   type(mchrg_cache), intent(in) :: cache
+
+   !> Charge-like contraction vector
+   real(wp), intent(in) :: p(:)
+
+   !> Nuclear Hessian
+   real(wp), intent(inout) :: hessian(:,:)
+
+   !> Alpha parameter
+   real(wp), intent(in), optional :: alphain
+
+   !> Beta parameter
+   real(wp), intent(in), optional :: betain
+
+   real(wp) :: alpha, beta
+   real(wp) :: elst(3, 3, 3, 3)
+   integer :: iat, jat, izp, jzp, ii, jj, img
+   real(wp) :: rij(3), norm_cn_i, radi, dradi, d2radi, capi, capj, rvdw, wsw
+   real(wp) :: tqeta, hardi, dhdcni, d2hdcni2, detai, d2etai, ctmp
+   real(wp) :: W_ii, aWij, wcap_sum, cij, wcni, wcnj, wqloci, wqlocj
+   real(wp) :: cni, cnj, kii, kjj, kij
+   real(wp) :: d2pair(3, 3), gk_ij(3), gk_ji(3), gq_ij(3), gq_ji(3)
+   real(wp), allocatable :: v(:), ptmp(:), qlocacc(:), cnacc(:)
+   real(wp), allocatable :: dcnacc(:, :, :), dqlocacc(:, :, :)
+   real(wp), allocatable :: d2cnacc(:, :), d2cndiag(:), d2qlocacc(:)
+   real(wp), allocatable :: radius(:), rdrad(:), drdrad(:), wcap(:), wcn(:), wqloc(:)
+   real(wp), allocatable :: diagonal(:, :, :), dcndiag(:, :), dqlocdiag(:, :)
+   real(wp), allocatable :: dtrans(:, :)
+
+   alpha = 1.0_wp
+   if (present(alphain)) alpha = alphain
+   beta = 1.0_wp
+   if (present(betain)) beta = betain
+
+   call get_dir_trans(mol, dtrans, cutoff)
+   allocate(qlocacc(mol%nat), cnacc(mol%nat), source=0.0_wp)
+
+   allocate(ptmp(size(cache%cmat, 1)), source=0.0_wp)
+   ptmp(:mol%nat) = p
+   allocate(v(size(cache%cmat, 1)))
+   call symv(cache%cmat, ptmp, v, alpha=1.0_wp, beta=0.0_wp, uplo='l')
+
+   allocate(dcnacc(3, mol%nat, mol%nat), dqlocacc(3, mol%nat, mol%nat), &
+      & source=0.0_wp)
+   allocate(diagonal(3, 3, mol%nat), dcndiag(3, mol%nat), &
+      & dqlocdiag(3, mol%nat), source=0.0_wp)
+   allocate(d2cnacc(mol%nat, mol%nat), d2cndiag(mol%nat), d2qlocacc(mol%nat), &
+      & source=0.0_wp)
+   allocate(radius(mol%nat), rdrad(mol%nat), drdrad(mol%nat), wcap(mol%nat), &
+      & wcn(mol%nat), wqloc(mol%nat), source=0.0_wp)
+
+   ! Precompute atomic radii, hardness derivatives, and diagonal weights
+   !$omp parallel do default(none) schedule(runtime) &
+   !$omp shared(cache, mol, self, p, v, alpha, beta, cnacc, qlocacc, d2cndiag) &
+   !$omp shared(d2qlocacc, radius, rdrad, drdrad, wcap, wcn, wqloc, dtrans) &
+   !$omp private(iat, izp, norm_cn_i, radi, dradi, d2radi, tqeta, hardi, dhdcni) &
+   !$omp private(d2hdcni2, detai, d2etai, W_ii, cij, capi, rvdw, wsw, img, ctmp)
+   do iat = 1, mol%nat
+      izp = mol%id(iat)
+      norm_cn_i = 1.0_wp / self%avg_cn(izp)
+      radi = self%rad(izp) * exp(-self%kcnrad(izp) * cache%cn(iat) * norm_cn_i)
+      dradi = -self%kcnrad(izp) * norm_cn_i * radi
+      d2radi = -self%kcnrad(izp) * norm_cn_i * dradi
+
+      ! Effective hardness of i and its derivatives w.r.t. CN and local charge
+      tqeta = tanh(self%kqeta(izp) * cache%qloc(iat))
+      hardi = self%eta(izp) + self%kqeta_pre * tqeta + sqrt2pi / radi
+      dhdcni = -sqrt2pi * dradi / radi**2
+      d2hdcni2 = sqrt2pi * (2.0_wp * dradi**2 / radi**3 - d2radi / radi**2)
+      detai = self%kqeta_pre * self%kqeta(izp) * (1.0_wp - tqeta**2)
+      d2etai = -2.0_wp * self%kqeta(izp) * tqeta * detai
+
+      ! The capacitance to the own images cancels in the electronegativity term
+      capi = self%cap(izp)
+      rvdw = self%rvdw(izp, izp)
+      wsw = 1.0_wp / real(cache%wsc%nimg(iat, iat), wp)
+      do img = 1, cache%wsc%nimg(iat, iat)
+         call get_cpair_dir(self%kbc, cache%wsc%trans(:, &
+            & cache%wsc%tridx(img, iat, iat)), dtrans, rvdw, capi, capi, ctmp)
+         v(iat) = v(iat) - wsw * ctmp * p(iat)
+      end do
+
+      W_ii = p(iat) * cache%vrhs(iat)
+
+      radius(iat) = radi
+      rdrad(iat) = radi * dradi
+      drdrad(iat) = dradi**2 + radi * d2radi
+      wcap(iat) = alpha * W_ii * hardi + beta * p(iat) * cache%xtmp(iat)
+      wcn(iat) = alpha * W_ii * dhdcni + beta * p(iat) * self%kcnchi(izp)
+      wqloc(iat) = alpha * W_ii * detai + beta * p(iat) * self%kqchi(izp)
+
+      ! The diagonal capacitance includes the capacitance to the own images
+      cij = cache%cmat(iat, iat)
+      cnacc(iat) = alpha * W_ii * cij * dhdcni + beta * self%kcnchi(izp) * v(iat)
+      qlocacc(iat) = alpha * W_ii * cij * detai + beta * self%kqchi(izp) * v(iat)
+      d2cndiag(iat) = alpha * W_ii * cij * d2hdcni2
+      d2qlocacc(iat) = alpha * W_ii * cij * d2etai
+   end do
+   !$omp end parallel do
+
+   ! Pairwise contributions of the Wigner-Seitz images and their lattice sums
+   !$omp parallel do default(none) schedule(runtime) &
+   !$omp shared(cache, mol, self, p, alpha, beta, radius, rdrad, drdrad, wcap) &
+   !$omp shared(wcn, wqloc, hessian, dcnacc, dqlocacc, d2cnacc, dtrans) &
+   !$omp private(iat, jat, izp, jzp, ii, jj, img, rij, capi, capj, rvdw, wsw) &
+   !$omp private(W_ii, aWij, wcap_sum, wcni, wcnj, wqloci, wqlocj, cni, cnj) &
+   !$omp private(gk_ij, gk_ji, gq_ij, gq_ji, kii, kjj, kij, d2pair) &
+   !$omp reduction(+:cnacc, diagonal, dcndiag, dqlocdiag, d2cndiag)
+   do iat = 1, mol%nat
+      izp = mol%id(iat)
+      ii = 3 * (iat - 1)
+      capi = self%cap(izp)
+
+      do jat = 1, iat - 1
+         jzp = mol%id(jat)
+         jj = 3 * (jat - 1)
+         capj = self%cap(jzp)
+         rvdw = self%rvdw(izp, jzp)
+
+         aWij = alpha * (p(iat) * cache%vrhs(jat) + p(jat) * cache%vrhs(iat))
+         wcap_sum = wcap(iat) + wcap(jat) &
+            & - beta * (p(iat) * cache%xtmp(jat) + p(jat) * cache%xtmp(iat))
+         wcni = wcn(iat) - beta * self%kcnchi(izp) * p(jat)
+         wcnj = wcn(jat) - beta * self%kcnchi(jzp) * p(iat)
+         wqloci = wqloc(iat) - beta * self%kqchi(izp) * p(jat)
+         wqlocj = wqloc(jat) - beta * self%kqchi(jzp) * p(iat)
+
+         ! The weights are linear in all pair quantities and carry the image weight
+         wsw = 1.0_wp / real(cache%wsc%nimg(jat, iat), wp)
+         do img = 1, cache%wsc%nimg(jat, iat)
+            rij = mol%xyz(:, jat) - mol%xyz(:, iat) &
+               & + cache%wsc%trans(:, cache%wsc%tridx(img, jat, iat))
+
+            call get_hessian_pair_3d(rij, dtrans, self%kbc, rvdw, capi, capj, &
+               & radius(iat), radius(jat), rdrad(iat), rdrad(jat), &
+               & drdrad(iat), drdrad(jat), wsw * aWij, wsw * wcap_sum, &
+               & wsw * wcni, wsw * wcnj, wsw * wqloci, wsw * wqlocj, d2pair, &
+               & cni, cnj, gk_ij, gk_ji, gq_ij, gq_ji, kii, kjj, kij)
+
+            hessian(ii+1:ii+3, jj+1:jj+3) = hessian(ii+1:ii+3, jj+1:jj+3) - d2pair
+            hessian(jj+1:jj+3, ii+1:ii+3) = hessian(jj+1:jj+3, ii+1:ii+3) - d2pair
+            diagonal(:, :, iat) = diagonal(:, :, iat) + d2pair
+            diagonal(:, :, jat) = diagonal(:, :, jat) + d2pair
+
+            cnacc(iat) = cnacc(iat) + cni
+            cnacc(jat) = cnacc(jat) + cnj
+
+            dcnacc(:, jat, iat) = dcnacc(:, jat, iat) + gk_ij
+            dcndiag(:, iat) = dcndiag(:, iat) - gk_ij
+            dcndiag(:, jat) = dcndiag(:, jat) + gk_ji
+            dcnacc(:, iat, jat) = dcnacc(:, iat, jat) - gk_ji
+
+            dqlocacc(:, jat, iat) = dqlocacc(:, jat, iat) + gq_ij
+            dqlocdiag(:, iat) = dqlocdiag(:, iat) - gq_ij
+            dqlocdiag(:, jat) = dqlocdiag(:, jat) + gq_ji
+            dqlocacc(:, iat, jat) = dqlocacc(:, iat, jat) - gq_ji
+
+            d2cndiag(iat) = d2cndiag(iat) + kii
+            d2cndiag(jat) = d2cndiag(jat) + kjj
+            d2cnacc(iat, jat) = d2cnacc(iat, jat) + kij
+            d2cnacc(jat, iat) = d2cnacc(jat, iat) + kij
+         end do
+      end do
+
+      ! Coulomb interaction with the own images, it does not depend on the
+      ! positions but on the CN of i through both charge widths
+      W_ii = p(iat) * cache%vrhs(iat)
+      rvdw = self%rvdw(izp, izp)
+      wsw = 1.0_wp / real(cache%wsc%nimg(iat, iat), wp)
+      do img = 1, cache%wsc%nimg(iat, iat)
+         rij = cache%wsc%trans(:, cache%wsc%tridx(img, iat, iat))
+
+         call get_hessian_pair_3d(rij, dtrans, self%kbc, rvdw, capi, capi, &
+            & radius(iat), radius(iat), rdrad(iat), rdrad(iat), &
+            & drdrad(iat), drdrad(iat), wsw * alpha * W_ii, 0.0_wp, &
+            & 0.0_wp, 0.0_wp, 0.0_wp, 0.0_wp, d2pair, &
+            & cni, cnj, gk_ij, gk_ji, gq_ij, gq_ji, kii, kjj, kij)
+
+         cnacc(iat) = cnacc(iat) + cni + cnj
+         d2cndiag(iat) = d2cndiag(iat) + kii + kjj + 2.0_wp * kij
+      end do
+   end do
+   !$omp end parallel do
+   deallocate(radius, rdrad, drdrad, wcap, wcn, wqloc)
+
+   !$omp parallel do default(none) schedule(static) &
+   !$omp shared(mol, cache, hessian, diagonal, dcnacc, dqlocacc, dcndiag) &
+   !$omp shared(dqlocdiag, d2cnacc, d2cndiag, d2qlocacc) &
+   !$omp private(iat, ii)
+   do iat = 1, mol%nat
+      ii = 3 * (iat - 1)
+      hessian(ii+1:ii+3, ii+1:ii+3) = hessian(ii+1:ii+3, ii+1:ii+3) &
+         & + diagonal(:, :, iat)
+      dcnacc(:, iat, iat) = dcndiag(:, iat)
+      dqlocacc(:, iat, iat) = dqlocdiag(:, iat)
+      d2cnacc(iat, iat) = d2cndiag(iat)
+      dqlocacc(:, :, iat) = dqlocacc(:, :, iat) &
+         & + 0.5_wp * d2qlocacc(iat) * cache%dqlocdr(:, :, iat)
+   end do
+   !$omp end parallel do
+
+   ! Half of the symmetric product of the CN derivatives in their vector weights
+   call gemm(cache%dcndr, d2cnacc, dcnacc, alpha=0.5_wp, beta=1.0_wp)
+
+   ! Products of the CN and local charge derivatives with their vector weights
+   call add_chain_products(cache%dcndr, dcnacc, hessian)
+   call add_chain_products(cache%dqlocdr, dqlocacc, hessian)
+
+   ! The strain Hessian of the contraction is evaluated by the caller
+   elst(:, :, :, :) = 0.0_wp
+   call self%ncoord%add_coordination_number_hessian(mol, cache%trans, cnacc, &
+      & hessian, elst)
+   call self%ncoord_en%add_coordination_number_hessian(mol, cache%trans, qlocacc, &
+      & hessian, elst)
+
+   deallocate(qlocacc, cnacc, dcnacc, dqlocacc, d2cnacc, d2cndiag, d2qlocacc, &
+      & diagonal, dcndiag, dqlocdiag, dtrans, v, ptmp)
+
+end subroutine get_explicit_hessian_3d
+
 !> Add D M^T + M D^T of derivatives and their weights to the Hessian
 subroutine add_chain_products(dzdr, weight, hessian)
    !> Position derivatives of the atomic quantities, dzdr(:, x, k) = dz_k/dR_x
@@ -4066,6 +4300,87 @@ pure subroutine get_hessian_pair_0d(vec, kbc, rvdw, capi, capj, radi, radj, &
       & * (gam * d2gdgam2 + 3.0_wp * dgdgam)
 
 end subroutine get_hessian_pair_0d
+
+!> Lattice sum of the pairwise second-derivative quantities, the mixed
+!> position-CN and position-qloc weights are returned as vectors
+subroutine get_hessian_pair_3d(rij, trans, kbc, rvdw, capi, capj, radi, radj, &
+   & rdradi, rdradj, drdradi, drdradj, aWij, wcap_sum, wcni, wcnj, wqloci, &
+   & wqlocj, d2pair, cni, cnj, gk_ij, gk_ji, gq_ij, gq_ji, kii, kjj, kij)
+   !> Distance vector R_j - R_i of the Wigner-Seitz image
+   real(wp), intent(in) :: rij(3)
+   !> Direct lattice translation vectors (3 × N)
+   real(wp), intent(in) :: trans(:, :)
+   !> Bond capacitance exponent
+   real(wp), intent(in) :: kbc
+   !> Van der Waals distance of the pair
+   real(wp), intent(in) :: rvdw
+   !> Bond capacitance parameters of atom i and j
+   real(wp), intent(in) :: capi, capj
+   !> Effective charge radii of atom i and j
+   real(wp), intent(in) :: radi, radj
+   !> Product R_a * dR_a/dCN_a for atom i and j
+   real(wp), intent(in) :: rdradi, rdradj
+   !> Second derivative (dR_a/dCN_a)^2 + R_a * d^2R_a/dCN_a^2 for atom i and j
+   real(wp), intent(in) :: drdradi, drdradj
+   !> Scaled pair charge weight alpha * W_ij
+   real(wp), intent(in) :: aWij
+   !> Combined capacitance weight wcap(i) + wcap(j) - pchi
+   real(wp), intent(in) :: wcap_sum
+   !> Pairwise CN weights for i -> j and j -> i
+   real(wp), intent(in) :: wcni, wcnj
+   !> Pairwise local-charge weights for i -> j and j -> i
+   real(wp), intent(in) :: wqloci, wqlocj
+   !> Explicit 3x3 second-derivative block at fixed CN and local charge
+   real(wp), intent(out) :: d2pair(3, 3)
+   !> Pair contributions to the scalar CN weights of i and j
+   real(wp), intent(out) :: cni, cnj
+   !> Directed mixed position-CN vector weights
+   real(wp), intent(out) :: gk_ij(3), gk_ji(3)
+   !> Directed mixed position-qloc vector weights
+   real(wp), intent(out) :: gq_ij(3), gq_ji(3)
+   !> Second derivatives w.r.t. CN_i^2, CN_j^2, and CN_i * CN_j
+   real(wp), intent(out) :: kii, kjj, kij
+
+   integer :: itr
+   real(wp) :: vec(3), r1, cpair, d2tmp(3, 3), cnitmp, cnjtmp
+   real(wp) :: wk_ij, wk_ji, wq_ij, wq_ji, kiitmp, kjjtmp, kijtmp
+
+   d2pair(:, :) = 0.0_wp
+   cni = 0.0_wp
+   cnj = 0.0_wp
+   gk_ij(:) = 0.0_wp
+   gk_ji(:) = 0.0_wp
+   gq_ij(:) = 0.0_wp
+   gq_ji(:) = 0.0_wp
+   kii = 0.0_wp
+   kjj = 0.0_wp
+   kij = 0.0_wp
+
+   do itr = 1, size(trans, 2)
+      vec(:) = rij + trans(:, itr)
+      r1 = norm2(vec)
+      if (r1 < eps) cycle
+
+      ! Off-diagonal capacitance matrix element of this lattice image
+      call get_cpair(kbc, cpair, r1, rvdw, capi, capj)
+      call get_hessian_pair_0d(vec, kbc, rvdw, capi, capj, radi, radj, &
+         & rdradi, rdradj, drdradi, drdradj, -cpair, aWij, wcap_sum, &
+         & wcni, wcnj, wqloci, wqlocj, d2tmp, cnitmp, cnjtmp, &
+         & wk_ij, wk_ji, wq_ij, wq_ji, kiitmp, kjjtmp, kijtmp)
+
+      d2pair(:, :) = d2pair + d2tmp
+      cni = cni + cnitmp
+      cnj = cnj + cnjtmp
+      gk_ij(:) = gk_ij + wk_ij * vec
+      gk_ji(:) = gk_ji + wk_ji * vec
+      gq_ij(:) = gq_ij + wq_ij * vec
+      gq_ji(:) = gq_ji + wq_ji * vec
+      kii = kii + kiitmp
+      kjj = kjj + kjjtmp
+      kij = kij + kijtmp
+   end do
+
+end subroutine get_hessian_pair_3d
 
 !> Explicit part of the molecular nuclear Hessian on a neighborlist
 subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &

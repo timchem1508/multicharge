@@ -81,6 +81,7 @@ subroutine collect_model(testsuite)
    & new_unittest("eeq-charge-hess-mb05", test_eeq_qhess_mb05), &
    & new_unittest("eeq-charge-hess-co2", test_eeq_qhess_co2), &
    & new_unittest("eeqbc-charge-hess-mb05", test_eeqbc_qhess_mb05), &
+   & new_unittest("eeqbc-charge-hess-co2", test_eeqbc_qhess_co2), &
    & new_unittest("eeqbc-dadr-mb01", test_eeqbc_dadr_mb01), &
    & new_unittest("eeqbc-dadL-mb01", test_eeqbc_dadL_mb01), &
    & new_unittest("eeqbc-dbdr-mb01", test_eeqbc_dbdr_mb01), &
@@ -3000,6 +3001,28 @@ subroutine test_eeqbc_qhess_mb05(error)
    call test_charge_hessian(error, mol, model)
 
 end subroutine test_eeqbc_qhess_mb05
+
+
+subroutine test_eeqbc_qhess_co2(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+   integer :: iat
+
+   ! 3D periodic, displaced from the symmetric positions
+   call get_structure(mol, "X23", "CO2")
+   do iat = 1, mol%nat
+      mol%xyz(:, iat) = mol%xyz(:, iat) &
+         & + 0.1_wp * [sin(real(iat, wp)), cos(real(2*iat, wp)), sin(real(3*iat, wp))]
+   end do
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_charge_hessian(error, mol, model)
+
+end subroutine test_eeqbc_qhess_co2
 
 
 subroutine test_eeqbc_hext_mb05(error)

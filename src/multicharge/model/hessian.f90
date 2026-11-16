@@ -25,16 +25,10 @@ submodule (multicharge_model_type) multicharge_model_hessian
 contains
 
 
-!> Compute the molecular nuclear Hessian of the electrostatic energy
+!> Compute the nuclear Hessian of the electrostatic energy
 module procedure get_hessian_dense
 
    real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
-
-   if (any(mol%periodic)) then
-      call fatal_error(error, &
-         & "Analytical Hessian is not available for periodic systems")
-      return
-   end if
 
    ! Get variables from the model cache
    if (.not. allocated(cache%vrhs) .or. .not. allocated(cache%dcndr)) then

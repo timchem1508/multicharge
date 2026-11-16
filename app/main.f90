@@ -90,9 +90,9 @@ program main
       if (model_id == mchrg_model%eeq2019 .and. use_nlist) then
          call fatal_error(error, &
          & "Analytical Hessian of the EEQ model is not available on a neighborlist")
-      else if (any(mol%periodic)) then
+      else if (any(mol%periodic) .and. use_nlist) then
          call fatal_error(error, &
-         & "Analytical Hessian is not available for periodic systems")
+         & "Analytical Hessian on a neighborlist is not available for periodic systems")
       end if
       if (allocated(error)) then
          write(error_unit, '(a)') error%message
@@ -324,7 +324,7 @@ subroutine help(unit)
       & "Evaluate molecular energy gradient and virial.", &
       "-qg, -qgrad, --qgrad", "Evaluate molecular charge gradient and virial.", &
       "-hess, --hess", &
-      & "Evaluate analytical Hessian (eeqbc model, molecules only).", &
+      & "Evaluate analytical Hessian (periodic only without neighborlist).", &
       "-numhess, --numhess", &
       & "Evaluate semi-numerical Hessian and pressure tensor.", &
       "-list, -nlist, --nlist", &
