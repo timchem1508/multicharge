@@ -26,7 +26,7 @@ module multicharge_model_eeq
    use mctc_env, only : error_type, fatal_error, wp
    use mctc_io, only : structure_type
    use mctc_io_constants, only : pi
-   use mctc_io_math, only : matdet_3x3
+   use mctc_io_math, only : matdet_3x3, outerprod
    use mctc_ncoord, only : new_ncoord, cn_count
    use mctc_wignerseitz, only : wignerseitz_cell
    use multicharge_wignerseitz, only : new_wignerseitz_cell
@@ -577,7 +577,7 @@ subroutine get_damat_0d(self, mol, cache, alpha, p, dadr, dadL)
          dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) - erf(sqrt(arg)) &
             & / (r2 * sqrt(r2))
          dG = alpha * dtmp * vec
-         dS = spread(dG, 1, 3) * spread(vec, 2, 3)
+         dS = outerprod(vec, dG)
          dadr_local(:, iat, iat) = dadr_local(:, iat, iat) - dG * p(jat)
          dadr_local(:, jat, jat) = dadr_local(:, jat, jat) + dG * p(iat)
          dadr_local(:, iat, jat) = dadr_local(:, iat, jat) - dG * p(iat)
@@ -713,7 +713,7 @@ subroutine get_damat_dir_3d(rij, gam, alp, trans, dg, ds)
       gtmp = +2.0_wp * gam * exp(-r2 * gam2) / (sqrtpi * r2) - erf(r1 * gam) / (r2 * r1)
       atmp = -2.0_wp * alp * exp(-r2 * alp2) / (sqrtpi * r2) + erf(r1 * alp) / (r2 * r1)
       dg(:) = dg + (gtmp + atmp) * vec
-      ds(:, :) = ds + (gtmp + atmp) * spread(vec, 1, 3) * spread(vec, 2, 3)
+      ds(:, :) = ds + (gtmp + atmp) * outerprod(vec, vec)
    end do
 
 end subroutine get_damat_dir_3d
@@ -753,8 +753,7 @@ subroutine get_damat_rec_3d(rij, vol, alp, trans, dg, ds)
       dtmp = -sin(gv) * etmp
       dg(:) = dg + dtmp * vec
       ds(:, :) = ds + etmp * cos(gv) &
-         & * ((2.0_wp / g2 + 0.5_wp / alp2) * spread(vec, 1, 3) * spread(vec, 2, &
-         & 3) - unity)
+         & * ((2.0_wp / g2 + 0.5_wp / alp2) * outerprod(vec, vec) - unity)
    end do
 
 end subroutine get_damat_rec_3d
@@ -983,7 +982,7 @@ subroutine get_d2amat_3d(self, mol, cache, alpha, p, hessian, diagonal)
             do itr = 1, size(rtrans, 2)
                vec = rtrans(:, itr)
                box = box - wsw * rweight(itr) * cos(dot_product(rij, vec)) &
-                  & * spread(vec, 1, 3) * spread(vec, 2, 3)
+                  & * outerprod(vec, vec)
             end do
          end do
          weight = alpha * (p(iat) * cache%vrhs(jat) + p(jat) * cache%vrhs(iat))
@@ -1038,7 +1037,7 @@ pure function radial_hessian(vec, dr, drr) result(box)
 
    r1 = norm2(vec)
    evec = vec / r1
-   box = (drr - dr / r1) * spread(evec, 1, 3) * spread(evec, 2, 3)
+   box = (drr - dr / r1) * outerprod(evec, evec)
    do ic = 1, 3
       box(ic, ic) = box(ic, ic) + dr / r1
    end do
@@ -1153,7 +1152,7 @@ subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
          dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) - erf(sqrt(arg)) &
             & / (r2 * sqrt(r2))
          dG = dtmp * vec
-         dS = spread(dG, 1, 3) * spread(vec, 2, 3)
+         dS = outerprod(vec, dG)
 
          ! Weights for the pair
          W_ij = p(iat) * cache%vrhs(jat) + p(jat) * cache%vrhs(iat)

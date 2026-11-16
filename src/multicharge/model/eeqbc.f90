@@ -32,6 +32,7 @@ module multicharge_model_eeqbc
    use mctc_env, only : error_type, fatal_error, wp, i8
    use mctc_io, only : structure_type
    use mctc_io_constants, only : pi
+   use mctc_io_math, only : outerprod
    use mctc_ncoord, only : cn_count, new_ncoord, ncoord_type
    use mctc_csrlist, only : csr_list, spsymv_csr, find_lower_start
    use mctc_wignerseitz, only : wignerseitz_cell
@@ -624,8 +625,8 @@ subroutine get_xvec_derivs_0d(self, mol, ndim, cache, beta)
             & jat) + cache%dabdr(:, iat, iat)
          cache%dabdr(:, jat, iat) = +beta * (cache%xtmp(jat) - cache%xtmp(iat)) &
             & * cache%dcdr(:, jat, iat) + cache%dabdr(:, jat, iat)
-         cache%dabdL(:, :, iat) = +beta * cache%xtmp(jat) * spread(cache%dcdr(:, &
-            & iat, jat), 1, 3) * spread(-vec, 2, 3) + cache%dabdL(:, :, iat)
+         cache%dabdL(:, :, iat) = +beta * cache%xtmp(jat) &
+            & * outerprod(-vec, cache%dcdr(:, iat, jat)) + cache%dabdL(:, :, iat)
       end do
 
       ! EN derivative: capacitance matrix derivative diagonal
@@ -1101,7 +1102,7 @@ subroutine get_damat_0d(self, mol, cache, alpha, p, dadr, dadL)
          dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) &
             & - erf(sqrt(arg)) / (r2 * sqrt(r2))
          dG(:) = alpha * dtmp * vec * p(jat) * cache%cmat(jat, iat)
-         dS(:, :) = spread(dG, 1, 3) * spread(vec, 2, 3)
+         dS(:, :) = outerprod(vec, dG)
          dadr(:, iat, iat) = dadr(:, iat, iat) - dG
          dadr(:, jat, iat) = dadr(:, jat, iat) + dG
          dadL(:, :, iat) = dadL(:, :, iat) + dS
@@ -1117,8 +1118,8 @@ subroutine get_damat_0d(self, mol, cache, alpha, p, dadr, dadL)
          dtmp = alpha * erf(sqrt(r2) * gam) / (sqrt(r2)) * p(jat)
          dadr(:, iat, iat) = -dtmp * cache%dcdr(:, jat, iat) + dadr(:, iat, iat)
          dadr(:, jat, iat) = +dtmp * cache%dcdr(:, jat, iat) + dadr(:, jat, iat)
-         dadL(:, :, iat) = -dtmp * spread(cache%dcdr(:, iat, jat), 2, 3) &
-            & * spread(vec, 1, 3) + dadL(:, :, iat)
+         dadL(:, :, iat) = -dtmp * outerprod(cache%dcdr(:, iat, jat), vec) &
+            & + dadL(:, :, iat)
 
          ! Capacitance derivative diagonal
          dtmp = alpha * hardi * p(iat)
@@ -1405,7 +1406,7 @@ subroutine get_damat_0d_list(self, mol, list, cache, alpha, p, dlist, dadL)
          ! Explicit derivative
          dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) - erf(sqrt(arg)) / (r2 * r1)
          dG(:) = alpha * dtmp * vec * p(jat) * cij
-         dS(:, :) = spread(dG, 1, 3) * spread(vec, 2, 3)
+         dS(:, :) = outerprod(vec, dG)
          drow(:, 1) = drow(:, 1) - dG
          drow(:, kat - ist + 1) = drow(:, kat - ist + 1) + dG
          dadL(:, :, iat) = dadL(:, :, iat) + dS
@@ -2097,7 +2098,7 @@ subroutine get_damat_dir(rij, trans, capi, capj, rvdw, kbc, gam, dG, dS, dgam)
       call get_cpair(kbc, cmat, r1, rvdw, capi, capj)
       gtmp = 2.0_wp * gam * exp(-r2 * gam2) / (sqrtpi * r2) - erf(r1 * gam) / (r2 * r1)
       dG(:) = dG - cmat * gtmp * vec
-      dS(:, :) = dS - cmat * gtmp * spread(vec, 1, 3) * spread(vec, 2, 3)
+      dS(:, :) = dS - cmat * gtmp * outerprod(vec, vec)
       dgam = dgam + cmat * 2.0_wp * exp(-gam2 * r2) / sqrtpi
    end do
 
@@ -2495,7 +2496,7 @@ subroutine get_dcpair(kbc, vec, rvdw, capi, capj, dgpair, dspair)
    arg = -(kbc * (r1 - rvdw) / rvdw)**2
    dtmp = -sqrt(capi * capj) * kbc * exp(arg) / (sqrtpi * rvdw)
    dgpair = dtmp * vec / r1
-   dspair = spread(dgpair, 1, 3) * spread(vec, 2, 3)
+   dspair = outerprod(vec, dgpair)
 end subroutine get_dcpair
 
 !> Build the derivative of the bond capacitance matrix for a non‑periodic system.
@@ -2945,7 +2946,7 @@ subroutine get_grad_0d_list(self, mol, list, cache, p, gradient, sigma, alphain,
          dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) - erf(sqrt(arg)) &
             & / (r2 * sqrt(r2))
          dG = dtmp * vec
-         dS = spread(dG, 1, 3) * spread(vec, 2, 3)
+         dS = outerprod(vec, dG)
 
          gradient_local(:, iat) = gradient_local(:, &
             & iat) - dG * cache%clist(kat) * W_ij * alpha
@@ -3107,7 +3108,7 @@ subroutine get_grad_0d(self, mol, cache, p, gradient, sigma, alphain, betain)
          dtmp = 2.0_wp * gam * exp(-arg) / (sqrtpi * r2) - erf(sqrt(arg)) &
             & / (r2 * sqrt(r2))
          dG = dtmp * vec
-         dS = spread(dG, 1, 3) * spread(vec, 2, 3)
+         dS = outerprod(vec, dG)
 
          gradient_local(:, iat) = gradient_local(:, iat) - dG * cache%cmat(iat, &
             & jat) * W_ij * alpha
