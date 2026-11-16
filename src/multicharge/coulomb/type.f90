@@ -37,6 +37,9 @@ module multicharge_coulomb_type
 
       !> Particle mesh Ewald summation
       integer :: pme = 1
+
+      !> Fast multipole method for molecules
+      integer :: fmm = 2
    end type enum_coulomb_method
 
    !> Actual enumerator of the Coulomb matrix representations
@@ -57,7 +60,12 @@ module multicharge_coulomb_type
       real(wp), allocatable :: spacing
 
       !> Order of the cardinal B-splines of the particle mesh Ewald summation
+      !> or of the multipole expansions of the fast multipole method
       integer, allocatable :: order
+
+      !> Target number of atoms per leaf box of the fast multipole method,
+      !> chosen from a cost model of the tree if not given
+      integer, allocatable :: leaf_size
    end type coulomb_input
 
    !> Abstract matrix-free Coulomb operator

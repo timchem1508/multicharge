@@ -42,6 +42,9 @@ module test_coulomb
    !> Accuracy of the tightly converged particle mesh Ewald operator
    real(wp), parameter :: tight = 1.0e-10_wp
 
+   !> Accuracy of the tightly converged fast multipole operator
+   real(wp), parameter :: tight_fmm = 1.0e-8_wp
+
    !> Convergence threshold of the CG solver
    real(wp), parameter :: cgtol = 1.0e-12_wp
 
@@ -63,6 +66,11 @@ subroutine collect_coulomb(testsuite)
       & new_unittest("pme-urea-supercell", test_pme_urea222), &
       & new_unittest("pme-ice-hexagonal", test_pme_ice), &
       & new_unittest("pme-default-mb05", test_pme_default_mb05), &
+      & new_unittest("fmm-mb01", test_fmm_mb01), &
+      & new_unittest("fmm-amylose", test_fmm_amylose), &
+      & new_unittest("fmm-default-mb05", test_fmm_default_mb05), &
+      & new_unittest("fmm-charged-mb03", test_fmm_charged_mb03), &
+      & new_unittest("fmm-periodic", test_fmm_periodic, should_fail=.true.), &
       & new_unittest("projected-dense-mb02", test_projected_mb02), &
       & new_unittest("projected-dense-urea", test_projected_urea), &
       & new_unittest("projected-eeqbc-list", test_projected_eeqbc), &
@@ -452,6 +460,96 @@ subroutine test_pme_default_mb05(error)
    call gen_test_operator(error, mol, input, thr2, .true.)
 
 end subroutine test_pme_default_mb05
+
+
+subroutine test_fmm_mb01(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   type(coulomb_input) :: input
+
+   call get_structure(mol, "MB16-43", "01")
+   input%method = coulomb_method%fmm
+   input%accuracy = tight_fmm
+   ! Small leaf boxes enforce several tree levels for a small molecule
+   allocate(input%leaf_size, source=2)
+   call gen_test_operator(error, mol, input, thr, .true.)
+
+end subroutine test_fmm_mb01
+
+
+subroutine test_fmm_amylose(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   type(coulomb_input) :: input
+
+   call get_structure(mol, "AMYLOSE", "Amylose8")
+   input%method = coulomb_method%fmm
+   input%accuracy = tight_fmm
+   allocate(input%leaf_size, source=6)
+   call gen_test_operator(error, mol, input, thr, .true.)
+
+end subroutine test_fmm_amylose
+
+
+subroutine test_fmm_default_mb05(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   type(coulomb_input) :: input
+
+   call get_structure(mol, "MB16-43", "05")
+   input%method = coulomb_method%fmm
+   call gen_test_operator(error, mol, input, thr2, .true.)
+
+end subroutine test_fmm_default_mb05
+
+
+subroutine test_fmm_charged_mb03(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   type(coulomb_input) :: input
+
+   call get_structure(mol, "MB16-43", "03")
+   mol%charge = 1.0_wp
+   input%method = coulomb_method%fmm
+   input%accuracy = tight_fmm
+   call gen_test_operator(error, mol, input, thr, .true.)
+
+end subroutine test_fmm_charged_mb03
+
+
+subroutine test_fmm_periodic(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   type(coulomb_input) :: input
+   class(mchrg_model_type), allocatable :: model
+   class(mchrg_solver_type), allocatable :: solver
+   real(wp), allocatable :: energy(:), qvec(:)
+
+   call get_structure(mol, "X23", "urea")
+   allocate(energy(mol%nat), qvec(mol%nat), source=0.0_wp)
+   input%method = coulomb_method%fmm
+   call new_eeq2019_model(mol, model, error, coulomb=input)
+   if (allocated(error)) return
+   call get_solver(error, solver, .true., .true.)
+   if (allocated(error)) return
+   call solve_model(error, mol, model, solver, energy, qvec)
+
+end subroutine test_fmm_periodic
 
 
 subroutine test_projected_mb02(error)

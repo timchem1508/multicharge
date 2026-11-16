@@ -235,9 +235,9 @@ subroutine help(unit)
       "-cutoff, --cutoff <real>", &
       & "Neighbour list cutoff in Bohr (default: 29.0)", &
       "-coulomb, --coulomb <method>", &
-      & "Coulomb matrix of the eeq model: 'dense' (default) or 'pme'", &
+      & "Coulomb matrix of the eeq model: 'dense' (default), 'pme' or 'fmm' (molecules)", &
       "-coulomb-acc, --coulomb-accuracy <real>", &
-      & "Target accuracy of the PME operator (default: 1.0e-7)", &
+      & "Target accuracy of the matrix-free operator (default: 1.0e-7)", &
       "-projected, --projected", &
       & "Enforce the total charge by projection in a single CG solve", &
       "-precond, --precond <type>", &
@@ -468,6 +468,9 @@ subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
          case("pme")
             if (.not. allocated(coulomb)) allocate(coulomb)
             coulomb%method = coulomb_method%pme
+         case("fmm")
+            if (.not. allocated(coulomb)) allocate(coulomb)
+            coulomb%method = coulomb_method%fmm
          case default
             call fatal_error(error, "Unknown Coulomb method '"//arg//"' requested")
             exit
@@ -535,14 +538,14 @@ subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
    if (allocated(coulomb_acc)) then
       if (.not. allocated(coulomb)) then
          call fatal_error(error, "Coulomb accuracy can only be used together "//&
-            & "with the 'pme' Coulomb method.")
+            & "with a matrix-free Coulomb method.")
          return
       end if
       coulomb%accuracy = coulomb_acc
    end if
    if (allocated(coulomb) .and. use_nlist) then
-      call fatal_error(error, "The neighbour list cannot be combined with the "//&
-         & "'pme' Coulomb method.")
+      call fatal_error(error, "The neighbour list cannot be combined with a "//&
+         & "matrix-free Coulomb method.")
       return
    end if
 
@@ -588,7 +591,7 @@ subroutine get_arguments(input, model_id, input_format, egrad, qgrad, charge, &
       end if
       if (allocated(coulomb)) then
          call fatal_error(error, &
-            & "The 'pme' Coulomb method requires the cg solver.")
+            & "The matrix-free Coulomb methods require the cg solver.")
          return
       end if
       if (allocated(maxiter) .or. allocated(tol)) then

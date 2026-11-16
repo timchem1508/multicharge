@@ -23,6 +23,7 @@
 module multicharge_coulomb
    use mctc_env, only : error_type, fatal_error, wp
    use mctc_io, only : structure_type
+   use multicharge_coulomb_fmm, only : fmm_operator, new_fmm_operator
    use multicharge_coulomb_pme, only : pme_operator, new_pme_operator
    use multicharge_coulomb_type, only : coulomb_operator, coulomb_input, &
       & coulomb_method
@@ -30,7 +31,7 @@ module multicharge_coulomb
    private
 
    public :: coulomb_operator, coulomb_input, coulomb_method
-   public :: pme_operator
+   public :: pme_operator, fmm_operator
    public :: new_coulomb_operator
 
 
@@ -65,6 +66,14 @@ subroutine new_coulomb_operator(op, mol, error, input, rad, eta, alpha_ref)
          type(pme_operator), allocatable :: tmp
          allocate(tmp)
          call new_pme_operator(tmp, mol, error, input, rad, eta, alpha_ref)
+         if (allocated(error)) return
+         call move_alloc(tmp, op)
+      end block
+   case(coulomb_method%fmm)
+      block
+         type(fmm_operator), allocatable :: tmp
+         allocate(tmp)
+         call new_fmm_operator(tmp, mol, error, input, rad, eta)
          if (allocated(error)) return
          call move_alloc(tmp, op)
       end block

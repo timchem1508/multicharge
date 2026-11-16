@@ -14,6 +14,7 @@
 # limitations under the License.
 
 srcs += files(
+  'fmm.f90',
   'pme.f90',
   'shortrange.f90',
   'type.f90',
