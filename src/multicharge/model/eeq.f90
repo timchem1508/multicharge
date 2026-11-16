@@ -886,11 +886,15 @@ subroutine get_d2amat_0d(self, mol, cache, alpha, p, hessian, diagonal)
 
    integer :: iat, jat, izp, jzp
    real(wp) :: vec(3), r1, gam, dr, drr, weight
+   real(wp), allocatable :: diagonal_local(:, :, :)
 
-   !$omp parallel do default(none) schedule(runtime) &
+   !$omp parallel default(none) &
    !$omp shared(self, mol, cache, alpha, p, hessian) &
    !$omp private(iat, jat, izp, jzp, vec, r1, gam, dr, drr, weight) &
-   !$omp reduction(+:diagonal)
+   !$omp shared(diagonal) &
+   !$omp private(diagonal_local)
+   allocate(diagonal_local(3, 3, size(diagonal, 3)), source=0.0_wp)
+   !$omp do schedule(runtime)
    do iat = 1, mol%nat
       izp = mol%id(iat)
       do jat = 1, iat - 1
@@ -901,10 +905,16 @@ subroutine get_d2amat_0d(self, mol, cache, alpha, p, hessian, diagonal)
          call get_coulomb_kernel(r1, gam, dr, drr)
          weight = alpha * (p(iat) * cache%vrhs(jat) + p(jat) * cache%vrhs(iat))
          call add_pair_block(iat, jat, weight * radial_hessian(vec, dr, drr), &
-            & hessian, diagonal)
+            & hessian, diagonal_local)
       end do
    end do
-   !$omp end parallel do
+   !$omp end do
+
+   !$omp critical (get_d2amat_0d_)
+   diagonal(:, :, :) = diagonal + diagonal_local
+   !$omp end critical (get_d2amat_0d_)
+   deallocate(diagonal_local)
+   !$omp end parallel
 
 end subroutine get_d2amat_0d
 
@@ -930,6 +940,7 @@ subroutine get_d2amat_3d(self, mol, cache, alpha, p, hessian, diagonal)
    real(wp) :: rij(3), vec(3), box(3, 3), gam, r1, g2, wsw, weight, fac
    real(wp) :: dr, drr, ar, arr
    real(wp), allocatable :: dtrans(:, :), rtrans(:, :), rweight(:)
+   real(wp), allocatable :: diagonal_local(:, :, :)
 
    call get_dir_trans(mol, dtrans)
    call get_rec_trans(mol, rtrans)
@@ -943,11 +954,14 @@ subroutine get_d2amat_3d(self, mol, cache, alpha, p, hessian, diagonal)
       rweight(itr) = fac * exp(-0.25_wp * g2 / cache%alpha**2) / g2
    end do
 
-   !$omp parallel do default(none) schedule(runtime) &
+   !$omp parallel default(none) &
    !$omp shared(self, mol, cache, alpha, p, hessian, dtrans, rtrans, rweight) &
    !$omp private(iat, jat, izp, jzp, img, itr, rij, vec, box, gam, r1, wsw) &
    !$omp private(weight, dr, drr, ar, arr) &
-   !$omp reduction(+:diagonal)
+   !$omp shared(diagonal) &
+   !$omp private(diagonal_local)
+   allocate(diagonal_local(3, 3, size(diagonal, 3)), source=0.0_wp)
+   !$omp do schedule(runtime)
    do iat = 1, mol%nat
       izp = mol%id(iat)
       do jat = 1, iat - 1
@@ -973,10 +987,16 @@ subroutine get_d2amat_3d(self, mol, cache, alpha, p, hessian, diagonal)
             end do
          end do
          weight = alpha * (p(iat) * cache%vrhs(jat) + p(jat) * cache%vrhs(iat))
-         call add_pair_block(iat, jat, weight * box, hessian, diagonal)
+         call add_pair_block(iat, jat, weight * box, hessian, diagonal_local)
       end do
    end do
-   !$omp end parallel do
+   !$omp end do
+
+   !$omp critical (get_d2amat_3d_)
+   diagonal(:, :, :) = diagonal + diagonal_local
+   !$omp end critical (get_d2amat_3d_)
+   deallocate(diagonal_local)
+   !$omp end parallel
 
 end subroutine get_d2amat_3d
 
