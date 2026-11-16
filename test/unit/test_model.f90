@@ -99,6 +99,7 @@ subroutine collect_model(testsuite)
    & new_unittest("eeqbc-hess-impl-mb05", test_eeqbc_himpl_mb05), &
    & new_unittest("eeqbc-hess-impl-znooh", test_eeqbc_himpl_znooh), &
    & new_unittest("eeqbc-hess-mb05", test_eeqbc_hess_mb05), &
+   & new_unittest("eeqbc-hess-plain-mb05", test_eeqbc_hess_plain_mb05), &
    & new_unittest("eeqbc-hess-cg-znooh", test_eeqbc_hess_cg_znooh), &
    & new_unittest("eeqbc-hess-ext-mb05", test_eeqbc_hext_mb05), &
    & new_unittest("eeqbc-hess-ext-cg-znooh", test_eeqbc_hext_cg_znooh), &
@@ -1615,7 +1616,7 @@ end subroutine test_implicit_hessian
 
 
 !> Check the electrostatic Hessian against finite differences
-subroutine test_hessian(error, mol, model, cg)
+subroutine test_hessian(error, mol, model, cg, plain_solve)
 
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
@@ -1628,6 +1629,9 @@ subroutine test_hessian(error, mol, model, cg)
 
    !> Use the conjugate-gradient solver instead of the direct solver
    logical, intent(in), optional :: cg
+
+   !> Solve only for the charges before the Hessian, as the application does
+   logical, intent(in), optional :: plain_solve
 
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
@@ -1683,8 +1687,17 @@ subroutine test_hessian(error, mol, model, cg)
    allocate(cache)
    allocate(dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat))
    call model%update(mol, cache, trans, grad=.false., hess=.true.)
-   call model%solve(mol, solver, cache, error, dqdr=dqdr, dqdL=dqdL)
+   if (present(plain_solve)) then
+      if (plain_solve) then
+         call model%solve(mol, solver, cache, error)
+      else
+         call model%solve(mol, solver, cache, error, dqdr=dqdr, dqdL=dqdL)
+      end if
+   else
+      call model%solve(mol, solver, cache, error, dqdr=dqdr, dqdL=dqdL)
+   end if
    if (allocated(error)) return
+
    call model%get_hessian(mol, solver, cache, error, hessian)
    if (allocated(error)) return
 
@@ -2865,6 +2878,22 @@ subroutine test_eeqbc_hess_mb05(error)
    call test_hessian(error, mol, model)
 
 end subroutine test_eeqbc_hess_mb05
+
+
+subroutine test_eeqbc_hess_plain_mb05(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   class(mchrg_model_type), allocatable :: model
+
+   call get_structure(mol, "MB16-43", "05")
+   call new_eeqbc2025_model(mol, model, error)
+   if (allocated(error)) return
+   call test_hessian(error, mol, model, plain_solve=.true.)
+
+end subroutine test_eeqbc_hess_plain_mb05
 
 
 subroutine test_eeqbc_hess_cg_znooh(error)

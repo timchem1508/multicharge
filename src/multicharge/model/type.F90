@@ -948,14 +948,19 @@ subroutine solve(self, mol, solver, cache, error, &
    call print_solve_header(print_unit, verbosity_solve, timer%get("setup"))
 
    if (add_lagr) then
-      if (.not. allocated(cache%ainv)) then
-         allocate(cache%ainv(ndim, ndim))
-      end if
       cache%vrhs = cache%xvec
-      cache%ainv = cache%amat
-      call solver%solve(amat=cache%amat, xvec=cache%xvec, &
-         & vrhs=cache%vrhs, ainv=cache%ainv, cpq=cpq, &
-         & new_unit=print_unit, error=error)
+      ! Without charge derivatives the solver only factorizes the matrix, an
+      ! inverse kept from an earlier solve belongs to another structure
+      if (allocated(cache%ainv)) deallocate(cache%ainv)
+      if (cpq) then
+         allocate(cache%ainv(ndim, ndim))
+         call solver%solve(amat=cache%amat, xvec=cache%xvec, &
+            & vrhs=cache%vrhs, ainv=cache%ainv, cpq=.true., &
+            & new_unit=print_unit, error=error)
+      else
+         call solver%solve(amat=cache%amat, xvec=cache%xvec, &
+            & vrhs=cache%vrhs, new_unit=print_unit, error=error)
+      end if
 
    else
       if (.not. allocated(cache%uvec)) then
@@ -1109,7 +1114,7 @@ subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit,
    integer, intent(in), optional :: verbosity
 
    real(wp), allocatable :: daqxdr(:, :, :), daqxdL(:, :, :), ainv(:, :)
-   real(wp), allocatable :: dlambdadr(:, :)
+   real(wp), allocatable :: dlambdadr(:, :), xvec(:), vtmp(:)
    real(wp) :: scale, uvecsum
    integer :: jat, xat, bat, print_unit
    integer(i8) :: kat
@@ -1184,11 +1189,25 @@ subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit,
 
    class default
       ! Non-iterative solve using the inverse of the augmented matrix
-      if (.not. allocated(cache%ainv) .or. .not. present(dqdr)) then
+      if (.not. allocated(cache%amat) .or. .not. present(dqdr)) then
          call fatal_error(error, &
-            & "Charge derivatives require the inverse of the augmented matrix")
+            & "Charge derivatives require the augmented matrix of a solve")
          return
       end if
+
+      ! A solve without charge derivatives keeps no inverse
+      if (.not. allocated(cache%ainv)) then
+         allocate(cache%ainv(size(cache%amat, 1), size(cache%amat, 2)))
+         allocate(xvec(size(cache%amat, 1)), source=0.0_wp)
+         allocate(vtmp(size(cache%amat, 1)))
+         call solver%solve(amat=cache%amat, xvec=xvec, vrhs=vtmp, &
+            & ainv=cache%ainv, cpq=.true., new_unit=unit, error=error)
+         if (allocated(error)) then
+            deallocate(cache%ainv)
+            return
+         end if
+      end if
+
       allocate(daqxdr(3, mol%nat, ndim), source=0.0_wp)
       allocate(daqxdL(3, 3, ndim), source=0.0_wp)
       daqxdr(:, :, :mol%nat) = cache%dabdr(:, :, :mol%nat)
