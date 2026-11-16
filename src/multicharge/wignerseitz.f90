@@ -119,6 +119,8 @@ subroutine get_pairs(iws, trans, rij, list)
    if (img <= iws) return
 
    do
+      ! All candidates are equivalent, e.g. both self-images in a 1D chain
+      if (iws >= img) exit
       pos = minloc(dist(:img), dim=1, mask=mask(:img))
       if (abs(dist(pos) - r2) > tol) exit
       mask(pos) = .false.

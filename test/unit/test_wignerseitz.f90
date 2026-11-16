@@ -17,7 +17,7 @@ module test_wignerseitz
    use mctc_env, only: wp
    use mctc_env_testing, only: new_unittest, unittest_type, error_type, check, &
       & test_failed
-   use mctc_io_structure, only: structure_type
+   use mctc_io_structure, only: structure_type, new
    use mctc_cutoff, only: get_lattice_points
    use mctc_wignerseitz, only : wignerseitz_cell
    use mstore, only: get_structure
@@ -46,7 +46,8 @@ subroutine collect_wignerseitz(testsuite)
       & new_unittest("lattice-points-3d", test_latticepoints_3d), &
       & new_unittest("wignerseitz-cell-0d", test_wsc_0d), &
       & new_unittest("wignerseitz-cell-3d", test_wsc_3d), &
-      & new_unittest("wignerseitz-images-3d", test_wsc_images_3d) &
+      & new_unittest("wignerseitz-images-3d", test_wsc_images_3d), &
+      & new_unittest("wignerseitz-images-1d", test_wsc_images_1d) &
       & ]
 
 end subroutine collect_wignerseitz
@@ -198,5 +199,48 @@ subroutine test_wsc_images_3d(error)
    end do
 
 end subroutine test_wsc_images_3d
+
+
+!> In a 1D chain both self-images are equally close and are the only candidates
+subroutine test_wsc_images_1d(error)
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   type(structure_type) :: mol
+   type(wignerseitz_cell) :: wsc
+   integer :: img, itr
+   real(wp), parameter :: lattice(3, 3) = reshape([ &
+      & 8.0_wp, 0.0_wp, 0.0_wp, &
+      & 0.0_wp, 100.0_wp, 0.0_wp, &
+      & 0.0_wp, 0.0_wp, 100.0_wp], [3, 3])
+   real(wp), parameter :: xyz(3, 2) = reshape([ &
+      & 0.0_wp, 0.0_wp, 0.0_wp, &
+      & 2.0_wp, 0.5_wp, 0.0_wp], [3, 2])
+
+   call new(mol, [1, 1], xyz, lattice=lattice, periodic=[.true., .false., .false.])
+
+   call new_wignerseitz_cell(wsc, mol)
+
+   do img = 1, 2
+      if (wsc%nimg(img, img) /= 2) then
+         call test_failed(error, "Self-pair in a 1D chain must have two images")
+         print '(a, i0)', "nimg = ", wsc%nimg(img, img)
+         return
+      end if
+      do itr = 1, 2
+         if (abs(abs(wsc%trans(1, wsc%tridx(itr, img, img))) - 8.0_wp) > thr) then
+            call test_failed(error, "Self-images are not the nearest chain translations")
+            return
+         end if
+      end do
+   end do
+
+   if (wsc%nimg(1, 2) /= 1 .or. wsc%nimg(2, 1) /= 1) then
+      call test_failed(error, "Distinct atoms in a 1D chain must have one image")
+   end if
+
+end subroutine test_wsc_images_1d
+
 
 end module test_wignerseitz
