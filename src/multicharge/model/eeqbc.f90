@@ -40,6 +40,8 @@ module multicharge_model_eeqbc
    use multicharge_model_type, only : get_dir_trans, mchrg_model_type, mchrg_hessian
    use multicharge_blas, only : gemm, gemv, symv
    use multicharge_linal, only : add_chain_products, get_transposed_positions
+   use multicharge_ncoord, only : local_charge, update_ncoord_list, &
+      & get_cn_entries_list
    use multicharge_model_cache, only : mchrg_cache
    implicit none
    private
@@ -104,10 +106,6 @@ module multicharge_model_eeqbc
 
    !> Distance below which a lattice image of a pair is skipped as the atom itself
    real(wp), parameter :: eps = sqrt(epsilon(0.0_wp))
-
-   !> Threshold of the CN and local charge derivatives on the neighborlist below
-   !> which their products in the partial derivatives and the Hessian are skipped
-   real(wp), parameter :: cnthr = epsilon(1.0_wp)**2
 
    !> Sign of a mirrored CN derivative, dCN_i/dR_j = -dCN_j/dR_i for the
    !> symmetric erf count without CN cap. The EN-weighted count of the local
@@ -251,18 +249,19 @@ subroutine update(self, mol, cache, trans, grad, list, dqdr, hess)
    end if
 
    if (present(list)) then
-      call update_ncoord_list(self, mol, cache, trans, deriv, list)
+      call update_ncoord_list(self%ncoord, self%ncoord_en, mol, cache, trans, &
+         & deriv, list)
    else
       if (deriv) then
          if (.not. allocated(cache%dcndr)) allocate(cache%dcndr(3, mol%nat, mol%nat))
          if (.not. allocated(cache%dqlocdr)) allocate(cache%dqlocdr(3, mol%nat, mol%nat))
          call self%ncoord%get_coordination_number(mol, trans, cache%cn, &
             & dcndr=cache%dcndr, dcndL=cache%dcndL)
-         call self%local_charge(mol, trans, cache%qloc, dqlocdr=cache%dqlocdr, &
-            & dqlocdL=cache%dqlocdL)
+         call local_charge(self%ncoord_en, mol, trans, cache%qloc, &
+            & dqlocdr=cache%dqlocdr, dqlocdL=cache%dqlocdL)
       else
          call self%ncoord%get_coordination_number(mol, trans, cache%cn)
-         call self%local_charge(mol, trans, qloc=cache%qloc)
+         call local_charge(self%ncoord_en, mol, trans, qloc=cache%qloc)
       end if
    end if
 
@@ -273,101 +272,6 @@ subroutine update(self, mol, cache, trans, grad, list, dqdr, hess)
 
 end subroutine update
 
-
-!> Compress the CN and local charge derivatives on a list to the entries above
-!> cnthr, the derivatives decay much faster than the pair distances of the list
-subroutine compress_cn_derivs(dcndrlist, dqlocdrlist, cnmap)
-
-   !> CN derivatives on the list, replaced by the compressed columns
-   real(wp), allocatable, intent(inout) :: dcndrlist(:, :)
-
-   !> Local charge derivatives on the list, replaced by the compressed columns
-   real(wp), allocatable, intent(inout) :: dqlocdrlist(:, :)
-
-   !> Column of each entry of the list, 0 for the zero column
-   integer, allocatable, intent(out) :: cnmap(:)
-
-   integer(i8) :: kat, nnz, ncn
-   real(wp), allocatable :: dcn(:, :), dqloc(:, :)
-
-   nnz = size(dcndrlist, 2, kind=i8)
-   allocate(cnmap(nnz))
-   !$omp parallel do default(none) schedule(static) &
-   !$omp shared(nnz, dcndrlist, dqlocdrlist, cnmap) private(kat)
-   do kat = 1, nnz
-      cnmap(kat) = merge(1, 0, any(abs(dcndrlist(:, kat)) > cnthr) &
-         & .or. any(abs(dqlocdrlist(:, kat)) > cnthr))
-   end do
-   !$omp end parallel do
-
-   ncn = 0
-   do kat = 1, nnz
-      if (cnmap(kat) > 0) then
-         ncn = ncn + 1
-         if (ncn > huge(cnmap)) &
-            & error stop "Too many CN derivative entries for the int32 cnmap"
-         cnmap(kat) = int(ncn)
-      end if
-   end do
-
-   allocate(dcn(3, 0:ncn), dqloc(3, 0:ncn))
-   dcn(:, 0) = 0.0_wp
-   dqloc(:, 0) = 0.0_wp
-   !$omp parallel do default(none) schedule(static) &
-   !$omp shared(nnz, dcndrlist, dqlocdrlist, cnmap, dcn, dqloc) private(kat)
-   do kat = 1, nnz
-      if (cnmap(kat) > 0) then
-         dcn(:, cnmap(kat)) = dcndrlist(:, kat)
-         dqloc(:, cnmap(kat)) = dqlocdrlist(:, kat)
-      end if
-   end do
-   !$omp end parallel do
-   call move_alloc(dcn, dcndrlist)
-   call move_alloc(dqloc, dqlocdrlist)
-
-end subroutine compress_cn_derivs
-
-!> Coordination numbers and local charges on a sorted neighborlist
-subroutine update_ncoord_list(self, mol, cache, trans, deriv, list)
-   !> EEQBC model type
-   class(eeqbc_model), intent(in) :: self
-   !> Structure type
-   type(structure_type), intent(in) :: mol
-   !> Multicharge cache
-   type(mchrg_cache), intent(inout) :: cache
-   !> Lattice vectors
-   real(wp), intent(in) :: trans(:, :)
-   !> Flag for the position and strain derivatives
-   logical, intent(in) :: deriv
-   !> Sorted neighborlist, half or complete, holds the pair arrays of the cache
-   type(csr_list), intent(in) :: list
-
-   integer(i8) :: nnz
-
-   ! Derivatives of a previous update may belong to another list, the transposed
-   ! positions and CN entries on the complete list are formed on first use
-   if (allocated(cache%dcndrlist)) deallocate(cache%dcndrlist)
-   if (allocated(cache%dqlocdrlist)) deallocate(cache%dqlocdrlist)
-   if (allocated(cache%cnmap)) deallocate(cache%cnmap)
-   if (allocated(cache%tpos)) deallocate(cache%tpos)
-   if (allocated(cache%cninl)) deallocate(cache%cninl)
-   if (allocated(cache%cnpos)) deallocate(cache%cnpos)
-   cache%hinl = list%inl
-
-   if (deriv) then
-      nnz = size(list%nlat, kind=i8)
-      allocate(cache%dcndrlist(3, nnz), cache%dqlocdrlist(3, nnz))
-      call self%ncoord%get_coordination_number(mol, trans, cache%cn, &
-         & dcndL=cache%dcndL, list=list, dcndrlist=cache%dcndrlist)
-      call self%local_charge(mol, trans, cache%qloc, dqlocdL=cache%dqlocdL, &
-         & list=list, dqlocdrlist=cache%dqlocdrlist)
-      call compress_cn_derivs(cache%dcndrlist, cache%dqlocdrlist, cache%cnmap)
-   else
-      call self%ncoord%get_coordination_number(mol, trans, cache%cn, list=list)
-      call self%local_charge(mol, trans, cache%qloc, list=list)
-   end if
-
-end subroutine update_ncoord_list
 
 !> Compute the capacitance matrix (and its derivatives if needed).
 subroutine get_capacitance_matrix(self, mol, ndim, cache, list)
@@ -4780,88 +4684,5 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    deallocate(cnacc, qlocacc)
 
 end subroutine get_explicit_hessian_0d_list
-
-
-!> Entries of a sorted complete neighborlist with CN or local charge
-subroutine get_cn_entries_list(mol, list, cache, tpos, cninl, cnpos)
-
-   !> Molecular structure data
-   type(structure_type), intent(in) :: mol
-
-   !> Sorted complete neighborlist
-   type(csr_list), intent(in) :: list
-
-   !> Cache with the CN and local charge derivatives on the list of the update
-   type(mchrg_cache), intent(in) :: cache
-
-   !> Position of the atom in the row of the neighbor for each entry
-   integer(i8), intent(in) :: tpos(:)
-
-   !> Offsets of the rows of the entries
-   integer(i8), allocatable, intent(out) :: cninl(:)
-
-   !> Positions of the entries in the sorted complete list
-   integer(i8), allocatable, intent(out) :: cnpos(:)
-
-   integer :: iat
-   integer(i8) :: kat, tat, hat, hoff, nfin, cnt
-   logical :: half
-   logical, allocatable :: keep(:)
-
-   ! On a half list both entries of a pair share the position of the upper one
-   half = cache%hinl(mol%nat + 1) /= list%inl(mol%nat + 1)
-
-   allocate(cninl(mol%nat + 1))
-   allocate(keep(size(list%nlat, kind=i8)))
-   cninl(1) = 1
-
-   !$omp parallel default(none) &
-   !$omp shared(mol, list, cache, tpos, keep, cninl, half) &
-   !$omp private(iat, kat, tat, hat, hoff, nfin, cnt)
-   !$omp do schedule(runtime)
-   do iat = 1, mol%nat
-      nfin = find_lower_start(list, iat) - 1
-      hoff = list%inl(iat) - cache%hinl(iat)
-      do kat = list%inl(iat) + 1, nfin
-         tat = tpos(kat)
-         hat = kat - hoff
-         keep(kat) = cache%cnmap(hat) > 0 .or. cache%cnmap(merge(hat, tat, half)) > 0
-         keep(tat) = keep(kat)
-      end do
-   end do
-   !$omp end do
-
-   !$omp do schedule(runtime)
-   do iat = 1, mol%nat
-      cnt = 1
-      do kat = list%inl(iat) + 1, list%inl(iat + 1) - 1
-         if (keep(kat)) cnt = cnt + 1
-      end do
-      cninl(iat + 1) = cnt
-   end do
-   !$omp end do
-   !$omp end parallel
-
-   do iat = 1, mol%nat
-      cninl(iat + 1) = cninl(iat) + cninl(iat + 1)
-   end do
-
-   allocate(cnpos(cninl(mol%nat + 1) - 1))
-   !$omp parallel do default(none) schedule(runtime) &
-   !$omp shared(mol, list, keep, cninl, cnpos) private(iat, kat, cnt)
-   do iat = 1, mol%nat
-      cnt = cninl(iat)
-      cnpos(cnt) = list%inl(iat)
-      do kat = list%inl(iat) + 1, list%inl(iat + 1) - 1
-         if (keep(kat)) then
-            cnt = cnt + 1
-            cnpos(cnt) = kat
-         end if
-      end do
-   end do
-   !$omp end parallel do
-   deallocate(keep)
-
-end subroutine get_cn_entries_list
 
 end module multicharge_model_eeqbc

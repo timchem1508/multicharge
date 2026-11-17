@@ -142,9 +142,6 @@ module multicharge_model_type
       generic :: get_implicit_hessian => get_implicit_hessian_dense, &
          & get_implicit_hessian_list
 
-      !> Calculate local charges from electronegativity weighted CN
-      procedure :: local_charge
-
       !> Calculate semi-numerical Hessian in packed lower-triangle storage
       procedure, private :: get_numhess_packed
 
@@ -1684,54 +1681,6 @@ subroutine get_adjoint_vector(mol, solver, cache, error, dfdq, padj, list, unit,
    end if
 
 end subroutine get_adjoint_vector
-
-
-!> Local charges calculation
-subroutine local_charge(self, mol, trans, qloc, dqlocdr, dqlocdL, &
-   & list, dqlocdrlist)
-   !> Electronegativity equilibration model
-   class(mchrg_model_type), intent(in) :: self
-
-   !> Molecular structure data
-   type(structure_type), intent(in) :: mol
-
-   !> Lattice translation vectors
-   real(wp), intent(in) :: trans(:, :)
-
-   !> Local atomic partial charges
-   real(wp), intent(out) :: qloc(:)
-
-   !> Optional derivative of local atomic partial charges w.r.t. atomic positions
-   real(wp), intent(out), optional :: dqlocdr(3, mol%nat, mol%nat)
-
-   !> Optional derivative of local atomic partial charges w.r.t. lattice vectors
-   real(wp), intent(out), optional :: dqlocdL(3, 3, mol%nat)
-
-   !> Multicharge neighborlist type
-   type(csr_list), intent(in), optional :: list
-
-   !> Optional derivative of local charges w.r.t. positions on the list
-   real(wp), intent(out), optional :: dqlocdrlist(:, :)
-
-   qloc = 0.0_wp
-   if (present(dqlocdr) .and. present(dqlocdL)) then
-      dqlocdr = 0.0_wp
-      dqlocdL = 0.0_wp
-   end if
-   if (present(list) .and. present(dqlocdrlist) .and. present(dqlocdL)) then
-      dqlocdrlist = 0.0_wp
-      dqlocdL = 0.0_wp
-   end if
-   ! Get the electronegativity weighted CN for local charge
-   if (allocated(self%ncoord_en)) then
-      call self%ncoord_en%get_coordination_number(mol, trans, qloc, &
-         & dcndr=dqlocdr, dcndrlist=dqlocdrlist, dcndL=dqlocdL, list=list)
-   end if
-
-   ! Distribute the total charge equally
-   qloc = qloc + mol%charge / real(mol%nat, wp)
-
-end subroutine local_charge
 
 
 !> Print header for charge equilibration solver
