@@ -34,6 +34,8 @@ module multicharge_model_type
    use mctc_csrlist, only : csr_list, find_lower_start, spsymv_csr, spmm_csr
    use mctc_wignerseitz, only : wignerseitz_cell
    use multicharge_blas, only : gemv, symv, gemm
+   use multicharge_linal, only : max_group, add_transposed_product, &
+      & gather_group_list, multiply_group_list
    use multicharge_model_cache, only : mchrg_cache
    use multicharge_solver_type, only : mchrg_solver_type
    use multicharge_solver_cg, only : cg_solver
@@ -46,8 +48,7 @@ module multicharge_model_type
 
    ! Used by the Hessian submodule, gfortran does not link private procedures
    public :: get_q_derivs, get_inverse_list, get_constraint_factors, &
-      & add_transposed_product, get_group_dqdr, multiply_group_list, &
-      & get_max_neighbors, get_adjoint_vector, print_stage_time
+      & get_group_dqdr, get_max_neighbors, get_adjoint_vector, print_stage_time
 
 
    !> Molecular nuclear Hessian in compressed storage on a sorted list
@@ -749,9 +750,6 @@ module multicharge_model_type
    !> Smallest positive working-precision number
    real(wp), parameter :: eps = tiny(1.0_wp)
 
-   !> Number of atoms in a group of the charge derivatives on a neighborlist
-   integer, parameter :: max_group = 8
-
 
 contains
 
@@ -1341,38 +1339,6 @@ subroutine get_constraint_factors(mol, cache, list, dlambdadr)
 end subroutine get_constraint_factors
 
 
-!> Add the transposed product of partial derivatives on a list with a vector
-subroutine add_transposed_product(list, dlist, vec, wvec)
-
-   !> Sorted complete neighborlist
-   type(csr_list), intent(in) :: list
-
-   !> Partial derivatives on the list
-   real(wp), intent(in) :: dlist(:, :)
-
-   !> Vector contracted with the components
-   real(wp), intent(in) :: vec(:)
-
-   !> Product for each atom, dimension (3, nat)
-   real(wp), intent(inout) :: wvec(:, :)
-
-   integer :: xat
-   integer(i8) :: kat
-   real(wp) :: wx(3)
-
-   !$omp parallel do default(none) schedule(runtime) &
-   !$omp shared(list, dlist, vec, wvec) private(xat, kat, wx)
-   do xat = 1, size(wvec, 2)
-      wx(:) = 0.0_wp
-      do kat = list%inl(xat), list%inl(xat + 1) - 1
-         wx(:) = wx + dlist(:, kat) * vec(list%nlat(kat))
-      end do
-      wvec(:, xat) = wvec(:, xat) + wx
-   end do
-
-end subroutine add_transposed_product
-
-
 !> Derivatives of the charges w.r.t. the lattice vectors on a list
 subroutine get_dqdL_list(mol, cache, list, dqdL)
 
@@ -1460,109 +1426,6 @@ subroutine get_group_dqdr(cache, list, half, hfin, group, nb, bloc, blist, qpos,
    end do
 
 end subroutine get_group_dqdr
-
-
-!> Union of the neighbors of a group of atoms on a sorted complete list
-subroutine gather_group_list(list, dlist, group, nb, bloc, blist, qpos, pan)
-
-   !> Sorted complete neighborlist
-   type(csr_list), intent(in) :: list
-
-   !> Partial derivatives on the list, the row of x holds the column x
-   real(wp), intent(in), contiguous :: dlist(:, :)
-
-   !> Atoms of the group
-   integer, intent(in), contiguous :: group(:)
-
-   !> Number of atoms in the union of the neighbors of the group
-   integer, intent(out) :: nb
-
-   !> Index of each atom in the union, zero outside
-   integer, intent(inout), contiguous :: bloc(:)
-
-   !> Atoms of the union, sorted in ascending order
-   integer, intent(inout), contiguous :: blist(:)
-
-   !> Position of the entry of each union atom in the row of x
-   integer(i8), intent(inout), contiguous :: qpos(:, :)
-
-   !> Partial derivatives dB_c/dR_x of the union
-   real(wp), intent(inout), contiguous :: pan(:, :)
-
-   integer :: i, ic, xat, bat, n
-   integer(i8) :: kat
-
-   nb = 0
-   do i = 1, size(group)
-      xat = group(i)
-      ic = 3 * (i - 1)
-      do kat = list%inl(xat), list%inl(xat + 1) - 1
-         bat = list%nlat(kat)
-         n = bloc(bat)
-         if (n == 0) then
-            nb = nb + 1
-            n = nb
-            bloc(bat) = n
-            blist(n) = bat
-            qpos(:, n) = 0_i8
-            pan(:, n) = 0.0_wp
-         end if
-         pan(ic + 1:ic + 3, n) = dlist(:, kat)
-         qpos(i, n) = kat
-      end do
-   end do
-
-end subroutine gather_group_list
-
-
-!> Product of a symmetric matrix on a list with the derivatives of a union
-pure subroutine multiply_group_list(list, ufin, smat, nb, bloc, blist, pan, qcol)
-
-   !> Sorted complete list of the symmetric matrix
-   type(csr_list), intent(in) :: list
-
-   !> End of the upper triangle in each row of the list
-   integer(i8), intent(in), contiguous :: ufin(:)
-
-   !> Symmetric matrix on the upper triangle of the list
-   real(wp), intent(in), contiguous :: smat(:)
-
-   !> Number of atoms in the union
-   integer, intent(in) :: nb
-
-   !> Index of each atom in the union, zero outside
-   integer, intent(in), contiguous :: bloc(:)
-
-   !> Atoms of the union
-   integer, intent(in), contiguous :: blist(:)
-
-   !> Derivatives of the union with fixed leading dimension 3 * max_group
-   real(wp), intent(in) :: pan(3 * max_group, *)
-
-   !> Product with the symmetric matrix on the union
-   real(wp), intent(inout) :: qcol(3 * max_group, *)
-
-   integer, parameter :: nvec = 3 * max_group
-   integer :: n, m, bat
-   integer(i8) :: hat
-   real(wp) :: s, pn(nvec), acc(nvec)
-
-   qcol(:, :nb) = 0.0_wp
-   do n = 1, nb
-      bat = blist(n)
-      pn(:) = pan(:, n)
-      acc(:) = qcol(:, n) + smat(list%inl(bat)) * pn(:)
-      do hat = list%inl(bat) + 1, ufin(bat)
-         m = bloc(list%nlat(hat))
-         if (m == 0) cycle
-         s = smat(hat)
-         acc(:) = acc(:) + s * pan(:, m)
-         qcol(:, m) = qcol(:, m) + s * pn(:)
-      end do
-      qcol(:, n) = acc(:)
-   end do
-
-end subroutine multiply_group_list
 
 
 !> Largest number of entries of a row of a complete neighborlist

@@ -39,6 +39,7 @@ module multicharge_model_eeqbc
    use multicharge_wignerseitz, only : new_wignerseitz_cell
    use multicharge_model_type, only : get_dir_trans, mchrg_model_type, mchrg_hessian
    use multicharge_blas, only : gemm, gemv, symv
+   use multicharge_linal, only : add_chain_products, get_transposed_positions
    use multicharge_model_cache, only : mchrg_cache
    implicit none
    private
@@ -4266,26 +4267,6 @@ subroutine get_explicit_hessian_3d(self, mol, cache, p, hessian, alphain, betain
 
 end subroutine get_explicit_hessian_3d
 
-!> Add D M^T + M D^T of derivatives and their weights to the Hessian
-subroutine add_chain_products(dzdr, weight, hessian)
-   !> Position derivatives of the atomic quantities, dzdr(:, x, k) = dz_k/dR_x
-   real(wp), intent(in), contiguous, target :: dzdr(:, :, :)
-
-   !> Vector weights of the position derivatives, in the layout of dzdr
-   real(wp), intent(in), contiguous, target :: weight(:, :, :)
-
-   !> Molecular nuclear Hessian
-   real(wp), intent(inout) :: hessian(:, :)
-
-   real(wp), pointer :: dptr(:, :), wptr(:, :)
-
-   dptr(1:size(dzdr, 1) * size(dzdr, 2), 1:size(dzdr, 3)) => dzdr
-   wptr(1:size(weight, 1) * size(weight, 2), 1:size(weight, 3)) => weight
-   call gemm(dptr, wptr, hessian, transb='t', beta=1.0_wp)
-   call gemm(wptr, dptr, hessian, transb='t', beta=1.0_wp)
-
-end subroutine add_chain_products
-
 !> Pairwise radial Coulomb and bond-capacitance second-derivative quantities
 pure subroutine get_hessian_pair_0d(vec, kbc, rvdw, capi, capj, radi, radj, &
    & rdradi, rdradj, drdradi, drdradj, cij, aWij, wcap_sum, wcni, wcnj, &
@@ -4800,47 +4781,6 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
 
 end subroutine get_explicit_hessian_0d_list
 
-
-!> Transposed positions of the entries of a sorted complete neighborlist
-subroutine get_transposed_positions(list, tpos)
-
-   !> Sorted complete neighborlist
-   type(csr_list), intent(in) :: list
-
-   !> Position of the atom in the row of the neighbor for each entry
-   integer(i8), allocatable, intent(out) :: tpos(:)
-
-   integer :: iat, jat, nat
-   integer(i8) :: kat, lo, hi, mid, nfin
-
-   nat = size(list%inl) - 1
-   allocate(tpos(list%inl(nat + 1) - 1))
-
-   !$omp parallel do default(none) schedule(runtime) &
-   !$omp shared(list, tpos, nat) private(iat, jat, kat, lo, hi, mid, nfin)
-   do iat = 1, nat
-      tpos(list%inl(iat)) = list%inl(iat)
-      nfin = find_lower_start(list, iat) - 1
-      do kat = list%inl(iat) + 1, nfin
-         jat = list%nlat(kat)
-         ! First entry in the row of jat with a neighbor not above iat
-         lo = list%inl(jat) + 1
-         hi = list%inl(jat + 1) - 1
-         do while (lo < hi)
-            mid = (lo + hi) / 2
-            if (list%nlat(mid) > iat) then
-               lo = mid + 1
-            else
-               hi = mid
-            end if
-         end do
-         tpos(kat) = lo
-         tpos(lo) = kat
-      end do
-   end do
-   !$omp end parallel do
-
-end subroutine get_transposed_positions
 
 !> Entries of a sorted complete neighborlist with CN or local charge
 subroutine get_cn_entries_list(mol, list, cache, tpos, cninl, cnpos)

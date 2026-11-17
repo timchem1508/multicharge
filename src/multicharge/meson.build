@@ -22,6 +22,7 @@ srcs += files(
   'charge.f90',
   'ewald.f90',
   'lapack.F90',
+  'linal.f90',
   'model.f90',
   'output.f90',
   'param.f90',
