@@ -25,7 +25,7 @@ module multicharge_model_cache
    implicit none
    private
 
-   public :: mchrg_cache
+   public :: mchrg_cache, clear_cache_derivs, clear_solve_derivs
 
    !> Cache for the charge model
    type :: mchrg_cache
@@ -151,12 +151,56 @@ module multicharge_model_cache
 
       !> External electric field of the last solve
       real(wp), allocatable :: efield(:)
-
-      !> Logical flag for gradient calculation
-      logical :: grad
-
-      !> Logical flag for Hessian calculation
-      logical :: hess
    end type mchrg_cache
+
+
+contains
+
+
+!> Drop all derivatives of the previous structure
+subroutine clear_cache_derivs(cache)
+
+   !> Multicharge cache
+   type(mchrg_cache), intent(inout) :: cache
+
+   call clear_solve_derivs(cache)
+
+   if (allocated(cache%dcndr)) deallocate(cache%dcndr)
+   if (allocated(cache%dcndL)) deallocate(cache%dcndL)
+   if (allocated(cache%dcndrlist)) deallocate(cache%dcndrlist)
+   if (allocated(cache%cnmap)) deallocate(cache%cnmap)
+   if (allocated(cache%dqlocdr)) deallocate(cache%dqlocdr)
+   if (allocated(cache%dqlocdL)) deallocate(cache%dqlocdL)
+   if (allocated(cache%dqlocdrlist)) deallocate(cache%dqlocdrlist)
+   if (allocated(cache%tpos)) deallocate(cache%tpos)
+   if (allocated(cache%cninl)) deallocate(cache%cninl)
+   if (allocated(cache%cnpos)) deallocate(cache%cnpos)
+   if (allocated(cache%dcdr)) deallocate(cache%dcdr)
+   if (allocated(cache%dcdrdiag)) deallocate(cache%dcdrdiag)
+   if (allocated(cache%dcdL)) deallocate(cache%dcdL)
+   if (allocated(cache%d2cdr2diag)) deallocate(cache%d2cdr2diag)
+
+end subroutine clear_cache_derivs
+
+
+!> Drop the inverse and derivatives of the previous solve
+subroutine clear_solve_derivs(cache)
+
+   !> Multicharge cache
+   type(mchrg_cache), intent(inout) :: cache
+
+   if (allocated(cache%ainv)) deallocate(cache%ainv)
+   if (allocated(cache%ainvlist)) deallocate(cache%ainvlist)
+   if (allocated(cache%dabdr)) deallocate(cache%dabdr)
+   if (allocated(cache%dabdL)) deallocate(cache%dabdL)
+   if (allocated(cache%dabdrlist)) deallocate(cache%dabdrlist)
+   if (allocated(cache%dafdr)) deallocate(cache%dafdr)
+   if (allocated(cache%dafdL)) deallocate(cache%dafdL)
+   if (allocated(cache%dafdrlist)) deallocate(cache%dafdrlist)
+   if (allocated(cache%dqdrlist)) deallocate(cache%dqdrlist)
+   if (allocated(cache%dlambdadr)) deallocate(cache%dlambdadr)
+
+end subroutine clear_solve_derivs
+
 
 end module multicharge_model_cache

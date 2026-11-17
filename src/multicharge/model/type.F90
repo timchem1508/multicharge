@@ -36,7 +36,7 @@ module multicharge_model_type
    use multicharge_blas, only : gemv, symv, gemm
    use multicharge_linal, only : max_group, add_transposed_product, &
       & gather_group_list, multiply_group_list
-   use multicharge_model_cache, only : mchrg_cache
+   use multicharge_model_cache, only : mchrg_cache, clear_solve_derivs
    use multicharge_solver_type, only : mchrg_solver_type
    use multicharge_solver_cg, only : cg_solver
 
@@ -47,8 +47,9 @@ module multicharge_model_type
       & hess_index, get_dqdr_row, new_partial_derivs, new_hessian_blocks
 
    ! Used by the Hessian submodule, gfortran does not link private procedures
-   public :: get_q_derivs, get_inverse_list, get_constraint_factors, &
-      & get_group_dqdr, get_max_neighbors, get_adjoint_vector, print_stage_time
+   public :: get_inverse_list, get_constraint_factors, get_group_dqdr, &
+      & get_max_neighbors, get_adjoint_vector, print_stage_time, &
+      & ensure_partial_derivs, get_dqdL_list
 
 
    !> Molecular nuclear Hessian in compressed storage on a sorted list
@@ -110,8 +111,14 @@ module multicharge_model_type
       !> Solve linear equations for the charge model
       procedure :: solve
 
+      !> Calculate the gradient of the electrostatic energy
+      procedure :: get_electrostatic_gradient
+
       !> Get external gradient
       procedure :: get_external_gradient
+
+      !> Calculate the derivatives of the charges w.r.t. positions and strain
+      procedure :: get_charge_derivs
 
       !> Calculate the analytical Hessian of an external function (molecular)
       procedure :: get_external_hessian_dense
@@ -124,13 +131,14 @@ module multicharge_model_type
          & get_external_hessian_list
 
       !> Calculate the analytical Hessian of the electrostatic energy (molecular)
-      procedure :: get_hessian_dense
+      procedure :: get_electrostatic_hessian_dense
 
       !> Calculate the analytical Hessian of the electrostatic energy on a list
-      procedure :: get_hessian_list
+      procedure :: get_electrostatic_hessian_list
 
       !> Calculate the analytical Hessian of the electrostatic energy
-      generic :: get_hessian => get_hessian_dense, get_hessian_list
+      generic :: get_electrostatic_hessian => get_electrostatic_hessian_dense, &
+         & get_electrostatic_hessian_list
 
       !> Calculate the implicit Hessian (molecular)
       procedure :: get_implicit_hessian_dense
@@ -156,6 +164,9 @@ module multicharge_model_type
 
       !> Calculate capacitance matrix
       procedure(get_capacitance_matrix), deferred :: get_capacitance_matrix
+
+      !> Calculate the derivatives of the capacitance matrix
+      procedure(get_capacitance_derivs), deferred :: get_capacitance_derivs
 
       !> Calculate right-hand side (electronegativity)
       procedure(get_xvec), deferred :: get_xvec
@@ -185,8 +196,8 @@ module multicharge_model_type
    end type mchrg_model_type
 
    abstract interface
-      !> Update model-dependent quantities and cache
-      subroutine update(self, mol, cache, trans, grad, list, dqdr, hess)
+      !> Update the cache, qcp adds the missing CN derivatives and keeps the rest
+      subroutine update(self, mol, cache, trans, list, qcp)
          import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
 
          !> Multicharge model type
@@ -195,23 +206,17 @@ module multicharge_model_type
          !> Structure type
          type(structure_type), intent(in) :: mol
 
-         !> Multicharge neighborlist type
-         type(csr_list), intent(in), optional :: list
-
          !> Multicharge cache containing CN, local charges, and a Wigner-Seitz cell
          type(mchrg_cache), intent(inout) :: cache
 
          !> Lattice vectors
          real(wp), intent(in) :: trans(:, :)
 
-         !> Flag to compute derivatives
-         logical, intent(in) :: grad
+         !> Multicharge neighborlist type
+         type(csr_list), intent(in), optional :: list
 
-         !> Flag for the charge derivatives w.r.t. positions and strain
-         logical, intent(in), optional :: dqdr
-
-         !> Flag for the Hessian
-         logical, intent(in), optional :: hess
+         !> Flag for the CN derivatives of the charge response
+         logical, intent(in), optional :: qcp
       end subroutine update
 
       !> Construct a capacitance matrix using cached CN and charge data
@@ -233,6 +238,23 @@ module multicharge_model_type
          !> Multicharge neighborlist type
          type(csr_list), intent(in), optional :: list
       end subroutine get_capacitance_matrix
+
+      !> Missing derivatives of the capacitance matrix
+      subroutine get_capacitance_derivs(self, mol, cache, list)
+         import :: mchrg_model_type, structure_type, mchrg_cache, csr_list
+
+         !> Multicharge model type
+         class(mchrg_model_type), intent(in) :: self
+
+         !> Structure type
+         type(structure_type), intent(in) :: mol
+
+         !> Multicharge cache holding the capacitance matrix and its derivatives
+         type(mchrg_cache), intent(inout) :: cache
+
+         !> Multicharge neighborlist type of the update
+         type(csr_list), intent(in), optional :: list
+      end subroutine get_capacitance_derivs
 
       !> Coulomb interaction matrix (A-matrix) construction
       subroutine get_coulomb_matrix(self, mol, ndim, cache, list)
@@ -362,8 +384,8 @@ module multicharge_model_type
       end subroutine get_grad
 
       !> Explicit part of the molecular nuclear Hessian at fixed p and charges q
-      subroutine get_explicit_hessian_dense(self, mol, cache, p, hessian, error, &
-         & alpha, beta)
+      subroutine get_explicit_hessian_dense(self, mol, cache, p, hessian, elst, &
+         & error, alpha, beta)
          import :: mchrg_model_type, structure_type, mchrg_cache, error_type, wp
 
          !> Multicharge model type
@@ -381,6 +403,9 @@ module multicharge_model_type
          !> Molecular nuclear Hessian
          real(wp), intent(inout) :: hessian(:, :)
 
+         !> Strain Hessian x -> (1 + eps) x, element (a, b, c, d) is eps_ab, eps_cd
+         real(wp), intent(inout) :: elst(:, :, :, :)
+
          !> Error handling
          type(error_type), allocatable, intent(out) :: error
 
@@ -392,8 +417,8 @@ module multicharge_model_type
       end subroutine get_explicit_hessian_dense
 
       !> Explicit part of the molecular nuclear Hessian on a sorted complete list
-      subroutine get_explicit_hessian_list(self, mol, cache, p, hessian, error, &
-         & list, alpha, beta)
+      subroutine get_explicit_hessian_list(self, mol, cache, p, hessian, elst, &
+         & error, list, alpha, beta)
          import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, &
             & mchrg_hessian, error_type, wp
 
@@ -412,6 +437,9 @@ module multicharge_model_type
          !> Molecular nuclear Hessian in compressed storage
          type(mchrg_hessian), intent(inout) :: hessian
 
+         !> Strain Hessian x -> (1 + eps) x, element (a, b, c, d) is eps_ab, eps_cd
+         real(wp), intent(inout) :: elst(:, :, :, :)
+
          !> Error handling
          type(error_type), allocatable, intent(out) :: error
 
@@ -429,8 +457,8 @@ module multicharge_model_type
 
    interface
       !> Compute the nuclear Hessian of the electrostatic energy
-      module subroutine get_hessian_dense(self, mol, solver, cache, error, &
-         & hessian, unit, verbosity)
+      module subroutine get_electrostatic_hessian_dense(self, mol, solver, cache, &
+         & error, hessian, elst, gradient, sigma, unit, verbosity)
 
          !> Electronegativity-equilibration model
          class(mchrg_model_type), intent(in) :: self
@@ -450,16 +478,25 @@ module multicharge_model_type
          !> Molecular nuclear Hessian
          real(wp), intent(out) :: hessian(:, :)
 
+         !> Strain Hessian x -> (1 + eps) x, element (a, b, c, d) is eps_ab, eps_cd
+         real(wp), intent(inout) :: elst(:, :, :, :)
+
+         !> Optional gradient of the energy, added to
+         real(wp), intent(inout), optional :: gradient(:, :)
+
+         !> Optional virial of the energy, added to
+         real(wp), intent(inout), optional :: sigma(:, :)
+
          !> Output unit
          integer, intent(in), optional :: unit
 
          !> Verbosity level
          integer, intent(in), optional :: verbosity
-      end subroutine get_hessian_dense
+      end subroutine get_electrostatic_hessian_dense
 
       !> Compute the molecular nuclear Hessian of the electrostatic energy on a list
-      module subroutine get_hessian_list(self, mol, solver, cache, error, &
-         & hessian, list, unit, verbosity)
+      module subroutine get_electrostatic_hessian_list(self, mol, solver, cache, &
+         & error, hessian, elst, list, gradient, sigma, unit, verbosity)
 
          !> Electronegativity-equilibration model
          class(mchrg_model_type), intent(in) :: self
@@ -480,15 +517,24 @@ module multicharge_model_type
          !> its list, the sorted half list of the update, or on the complete list
          type(mchrg_hessian), intent(inout) :: hessian
 
+         !> Strain Hessian x -> (1 + eps) x, element (a, b, c, d) is eps_ab, eps_cd
+         real(wp), intent(inout) :: elst(:, :, :, :)
+
          !> Sorted complete neighborlist, walked along the complete rows
          type(csr_list), intent(in) :: list
+
+         !> Optional gradient of the energy, added to
+         real(wp), intent(inout), optional :: gradient(:, :)
+
+         !> Optional virial of the energy, added to
+         real(wp), intent(inout), optional :: sigma(:, :)
 
          !> Output unit
          integer, intent(in), optional :: unit
 
          !> Verbosity level
          integer, intent(in), optional :: verbosity
-      end subroutine get_hessian_list
+      end subroutine get_electrostatic_hessian_list
 
       !> Allocate the zero blocks of a compressed Hessian on the upper triangle
       !> of its list
@@ -503,7 +549,7 @@ module multicharge_model_type
 
       !> Compute the implicit Hessian of the electrostatic energy
       module subroutine get_implicit_hessian_dense(self, mol, cache, hessian, &
-         & dqdr)
+         & elst, dqdr, dqdL)
 
          !> Electronegativity-equilibration model
          class(mchrg_model_type), intent(in) :: self
@@ -517,13 +563,19 @@ module multicharge_model_type
          !> Molecular nuclear Hessian
          real(wp), intent(inout) :: hessian(:, :)
 
+         !> Strain Hessian x -> (1 + eps) x, element (a, b, c, d) is eps_ab, eps_cd
+         real(wp), intent(inout) :: elst(:, :, :, :)
+
          !> Derivatives of the charges w.r.t. positions, dqdr(:, x, b) = dq_b/dR_x
          real(wp), intent(in) :: dqdr(:, :, :)
+
+         !> Derivatives of the charges w.r.t. strain
+         real(wp), intent(in) :: dqdL(:, :, :)
       end subroutine get_implicit_hessian_dense
 
       !> Compute the implicit Hessian of the electrostatic energy on a list
       module subroutine get_implicit_hessian_list(self, mol, cache, hessian, &
-         & list, times)
+         & elst, list, times)
 
          !> Electronegativity-equilibration model
          class(mchrg_model_type), intent(in) :: self
@@ -537,6 +589,9 @@ module multicharge_model_type
          !> Molecular nuclear Hessian in compressed storage
          type(mchrg_hessian), intent(inout) :: hessian
 
+         !> Strain Hessian x -> (1 + eps) x, element (a, b, c, d) is eps_ab, eps_cd
+         real(wp), intent(inout) :: elst(:, :, :, :)
+
          !> Multicharge neighborlist type (sorted complete)
          type(csr_list), intent(in) :: list
 
@@ -546,7 +601,8 @@ module multicharge_model_type
 
       !> Compute the nuclear Hessian of an external function of the charges
       module subroutine get_external_hessian_dense(self, mol, solver, cache, &
-         & error, dfdq, d2fdq2, dfdrdq, hessian, elst, unit, verbosity)
+         & error, dfdq, d2fdq2, dfdrdq, hessian, elst, gradient, sigma, unit, &
+         & verbosity)
 
          !> Electronegativity-equilibration model
          class(mchrg_model_type), intent(in) :: self
@@ -578,6 +634,12 @@ module multicharge_model_type
          !> Strain Hessian x -> (1 + eps) x, element (a, b, c, d) is eps_ab, eps_cd
          real(wp), intent(inout) :: elst(:, :, :, :)
 
+         !> Optional gradient of the external function, added to
+         real(wp), intent(inout), optional :: gradient(:, :)
+
+         !> Optional virial of the external function, added to
+         real(wp), intent(inout), optional :: sigma(:, :)
+
          !> Output unit
          integer, intent(in), optional :: unit
 
@@ -588,7 +650,7 @@ module multicharge_model_type
       !> Compute the nuclear Hessian of an external function on a list
       module subroutine get_external_hessian_list(self, mol, solver, cache, &
          & error, dfdq, d2fdq2, d2fdq2_list, dfdrdq, dfdrdq_list, hessian, &
-         & list, unit, verbosity)
+         & elst, list, gradient, sigma, unit, verbosity)
 
          !> Electronegativity-equilibration model
          class(mchrg_model_type), intent(in) :: self
@@ -623,8 +685,17 @@ module multicharge_model_type
          !> Molecular nuclear Hessian in compressed storage
          type(mchrg_hessian), intent(inout) :: hessian
 
+         !> Strain Hessian x -> (1 + eps) x, element (a, b, c, d) is eps_ab, eps_cd
+         real(wp), intent(inout) :: elst(:, :, :, :)
+
          !> Neighborlist type
          type(csr_list), intent(in) :: list
+
+         !> Optional gradient of the external function, added to
+         real(wp), intent(inout), optional :: gradient(:, :)
+
+         !> Optional virial of the external function, added to
+         real(wp), intent(inout), optional :: sigma(:, :)
 
          !> Output unit
          integer, intent(in), optional :: unit
@@ -799,9 +870,9 @@ subroutine get_rec_trans(mol, trans, cutoff)
 end subroutine get_rec_trans
 
 
-!> Top-level solve routine with optional persistent cache
-subroutine solve(self, mol, solver, cache, error, &
-   & energy, gradient, sigma, qvec, dqdr, dqdL, list, efield, verbosity, unit)
+!> Solve the charge model for the charges and the electrostatic energy
+subroutine solve(self, mol, solver, cache, error, energy, qvec, list, efield, &
+   & verbosity, unit)
 
    !> Electronegativity-equilibration model
    class(mchrg_model_type), intent(in) :: self
@@ -818,52 +889,29 @@ subroutine solve(self, mol, solver, cache, error, &
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
-   !> Optional atomic partial charges result
-   real(wp), intent(out), contiguous, optional :: qvec(:)
-
    !> Optional electrostatic energy result
    real(wp), intent(inout), contiguous, optional :: energy(:)
 
-   !> Optional gradient for electrostatic energy
-   real(wp), intent(inout), contiguous, optional :: gradient(:, :)
+   !> Optional atomic partial charges result
+   real(wp), intent(out), contiguous, optional :: qvec(:)
 
-   !> Optional stress tensor for electrostatic energy
-   real(wp), intent(inout), contiguous, optional :: sigma(:, :)
-
-   !> Optional derivative of the atomic partial charges w.r.t. atomic positions
-   real(wp), intent(out), contiguous, optional :: dqdr(:, :, :)
-
-   !> Optional derivative of the atomic partial charges w.r.t. lattice vectors
-   real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
-
-   !> Optional sorted complete neighborlist, see sort_neighborlist
+   !> Optional sorted neighborlist of the update, see sort_neighborlist
    type(csr_list), intent(in), optional :: list
 
    !> Optional external electric field
    real(wp), intent(in), contiguous, optional :: efield(:)
 
-   !> Optional print verbossity number input flag
+   !> Optional print verbosity
    integer, intent(in), optional :: verbosity
 
    !> Output unit
    integer, intent(in), optional :: unit
 
-   integer :: iat, ndim
-
-   real(wp), allocatable :: unitvec(:)
-   real(wp), allocatable :: vvec(:), avec(:)
-   real(wp) :: uvecsum
-   real(wp) :: vvecsum
-   real(wp) :: lambda
-
-   logical :: grad, cpq, rebuilt, same_list
-   logical :: add_lagr = .true.
+   integer :: iat, ndim, print_unit, verbosity_solve
+   real(wp) :: uvecsum, vvecsum, lambda
+   real(wp), allocatable :: unitvec(:), vvec(:), avec(:)
+   logical :: add_lagr
    type(timer_type) :: timer
-   integer :: print_unit, verbosity_solve
-
-   ! Calculate gradient if the respective arrays are present
-   grad = present(gradient) .and. present(sigma)
-   cpq = present(dqdL) .and. (present(dqdr) .or. present(list))
 
    ! The augmented system of the direct solver is only set up as dense matrix
    if (.not. solver%need_pos_def .and. present(list)) then
@@ -871,99 +919,38 @@ subroutine solve(self, mol, solver, cache, error, &
       return
    end if
 
-   ! Charges, energy and gradient only use the upper triangle of a sorted list,
-   ! the charge derivatives walk the complete rows
-   if (present(list) .and. cpq) then
-      if (.not. list%complete) then
-         call fatal_error(error, "The charge derivatives require a sorted "// &
-            & "complete list, see sort_neighborlist")
-         return
-      end if
-   end if
-
-   ! The CN derivatives of the charge derivatives are stored by the update
-   if (cpq) then
-      if (present(list)) then
-         if (.not. allocated(cache%dcndrlist)) then
-            call fatal_error(error, "Charge derivatives require the CN derivatives "// &
-               & "on the neighborlist, update the cache with dqdr")
-            return
-         end if
-         ! The pair arrays of the cache are formed on the list of the update
-         same_list = size(cache%hinl) == size(list%inl)
-         if (same_list) same_list = all(cache%hinl == list%inl)
-         if (.not. same_list) then
-            call fatal_error(error, "The cache was updated with a different "// &
-               & "neighborlist")
-            return
-         end if
-      else if (.not. allocated(cache%dcndr)) then
-         call fatal_error(error, "Charge derivatives require the CN derivatives, "// &
-            & "update the cache with dqdr")
-         return
-      end if
-   end if
-
-   if (.not. present(verbosity)) then
-      verbosity_solve = 0
-   else
-      verbosity_solve = verbosity
-   end if
-
-   if (present(unit)) then
-      print_unit = unit
-   else
-      print_unit = output_unit
-   end if
+   verbosity_solve = 0
+   if (present(verbosity)) verbosity_solve = verbosity
+   print_unit = output_unit
+   if (present(unit)) print_unit = unit
 
    ! The CG solver requires a positive-definite system
-   if (solver%need_pos_def) then
-      ndim = mol%nat
-      add_lagr = .false.
-   else
-      ndim = mol%nat + 1
-      add_lagr = .true.
-   end if
+   add_lagr = .not. solver%need_pos_def
+   ndim = mol%nat
+   if (add_lagr) ndim = mol%nat + 1
+
+   ! New matrices and charges invalidate their inverse and derivatives
+   call clear_solve_derivs(cache)
 
    call timer%push("total")
    call timer%push("setup")
-
-   ! Setup the system matrices and vectors
    call self%get_capacitance_matrix(mol, ndim, cache, list)
    call self%get_coulomb_matrix(mol, ndim, cache, list)
    call self%get_xvec(mol, ndim, cache, list, efield)
-   if (.not. allocated(cache%vrhs)) then
-      allocate(cache%vrhs(mol%nat + 1))
-   end if
-
-   ! pop setup timer
+   if (.not. allocated(cache%vrhs)) allocate(cache%vrhs(mol%nat + 1))
    call timer%pop
-
-   ! Print header
    call print_solve_header(print_unit, verbosity_solve, timer%get("setup"))
 
    if (add_lagr) then
       cache%vrhs = cache%xvec
-      ! Without charge derivatives the solver only factorizes the matrix, an
-      ! inverse kept from an earlier solve belongs to another structure
-      if (allocated(cache%ainv)) deallocate(cache%ainv)
-      if (cpq) then
-         allocate(cache%ainv(ndim, ndim))
-         call solver%solve(amat=cache%amat, xvec=cache%xvec, &
-            & vrhs=cache%vrhs, ainv=cache%ainv, cpq=.true., &
-            & new_unit=print_unit, error=error)
-      else
-         call solver%solve(amat=cache%amat, xvec=cache%xvec, &
-            & vrhs=cache%vrhs, new_unit=print_unit, error=error)
-      end if
-
+      call solver%solve(amat=cache%amat, xvec=cache%xvec, vrhs=cache%vrhs, &
+         & new_unit=print_unit, error=error)
+      if (allocated(error)) return
    else
-      if (.not. allocated(cache%uvec)) then
-         allocate(cache%uvec(mol%nat))
-      end if
-      allocate(unitvec(mol%nat))
+      if (.not. allocated(cache%uvec)) allocate(cache%uvec(mol%nat))
+      allocate(unitvec(mol%nat), source=1.0_wp)
       allocate(vvec(mol%nat))
-      ! Initial guess
+      ! Initial guess from the diagonal
       if (present(list)) then
          do iat = 1, mol%nat
             cache%uvec(iat) = 1.0_wp / (cache%alist(list%inl(iat)) + eps)
@@ -976,34 +963,28 @@ subroutine solve(self, mol, solver, cache, error, &
          end do
       end if
 
-      unitvec = 1.0_wp
-
-      call print_constrained_system_message(print_unit, verbosity_solve, 'u')
       ! Constrained response: A*uvec = 1
+      call print_constrained_system_message(print_unit, verbosity_solve, 'u')
       call solver%solve(amat=cache%amat, alist=cache%alist, xvec=unitvec, &
          & vrhs=cache%uvec, list=list, new_unit=print_unit, error=error)
-      call print_constrained_system_message(print_unit, verbosity_solve, 'v')
+      if (allocated(error)) return
 
-      ! Unconstrained response: A*uvec = -xvec
+      ! Unconstrained response: A*vvec = -xvec
+      call print_constrained_system_message(print_unit, verbosity_solve, 'v')
       call solver%solve(amat=cache%amat, alist=cache%alist, xvec=-cache%xvec, &
          & vrhs=vvec, list=list, new_unit=print_unit, error=error)
+      if (allocated(error)) return
+
+      ! Lagrange multiplier and projection of uvec on vvec
       uvecsum = sum(cache%uvec)
       vvecsum = sum(vvec)
-      ! Lagrangian multiplier
       lambda = - (mol%charge + vvecsum) / (uvecsum + eps)
-
-      ! Projection of uvec on vvec
       cache%vrhs(:mol%nat) = -vvec - lambda * cache%uvec
       cache%vrhs(mol%nat + 1) = lambda
-
    end if
 
-   ! Partial charges if present
-   if (present(qvec)) then
-      qvec(:) = cache%vrhs(:mol%nat)
-   end if
+   if (present(qvec)) qvec(:) = cache%vrhs(:mol%nat)
 
-   ! Electrostatic energy if present
    if (present(energy)) then
       call timer%push("energy")
       if (present(list)) then
@@ -1015,8 +996,8 @@ subroutine solve(self, mol, solver, cache, error, &
          call symv(cache%amat, cache%vrhs, cache%xvec(:mol%nat), &
             & alpha=0.5_wp, beta=-1.0_wp, uplo='l')
       end if
+      ! Exclude the constraint term
       if (ndim > mol%nat) then
-         ! Correct xvec to exclude constraint term
          cache%xvec(:mol%nat) = cache%xvec(:mol%nat) - 0.5_wp * cache%vrhs(mol%nat + 1)
       end if
       energy(:) = energy(:) + cache%vrhs(:mol%nat) * cache%xvec(:mol%nat)
@@ -1024,59 +1005,72 @@ subroutine solve(self, mol, solver, cache, error, &
       call print_energy_time(print_unit, verbosity_solve, timer%get("energy"))
    end if
 
-   ! Calculate gradients if requested
-   if (grad) then
-      call timer%push("gradient")
-
-      call self%get_grad(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, &
-         & alpha=0.5_wp, beta=-1.0_wp, list=list)
-
-      ! pop gradient timer
-      call timer%pop
-      call print_gradient_time(print_unit, verbosity_solve, timer%get("gradient"))
-   end if
-
-   ! Calculate charge derivatives if requested
-   if (cpq) then
-      call timer%push("setup_gradient")
-
-      ! Right-hand sides of the response equations, dX/dR - dA/dR*q
-      call timer%push("dabdr_setup")
-      call new_partial_derivs(mol, ndim, cache, list)
-      call self%get_xvec_derivs(mol, ndim, cache, beta=1.0_wp, list=list)
-      call self%get_coulomb_derivs(mol, ndim, cache, alpha=-1.0_wp, &
-         & p=cache%vrhs(:mol%nat), list=list)
-      call timer%pop
-      if (verbosity_solve > 1) then
-         write(output_unit, '(a, 1x, a)') &
-            & "Partial derivatives setup time : ", &
-            & format_time(timer%get("dabdr_setup"))
-         write(output_unit, '(a)') ''
-      end if
-
-      ! pop gradient setup
-      call timer%pop
-      call print_gradient_header(print_unit, verbosity_solve, &
-         & timer%get("setup_gradient"))
-
-      call timer%push("cpq")
-      call get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, &
-         & unit=print_unit, verbosity=verbosity_solve)
-      ! pop cpq timer
-      call timer%pop
-      call print_gradient_time(print_unit, verbosity_solve, timer%get("cpq"))
-   end if
-
-   ! pop total solve timer
    call timer%pop
    call print_total_time(print_unit, verbosity_solve, timer%get("total"))
 
 end subroutine solve
 
 
-!> Derivatives of the partial charges w.r.t. atomic positions and lattice vectors
-subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit, &
-   & verbosity)
+!> Gradient and virial of the electrostatic energy at the charges of a solve
+subroutine get_electrostatic_gradient(self, mol, cache, error, gradient, sigma, &
+   & list, unit, verbosity)
+
+   !> Electronegativity-equilibration model
+   class(mchrg_model_type), intent(in) :: self
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Cache handling
+   type(mchrg_cache), intent(inout) :: cache
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Gradient of the electrostatic energy, added to
+   real(wp), intent(inout), contiguous :: gradient(:, :)
+
+   !> Virial of the electrostatic energy, added to
+   real(wp), intent(inout), contiguous :: sigma(:, :)
+
+   !> Optional sorted neighborlist of the update
+   type(csr_list), intent(in), optional :: list
+
+   !> Output unit
+   integer, intent(in), optional :: unit
+
+   !> Verbosity level
+   integer, intent(in), optional :: verbosity
+
+   integer :: print_unit, verbosity_grad
+   type(timer_type) :: timer
+
+   if (.not. allocated(cache%vrhs)) then
+      call fatal_error(error, "Charges are not in the cache, solve first")
+      return
+   end if
+
+   verbosity_grad = 0
+   if (present(verbosity)) verbosity_grad = verbosity
+   print_unit = output_unit
+   if (present(unit)) print_unit = unit
+
+   call timer%push("gradient")
+   call self%get_capacitance_derivs(mol, cache, list)
+   call self%get_grad(mol, cache, cache%vrhs(:mol%nat), gradient, sigma, &
+      & alpha=0.5_wp, beta=-1.0_wp, list=list)
+   call timer%pop
+   call print_gradient_time(print_unit, verbosity_grad, timer%get("gradient"))
+
+end subroutine get_electrostatic_gradient
+
+
+!> Derivatives of the charges w.r.t. atomic positions and lattice vectors
+subroutine get_charge_derivs(self, mol, solver, cache, error, dqdr, dqdL, &
+   & dqdrlist, dlambdadr, list, unit, verbosity)
+
+   !> Electronegativity-equilibration model
+   class(mchrg_model_type), intent(in) :: self
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
@@ -1090,16 +1084,19 @@ subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit,
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
 
-   !> Dimension of the linear system
-   integer, intent(in) :: ndim
+   !> Optional charge derivatives w.r.t. positions, dense matrices only
+   real(wp), intent(out), contiguous, optional :: dqdr(:, :, :)
 
-   !> Derivative of the atomic partial charges w.r.t. atomic positions
-   real(wp), intent(out), optional :: dqdr(:, :, :)
+   !> Optional charge derivatives w.r.t. lattice vectors
+   real(wp), intent(out), contiguous, optional :: dqdL(:, :, :)
 
-   !> Derivative of the atomic partial charges w.r.t. lattice vectors
-   real(wp), intent(out) :: dqdL(:, :, :)
+   !> Optional charge derivatives w.r.t. positions on the list
+   real(wp), allocatable, intent(out), optional :: dqdrlist(:, :)
 
-   !> neighborlist optional type
+   !> Optional position derivatives of the Lagrange multiplier on the list
+   real(wp), allocatable, intent(out), optional :: dlambdadr(:, :)
+
+   !> Optional sorted complete neighborlist of the update
    type(csr_list), intent(in), optional :: list
 
    !> Output unit
@@ -1108,113 +1105,192 @@ subroutine get_q_derivs(mol, solver, cache, error, ndim, dqdr, dqdL, list, unit,
    !> Verbosity level
    integer, intent(in), optional :: verbosity
 
-   real(wp), allocatable :: daqxdr(:, :, :), daqxdL(:, :, :), ainv(:, :)
-   real(wp), allocatable :: dlambdadr(:, :), xvec(:), vtmp(:)
+   integer :: jat, print_unit, verbosity_q
    real(wp) :: scale, uvecsum
-   integer :: jat, xat, bat, print_unit
-   integer(i8) :: kat
+   real(wp), allocatable :: xvec(:), vtmp(:), dlam(:, :)
    type(timer_type) :: timer
 
-   ! Without a neighborlist the position derivatives are only formed densely
-   if (.not. (present(list) .or. present(dqdr))) then
-      call fatal_error(error, "Charge derivatives without a neighborlist require dqdr")
+   call check_charge_derivs(mol, solver, cache, error, list)
+   if (allocated(error)) return
+   if (present(list) .and. present(dqdr)) then
+      call fatal_error(error, "Dense charge derivatives require dense matrices, "// &
+         & "use dqdrlist on a neighborlist")
       return
    end if
 
-   select type (solver)
-   class is (cg_solver)
-      if (present(list)) then
-         call timer%push("inverse")
+   verbosity_q = 0
+   if (present(verbosity)) verbosity_q = verbosity
+   print_unit = output_unit
+   if (present(unit)) print_unit = unit
+
+   ! Right-hand sides of the response equations, dX/dR - dA/dR*q
+   call timer%push("total")
+   call timer%push("partial")
+   call ensure_partial_derivs(self, mol, cache, list)
+   call timer%pop
+   call print_gradient_header(print_unit, verbosity_q, timer%get("partial"))
+
+   if (present(list)) then
+      call timer%push("inverse")
+      select type (solver)
+      class is (cg_solver)
          call get_inverse_list(mol, solver, cache, list, error, unit)
-         call timer%pop
-         if (allocated(error)) return
-
-         call timer%push("product")
-         call get_dqdr_list(mol, cache, list)
-         call get_constraint_factors(mol, cache, list, dlambdadr)
-         call move_alloc(dlambdadr, cache%dlambdadr)
-         call get_dqdL_list(mol, cache, list, dqdL)
-         call timer%pop
-
-         if (present(verbosity)) then
-            if (verbosity > 0) then
-               print_unit = output_unit
-               if (present(unit)) print_unit = unit
-               call print_stage_time(print_unit, "Inverse on the neighborlist", &
-                  & timer%get("inverse"))
-               call print_stage_time(print_unit, "Charge derivatives S*dB/dR", &
-                  & timer%get("product"))
-               write(print_unit, '(a)') ''
-            end if
-         end if
-
-         ! dq_b/dR_x is held at the entry of b in the row of x
-         if (present(dqdr)) then
-            !$omp parallel do default(none) schedule(runtime) &
-            !$omp shared(mol, cache, list, dqdr) private(xat, bat, kat)
-            do xat = 1, mol%nat
-               do bat = 1, mol%nat
-                  dqdr(:, xat, bat) = -cache%dlambdadr(:, xat) * cache%uvec(bat)
-               end do
-               do kat = list%inl(xat), list%inl(xat + 1) - 1
-                  bat = list%nlat(kat)
-                  dqdr(:, xat, bat) = dqdr(:, xat, bat) + cache%dqdrlist(:, kat)
-               end do
-            end do
-         end if
-         return
-      end if
-
-      allocate(ainv(mol%nat, mol%nat))
-      call solver%invert(amat=cache%amat, ainv=ainv, new_unit=unit, &
-         & error=error)
+      end select
+      call timer%pop
       if (allocated(error)) return
 
-      ! Projection onto the charge constraint, (P J^-1)^T = J^-1 - u*u^T/sum(u)
-      uvecsum = sum(cache%uvec)
-      !$omp parallel do default(none) schedule(runtime) &
-      !$omp shared(mol, cache, ainv, uvecsum) private(jat, scale)
-      do jat = 1, mol%nat
-         scale = cache%uvec(jat) / (uvecsum + eps)
-         ainv(:, jat) = ainv(:, jat) - scale * cache%uvec
-      end do
+      call timer%push("product")
+      call get_dqdr_list(mol, cache, list)
+      call get_constraint_factors(mol, cache, list, dlam)
+      call move_alloc(dlam, cache%dlambdadr)
+      if (present(dqdL)) call get_dqdL_list(mol, cache, list, dqdL)
+      call timer%pop
+      if (present(dqdrlist)) dqdrlist = cache%dqdrlist
+      if (present(dlambdadr)) dlambdadr = cache%dlambdadr
 
-      call gemm(cache%dabdr(:, :, :mol%nat), ainv, dqdr)
-      call gemm(cache%dabdL(:, :, :mol%nat), ainv, dqdL)
-
-   class default
-      ! Non-iterative solve using the inverse of the augmented matrix
-      if (.not. allocated(cache%amat) .or. .not. present(dqdr)) then
-         call fatal_error(error, &
-            & "Charge derivatives require the augmented matrix of a solve")
-         return
+      if (verbosity_q > 0) then
+         call print_stage_time(print_unit, "Inverse on the neighborlist", &
+            & timer%get("inverse"))
+         call print_stage_time(print_unit, "Charge derivatives S*dB/dR", &
+            & timer%get("product"))
+         write(print_unit, '(a)') ''
       end if
-
-      ! A solve without charge derivatives keeps no inverse
+   else
+      ! Projected inverse P J^-1 in ainv(:nat, :nat) for both solvers
       if (.not. allocated(cache%ainv)) then
-         allocate(cache%ainv(size(cache%amat, 1), size(cache%amat, 2)))
-         allocate(xvec(size(cache%amat, 1)), source=0.0_wp)
-         allocate(vtmp(size(cache%amat, 1)))
-         call solver%solve(amat=cache%amat, xvec=xvec, vrhs=vtmp, &
-            & ainv=cache%ainv, cpq=.true., new_unit=unit, error=error)
+         select type (solver)
+         class is (cg_solver)
+            allocate(cache%ainv(mol%nat, mol%nat))
+            call solver%invert(amat=cache%amat, ainv=cache%ainv, new_unit=unit, &
+               & error=error)
+            if (.not. allocated(error)) then
+               ! (P J^-1)^T = J^-1 - u*u^T/sum(u)
+               uvecsum = sum(cache%uvec)
+               !$omp parallel do default(none) schedule(runtime) &
+               !$omp shared(mol, cache, uvecsum) private(jat, scale)
+               do jat = 1, mol%nat
+                  scale = cache%uvec(jat) / (uvecsum + eps)
+                  cache%ainv(:, jat) = cache%ainv(:, jat) - scale * cache%uvec
+               end do
+            end if
+         class default
+            ! Inverse of the augmented matrix
+            allocate(cache%ainv(size(cache%amat, 1), size(cache%amat, 2)))
+            allocate(xvec(size(cache%amat, 1)), source=0.0_wp)
+            allocate(vtmp(size(cache%amat, 1)))
+            call solver%solve(amat=cache%amat, xvec=xvec, vrhs=vtmp, &
+               & ainv=cache%ainv, cpq=.true., new_unit=unit, error=error)
+         end select
          if (allocated(error)) then
             deallocate(cache%ainv)
             return
          end if
       end if
 
-      allocate(daqxdr(3, mol%nat, ndim), source=0.0_wp)
-      allocate(daqxdL(3, 3, ndim), source=0.0_wp)
-      daqxdr(:, :, :mol%nat) = cache%dabdr(:, :, :mol%nat)
-      daqxdL(:, :, :mol%nat) = cache%dabdL(:, :, :mol%nat)
-      call gemm(daqxdr, cache%ainv(:, :mol%nat), dqdr, alpha=1.0_wp)
-      call gemm(daqxdL, cache%ainv(:, :mol%nat), dqdL, alpha=1.0_wp)
+      if (present(dqdr)) call gemm(cache%dabdr, cache%ainv(:mol%nat, :mol%nat), dqdr)
+      if (present(dqdL)) call gemm(cache%dabdL, cache%ainv(:mol%nat, :mol%nat), dqdL)
+   end if
+
+   call timer%pop
+   call print_gradient_time(print_unit, verbosity_q, timer%get("total"))
+
+end subroutine get_charge_derivs
+
+
+!> Check the cache and the setup of the charge derivatives
+subroutine check_charge_derivs(mol, solver, cache, error, list)
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> The solver instance
+   class(mchrg_solver_type), intent(in) :: solver
+
+   !> Cache handling
+   type(mchrg_cache), intent(in) :: cache
+
+   !> Error handling
+   type(error_type), allocatable, intent(out) :: error
+
+   !> Optional sorted complete neighborlist of the update
+   type(csr_list), intent(in), optional :: list
+
+   logical :: same_list
+
+   if (.not. allocated(cache%vrhs)) then
+      call fatal_error(error, "Charges are not in the cache, solve first")
+      return
+   end if
+
+   if (.not. present(list)) then
+      if (.not. allocated(cache%dcndr)) then
+         call fatal_error(error, "Charge derivatives require the CN derivatives, "// &
+            & "update the cache with qcp")
+      end if
+      return
+   end if
+
+   if (.not. list%complete) then
+      call fatal_error(error, "The charge derivatives require a sorted "// &
+         & "complete list, see sort_neighborlist")
+      return
+   end if
+   select type (solver)
+   class is (cg_solver)
+   class default
+      call fatal_error(error, "Charge derivatives on a neighborlist require "// &
+         & "the CG solver")
+      return
    end select
+   if (.not. allocated(cache%dcndrlist)) then
+      call fatal_error(error, "Charge derivatives require the CN derivatives "// &
+         & "on the neighborlist, update the cache with qcp")
+      return
+   end if
+   same_list = size(cache%hinl) == size(list%inl)
+   if (same_list) same_list = all(cache%hinl == list%inl)
+   if (.not. same_list) then
+      call fatal_error(error, "The cache was updated with a different neighborlist")
+      return
+   end if
+   if (size(list%inl) /= mol%nat + 1) then
+      call fatal_error(error, "The neighborlist does not match the structure")
+   end if
 
-end subroutine get_q_derivs
+end subroutine check_charge_derivs
 
 
-!> Inverse of the coefficient matrix on a sorted complete neighborlist
+!> Partial derivatives dX/dR - dA/dR*q, formed only if not in the cache
+subroutine ensure_partial_derivs(self, mol, cache, list)
+
+   !> Electronegativity-equilibration model
+   class(mchrg_model_type), intent(in) :: self
+
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+
+   !> Cache with the charges and the CN derivatives
+   type(mchrg_cache), intent(inout) :: cache
+
+   !> Optional sorted complete neighborlist
+   type(csr_list), intent(in), optional :: list
+
+   if (present(list)) then
+      if (allocated(cache%dabdrlist)) return
+   else if (allocated(cache%dabdr)) then
+      return
+   end if
+
+   call self%get_capacitance_derivs(mol, cache, list)
+   call new_partial_derivs(mol, mol%nat, cache, list)
+   call self%get_xvec_derivs(mol, mol%nat, cache, beta=1.0_wp, list=list)
+   call self%get_coulomb_derivs(mol, mol%nat, cache, alpha=-1.0_wp, &
+      & p=cache%vrhs(:mol%nat), list=list)
+
+end subroutine ensure_partial_derivs
+
+
+!> Inverse of the coefficient matrix on a sorted neighborlist, kept if in the cache
 subroutine get_inverse_list(mol, solver, cache, list, error, unit, half)
 
    !> Molecular structure data
@@ -1247,9 +1323,10 @@ subroutine get_inverse_list(mol, solver, cache, list, error, unit, half)
       nnz = size(list%nlat, kind=i8)
    end if
    if (allocated(cache%ainvlist)) then
-      if (size(cache%ainvlist, kind=i8) /= nnz) deallocate(cache%ainvlist)
+      if (size(cache%ainvlist, kind=i8) == nnz) return
+      deallocate(cache%ainvlist)
    end if
-   if (.not. allocated(cache%ainvlist)) allocate(cache%ainvlist(nnz))
+   allocate(cache%ainvlist(nnz))
    call solver%invert_list(cache%alist, list, cache%ainvlist, xyz=mol%xyz, &
       & new_unit=unit, error=error, half=half)
 
@@ -1585,9 +1662,12 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
       & timer%get("setup_external"))
    call timer%push("external_gradient")
 
-   ! Get variables from the model cache
-   if (.not. allocated(cache%amat)) then
-      call fatal_error(error, "J-matrix is not allocated")
+   if (.not. allocated(cache%vrhs)) then
+      call fatal_error(error, "Charges are not in the cache, solve first")
+      return
+   end if
+   if (.not. (allocated(cache%amat) .or. allocated(cache%alist))) then
+      call fatal_error(error, "Coefficient matrix is not in the cache, solve again")
       return
    end if
    if (.not. allocated(cache%uvec) .and. solver%need_pos_def) then
@@ -1599,8 +1679,8 @@ subroutine get_external_gradient(self, mol, solver, cache, error, &
       & print_unit, verbosity_solve)
    if (allocated(error)) return
 
-   ! Evaluate external gradients via adjoint contraction
-
+   ! External gradient by adjoint contraction
+   call self%get_capacitance_derivs(mol, cache, list)
    call self%get_grad(mol, cache, padj(:mol%nat), dfdr, dfdL, alpha=-1.0_wp, &
       & beta=1.0_wp, list=list)
 

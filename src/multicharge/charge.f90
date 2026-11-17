@@ -78,7 +78,7 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, list, efield, 
 
    type(mchrg_cache), allocatable :: local_cache
    type(mchrg_cache) :: empty_cache
-   logical :: grad, hess
+   logical :: qderiv
    real(wp), allocatable :: trans(:, :)
 
    class(cg_solver), allocatable :: solver
@@ -89,11 +89,9 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, list, efield, 
    allocate(solver)
    call new_cg_solver(solver, solver_input)
 
-   ! With a neighborlist the position derivatives can stay in the cache
-   grad = present(dqdL) .and. present(dqdr)
-   hess = present(cache)
+   qderiv = present(dqdr) .or. present(dqdL)
    if (present(list)) then
-      if ((grad .or. hess) .and. .not. list%complete) then
+      if ((qderiv .or. present(cache)) .and. .not. list%complete) then
          call fatal_error(error, "Neighborlist must be sorted and complete "// &
             & "when computing charge gradients or Hessian")
          return
@@ -104,18 +102,30 @@ subroutine get_charges(mchrg_model, mol, error, qvec, dqdr, dqdL, list, efield, 
    if (present(cache)) then
       ! Start from an empty cache, the Hessian checks for allocated data
       cache = empty_cache
-      call mchrg_model%update(mol, cache, trans, grad, list=list, dqdr=grad, &
-         & hess=.true.)
-      call mchrg_model%solve(mol, solver, cache, error, &
-         & qvec=qvec, dqdr=dqdr, dqdL=dqdL, list=list, &
-         & efield=efield, unit=output_unit)
+      call get_cached_charges(cache)
    else
       allocate(local_cache)
-      call mchrg_model%update(mol, local_cache, trans, grad, list=list, dqdr=grad)
-      call mchrg_model%solve(mol, solver, local_cache, error, &
-         & qvec=qvec, dqdr=dqdr, dqdL=dqdL, list=list, &
-         & efield=efield, unit=output_unit)
+      call get_cached_charges(local_cache)
    end if
+
+contains
+
+   !> Charges and their derivatives with a given cache
+   subroutine get_cached_charges(work)
+
+      !> Multicharge cache
+      type(mchrg_cache), intent(inout) :: work
+
+      call mchrg_model%update(mol, work, trans, list)
+      call mchrg_model%solve(mol, solver, work, error, qvec=qvec, list=list, &
+         & efield=efield, unit=output_unit)
+      if (allocated(error) .or. .not. qderiv) return
+
+      call mchrg_model%update(mol, work, trans, list, qcp=.true.)
+      call mchrg_model%get_charge_derivs(mol, solver, work, error, dqdr=dqdr, &
+         & dqdL=dqdL, list=list, unit=output_unit)
+
+   end subroutine get_cached_charges
 
 end subroutine get_charges
 
@@ -151,7 +161,7 @@ subroutine add_charge_hessian_dense(mchrg_model, mol, error, weights, d2fdq2, &
    !> Cache retained by get_charges, holds partial derivatives afterwards
    type(mchrg_cache), intent(inout) :: cache
 
-   real(wp), allocatable :: whess(:, :)
+   real(wp), allocatable :: whess(:, :), trans(:, :)
    class(cg_solver), allocatable :: solver
    class(cg_input), allocatable :: solver_input
 
@@ -164,6 +174,8 @@ subroutine add_charge_hessian_dense(mchrg_model, mol, error, weights, d2fdq2, &
    allocate(solver)
    call new_cg_solver(solver, solver_input)
 
+   trans = cache%trans
+   call mchrg_model%update(mol, cache, trans, qcp=.true.)
    allocate(whess(3 * mol%nat, 3 * mol%nat))
    call mchrg_model%get_external_hessian(mol, solver, cache, error, weights, &
       & d2fdq2, dfdrdq, whess, elst)
@@ -175,7 +187,7 @@ end subroutine add_charge_hessian_dense
 
 !> Add the Hessian of an external function of the charges on a list
 subroutine add_charge_hessian_list(mchrg_model, mol, error, weights, d2fdq2, &
-   & d2fdq2_list, dfdrdq, dfdrdq_list, hessian, cache, list)
+   & d2fdq2_list, dfdrdq, dfdrdq_list, hessian, elst, cache, list)
 
    !> Multicharge model
    class(mchrg_model_type), intent(in) :: mchrg_model
@@ -204,12 +216,16 @@ subroutine add_charge_hessian_list(mchrg_model, mol, error, weights, d2fdq2, &
    !> Nuclear Hessian in compressed storage on the neighborlist, replaced
    type(mchrg_hessian), intent(inout) :: hessian
 
+   !> Strain Hessian, added to
+   real(wp), intent(inout) :: elst(:, :, :, :)
+
    !> Cache retained by get_charges, holds partial derivatives afterwards
    type(mchrg_cache), intent(inout) :: cache
 
    !> Sorted complete neighborlist of get_charges, see sort_neighborlist
    type(csr_list), intent(in) :: list
 
+   real(wp), allocatable :: trans(:, :)
    class(cg_solver), allocatable :: solver
    class(cg_input), allocatable :: solver_input
 
@@ -226,8 +242,10 @@ subroutine add_charge_hessian_list(mchrg_model, mol, error, weights, d2fdq2, &
    allocate(solver)
    call new_cg_solver(solver, solver_input)
 
+   trans = cache%trans
+   call mchrg_model%update(mol, cache, trans, list, qcp=.true.)
    call mchrg_model%get_external_hessian(mol, solver, cache, error, weights, &
-      & d2fdq2, d2fdq2_list, dfdrdq, dfdrdq_list, hessian, list)
+      & d2fdq2, d2fdq2_list, dfdrdq, dfdrdq_list, hessian, elst, list)
 
 end subroutine add_charge_hessian_list
 

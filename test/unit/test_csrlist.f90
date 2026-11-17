@@ -263,9 +263,9 @@ subroutine gen_test_molecular(error, mol, model, qref, eref)
    allocate(list)
    call get_sorted_list(list, mol, error, cutoff)
 
-   call model%update(mol, cache, trans, grad=.false., list=list)
+   call model%update(mol, cache, trans, list=list)
    call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, &
-   & unit=output_unit)
+      & unit=output_unit)
    if (allocated(error)) return
 
    if (present(qref)) then
@@ -332,7 +332,7 @@ subroutine test_components(error, mol, model)
 
    allocate(cache1)
 
-   call model%update(mol, cache1, trans, grad=.true.)
+   call model%update(mol, cache1, trans)
    call model%solve(mol, solver, cache1, error, unit=output_unit)
    if (allocated(error)) return
 
@@ -340,7 +340,7 @@ subroutine test_components(error, mol, model)
    allocate(list)
 
    call get_sorted_list(list, mol, error, cutoff)
-   call model%update(mol, cache2, trans, grad=.true., list=list)
+   call model%update(mol, cache2, trans, list=list)
 
    call model%solve(mol, solver, cache2, error, list=list, unit=output_unit)
    if (allocated(error)) return
@@ -451,8 +451,9 @@ subroutine gen_test_periodic(error, mol, model)
    allocate (qvec(mol%nat))
    allocate(amat_dir(mol%nat, mol%nat), amat_list(mol%nat, mol%nat))
 
-   call model%update(mol, cache, trans, grad=.false.)
-   call model%solve(mol, solver, cache, error, energy=eref, qvec=qref, unit=output_unit)
+   call model%update(mol, cache, trans)
+   call model%solve(mol, solver, cache, error, energy=eref, qvec=qref, &
+      & unit=output_unit)
 
 
    if (allocated(error)) return
@@ -462,9 +463,9 @@ subroutine gen_test_periodic(error, mol, model)
    allocate(cache)
    allocate(list)
    call get_sorted_list(list, mol, error, 29.0_wp, cache%wsc)
-   call model%update(mol, cache, trans, grad=.false., list=list)
+   call model%update(mol, cache, trans, list=list)
    call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, &
-   & unit=output_unit)
+      & unit=output_unit)
 
    if (any(abs(qvec - qref) > thr1)) then
       call test_failed(error, "Partial charges do not match")
@@ -535,9 +536,10 @@ subroutine test_grad(error, mol, model)
    allocate(numsigma(3, 3), source=0.0_wp)
    allocate(numgrad(3, mol%nat), source=0.0_wp)
 
-   call model%update(mol, cache1, trans, grad=.true.)
-   call model%solve(mol, solver, cache1, error, &
-   & gradient=numgrad, sigma=numsigma, unit=output_unit)
+   call model%update(mol, cache1, trans)
+   call model%solve(mol, solver, cache1, error, unit=output_unit)
+   if (.not. allocated(error)) call model%get_electrostatic_gradient(mol, cache1, &
+      & error, numgrad, numsigma, unit=output_unit)
    if (allocated(error)) return
 
    allocate(cache2)
@@ -545,10 +547,11 @@ subroutine test_grad(error, mol, model)
    gradient = 0.0_wp
    sigma(:, :) = 0.0_wp
    call get_sorted_list(list, mol, error, cutoff)
-   call model%update(mol, cache2, trans, grad=.true., list=list)
+   call model%update(mol, cache2, trans, list=list)
 
-   call model%solve(mol, solver, cache2, error, &
-   & gradient=gradient, sigma=sigma, list=list, unit=output_unit)
+   call model%solve(mol, solver, cache2, error, list=list, unit=output_unit)
+   if (.not. allocated(error)) call model%get_electrostatic_gradient(mol, cache2, &
+      & error, gradient, sigma, list=list, unit=output_unit)
    if (allocated(error)) return
 
 
@@ -626,9 +629,10 @@ subroutine test_grad_periodic(error, mol, model)
 
    call get_lattice_points(mol%periodic, mol%lattice, model%ncoord%cutoff, trans)
 
-   call model%update(mol, cache1, trans, grad=.true.)
-   call model%solve(mol, solver, cache1, error, &
-   & gradient=numgrad, sigma=numsigma, unit=output_unit)
+   call model%update(mol, cache1, trans)
+   call model%solve(mol, solver, cache1, error, unit=output_unit)
+   if (.not. allocated(error)) call model%get_electrostatic_gradient(mol, cache1, &
+      & error, numgrad, numsigma, unit=output_unit)
    allocate(dcdrdiag(3, mol%nat), source = 0.0_wp)
    do iat = 1, mol%nat
       dcdrdiag(:, iat) = cache1%dcdr(:, iat, iat)
@@ -641,10 +645,11 @@ subroutine test_grad_periodic(error, mol, model)
    gradient = 0.0_wp
    sigma(:, :) = 0.0_wp
    call get_sorted_list(list, mol, error, 29.0_wp, cache2%wsc)
-   call model%update(mol, cache2, trans, grad=.true., list=list)
+   call model%update(mol, cache2, trans, list=list)
 
-   call model%solve(mol, solver, cache2, error, &
-   & gradient=gradient, sigma=sigma, list=list, unit=output_unit)
+   call model%solve(mol, solver, cache2, error, list=list, unit=output_unit)
+   if (.not. allocated(error)) call model%get_electrostatic_gradient(mol, cache2, &
+      & error, gradient, sigma, list=list, unit=output_unit)
    if (allocated(error)) return
 
    if (any(abs(gradient(:, :) - numgrad(:, :)) > thr2)) then
@@ -1288,16 +1293,20 @@ subroutine test_partial_derivs(error, mol, model)
 
    ! Dense reference with the block CG solver
    allocate(cache1)
-   call model%update(mol, cache1, trans, grad=.true., dqdr=.true.)
-   call model%solve(mol, solver, cache1, error, dqdr=dqdr1, dqdL=dqdL1, &
-      & unit=output_unit)
+   call model%update(mol, cache1, trans)
+   call model%update(mol, cache1, trans, qcp=.true.)
+   call model%solve(mol, solver, cache1, error, unit=output_unit)
+   if (.not. allocated(error)) call model%get_charge_derivs(mol, solver, cache1, &
+      & error, dqdr=dqdr1, dqdL=dqdL1, unit=output_unit)
    if (allocated(error)) return
 
    ! Dense reference with the direct solver
    allocate(cache3)
-   call model%update(mol, cache3, trans, grad=.true., dqdr=.true.)
-   call model%solve(mol, direct, cache3, error, dqdr=dqdr3, dqdL=dqdL3, &
-      & unit=output_unit)
+   call model%update(mol, cache3, trans)
+   call model%update(mol, cache3, trans, qcp=.true.)
+   call model%solve(mol, direct, cache3, error, unit=output_unit)
+   if (.not. allocated(error)) call model%get_charge_derivs(mol, direct, cache3, &
+      & error, dqdr=dqdr3, dqdL=dqdL3, unit=output_unit)
    if (allocated(error)) return
 
    ! Sorted complete neighbour list, inverse on the pattern of the list
@@ -1308,10 +1317,15 @@ subroutine test_partial_derivs(error, mol, model)
       call get_sorted_list(list, mol, error, cutoff)
    end if
    if (allocated(error)) return
-   call model%update(mol, cache2, trans, grad=.true., list=list, dqdr=.true.)
-   call model%solve(mol, solver, cache2, error, dqdr=dqdr2, dqdL=dqdL2, list=list, &
-      & unit=output_unit)
+   call model%update(mol, cache2, trans, list=list)
+   call model%update(mol, cache2, trans, list=list, qcp=.true.)
+   call model%solve(mol, solver, cache2, error, list=list, unit=output_unit)
+   if (.not. allocated(error)) call model%get_charge_derivs(mol, solver, cache2, &
+      & error, dqdL=dqdL2, list=list, unit=output_unit)
    if (allocated(error)) return
+   do jat = 1, mol%nat
+      call get_dqdr_row(cache2, list, jat, dqdr2(:, :, jat))
+   end do
 
    if (any(abs(dqdr2 - dqdr1) > thr2) .or. any(abs(dqdr2 - dqdr3) > thr2)) then
       call test_failed(error, "Charge derivatives w.r.t. positions do not match")
@@ -1327,9 +1341,11 @@ subroutine test_partial_derivs(error, mol, model)
    allocate(cache4)
    cache4%wsc = cache2%wsc
    call move_alloc(cache4, cache2)
-   call model%update(mol, cache2, trans, grad=.true., list=list, dqdr=.true.)
-   call model%solve(mol, solver, cache2, error, dqdL=dqdL4, list=list, &
-      & unit=output_unit)
+   call model%update(mol, cache2, trans, list=list)
+   call model%update(mol, cache2, trans, list=list, qcp=.true.)
+   call model%solve(mol, solver, cache2, error, list=list, unit=output_unit)
+   if (.not. allocated(error)) call model%get_charge_derivs(mol, solver, cache2, &
+      & error, dqdL=dqdL4, list=list, unit=output_unit)
    if (allocated(error)) return
 
    do jat = 1, mol%nat
@@ -1419,9 +1435,11 @@ subroutine test_partial_derivs_half_list(error)
    if (allocated(error)) return
 
    allocate(dqdL(3, 3, mol%nat))
-   call model%update(mol, cache, trans, grad=.false., list=list, dqdr=.true.)
-   call model%solve(mol, solver, cache, error, dqdL=dqdL, list=list, &
-      & unit=output_unit)
+   call model%update(mol, cache, trans, list=list)
+   call model%update(mol, cache, trans, list=list, qcp=.true.)
+   call model%solve(mol, solver, cache, error, list=list, unit=output_unit)
+   if (.not. allocated(error)) call model%get_charge_derivs(mol, solver, cache, &
+      & error, dqdL=dqdL, list=list, unit=output_unit)
 
 end subroutine test_partial_derivs_half_list
 
@@ -1502,28 +1520,36 @@ subroutine test_d2cdr2(error, mol, model)
    if (allocated(error)) return
 
    ! The capacitance matrix depends on the positions only
-   call model%update(mol, cache, trans, grad=.true., list=list)
+   call model%update(mol, cache, trans, list=list)
 
    do iat = 1, mol%nat
       do ic = 1, 3
          ! First right-hand side (x+h)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
+         call model%update(mol, cache, trans, list=list)
          call model%get_capacitance_matrix(mol, ndim, cache, list=list)
+         call model%get_capacitance_derivs(mol, cache, list=list)
          dcdrr1 = cache%dcdrdiag(:, iat)
 
          ! Second right-hand side (x+2h)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
+         call model%update(mol, cache, trans, list=list)
          call model%get_capacitance_matrix(mol, ndim, cache, list=list)
+         call model%get_capacitance_derivs(mol, cache, list=list)
          dcdrr2 = cache%dcdrdiag(:, iat)
 
          ! First left-hand side (x-h)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - 3*step
+         call model%update(mol, cache, trans, list=list)
          call model%get_capacitance_matrix(mol, ndim, cache, list=list)
+         call model%get_capacitance_derivs(mol, cache, list=list)
          dcdrl1 = cache%dcdrdiag(:, iat)
 
          ! Second left-hand side (x-2h)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - step
+         call model%update(mol, cache, trans, list=list)
          call model%get_capacitance_matrix(mol, ndim, cache, list=list)
+         call model%get_capacitance_derivs(mol, cache, list=list)
          dcdrl2 = cache%dcdrdiag(:, iat)
 
          ! Return to original position
@@ -1622,7 +1648,7 @@ subroutine test_explicit_hessian(error, mol, model, alpha, beta, nlcutoff, pvec)
    integer :: iat, ic, ndim
    real(wp), parameter :: trans(3, 1) = 0.0_wp
    real(wp), parameter :: step = 1.0e-4_wp
-   real(wp) :: xorig
+   real(wp) :: xorig, refelst(3, 3, 3, 3), spelst(3, 3, 3, 3)
    real(wp), allocatable :: qvec(:), p(:), hessian(:, :), refhess(:, :), numhess(:, :)
    real(wp), allocatable :: gr1(:, :), gr2(:, :), gl1(:, :), gl2(:, :)
 
@@ -1643,7 +1669,8 @@ subroutine test_explicit_hessian(error, mol, model, alpha, beta, nlcutoff, pvec)
 
    ! Charges of the reference structure without a neighbour list
    allocate(cache)
-   call model%update(mol, cache, trans, grad=.true., hess=.true.)
+   call model%update(mol, cache, trans)
+   call model%update(mol, cache, trans, qcp=.true.)
    call model%solve(mol, solver, cache, error, qvec=qvec, unit=output_unit)
    if (allocated(error)) return
    if (present(pvec)) then
@@ -1658,16 +1685,18 @@ subroutine test_explicit_hessian(error, mol, model, alpha, beta, nlcutoff, pvec)
 
    refhess(:, :) = 0.0_wp
    hessian(:, :) = 0.0_wp
+   refelst(:, :, :, :) = 0.0_wp
+   spelst(:, :, :, :) = 0.0_wp
    select type (model)
    type is (eeqbc_model)
       ! Dense evaluation from the cache of the charges
-      call model%get_explicit_hessian(mol, cache, p, refhess, error, &
+      call model%get_explicit_hessian(mol, cache, p, refhess, refelst, error, &
          & alpha=alpha, beta=beta)
       if (allocated(error)) return
 
       call fixed_charge_cache(mol, model, list, qvec, cache)
       call new_list_hessian(list, sphess)
-      call model%get_explicit_hessian(mol, cache, p, sphess, error, &
+      call model%get_explicit_hessian(mol, cache, p, sphess, spelst, error, &
          & alpha=alpha, beta=beta, list=list)
       if (allocated(error)) return
       call expand_hessian(mol, list, sphess, hessian)
@@ -1682,6 +1711,11 @@ subroutine test_explicit_hessian(error, mol, model, alpha, beta, nlcutoff, pvec)
          call test_failed(error, "Explicit Hessian does not match the dense one")
          print'(a)', "diff:"
          print'(3es21.12)', hessian - refhess
+         return
+      end if
+      if (any(abs(spelst - refelst) > thr2)) then
+         call test_failed(error, "Explicit strain Hessian does not match the dense one")
+         print'(3es21.12)', spelst - refelst
          return
       end if
    end if
@@ -1761,8 +1795,10 @@ subroutine fixed_charge_cache(mol, model, list, qvec, cache)
 
    real(wp), parameter :: trans(3, 1) = 0.0_wp
 
-   call model%update(mol, cache, trans, grad=.true., list=list, hess=.true.)
+   call model%update(mol, cache, trans, list=list)
+   call model%update(mol, cache, trans, list=list, qcp=.true.)
    call model%get_capacitance_matrix(mol, mol%nat, cache, list=list)
+   call model%get_capacitance_derivs(mol, cache, list=list)
    call model%get_xvec(mol, mol%nat, cache, list=list)
    cache%vrhs = qvec
 
@@ -1831,6 +1867,7 @@ subroutine test_implicit_hessian(error, mol, model, nlcutoff)
    type(csr_list), allocatable :: list
    type(mchrg_hessian), allocatable :: sphess
    integer :: jat, ndim, xat, yat, ii, jj
+   real(wp) :: refelst(3, 3, 3, 3), spelst(3, 3, 3, 3)
    real(wp), parameter :: trans(3, 1) = 0.0_wp
    real(wp) :: blk(3, 3)
    real(wp), allocatable :: dabdr(:, :, :), dqdr(:, :, :), dqdL(:, :, :)
@@ -1854,15 +1891,18 @@ subroutine test_implicit_hessian(error, mol, model, nlcutoff)
    allocate(cache, list)
    call get_sorted_list(list, mol, error, nlcutoff)
    if (allocated(error)) return
-   call model%update(mol, cache, trans, grad=.false., list=list, dqdr=.true.)
-   call model%solve(mol, solver, cache, error, dqdL=dqdL, list=list, &
-      & unit=output_unit)
+   call model%update(mol, cache, trans, list=list)
+   call model%update(mol, cache, trans, list=list, qcp=.true.)
+   call model%solve(mol, solver, cache, error, list=list, unit=output_unit)
+   if (.not. allocated(error)) call model%get_charge_derivs(mol, solver, cache, &
+      & error, dqdL=dqdL, list=list, unit=output_unit)
    if (allocated(error)) return
 
    call new_list_hessian(list, sphess)
    select type (model)
    type is (eeqbc_model)
-      call model%get_implicit_hessian(mol, cache, sphess, list=list)
+      spelst(:, :, :, :) = 0.0_wp
+      call model%get_implicit_hessian(mol, cache, sphess, spelst, list=list)
    class default
       call test_failed(error, "Implicit Hessian requires the EEQBC model")
       return
@@ -1900,21 +1940,30 @@ subroutine test_implicit_hessian(error, mol, model, nlcutoff)
    if (size(list%nlat) == mol%nat**2) then
       deallocate(cache)
       allocate(cache)
-      call model%update(mol, cache, trans, grad=.false., dqdr=.true.)
-      call model%solve(mol, solver, cache, error, dqdr=dqdr, dqdL=dqdL, &
-         & unit=output_unit)
+      call model%update(mol, cache, trans)
+      call model%update(mol, cache, trans, qcp=.true.)
+      call model%solve(mol, solver, cache, error, unit=output_unit)
+      if (.not. allocated(error)) call model%get_charge_derivs(mol, solver, cache, &
+         & error, dqdr=dqdr, dqdL=dqdL, unit=output_unit)
       if (allocated(error)) return
 
       refhess(:, :) = 0.0_wp
       select type (model)
       type is (eeqbc_model)
-         call model%get_implicit_hessian(mol, cache, refhess, dqdr=dqdr)
+         refelst(:, :, :, :) = 0.0_wp
+         call model%get_implicit_hessian(mol, cache, refhess, refelst, dqdr=dqdr, &
+            & dqdL=dqdL)
       end select
 
       if (any(abs(hessian - refhess) > thr2)) then
          call test_failed(error, "Implicit Hessian does not match the dense one")
          print'(a)', "diff:"
          print'(3es21.12)', hessian - refhess
+         return
+      end if
+      if (any(abs(spelst - refelst) > thr2)) then
+         call test_failed(error, "Implicit strain Hessian does not match the dense one")
+         print'(3es21.12)', spelst - refelst
       end if
    end if
 
@@ -1944,6 +1993,9 @@ subroutine test_hessian(error, mol, model)
    real(wp), parameter :: trans(3, 1) = 0.0_wp
    real(wp), allocatable :: hessian(:, :), refhess(:, :), hhessian(:, :)
    real(wp), allocatable :: qvec(:), hqvec(:), dcn(:, :), dqloc(:, :)
+   real(wp), allocatable :: refgrad(:, :), grad(:, :), hgrad(:, :)
+   real(wp), allocatable :: refelst(:, :, :, :), elst(:, :, :, :), helst(:, :, :, :)
+   real(wp) :: refsig(3, 3), sig(3, 3), hsig(3, 3)
 
    allocate(cg_input :: solver_input)
    select type (solver_input)
@@ -1959,6 +2011,11 @@ subroutine test_hessian(error, mol, model)
    ndim = 3*mol%nat
    allocate(hessian(ndim, ndim), refhess(ndim, ndim), hhessian(ndim, ndim))
    allocate(qvec(mol%nat), hqvec(mol%nat))
+   allocate(refgrad(3, mol%nat), grad(3, mol%nat), hgrad(3, mol%nat), source=0.0_wp)
+   allocate(refelst(3, 3, 3, 3), elst(3, 3, 3, 3), helst(3, 3, 3, 3), source=0.0_wp)
+   refsig(:, :) = 0.0_wp
+   sig(:, :) = 0.0_wp
+   hsig(:, :) = 0.0_wp
 
    allocate(list)
    call get_sorted_list(list, mol, error, cutoff)
@@ -1971,30 +2028,36 @@ subroutine test_hessian(error, mol, model)
    select type (model)
    type is (eeqbc_model)
       allocate(cache)
-      call model%update(mol, cache, trans, grad=.false., hess=.true.)
+      call model%update(mol, cache, trans)
+      call model%update(mol, cache, trans, qcp=.true.)
       call model%solve(mol, solver, cache, error)
       if (allocated(error)) return
-      call model%get_hessian(mol, solver, cache, error, refhess)
+      call model%get_electrostatic_hessian(mol, solver, cache, error, refhess, &
+         & elst=refelst, gradient=refgrad, sigma=refsig)
       if (allocated(error)) return
 
       ! Compressed Hessian on the neighbour list
       deallocate(cache)
       allocate(cache, sphess)
-      call model%update(mol, cache, trans, grad=.false., hess=.true., list=list)
+      call model%update(mol, cache, trans, list=list)
+      call model%update(mol, cache, trans, list=list, qcp=.true.)
       call model%solve(mol, solver, cache, error, qvec=qvec, list=list)
       if (allocated(error)) return
-      call model%get_hessian(mol, solver, cache, error, sphess, list=list)
+      call model%get_electrostatic_hessian(mol, solver, cache, error, sphess, &
+         & list=list, elst=elst, gradient=grad, sigma=sig)
       if (allocated(error)) return
 
       ! Pair arrays and blocks on the sorted half list, complete rows from list
       allocate(hcache, hlhess, half)
       call get_sorted_list(half, mol, error, cutoff, complete=.false.)
       if (allocated(error)) return
-      call model%update(mol, hcache, trans, grad=.false., hess=.true., list=half)
+      call model%update(mol, hcache, trans, list=half)
+      call model%update(mol, hcache, trans, list=half, qcp=.true.)
       call model%solve(mol, solver, hcache, error, qvec=hqvec, list=half)
       if (allocated(error)) return
       call move_alloc(half, hlhess%list)
-      call model%get_hessian(mol, solver, hcache, error, hlhess, list=list)
+      call model%get_electrostatic_hessian(mol, solver, hcache, error, hlhess, &
+         & list=list, elst=helst, gradient=hgrad, sigma=hsig)
       if (allocated(error)) return
    class default
       call test_failed(error, "Analytical Hessian requires the EEQBC model")
@@ -2007,6 +2070,19 @@ subroutine test_hessian(error, mol, model)
       call test_failed(error, "Hessian does not match the dense one")
       print'(a)', "diff:"
       print'(3es21.12)', hessian - refhess
+      return
+   end if
+
+   if (any(abs(grad - refgrad) > thr1) .or. any(abs(hgrad - refgrad) > thr1) &
+      & .or. any(abs(sig - refsig) > thr1) .or. any(abs(hsig - refsig) > thr1)) then
+      call test_failed(error, "Gradient of the Hessian call does not match the dense one")
+      print'(2es21.12)', maxval(abs(grad - refgrad)), maxval(abs(hgrad - refgrad))
+      return
+   end if
+
+   if (any(abs(elst - refelst) > thr2) .or. any(abs(helst - refelst) > thr2)) then
+      call test_failed(error, "Strain Hessian does not match the dense one")
+      print'(2es21.12)', maxval(abs(elst - refelst)), maxval(abs(helst - refelst))
       return
    end if
 
@@ -2083,7 +2159,9 @@ subroutine test_external_hessian(error, mol, model)
    real(wp), parameter :: trans(3, 1) = 0.0_wp
    real(wp), allocatable :: rval(:, :), hessian(:, :), refhess(:, :), hhessian(:, :)
 
-   real(wp) :: elst(3, 3, 3, 3)
+   real(wp) :: elst(3, 3, 3, 3), refsig(3, 3), sig(3, 3), hsig(3, 3)
+   real(wp) :: spelst(3, 3, 3, 3), hlelst(3, 3, 3, 3)
+   real(wp), allocatable :: refgrad(:, :), grad(:, :), hgrad(:, :)
 
    elst(:, :, :, :) = 0.0_wp
    allocate(cg_input :: solver_input)
@@ -2115,33 +2193,43 @@ subroutine test_external_hessian(error, mol, model)
    select type (model)
    type is (eeqbc_model)
       allocate(cache)
-      call model%update(mol, cache, trans, grad=.false., hess=.true.)
+      call model%update(mol, cache, trans)
+      call model%update(mol, cache, trans, qcp=.true.)
       call model%solve(mol, solver, cache, error)
       if (allocated(error)) return
+      allocate(refgrad(3, mol%nat), grad(3, mol%nat), hgrad(3, mol%nat), source=0.0_wp)
+      refsig(:, :) = 0.0_wp
+      sig(:, :) = 0.0_wp
+      hsig(:, :) = 0.0_wp
+      elst(:, :, :, :) = 0.0_wp
+      spelst(:, :, :, :) = 0.0_wp
+      hlelst(:, :, :, :) = 0.0_wp
       call model%get_external_hessian(mol, solver, cache, error, dfdq, d2fdq2, &
-         & dfdrdq, refhess, elst)
+         & dfdrdq, refhess, elst, gradient=refgrad, sigma=refsig)
       if (allocated(error)) return
 
       ! Compressed Hessian on the neighbour list
       deallocate(cache)
       allocate(cache, sphess)
-      call model%update(mol, cache, trans, grad=.false., hess=.true., list=list)
+      call model%update(mol, cache, trans, list=list)
+      call model%update(mol, cache, trans, list=list, qcp=.true.)
       call model%solve(mol, solver, cache, error, list=list)
       if (allocated(error)) return
       call model%get_external_hessian(mol, solver, cache, error, dfdq, qval, &
-         & qlist, rval, rlist, sphess, list)
+         & qlist, rval, rlist, sphess, spelst, list, gradient=grad, sigma=sig)
       if (allocated(error)) return
 
       ! Pair arrays and blocks on the sorted half list, complete rows from list
       allocate(hcache, hlhess, half)
       call get_sorted_list(half, mol, error, cutoff, complete=.false.)
       if (allocated(error)) return
-      call model%update(mol, hcache, trans, grad=.false., hess=.true., list=half)
+      call model%update(mol, hcache, trans, list=half)
+      call model%update(mol, hcache, trans, list=half, qcp=.true.)
       call model%solve(mol, solver, hcache, error, list=half)
       if (allocated(error)) return
       call move_alloc(half, hlhess%list)
       call model%get_external_hessian(mol, solver, hcache, error, dfdq, qval, &
-         & qlist, rval, rlist, hlhess, list)
+         & qlist, rval, rlist, hlhess, hlelst, list, gradient=hgrad, sigma=hsig)
       if (allocated(error)) return
    class default
       call test_failed(error, "Analytical Hessian requires the EEQBC model")
@@ -2149,6 +2237,19 @@ subroutine test_external_hessian(error, mol, model)
    end select
    call expand_hessian(mol, list, sphess, hessian)
    call expand_hessian(mol, hlhess%list, hlhess, hhessian)
+
+   if (any(abs(grad - refgrad) > thr1) .or. any(abs(hgrad - refgrad) > thr1) &
+      & .or. any(abs(sig - refsig) > thr1) .or. any(abs(hsig - refsig) > thr1)) then
+      call test_failed(error, "Gradient of the external Hessian does not match")
+      print'(2es21.12)', maxval(abs(grad - refgrad)), maxval(abs(hgrad - refgrad))
+      return
+   end if
+
+   if (any(abs(spelst - elst) > thr2) .or. any(abs(hlelst - elst) > thr2)) then
+      call test_failed(error, "External strain Hessian does not match the dense one")
+      print'(2es21.12)', maxval(abs(spelst - elst)), maxval(abs(hlelst - elst))
+      return
+   end if
 
    if (any(abs(hessian - refhess) > thr2)) then
       call test_failed(error, "External Hessian does not match the dense one")
@@ -2186,9 +2287,10 @@ subroutine test_charge_hessian(error, mol, model)
    real(wp), allocatable :: qvec(:), weights(:), hessian(:, :), refhess(:, :)
    real(wp), allocatable :: d2fdq2(:, :), dfdrdq(:, :, :), qval(:), rval(:, :)
 
-   real(wp) :: elst(3, 3, 3, 3)
+   real(wp) :: elst(3, 3, 3, 3), spelst(3, 3, 3, 3)
 
    elst(:, :, :, :) = 0.0_wp
+   spelst(:, :, :, :) = 0.0_wp
    allocate(list)
    call get_sorted_list(list, mol, error, cutoff)
    if (allocated(error)) return
@@ -2221,10 +2323,16 @@ subroutine test_charge_hessian(error, mol, model)
    call get_charges(model, mol, error, qvec, list=list, cache=cache)
    if (allocated(error)) return
    call add_charge_hessian(model, mol, error, weights, qval, list, rval, list, &
-      & sphess, cache, list)
+      & sphess, spelst, cache, list)
    if (allocated(error)) return
 
    call expand_hessian(mol, list, sphess, hessian)
+   if (any(abs(spelst - elst) > thr2)) then
+      call test_failed(error, "Charge strain Hessian does not match the dense one")
+      print'(es21.12)', maxval(abs(spelst - elst))
+      return
+   end if
+
    if (.not. all(abs(hessian - refhess) <= thr2)) then
       call test_failed(error, "Charge Hessian does not match the dense one")
       print'(a)', "diff:"
@@ -2260,7 +2368,7 @@ subroutine test_external_hessian_sparse(error, mol, model, nlcutoff, ecutoff)
    integer :: xat, yat, bat, cat, ic, nlow
    integer(i8) :: hat, nfin
    real(wp), parameter :: trans(3, 1) = 0.0_wp
-   real(wp) :: blk(3, 3)
+   real(wp) :: blk(3, 3), elst(3, 3, 3, 3)
    logical, allocatable :: nbr(:, :)
    real(wp), allocatable :: dfdq(:), d2fdq2(:, :), dfdrdq(:, :, :), qval(:)
    real(wp), allocatable :: rval(:, :), dqdL(:, :, :)
@@ -2295,11 +2403,13 @@ subroutine test_external_hessian_sparse(error, mol, model, nlcutoff, ecutoff)
    select type (model)
    type is (eeqbc_model)
       allocate(cache, sphess)
-      call model%update(mol, cache, trans, grad=.false., hess=.true., list=list)
+      call model%update(mol, cache, trans, list=list)
+      call model%update(mol, cache, trans, list=list, qcp=.true.)
       call model%solve(mol, solver, cache, error, list=list)
       if (allocated(error)) return
+      elst(:, :, :, :) = 0.0_wp
       call model%get_external_hessian(mol, solver, cache, error, dfdq, qval, &
-         & qlist, rval, rlist, sphess, list)
+         & qlist, rval, rlist, sphess, elst, list)
       if (allocated(error)) return
    class default
       call test_failed(error, "Analytical Hessian requires the EEQBC model")
@@ -2309,9 +2419,11 @@ subroutine test_external_hessian_sparse(error, mol, model, nlcutoff, ecutoff)
    deallocate(cache)
    allocate(cache)
    allocate(dqdL(3, 3, mol%nat))
-   call model%update(mol, cache, trans, grad=.false., list=list, dqdr=.true.)
-   call model%solve(mol, solver, cache, error, dqdL=dqdL, list=list, &
-      & unit=output_unit)
+   call model%update(mol, cache, trans, list=list)
+   call model%update(mol, cache, trans, list=list, qcp=.true.)
+   call model%solve(mol, solver, cache, error, list=list, unit=output_unit)
+   if (.not. allocated(error)) call model%get_charge_derivs(mol, solver, cache, &
+      & error, dqdL=dqdL, list=list, unit=output_unit)
    if (allocated(error)) return
 
    allocate(nbr(mol%nat, mol%nat), source=.false.)

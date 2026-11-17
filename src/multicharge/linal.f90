@@ -25,7 +25,8 @@ module multicharge_linal
    private
 
    public :: max_group, add_transposed_product, gather_group_list, &
-      & multiply_group_list, add_chain_products, get_transposed_positions
+      & multiply_group_list, add_chain_products, get_transposed_positions, &
+      & add_strain_block, add_strain_virial
 
 
    !> Number of atoms in a group of the charge derivatives on a neighborlist
@@ -232,6 +233,49 @@ subroutine get_transposed_positions(list, tpos)
    !$omp end parallel do
 
 end subroutine get_transposed_positions
+
+
+!> Add the strain Hessian of a pair block, elst(a, b, c, d) += box(a, c) r_b r_d
+pure subroutine add_strain_block(box, vec, elst)
+
+   !> Second derivative block w.r.t. the pair vector
+   real(wp), intent(in) :: box(3, 3)
+
+   !> Pair vector
+   real(wp), intent(in) :: vec(3)
+
+   !> Strain Hessian
+   real(wp), intent(inout) :: elst(3, 3, 3, 3)
+
+   integer :: ib, ic, id
+
+   do id = 1, 3
+      do ic = 1, 3
+         do ib = 1, 3
+            elst(:, ib, ic, id) = elst(:, ib, ic, id) + box(:, ic) * vec(ib) * vec(id)
+         end do
+      end do
+   end do
+
+end subroutine add_strain_block
+
+
+!> Add the virial term of the strain Hessian, elst(a, c, c, d) += sigma(a, d)
+pure subroutine add_strain_virial(sigma, elst)
+
+   !> Virial
+   real(wp), intent(in) :: sigma(3, 3)
+
+   !> Strain Hessian
+   real(wp), intent(inout) :: elst(3, 3, 3, 3)
+
+   integer :: ic
+
+   do ic = 1, 3
+      elst(:, ic, ic, :) = elst(:, ic, ic, :) + sigma
+   end do
+
+end subroutine add_strain_virial
 
 
 end module multicharge_linal

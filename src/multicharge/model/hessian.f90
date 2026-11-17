@@ -26,39 +26,40 @@ contains
 
 
 !> Compute the nuclear Hessian of the electrostatic energy
-module procedure get_hessian_dense
+module procedure get_electrostatic_hessian_dense
 
    real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
 
-   ! Get variables from the model cache
    if (.not. allocated(cache%vrhs) .or. .not. allocated(cache%dcndr)) then
       call fatal_error(error, "Charges and CN derivatives are not in the cache, "// &
-         & "update the cache with hess and solve first")
+         & "solve and update the cache with qcp first")
       return
    end if
 
-   ! Charge derivatives
-   call new_partial_derivs(mol, mol%nat, cache)
-   call self%get_xvec_derivs(mol, mol%nat, cache, beta=1.0_wp)
-   call self%get_coulomb_derivs(mol, mol%nat, cache, alpha=-1.0_wp, &
-      & p=cache%vrhs(:mol%nat))
-   allocate(dqdL(3, 3, mol%nat), dqdr(3, mol%nat, mol%nat))
-   call get_q_derivs(mol, solver, cache, error, mol%nat, dqdr, dqdL, &
+   if (present(gradient) .and. present(sigma)) then
+      call self%get_electrostatic_gradient(mol, cache, error, gradient, sigma, &
+         & unit=unit, verbosity=verbosity)
+      if (allocated(error)) return
+   end if
+
+   allocate(dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat))
+   call self%get_charge_derivs(mol, solver, cache, error, dqdr=dqdr, dqdL=dqdL, &
       & unit=unit, verbosity=verbosity)
    if (allocated(error)) return
 
    ! Second derivatives of 0.5 * q^T A q - q^T X at fixed charges
    hessian(:, :) = 0.0_wp
    call self%get_explicit_hessian(mol, cache, cache%vrhs(:mol%nat), hessian, &
-      & error, alpha=0.5_wp, beta=-1.0_wp)
+      & elst, error, alpha=0.5_wp, beta=-1.0_wp)
    if (allocated(error)) return
-   call self%get_implicit_hessian(mol, cache, hessian, dqdr=dqdr)
+   call self%get_implicit_hessian(mol, cache, hessian, elst, dqdr=dqdr, dqdL=dqdL)
+   deallocate(dqdr, dqdL, cache%dabdr, cache%dabdL, cache%ainv)
 
-end procedure get_hessian_dense
+end procedure get_electrostatic_hessian_dense
 
 
 !> Compute the molecular nuclear Hessian of the electrostatic energy on a list
-module procedure get_hessian_list
+module procedure get_electrostatic_hessian_list
 
    real(wp) :: tgroup(2)
    type(timer_type) :: timer
@@ -74,15 +75,19 @@ module procedure get_hessian_list
    verbosity_hess = 0
    if (present(verbosity)) verbosity_hess = verbosity
 
+   ! The pair arrays of the gradient live on the list of the update
+   if (present(gradient) .and. present(sigma)) then
+      call self%get_electrostatic_gradient(mol, cache, error, gradient, sigma, &
+         & hessian%list, unit, verbosity)
+      if (allocated(error)) return
+   end if
+
    call timer%push("total")
 
    ! Partial derivatives dX/dR - dA/dR*q and the inverse on the list
    call print_hessian_header(print_unit, verbosity_hess)
    call timer%push("dabdr")
-   call new_partial_derivs(mol, mol%nat, cache, list)
-   call self%get_xvec_derivs(mol, mol%nat, cache, beta=1.0_wp, list=list)
-   call self%get_coulomb_derivs(mol, mol%nat, cache, alpha=-1.0_wp, &
-      & p=cache%vrhs(:mol%nat), list=list)
+   call ensure_partial_derivs(self, mol, cache, list)
    call timer%pop
    if (allocated(cache%tpos)) deallocate(cache%tpos)
    call timer%push("inverse")
@@ -98,21 +103,21 @@ module procedure get_hessian_list
 
    ! Response of the charges, -(dX/dR - dA/dR*q)^T dq/dR
    call timer%push("implicit")
-   call self%get_implicit_hessian(mol, cache, hessian, list, times=tgroup)
+   call self%get_implicit_hessian(mol, cache, hessian, elst, list, times=tgroup)
    call timer%pop
-   deallocate(cache%ainvlist, cache%dabdrlist)
+   deallocate(cache%ainvlist, cache%dabdrlist, cache%dabdL)
 
    ! Second derivatives of 0.5 * q^T A q - q^T X at fixed charges
    call timer%push("explicit")
    call self%get_explicit_hessian(mol, cache, cache%vrhs(:mol%nat), hessian, &
-      & error, list, alpha=0.5_wp, beta=-1.0_wp)
+      & elst, error, list, alpha=0.5_wp, beta=-1.0_wp)
    call timer%pop
    call timer%pop
    if (allocated(error)) return
 
    if (verbosity_hess > 0) call print_hessian_stages(print_unit, timer, tgroup)
 
-end procedure get_hessian_list
+end procedure get_electrostatic_hessian_list
 
 
 !> Allocate the zero blocks of a compressed Hessian on the upper triangle of its list
@@ -171,7 +176,7 @@ subroutine check_hessian_setup(self, mol, solver, cache, hessian, list, error)
    end select
    if (.not. allocated(cache%vrhs) .or. .not. allocated(cache%dcndrlist)) then
       call fatal_error(error, "Charges and CN derivatives on the list are not "// &
-         & "in the cache, update the cache with hess and solve first")
+         & "in the cache, solve and update the cache with qcp first")
       return
    end if
 
@@ -232,9 +237,16 @@ end subroutine check_hessian_setup
 !> Compute the implicit Hessian of the electrostatic energy
 module procedure get_implicit_hessian_dense
 
+   real(wp) :: hess9(9, 9)
+
    call gemm(reshape(cache%dabdr(:, :, :mol%nat), [3 * mol%nat, mol%nat]), &
       & reshape(dqdr, [3 * mol%nat, mol%nat]), hessian, transb='t', &
       & alpha=-1.0_wp, beta=1.0_wp)
+
+   ! Strain response of the charges, -dB/deps^T dq/deps
+   call gemm(reshape(cache%dabdL(:, :, :mol%nat), [9, mol%nat]), &
+      & reshape(dqdL, [9, mol%nat]), hess9, transb='t')
+   elst(:, :, :, :) = elst - reshape(hess9, [3, 3, 3, 3])
 
 end procedure get_implicit_hessian_dense
 
@@ -242,12 +254,20 @@ end procedure get_implicit_hessian_dense
 !> Compute the implicit Hessian of the electrostatic energy on a list
 module procedure get_implicit_hessian_list
 
-   real(wp) :: tgroup(2)
+   real(wp) :: tgroup(2), hess9(9, 9)
    integer, allocatable :: order(:)
+   real(wp), allocatable :: dqdL(:, :, :)
 
    call get_spatial_order(mol%xyz, order)
    call add_implicit_blocks_list(mol, cache, hessian, list, order, tgroup)
    if (present(times)) times(:) = tgroup
+
+   ! Strain response of the charges with the inverse on the list of the blocks
+   allocate(dqdL(3, 3, mol%nat))
+   call get_dqdL_list(mol, cache, hessian%list, dqdL)
+   call gemm(reshape(cache%dabdL(:, :, :mol%nat), [9, mol%nat]), &
+      & reshape(dqdL, [9, mol%nat]), hess9, transb='t')
+   elst(:, :, :, :) = elst - reshape(hess9, [3, 3, 3, 3])
 
    call get_constraint_factors(mol, cache, list, hessian%dlambda)
    hessian%weight = sum(cache%uvec)
@@ -598,10 +618,7 @@ module procedure get_external_hessian_dense
 
    real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :), padj(:)
    real(wp), allocatable :: gmat(:, :), dqmat(:, :), work9(:, :), hess9(:, :)
-   real(wp) :: eps(3, 3), sigma(3, 3, 2), gradient(3, mol%nat, 2)
-   real(wp), parameter :: step = 1.0e-5_wp
-   type(structure_type) :: displaced
-   integer :: ndim, ic, id, ix, isgn, iat
+   integer :: ndim
 
    ndim = 3 * mol%nat
    if (size(dfdq) /= mol%nat .or. any(shape(d2fdq2) /= [mol%nat, mol%nat]) &
@@ -612,25 +629,26 @@ module procedure get_external_hessian_dense
       return
    end if
 
-   ! Get variables from the model cache
    if (.not. allocated(cache%vrhs) .or. .not. allocated(cache%dcndr)) then
       call fatal_error(error, "Charges and CN derivatives are not in the cache, "// &
-         & "update the cache with hess and solve first")
+         & "solve and update the cache with qcp first")
       return
    end if
 
-   ! Charge derivatives
-   call new_partial_derivs(mol, mol%nat, cache)
-   call self%get_xvec_derivs(mol, mol%nat, cache, beta=1.0_wp)
-   call self%get_coulomb_derivs(mol, mol%nat, cache, alpha=-1.0_wp, &
-      & p=cache%vrhs(:mol%nat))
-   allocate(dqdL(3, 3, mol%nat), dqdr(3, mol%nat, mol%nat))
-   call get_q_derivs(mol, solver, cache, error, mol%nat, dqdr, dqdL, &
-      & unit=unit, verbosity=verbosity)
-   if (allocated(error)) return
-
    call get_adjoint_vector(mol, solver, cache, error, dfdq, padj, unit=unit, &
       & verbosity=verbosity)
+   if (allocated(error)) return
+
+   ! External gradient by adjoint contraction
+   if (present(gradient) .and. present(sigma)) then
+      call self%get_capacitance_derivs(mol, cache)
+      call self%get_grad(mol, cache, padj(:mol%nat), gradient, sigma, &
+         & alpha=-1.0_wp, beta=1.0_wp)
+   end if
+
+   allocate(dqdL(3, 3, mol%nat), dqdr(3, mol%nat, mol%nat))
+   call self%get_charge_derivs(mol, solver, cache, error, dqdr=dqdr, dqdL=dqdL, &
+      & unit=unit, verbosity=verbosity)
    if (allocated(error)) return
 
    ! Mixed derivatives of the Lagrangian, G^T = d2f/dRdq - dA/dR*p
@@ -659,102 +677,22 @@ module procedure get_external_hessian_dense
    deallocate(cache%dafdL)
 
    ! Second derivatives of p^T (X - A*q) at fixed charges and adjoint vector
-   call self%get_explicit_hessian(mol, cache, padj(:mol%nat), hessian, &
+   call self%get_explicit_hessian(mol, cache, padj(:mol%nat), hessian, elst, &
       & error, alpha=-1.0_wp, beta=1.0_wp)
-   displaced = mol
-   if (allocated(error)) then
-      ! Without an analytical periodic explicit Hessian use central differences of
-      ! the gradient at fixed charges
-      if (.not. any(mol%periodic)) return
-      deallocate(error)
-      do iat = 1, mol%nat
-         do ic = 1, 3
-            do isgn = 1, 2
-               displaced%xyz(ic, iat) = mol%xyz(ic, iat) + merge(step, -step, isgn == 1)
-               call get_fixed_charge_grad(self, displaced, cache, padj(:mol%nat), &
-                  & gradient(:, :, isgn), sigma(:, :, isgn), error)
-               if (allocated(error)) return
-            end do
-            displaced%xyz(ic, iat) = mol%xyz(ic, iat)
-            hessian(:, 3*(iat - 1) + ic) = hessian(:, 3*(iat - 1) + ic) &
-               & + 0.5_wp * reshape(gradient(:, :, 1) - gradient(:, :, 2), &
-               & [3*mol%nat]) / step
-         end do
-      end do
-   end if
-
-   ! Strain derivative of the explicit term from central differences of its virial
-   do id = 1, 3
-      do ic = 1, 3
-         do isgn = 1, 2
-            eps(:, :) = 0.0_wp
-            do ix = 1, 3
-               eps(ix, ix) = 1.0_wp
-            end do
-            eps(ic, id) = eps(ic, id) + merge(step, -step, isgn == 1)
-            displaced%xyz(:, :) = matmul(eps, mol%xyz)
-            if (any(mol%periodic)) displaced%lattice(:, :) = matmul(eps, mol%lattice)
-            call get_fixed_charge_grad(self, displaced, cache, padj(:mol%nat), &
-               & gradient(:, :, isgn), sigma(:, :, isgn), error)
-            if (allocated(error)) return
-         end do
-         elst(:, :, ic, id) = elst(:, :, ic, id) &
-            & + 0.5_wp * (sigma(:, :, 1) - sigma(:, :, 2)) / step
-      end do
-   end do
 
 end procedure get_external_hessian_dense
 
-
-!> Gradient and virial of p^T (X - A*q) of a displaced structure at the fixed
-!> charges q of the reference cache
-subroutine get_fixed_charge_grad(self, displaced, cache, p, gradient, sigma, error)
-
-   !> Electronegativity-equilibration model
-   class(mchrg_model_type), intent(in) :: self
-
-   !> Displaced molecular structure data
-   type(structure_type), intent(in) :: displaced
-
-   !> Multicharge cache of the reference structure holding the charges
-   type(mchrg_cache), intent(in) :: cache
-
-   !> Charge-like contraction vector
-   real(wp), intent(in) :: p(:)
-
-   !> Gradient
-   real(wp), intent(out) :: gradient(:, :)
-
-   !> Virial
-   real(wp), intent(out) :: sigma(:, :)
-
-   !> Error handling
-   type(error_type), allocatable, intent(out) :: error
-
-   type(mchrg_cache) :: work
-   real(wp), allocatable :: trans(:, :)
-
-   call get_lattice_points(displaced%periodic, displaced%lattice, &
-      & self%ncoord%cutoff, trans)
-   call self%update(displaced, work, trans, .true.)
-   call self%get_capacitance_matrix(displaced, displaced%nat, work)
-   call self%get_coulomb_matrix(displaced, displaced%nat, work)
-   call self%get_xvec(displaced, displaced%nat, work)
-   work%vrhs = cache%vrhs
-   gradient(:, :) = 0.0_wp
-   sigma(:, :) = 0.0_wp
-   call self%get_grad(displaced, work, p, gradient, sigma, alpha=-1.0_wp, beta=1.0_wp)
-
-end subroutine get_fixed_charge_grad
 
 
 !> Compute the nuclear Hessian of an external function on a list
 module procedure get_external_hessian_list
 
-   integer :: print_unit, verbosity_hess
-   real(wp) :: tgroup(2)
+   integer :: print_unit, verbosity_hess, kat0, lat
+   integer(i8) :: kat
+   real(wp) :: tgroup(2), hess9(9, 9)
    integer, allocatable :: order(:)
-   real(wp), allocatable :: padj(:), fuvec(:), tvec(:)
+   real(wp), allocatable :: padj(:), fuvec(:), tvec(:), dqdL(:, :, :), gmat(:, :)
+   real(wp), allocatable :: work9(:, :)
    type(timer_type) :: timer
 
    ! Without a list of its own the blocks stay on the complete list
@@ -782,12 +720,16 @@ module procedure get_external_hessian_list
    call timer%pop
    if (allocated(error)) return
 
+   ! External gradient by adjoint contraction on the list of the update
+   if (present(gradient) .and. present(sigma)) then
+      call self%get_capacitance_derivs(mol, cache, hessian%list)
+      call self%get_grad(mol, cache, padj(:mol%nat), gradient, sigma, &
+         & alpha=-1.0_wp, beta=1.0_wp, list=hessian%list)
+   end if
+
    call print_hessian_header(print_unit, verbosity_hess)
    call timer%push("dabdr")
-   call new_partial_derivs(mol, mol%nat, cache, list)
-   call self%get_xvec_derivs(mol, mol%nat, cache, beta=1.0_wp, list=list)
-   call self%get_coulomb_derivs(mol, mol%nat, cache, alpha=-1.0_wp, &
-      & p=cache%vrhs(:mol%nat), list=list)
+   call ensure_partial_derivs(self, mol, cache, list)
    call new_partial_derivs(mol, mol%nat, cache, list, dafdr=.true.)
    call self%get_coulomb_derivs(mol, mol%nat, cache, alpha=-1.0_wp, p=padj, &
       & list=list, dafdr=.true.)
@@ -803,6 +745,25 @@ module procedure get_external_hessian_list
    if (allocated(error)) return
    deallocate(cache%alist)
 
+   ! Strain Hessian of the response, G Q^T + Q (G + F Q^T)^T with G = dafdL
+   allocate(dqdL(3, 3, mol%nat))
+   call get_dqdL_list(mol, cache, hessian%list, dqdL)
+   gmat = reshape(cache%dafdL(:, :, :mol%nat), [9, mol%nat])
+   work9 = gmat
+   ! F is symmetric on the upper triangle of its list
+   do kat0 = 1, mol%nat
+      do kat = d2fdq2_list%inl(kat0), find_lower_start(d2fdq2_list, kat0) - 1
+         lat = d2fdq2_list%nlat(kat)
+         work9(:, kat0) = work9(:, kat0) + d2fdq2(kat) * reshape(dqdL(:, :, lat), [9])
+         if (lat /= kat0) work9(:, lat) = work9(:, lat) &
+            & + d2fdq2(kat) * reshape(dqdL(:, :, kat0), [9])
+      end do
+   end do
+   call gemm(gmat, reshape(dqdL, [9, mol%nat]), hess9, transb='t')
+   call gemm(reshape(dqdL, [9, mol%nat]), work9, hess9, transb='t', beta=1.0_wp)
+   elst(:, :, :, :) = elst + reshape(hess9, [3, 3, 3, 3])
+   deallocate(cache%dafdL)
+
    call new_hessian_blocks(hessian)
    call get_external_constraint_factors(mol, cache, list, fuvec, tvec, hessian)
 
@@ -815,7 +776,7 @@ module procedure get_external_hessian_list
 
    ! Second derivatives of p^T (X - A*q) at fixed charges and adjoint vector
    call timer%push("explicit")
-   call self%get_explicit_hessian(mol, cache, padj, hessian, error, list, &
+   call self%get_explicit_hessian(mol, cache, padj, hessian, elst, error, list, &
       & alpha=-1.0_wp, beta=1.0_wp)
    call timer%pop
    call timer%pop
@@ -1024,9 +985,12 @@ module procedure get_numhess_packed
 
    ! Evaluate the unperturbed system
    call get_lattice_points(mol%periodic, mol%lattice, self%ncoord%cutoff, trans)
-   call self%update(mol, cache, trans, .true., list)
-   call self%solve(mol, solver, cache, error, qvec=qvec, energy=energy, &
-      & gradient=grad, sigma=sigma, list=list, unit=unit, verbosity=verbosity)
+   call self%update(mol, cache, trans, list)
+   call self%solve(mol, solver, cache, error, energy=energy, qvec=qvec, list=list, &
+      & unit=unit, verbosity=verbosity)
+   if (allocated(error)) return
+   call self%get_electrostatic_gradient(mol, cache, error, grad, sigma, list, &
+      & unit, verbosity)
    if (allocated(error)) return
 
    allocate(g_plus(3, mol%nat), g_minus(3, mol%nat))
@@ -1208,9 +1172,12 @@ subroutine get_displaced_gradient(self, mol, solver, error, gradient, sigma, &
       end if
    end if
 
-   call self%update(mol, cache, trans, .true., list_work)
-   call self%solve(mol, solver, cache, error, gradient=gradient, sigma=sigma, &
-      & list=list_work, unit=unit, verbosity=verbosity)
+   call self%update(mol, cache, trans, list_work)
+   call self%solve(mol, solver, cache, error, list=list_work, unit=unit, &
+      & verbosity=verbosity)
+   if (allocated(error)) return
+   call self%get_electrostatic_gradient(mol, cache, error, gradient, sigma, &
+      & list_work, unit, verbosity)
 
 end subroutine get_displaced_gradient
 

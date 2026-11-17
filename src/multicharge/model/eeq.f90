@@ -32,10 +32,11 @@ module multicharge_model_eeq
    use multicharge_wignerseitz, only : new_wignerseitz_cell
    use mctc_csrlist, only : csr_list
    use multicharge_blas, only : gemm
+   use multicharge_linal, only : add_strain_block, add_strain_virial
    use multicharge_ewald, only : get_alpha
    use multicharge_model_type, only : mchrg_model_type, mchrg_hessian, get_dir_trans, &
       & get_rec_trans
-   use multicharge_model_cache, only : mchrg_cache
+   use multicharge_model_cache, only : mchrg_cache, clear_cache_derivs
    implicit none
    private
 
@@ -48,6 +49,8 @@ module multicharge_model_eeq
       procedure :: update
       !> Calculate capacitance matrix
       procedure :: get_capacitance_matrix
+      !> Calculate capacitance matrix derivatives
+      procedure :: get_capacitance_derivs
       !> Calculate Coulomb matrix
       procedure :: get_coulomb_matrix
       !> Add alpha * dA/dR*p
@@ -123,48 +126,42 @@ subroutine new_eeq_model(self, mol, error, chi, rad, eta, kcnchi, &
 end subroutine new_eeq_model
 
 
-!> Update coordination numbers and their derivatives
-subroutine update(self, mol, cache, trans, grad, list, dqdr, hess)
+!> Update coordination numbers, qcp adds their missing derivatives
+subroutine update(self, mol, cache, trans, list, qcp)
    !> EEQ model type
    class(eeq_model), intent(in) :: self
    !> Structure type
    type(structure_type), intent(in) :: mol
-   !> Multicharge neighborlist type
-   type(csr_list), intent(in), optional :: list
    !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
    !> Lattice vectors
    real(wp), intent(in) :: trans(:, :)
-   !> Flag to compute derivatives
-   logical, intent(in) :: grad
-   !> Flag for the charge derivatives w.r.t. positions and strain
-   logical, intent(in), optional :: dqdr
-   !> Flag for the Hessian
-   logical, intent(in), optional :: hess
+   !> Multicharge neighborlist type
+   type(csr_list), intent(in), optional :: list
+   !> Flag for the CN derivatives of the charge response
+   logical, intent(in), optional :: qcp
 
-   logical :: deriv
+   logical :: deriv, fresh
 
    deriv = .false.
-   if (present(dqdr)) deriv = dqdr
-   if (present(hess)) deriv = deriv .or. hess
+   if (present(qcp)) deriv = qcp
 
-   if (.not. allocated(cache%cn)) then
-      allocate(cache%cn(mol%nat))
-   end if
+   ! A plain update starts over for a new structure
+   if (.not. deriv) call clear_cache_derivs(cache)
+   fresh = .not. (deriv .and. allocated(cache%cn))
 
+   if (.not. allocated(cache%cn)) allocate(cache%cn(mol%nat))
    cache%trans = trans
 
-   if (deriv) then
-      if (.not. allocated(cache%dcndr)) allocate(cache%dcndr(3, mol%nat, mol%nat))
-      if (.not. allocated(cache%dcndL)) allocate(cache%dcndL(3, 3, mol%nat))
+   if (deriv .and. .not. allocated(cache%dcndr)) then
+      allocate(cache%dcndr(3, mol%nat, mol%nat), cache%dcndL(3, 3, mol%nat))
       call self%ncoord%get_coordination_number(mol, trans, cache%cn, &
          & dcndr=cache%dcndr, dcndL=cache%dcndL)
-   else
+   else if (fresh) then
       call self%ncoord%get_coordination_number(mol, trans, cache%cn)
    end if
 
-   if (any(mol%periodic)) then
-      ! Create WSC
+   if (fresh .and. any(mol%periodic)) then
       call new_wignerseitz_cell(cache%wsc, mol)
       call get_alpha(mol%lattice, cache%alpha)
    end if
@@ -185,6 +182,19 @@ subroutine get_capacitance_matrix(self, mol, ndim, cache, list)
    !> Multicharge neighborlist type
    type(csr_list), intent(in), optional :: list
 end subroutine get_capacitance_matrix
+
+
+!> No-op override: the EEQ model does not use a capacitance matrix.
+subroutine get_capacitance_derivs(self, mol, cache, list)
+   !> EEQ model type
+   class(eeq_model), intent(in) :: self
+   !> Structure type
+   type(structure_type), intent(in) :: mol
+   !> Multicharge cache
+   type(mchrg_cache), intent(inout) :: cache
+   !> Multicharge neighborlist type
+   type(csr_list), intent(in), optional :: list
+end subroutine get_capacitance_derivs
 
 
 !> Build the electronegativity vector with CN correction.
@@ -790,8 +800,8 @@ end subroutine get_grad
 
 
 !> Explicit part of the nuclear Hessian at fixed p and charges q
-subroutine get_explicit_hessian_dense(self, mol, cache, p, hessian, error, alpha, &
-   & beta)
+subroutine get_explicit_hessian_dense(self, mol, cache, p, hessian, elst, error, &
+   & alpha, beta)
    !> EEQ model type
    class(eeq_model), intent(in) :: self
    !> Structure type
@@ -802,6 +812,8 @@ subroutine get_explicit_hessian_dense(self, mol, cache, p, hessian, error, alpha
    real(wp), intent(in) :: p(:)
    !> Nuclear Hessian
    real(wp), intent(inout) :: hessian(:, :)
+   !> Strain Hessian x -> (1 + eps) x, element (a, b, c, d) is eps_ab, eps_cd
+   real(wp), intent(inout) :: elst(:, :, :, :)
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
    !> Optional Coulomb matrix prefactor
@@ -812,9 +824,9 @@ subroutine get_explicit_hessian_dense(self, mol, cache, p, hessian, error, alpha
    real(wp), parameter :: reg = 1.0e-14_wp
 
    integer :: iat, izp, ii, nat
-   real(wp) :: alp, bet, sqcn
-   real(wp), allocatable :: dEdcn(:), work(:, :), diagonal(:, :, :)
-   real(wp) :: elst(3, 3, 3, 3)
+   real(wp) :: alp, bet, sqcn, sigma(3, 3), el4(3, 3, 3, 3), dl9(9)
+   real(wp), allocatable :: dEdcn(:), d2Edcn2(:), work(:, :), diagonal(:, :, :)
+   real(wp), allocatable :: gtmp(:, :)
 
    alp = 1.0_wp
    if (present(alpha)) alp = alpha
@@ -824,34 +836,41 @@ subroutine get_explicit_hessian_dense(self, mol, cache, p, hessian, error, alpha
 
    if (.not. allocated(cache%vrhs) .or. .not. allocated(cache%dcndr)) then
       call fatal_error(error, "Charges and CN derivatives are not in the cache, "// &
-         & "update the cache with hess and solve first")
+         & "solve and update the cache with qcp first")
       return
    end if
 
-   allocate(dEdcn(nat), work(3 * nat, nat))
+   allocate(dEdcn(nat), d2Edcn2(nat), work(3 * nat, nat))
    !$omp parallel do default(none) schedule(runtime) &
-   !$omp shared(self, mol, cache, p, bet, dEdcn, work, nat) private(iat, izp, sqcn)
+   !$omp shared(self, mol, cache, p, bet, dEdcn, d2Edcn2, work, nat) &
+   !$omp private(iat, izp, sqcn)
    do iat = 1, nat
       izp = mol%id(iat)
       sqcn = sqrt(cache%cn(iat) + reg)
       dEdcn(iat) = bet * p(iat) * 0.5_wp * self%kcnchi(izp) / sqcn
-      work(:, iat) = reshape(-bet * p(iat) * 0.25_wp * self%kcnchi(izp) &
-         & / sqcn**3 * cache%dcndr(:, :, iat), [3 * nat])
+      d2Edcn2(iat) = -bet * p(iat) * 0.25_wp * self%kcnchi(izp) / sqcn**3
+      work(:, iat) = reshape(d2Edcn2(iat) * cache%dcndr(:, :, iat), [3 * nat])
    end do
    !$omp end parallel do
-   ! The strain Hessian of the contraction is evaluated by the caller
-   elst(:, :, :, :) = 0.0_wp
+   el4(:, :, :, :) = 0.0_wp
    call self%ncoord%add_coordination_number_hessian(mol, cache%trans, dEdcn, &
-      & hessian, elst)
+      & hessian, el4)
    call gemm(work, reshape(cache%dcndr, [3 * nat, nat]), hessian, transb='t', &
       & beta=1.0_wp)
-   deallocate(work, dEdcn)
+   deallocate(work)
+
+   ! CN-CN strain term
+   do iat = 1, nat
+      dl9 = reshape(cache%dcndL(:, :, iat), [9])
+      el4(:, :, :, :) = el4 + d2Edcn2(iat) * reshape(spread(dl9, 2, 9) &
+         & * spread(dl9, 1, 9), [3, 3, 3, 3])
+   end do
 
    allocate(diagonal(3, 3, nat), source=0.0_wp)
    if (any(mol%periodic)) then
-      call get_d2amat_3d(self, mol, cache, alp, p, hessian, diagonal)
+      call get_d2amat_3d(self, mol, cache, alp, p, hessian, diagonal, el4)
    else
-      call get_d2amat_0d(self, mol, cache, alp, p, hessian, diagonal)
+      call get_d2amat_0d(self, mol, cache, alp, p, hessian, diagonal, el4)
    end if
 
    !$omp parallel do default(none) schedule(static) &
@@ -863,11 +882,21 @@ subroutine get_explicit_hessian_dense(self, mol, cache, p, hessian, error, alpha
    end do
    !$omp end parallel do
 
+   ! Virial term of the strain Hessian, the CN part is set by the CN Hessian
+   allocate(gtmp(3, nat), source=0.0_wp)
+   sigma(:, :) = 0.0_wp
+   call self%get_grad(mol, cache, p, gtmp, sigma, alpha=alp, beta=bet)
+   do iat = 1, nat
+      sigma(:, :) = sigma - dEdcn(iat) * cache%dcndL(:, :, iat)
+   end do
+   call add_strain_virial(sigma, el4)
+   elst(:, :, :, :) = elst + el4
+
 end subroutine get_explicit_hessian_dense
 
 
 !> Add alpha * p^T d2A/dR2 q of the pair terms (molecular)
-subroutine get_d2amat_0d(self, mol, cache, alpha, p, hessian, diagonal)
+subroutine get_d2amat_0d(self, mol, cache, alpha, p, hessian, diagonal, elst)
    !> EEQ model type
    class(eeq_model), intent(in) :: self
    !> Molecular structure data
@@ -882,17 +911,21 @@ subroutine get_d2amat_0d(self, mol, cache, alpha, p, hessian, diagonal)
    real(wp), intent(inout) :: hessian(:, :)
    !> Diagonal blocks of the Hessian
    real(wp), intent(inout) :: diagonal(:, :, :)
+   !> Strain Hessian
+   real(wp), intent(inout) :: elst(3, 3, 3, 3)
 
    integer :: iat, jat, izp, jzp
-   real(wp) :: vec(3), r1, gam, dr, drr, weight
+   real(wp) :: vec(3), r1, gam, dr, drr, weight, box(3, 3)
+   real(wp) :: elst_local(3, 3, 3, 3)
    real(wp), allocatable :: diagonal_local(:, :, :)
 
    !$omp parallel default(none) &
    !$omp shared(self, mol, cache, alpha, p, hessian) &
-   !$omp private(iat, jat, izp, jzp, vec, r1, gam, dr, drr, weight) &
-   !$omp shared(diagonal) &
-   !$omp private(diagonal_local)
+   !$omp private(iat, jat, izp, jzp, vec, r1, gam, dr, drr, weight, box) &
+   !$omp shared(diagonal, elst) &
+   !$omp private(diagonal_local, elst_local)
    allocate(diagonal_local(3, 3, size(diagonal, 3)), source=0.0_wp)
+   elst_local(:, :, :, :) = 0.0_wp
    !$omp do schedule(runtime)
    do iat = 1, mol%nat
       izp = mol%id(iat)
@@ -903,14 +936,16 @@ subroutine get_d2amat_0d(self, mol, cache, alpha, p, hessian, diagonal)
          gam = 1.0_wp / sqrt(self%rad(izp)**2 + self%rad(jzp)**2)
          call get_coulomb_kernel(r1, gam, dr, drr)
          weight = alpha * (p(iat) * cache%vrhs(jat) + p(jat) * cache%vrhs(iat))
-         call add_pair_block(iat, jat, weight * radial_hessian(vec, dr, drr), &
-            & hessian, diagonal_local)
+         box = weight * radial_hessian(vec, dr, drr)
+         call add_pair_block(iat, jat, box, hessian, diagonal_local)
+         call add_strain_block(box, vec, elst_local)
       end do
    end do
    !$omp end do
 
    !$omp critical (get_d2amat_0d_)
    diagonal(:, :, :) = diagonal + diagonal_local
+   elst(:, :, :, :) = elst + elst_local
    !$omp end critical (get_d2amat_0d_)
    deallocate(diagonal_local)
    !$omp end parallel
@@ -919,7 +954,7 @@ end subroutine get_d2amat_0d
 
 
 !> Add alpha * p^T d2A/dR2 q of the pair terms (periodic)
-subroutine get_d2amat_3d(self, mol, cache, alpha, p, hessian, diagonal)
+subroutine get_d2amat_3d(self, mol, cache, alpha, p, hessian, diagonal, elst)
    !> EEQ model type
    class(eeq_model), intent(in) :: self
    !> Molecular structure data
@@ -934,19 +969,22 @@ subroutine get_d2amat_3d(self, mol, cache, alpha, p, hessian, diagonal)
    real(wp), intent(inout) :: hessian(:, :)
    !> Diagonal blocks of the Hessian
    real(wp), intent(inout) :: diagonal(:, :, :)
+   !> Strain Hessian
+   real(wp), intent(inout) :: elst(3, 3, 3, 3)
 
    integer :: iat, jat, izp, jzp, img, itr
-   real(wp) :: rij(3), vec(3), box(3, 3), gam, r1, g2, wsw, weight, fac
+   real(wp) :: rij(3), vec(3), box(3, 3), rbox(3, 3), gam, r1, g2, wsw, weight, fac
    real(wp) :: dr, drr, ar, arr
+   real(wp) :: elst_local(3, 3, 3, 3)
    real(wp), allocatable :: dtrans(:, :), rtrans(:, :), rweight(:)
-   real(wp), allocatable :: diagonal_local(:, :, :)
+   real(wp), allocatable :: diagonal_local(:, :, :), rcoef(:), rcoef_local(:)
 
    call get_dir_trans(mol, dtrans)
    call get_rec_trans(mol, rtrans)
 
    ! Reciprocal-space weights independent of the atom pair
    fac = 4.0_wp * pi / abs(matdet_3x3(mol%lattice))
-   allocate(rweight(size(rtrans, 2)), source=0.0_wp)
+   allocate(rweight(size(rtrans, 2)), rcoef(size(rtrans, 2)), source=0.0_wp)
    do itr = 1, size(rtrans, 2)
       g2 = dot_product(rtrans(:, itr), rtrans(:, itr))
       if (g2 < eps) cycle
@@ -955,11 +993,13 @@ subroutine get_d2amat_3d(self, mol, cache, alpha, p, hessian, diagonal)
 
    !$omp parallel default(none) &
    !$omp shared(self, mol, cache, alpha, p, hessian, dtrans, rtrans, rweight) &
-   !$omp private(iat, jat, izp, jzp, img, itr, rij, vec, box, gam, r1, wsw) &
+   !$omp private(iat, jat, izp, jzp, img, itr, rij, vec, box, rbox, gam, r1, wsw) &
    !$omp private(weight, dr, drr, ar, arr) &
-   !$omp shared(diagonal) &
-   !$omp private(diagonal_local)
+   !$omp shared(diagonal, elst, rcoef) &
+   !$omp private(diagonal_local, elst_local, rcoef_local)
    allocate(diagonal_local(3, 3, size(diagonal, 3)), source=0.0_wp)
+   allocate(rcoef_local(size(rtrans, 2)), source=0.0_wp)
+   elst_local(:, :, :, :) = 0.0_wp
    !$omp do schedule(runtime)
    do iat = 1, mol%nat
       izp = mol%id(iat)
@@ -967,6 +1007,7 @@ subroutine get_d2amat_3d(self, mol, cache, alpha, p, hessian, diagonal)
          jzp = mol%id(jat)
          gam = 1.0_wp / sqrt(self%rad(izp)**2 + self%rad(jzp)**2)
          wsw = 1.0_wp / real(cache%wsc%nimg(jat, iat), wp)
+         weight = alpha * (p(iat) * cache%vrhs(jat) + p(jat) * cache%vrhs(iat))
          box(:, :) = 0.0_wp
          do img = 1, cache%wsc%nimg(jat, iat)
             rij = mol%xyz(:, jat) - mol%xyz(:, iat) &
@@ -977,27 +1018,100 @@ subroutine get_d2amat_3d(self, mol, cache, alpha, p, hessian, diagonal)
                if (r1 < eps) cycle
                call get_coulomb_kernel(r1, gam, dr, drr)
                call get_coulomb_kernel(r1, cache%alpha, ar, arr)
-               box = box + wsw * radial_hessian(vec, dr - ar, drr - arr)
+               rbox = wsw * radial_hessian(vec, dr - ar, drr - arr)
+               box = box + rbox
+               call add_strain_block(weight * rbox, vec, elst_local)
             end do
             do itr = 1, size(rtrans, 2)
                vec = rtrans(:, itr)
                box = box - wsw * rweight(itr) * cos(dot_product(rij, vec)) &
                   & * outerprod(vec, vec)
+               rcoef_local(itr) = rcoef_local(itr) &
+                  & + weight * wsw * cos(dot_product(rij, vec))
             end do
          end do
-         weight = alpha * (p(iat) * cache%vrhs(jat) + p(jat) * cache%vrhs(iat))
          call add_pair_block(iat, jat, weight * box, hessian, diagonal_local)
+      end do
+
+      ! Interaction with the own images depends on the strain only
+      gam = 1.0_wp / sqrt(2.0_wp * self%rad(izp)**2)
+      wsw = 1.0_wp / real(cache%wsc%nimg(iat, iat), wp)
+      weight = alpha * p(iat) * cache%vrhs(iat)
+      do img = 1, cache%wsc%nimg(iat, iat)
+         rij = cache%wsc%trans(:, cache%wsc%tridx(img, iat, iat))
+         do itr = 1, size(dtrans, 2)
+            vec = rij + dtrans(:, itr)
+            r1 = norm2(vec)
+            if (r1 < eps) cycle
+            call get_coulomb_kernel(r1, gam, dr, drr)
+            call get_coulomb_kernel(r1, cache%alpha, ar, arr)
+            call add_strain_block(weight * wsw * radial_hessian(vec, dr - ar, &
+               & drr - arr), vec, elst_local)
+         end do
+         do itr = 1, size(rtrans, 2)
+            rcoef_local(itr) = rcoef_local(itr) &
+               & + weight * wsw * cos(dot_product(rij, rtrans(:, itr)))
+         end do
       end do
    end do
    !$omp end do
 
    !$omp critical (get_d2amat_3d_)
    diagonal(:, :, :) = diagonal + diagonal_local
+   elst(:, :, :, :) = elst + elst_local
+   rcoef(:) = rcoef + rcoef_local
    !$omp end critical (get_d2amat_3d_)
-   deallocate(diagonal_local)
+   deallocate(diagonal_local, rcoef_local)
    !$omp end parallel
 
+   ! Reciprocal terms depend on the strain through the volume and |G|^2 only
+   do itr = 1, size(rtrans, 2)
+      if (rweight(itr) == 0.0_wp) cycle
+      call add_rec_strain(rtrans(:, itr), cache%alpha, rcoef(itr) * rweight(itr), elst)
+   end do
+
 end subroutine get_d2amat_3d
+
+
+!> Strain Hessian of a reciprocal term w(G) = 4 pi / V exp(-G^2 / 4 alp^2) / G^2
+pure subroutine add_rec_strain(gvec, alp, weight, elst)
+   !> Reciprocal lattice vector
+   real(wp), intent(in) :: gvec(3)
+   !> Ewald splitting parameter
+   real(wp), intent(in) :: alp
+   !> Prefactor times w(G)
+   real(wp), intent(in) :: weight
+   !> Strain Hessian
+   real(wp), intent(inout) :: elst(3, 3, 3, 3)
+
+   integer :: ia, ib, ic, id
+   real(wp) :: g2, u, c4, delta(3, 3)
+
+   delta(:, :) = 0.0_wp
+   do ia = 1, 3
+      delta(ia, ia) = 1.0_wp
+   end do
+   g2 = dot_product(gvec, gvec)
+   u = 0.25_wp / alp**2 + 1.0_wp / g2
+   c4 = 4.0_wp * (u**2 + 1.0_wp / g2**2)
+   do id = 1, 3
+      do ic = 1, 3
+         do ib = 1, 3
+            do ia = 1, 3
+               elst(ia, ib, ic, id) = elst(ia, ib, ic, id) + weight * ( &
+                  & c4 * gvec(ia) * gvec(ib) * gvec(ic) * gvec(id) &
+                  & - 2.0_wp * u * (delta(ib, id) * gvec(ia) * gvec(ic) &
+                  & + delta(ia, id) * gvec(ib) * gvec(ic) &
+                  & + delta(ib, ic) * gvec(ia) * gvec(id) &
+                  & + delta(ic, id) * gvec(ia) * gvec(ib) &
+                  & + delta(ia, ib) * gvec(ic) * gvec(id)) &
+                  & + delta(ia, ib) * delta(ic, id) + delta(ia, id) * delta(ib, ic))
+            end do
+         end do
+      end do
+   end do
+
+end subroutine add_rec_strain
 
 
 !> First and second derivative of the Gaussian Coulomb kernel
@@ -1071,7 +1185,7 @@ end subroutine add_pair_block
 
 
 !> The explicit part of the Hessian is not implemented for the EEQ model
-subroutine get_explicit_hessian_list(self, mol, cache, p, hessian, error, list, &
+subroutine get_explicit_hessian_list(self, mol, cache, p, hessian, elst, error, list, &
    & alpha, beta)
    !> EEQ model type
    class(eeq_model), intent(in) :: self
@@ -1083,6 +1197,8 @@ subroutine get_explicit_hessian_list(self, mol, cache, p, hessian, error, list, 
    real(wp), intent(in) :: p(:)
    !> Molecular nuclear Hessian in compressed storage
    type(mchrg_hessian), intent(inout) :: hessian
+   !> Strain Hessian
+   real(wp), intent(inout) :: elst(:, :, :, :)
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
    !> Multicharge neighborlist type (sorted complete)

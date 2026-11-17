@@ -214,7 +214,7 @@ subroutine test_dadr(error, mol, model)
    end select
 
    ! Obtain the vector of charges
-   call model%update(mol, cache, trans, grad=.false.)
+   call model%update(mol, cache, trans)
    call model%solve(mol, solver, cache, error, qvec=qvec, unit=output_unit)
    if (allocated(error)) return
 
@@ -234,14 +234,14 @@ subroutine test_dadr(error, mol, model)
 
          ! First right-hand side (x+h)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
-         call model%update(mol, cache, trans, grad=.false.)
+         call model%update(mol, cache, trans)
          call model%get_capacitance_matrix(mol, ndim, cache)
          call model%get_coulomb_matrix(mol, ndim, cache)
          amatr1 = cache%amat
 
          ! Second right-hand side (x+2h)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
-         call model%update(mol, cache, trans, grad=.false.)
+         call model%update(mol, cache, trans)
          call model%get_capacitance_matrix(mol, ndim, cache)
          call model%get_coulomb_matrix(mol, ndim, cache)
          amatr2 = cache%amat
@@ -251,14 +251,14 @@ subroutine test_dadr(error, mol, model)
 
          ! First left-hand side (x-h)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - step
-         call model%update(mol, cache, trans, grad=.false.)
+         call model%update(mol, cache, trans)
          call model%get_capacitance_matrix(mol, ndim, cache)
          call model%get_coulomb_matrix(mol, ndim, cache)
          amatl1 = cache%amat
 
          ! Second left-hand side (x-2h)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - step
-         call model%update(mol, cache, trans, grad=.false.)
+         call model%update(mol, cache, trans)
          call model%get_capacitance_matrix(mol, ndim, cache)
          call model%get_coulomb_matrix(mol, ndim, cache)
          amatl2 = cache%amat
@@ -279,8 +279,10 @@ subroutine test_dadr(error, mol, model)
    end do lp
 
    ! Analytical gradient
-   call model%update(mol, cache, trans, grad, dqdr=.true.)
+   call model%update(mol, cache, trans)
+   call model%update(mol, cache, trans, qcp=.true.)
    call model%get_capacitance_matrix(mol, ndim, cache)
+   call model%get_capacitance_derivs(mol, cache)
    call new_partial_derivs(mol, ndim, cache)
    call model%get_coulomb_derivs(mol, ndim, cache, alpha=1.0_wp, p=qvec)
 
@@ -339,7 +341,7 @@ subroutine test_dadL(error, mol, model)
    allocate (amatr(ndim, ndim), amatl(ndim, ndim), xyz(3, mol%nat), &
    & numsigma(3, 3, ndim), qvec(mol%nat))
 
-   call model%update(mol, cache, trans, grad=.false.)
+   call model%update(mol, cache, trans)
    call model%solve(mol, solver, cache, error, qvec=qvec, unit=output_unit)
    if (allocated(error)) return
 
@@ -357,7 +359,7 @@ subroutine test_dadL(error, mol, model)
          amatr(:, :) = 0.0_wp
          eps(jc, ic) = eps(jc, ic) + step
          mol%xyz(:, :) = matmul(eps, xyz)
-         call model%update(mol, cache, trans, grad=.false.)
+         call model%update(mol, cache, trans)
          call model%get_capacitance_matrix(mol, ndim, cache)
          call model%get_coulomb_matrix(mol, ndim, cache)
          if (allocated(error)) exit lp
@@ -366,7 +368,7 @@ subroutine test_dadL(error, mol, model)
          amatl(:, :) = 0.0_wp
          eps(jc, ic) = eps(jc, ic) - 2*step
          mol%xyz(:, :) = matmul(eps, xyz)
-         call model%update(mol, cache, trans, grad=.false.)
+         call model%update(mol, cache, trans)
          call model%get_capacitance_matrix(mol, ndim, cache)
          call model%get_coulomb_matrix(mol, ndim, cache)
          if (allocated(error)) exit lp
@@ -383,8 +385,10 @@ subroutine test_dadL(error, mol, model)
    end do lp
    if (allocated(error)) return
 
-   call model%update(mol, cache, trans, grad, dqdr=.true.)
+   call model%update(mol, cache, trans)
+   call model%update(mol, cache, trans, qcp=.true.)
    call model%get_capacitance_matrix(mol, ndim, cache)
+   call model%get_capacitance_derivs(mol, cache)
    call new_partial_derivs(mol, ndim, cache)
    call model%get_coulomb_derivs(mol, ndim, cache, alpha=1.0_wp, p=qvec)
    if (allocated(error)) return
@@ -446,7 +450,7 @@ subroutine test_dbdr(error, mol, model)
          ! Right-hand side
          xvecr(:) = 0.0_wp
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
-         call model%update(mol, cache, trans, grad=.false.)
+         call model%update(mol, cache, trans)
          call model%get_capacitance_matrix(mol, ndim, cache)
          call model%get_xvec(mol, ndim, cache)
          xvecr = cache%xvec
@@ -454,7 +458,7 @@ subroutine test_dbdr(error, mol, model)
          ! Left-hand side
          xvecl(:) = 0.0_wp
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - 2*step
-         call model%update(mol, cache, trans, grad=.false.)
+         call model%update(mol, cache, trans)
          call model%get_capacitance_matrix(mol, ndim, cache)
          call model%get_xvec(mol, ndim, cache)
          xvecl = cache%xvec
@@ -465,10 +469,12 @@ subroutine test_dbdr(error, mol, model)
    end do lp
 
    ! Analytical gradient
-   call model%update(mol, cache, trans, grad, dqdr=.true.)
+   call model%update(mol, cache, trans)
+   call model%update(mol, cache, trans, qcp=.true.)
    ! Solve for the charges to set up the capacitance matrix and xtmp (eeqbc)
    call model%solve(mol, solver, cache, error, unit=output_unit)
    if (allocated(error)) return
+   call model%get_capacitance_derivs(mol, cache)
    call new_partial_derivs(mol, ndim, cache)
    call model%get_xvec_derivs(mol, ndim, cache, beta=1.0_wp)
 
@@ -539,7 +545,7 @@ subroutine test_dbdL(error, mol, model)
          xvecr(:) = 0.0_wp
          eps(jc, ic) = eps(jc, ic) + step
          mol%xyz(:, :) = matmul(eps, xyz)
-         call model%update(mol, cache, trans, grad=.false.)
+         call model%update(mol, cache, trans)
          call model%get_capacitance_matrix(mol, ndim, cache)
          call model%get_xvec(mol, ndim, cache)
          xvecr = cache%xvec
@@ -548,7 +554,7 @@ subroutine test_dbdL(error, mol, model)
          xvecl(:) = 0.0_wp
          eps(jc, ic) = eps(jc, ic) - 2*step
          mol%xyz(:, :) = matmul(eps, xyz)
-         call model%update(mol, cache, trans, grad=.false.)
+         call model%update(mol, cache, trans)
          call model%get_capacitance_matrix(mol, ndim, cache)
          call model%get_xvec(mol, ndim, cache)
          xvecl = cache%xvec
@@ -562,10 +568,12 @@ subroutine test_dbdL(error, mol, model)
    end do lp
 
    ! Analytical gradient
-   call model%update(mol, cache, trans, grad, dqdr=.true.)
+   call model%update(mol, cache, trans)
+   call model%update(mol, cache, trans, qcp=.true.)
    ! Solve for the charges to set up the capacitance matrix and xtmp (eeqbc)
    call model%solve(mol, solver, cache, error, unit=output_unit)
    if (allocated(error)) return
+   call model%get_capacitance_derivs(mol, cache)
    call new_partial_derivs(mol, ndim, cache)
    call model%get_xvec_derivs(mol, ndim, cache, beta=1.0_wp)
 
@@ -635,7 +643,7 @@ subroutine gen_test(error, mol, model, qref, eref, efield)
       allocate (qvec(mol%nat))
    end if
 
-   call model%update(mol, cache, trans, grad=.false.)
+   call model%update(mol, cache, trans)
    call model%solve(mol, solver, cache, error, energy=energy, qvec=qvec, &
       & efield=efield, unit=output_unit)
    if (allocated(error)) return
@@ -712,15 +720,17 @@ subroutine test_numgrad(error, mol, model)
       do ic = 1, 3
          energy(:) = 0.0_wp
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
-         call model%update(mol, cache, trans, grad=.false.)
-         call model%solve(mol, solver, cache, error, energy=energy, unit=output_unit)
+         call model%update(mol, cache, trans)
+         call model%solve(mol, solver, cache, error, energy=energy, &
+            & unit=output_unit)
          if (allocated(error)) exit lp
          er = sum(energy)
 
          energy(:) = 0.0_wp
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - 2*step
-         call model%update(mol, cache, trans, grad=.false.)
-         call model%solve(mol, solver, cache, error, energy=energy, unit=output_unit)
+         call model%update(mol, cache, trans)
+         call model%solve(mol, solver, cache, error, energy=energy, &
+            & unit=output_unit)
          if (allocated(error)) exit lp
          el = sum(energy)
 
@@ -735,9 +745,10 @@ subroutine test_numgrad(error, mol, model)
    ! dqlocdr(:, :, :) = 0.0_wp
    ! dqlocdL(:, :, :) = 0.0_wp
 
-   call model%update(mol, cache, trans, grad)
-   call model%solve(mol, solver, cache, error, &
-   & gradient=gradient, sigma=sigma, unit=output_unit)
+   call model%update(mol, cache, trans)
+   call model%solve(mol, solver, cache, error, unit=output_unit)
+   if (.not. allocated(error)) call model%get_electrostatic_gradient(mol, cache, &
+      & error, gradient, sigma, unit=output_unit)
    if (allocated(error)) return
 
    if (any(abs(gradient(:, :) - numgrad(:, :)) > thr2)) then
@@ -885,9 +896,10 @@ subroutine displaced_gradient(mol, model, solver, error, gradient, sigma)
    sigma(:, :) = 0.0_wp
 
    allocate(cache)
-   call model%update(mol, cache, trans, .true.)
-   call model%solve(mol, solver, cache, error, gradient=gradient, sigma=sigma, &
-   & unit=output_unit)
+   call model%update(mol, cache, trans)
+   call model%solve(mol, solver, cache, error, unit=output_unit)
+   if (.not. allocated(error)) call model%get_electrostatic_gradient(mol, cache, &
+      & error, gradient, sigma, unit=output_unit)
 
 end subroutine displaced_gradient
 
@@ -945,16 +957,18 @@ subroutine test_numsigma(error, mol, model)
          energy(:) = 0.0_wp
          eps(jc, ic) = eps(jc, ic) + step
          mol%xyz(:, :) = matmul(eps, xyz)
-         call model%update(mol, cache, trans, grad=.false.)
-         call model%solve(mol, solver, cache, error, energy=energy, unit=output_unit)
+         call model%update(mol, cache, trans)
+         call model%solve(mol, solver, cache, error, energy=energy, &
+            & unit=output_unit)
          if (allocated(error)) exit lp
          er = sum(energy)
 
          energy(:) = 0.0_wp
          eps(jc, ic) = eps(jc, ic) - 2*step
          mol%xyz(:, :) = matmul(eps, xyz)
-         call model%update(mol, cache, trans, grad=.false.)
-         call model%solve(mol, solver, cache, error, energy=energy, unit=output_unit)
+         call model%update(mol, cache, trans)
+         call model%solve(mol, solver, cache, error, energy=energy, &
+            & unit=output_unit)
          if (allocated(error)) exit lp
          el = sum(energy)
 
@@ -966,9 +980,10 @@ subroutine test_numsigma(error, mol, model)
    if (allocated(error)) return
 
    energy(:) = 0.0_wp
-   call model%update(mol, cache, trans, grad)
-   call model%solve(mol, solver, cache, error, &
-   & gradient=gradient, sigma=sigma, unit=output_unit)
+   call model%update(mol, cache, trans)
+   call model%solve(mol, solver, cache, error, unit=output_unit)
+   if (.not. allocated(error)) call model%get_electrostatic_gradient(mol, cache, &
+      & error, gradient, sigma, unit=output_unit)
    if (allocated(error)) return
 
    if (any(abs(sigma(:, :) - numsigma(:, :)) > thr2)) then
@@ -1028,12 +1043,12 @@ subroutine test_numdqdr(error, mol, model, cg)
    lp: do iat = 1, mol%nat
       do ic = 1, 3
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
-         call model%update(mol, cache, trans, grad=.false.)
+         call model%update(mol, cache, trans)
          call model%solve(mol, solver, cache, error, qvec=qr, unit=output_unit)
          if (allocated(error)) exit lp
 
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - 2*step
-         call model%update(mol, cache, trans, grad=.false.)
+         call model%update(mol, cache, trans)
          call model%solve(mol, solver, cache, error, qvec=ql, unit=output_unit)
          if (allocated(error)) exit lp
 
@@ -1059,9 +1074,11 @@ subroutine test_numdqdr(error, mol, model, cg)
       allocate(cache)
    end if
 
-   call model%update(mol, cache, trans, grad, dqdr=.true.)
-   call model%solve(mol, solver, cache, error, &
-   & dqdr=dqdr, dqdL=dqdL, unit=output_unit)
+   call model%update(mol, cache, trans)
+   call model%update(mol, cache, trans, qcp=.true.)
+   call model%solve(mol, solver, cache, error, unit=output_unit)
+   if (.not. allocated(error)) call model%get_charge_derivs(mol, solver, cache, &
+      & error, dqdr=dqdr, dqdL=dqdL, unit=output_unit)
    if (allocated(error)) return
 
    if (any(abs(dqdr(:, :, :) - numdr(:, :, :)) > thr2)) then
@@ -1128,14 +1145,14 @@ subroutine test_numdqdL(error, mol, model, cg)
          eps(jc, ic) = eps(jc, ic) + step
          mol%xyz(:, :) = matmul(eps, xyz)
          lattr(:, :) = matmul(eps, trans)
-         call model%update(mol, cache, trans, grad=.false.)
+         call model%update(mol, cache, trans)
          call model%solve(mol, solver, cache, error, qvec=qr, unit=output_unit)
          if (allocated(error)) exit lp
 
          eps(jc, ic) = eps(jc, ic) - 2*step
          mol%xyz(:, :) = matmul(eps, xyz)
          lattr(:, :) = matmul(eps, trans)
-         call model%update(mol, cache, trans, grad=.false.)
+         call model%update(mol, cache, trans)
          call model%solve(mol, solver, cache, error, qvec=ql, unit=output_unit)
          if (allocated(error)) exit lp
 
@@ -1163,9 +1180,11 @@ subroutine test_numdqdL(error, mol, model, cg)
       allocate(cache)
    end if
 
-   call model%update(mol, cache, trans, grad, dqdr=.true.)
-   call model%solve(mol, solver, cache, error, &
-   &  dqdr=dqdr, dqdL=dqdL, unit=output_unit)
+   call model%update(mol, cache, trans)
+   call model%update(mol, cache, trans, qcp=.true.)
+   call model%solve(mol, solver, cache, error, unit=output_unit)
+   if (.not. allocated(error)) call model%get_charge_derivs(mol, solver, cache, &
+      & error, dqdr=dqdr, dqdL=dqdL, unit=output_unit)
    if (allocated(error)) return
 
    if (any(abs(dqdL(:, :, :) - numdL(:, :, :)) > thr2)) then
@@ -1243,9 +1262,11 @@ subroutine test_dfdr(error, mol, dfdq, model)
    end if
 
    ! Solve with direct solver to get dqdr
-   call model%update(mol, cache, trans, grad, dqdr=.true.)
-   call model%solve(mol, solver_dqdr, cache, error, &
-   & dqdr=dqdr, dqdL=dqdL, unit=output_unit)
+   call model%update(mol, cache, trans)
+   call model%update(mol, cache, trans, qcp=.true.)
+   call model%solve(mol, solver_dqdr, cache, error, unit=output_unit)
+   if (.not. allocated(error)) call model%get_charge_derivs(mol, solver_dqdr, cache, &
+      & error, dqdr=dqdr, dqdL=dqdL, unit=output_unit)
    if (allocated(error)) return
 
    ! Compute direct product: dfdr = dfdq * dqdr
@@ -1255,7 +1276,7 @@ subroutine test_dfdr(error, mol, dfdq, model)
    ! Main solve using the direct solver to check consiestency
    deallocate(cache)
    allocate(cache)
-   call model%update(mol, cache, trans, grad)
+   call model%update(mol, cache, trans)
    call model%solve(mol, solver_dfdr, cache, error)
    if (allocated(error)) return
    gradient = 0.0_wp
@@ -1301,28 +1322,36 @@ subroutine test_d2cdr2(error, mol, model)
    ndim = mol%nat
 
    ! The capacitance matrix depends on the positions only
-   call model%update(mol, cache, trans, grad=.true.)
+   call model%update(mol, cache, trans)
 
    do iat = 1, mol%nat
       do ic = 1, 3
          ! First right-hand side (x+h)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
+         call model%update(mol, cache, trans)
          call model%get_capacitance_matrix(mol, ndim, cache)
+         call model%get_capacitance_derivs(mol, cache)
          dcdrr1 = cache%dcdr(:, iat, iat)
 
          ! Second right-hand side (x+2h)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) + step
+         call model%update(mol, cache, trans)
          call model%get_capacitance_matrix(mol, ndim, cache)
+         call model%get_capacitance_derivs(mol, cache)
          dcdrr2 = cache%dcdr(:, iat, iat)
 
          ! First left-hand side (x-h)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - 3*step
+         call model%update(mol, cache, trans)
          call model%get_capacitance_matrix(mol, ndim, cache)
+         call model%get_capacitance_derivs(mol, cache)
          dcdrl1 = cache%dcdr(:, iat, iat)
 
          ! Second left-hand side (x-2h)
          mol%xyz(ic, iat) = mol%xyz(ic, iat) - step
+         call model%update(mol, cache, trans)
          call model%get_capacitance_matrix(mol, ndim, cache)
+         call model%get_capacitance_derivs(mol, cache)
          dcdrl2 = cache%dcdr(:, iat, iat)
 
          ! Return to original position
@@ -1385,10 +1414,13 @@ subroutine test_explicit_hessian(error, mol, model, alpha, beta, pvec)
    integer :: maxiter = 1000
    integer :: verbosity = 0
 
-   integer :: iat, ic, ndim
+   integer :: iat, ic, id, is, ndim
    real(wp), parameter :: trans(3, 1) = 0.0_wp
    real(wp), parameter :: step = 1.0e-4_wp
-   real(wp) :: xorig
+   real(wp) :: xorig, strain(3, 3), vir(3, 3, 4), elst(3, 3, 3, 3), numelst(3, 3, 3, 3)
+   real(wp), parameter :: offset(4) = [1.0_wp, 2.0_wp, -1.0_wp, -2.0_wp]
+   real(wp), allocatable :: xyz(:, :), lat(:, :), strans(:, :)
+   type(structure_type) :: strained
    real(wp), allocatable :: qvec(:), p(:), hessian(:, :), numhess(:, :)
    real(wp), allocatable :: gr1(:, :), gr2(:, :), gl1(:, :), gl2(:, :)
    type(mchrg_cache), allocatable :: cache
@@ -1409,7 +1441,8 @@ subroutine test_explicit_hessian(error, mol, model, alpha, beta, pvec)
 
    ! Charges and cache of the reference structure
    allocate(cache)
-   call model%update(mol, cache, trans, grad=.true., hess=.true.)
+   call model%update(mol, cache, trans)
+   call model%update(mol, cache, trans, qcp=.true.)
    call model%solve(mol, solver, cache, error, qvec=qvec, unit=output_unit)
    if (allocated(error)) return
    if (present(pvec)) then
@@ -1419,7 +1452,8 @@ subroutine test_explicit_hessian(error, mol, model, alpha, beta, pvec)
    end if
 
    hessian(:, :) = 0.0_wp
-   call model%get_explicit_hessian(mol, cache, p, hessian, error, &
+   elst(:, :, :, :) = 0.0_wp
+   call model%get_explicit_hessian(mol, cache, p, hessian, elst, error, &
       & alpha=alpha, beta=beta)
    if (allocated(error)) return
 
@@ -1442,6 +1476,31 @@ subroutine test_explicit_hessian(error, mol, model, alpha, beta, pvec)
             & - gr2)/(12.0_wp*step), [ndim])
       end do
    end do
+
+   ! Strain Hessian from central differences of the virial at fixed charges
+   xyz = mol%xyz
+   do id = 1, 3
+      do ic = 1, 3
+         do is = 1, 4
+            strain(:, :) = 0.0_wp
+            do iat = 1, 3
+               strain(iat, iat) = 1.0_wp
+            end do
+            strain(ic, id) = strain(ic, id) + offset(is) * step
+            mol%xyz(:, :) = matmul(strain, xyz)
+            call fixed_charge_gradient(mol, model, qvec, p, alpha, beta, gr1, &
+               & vir(:, :, is))
+         end do
+         numelst(:, :, ic, id) = (vir(:, :, 4) - 8.0_wp*vir(:, :, 3) &
+            & + 8.0_wp*vir(:, :, 1) - vir(:, :, 2))/(12.0_wp*step)
+      end do
+   end do
+   mol%xyz(:, :) = xyz
+   if (any(abs(elst - numelst) > thr2)) then
+      call test_failed(error, "Explicit strain Hessian does not match")
+      print'(3es21.12)', elst - numelst
+      return
+   end if
 
    if (any(abs(hessian - numhess) > thr2)) then
       call test_failed(error, "Explicit Hessian does not match")
@@ -1475,7 +1534,7 @@ end subroutine test_explicit_hessian
 
 
 !> Gradient at fixed p and charges for a displaced structure
-subroutine fixed_charge_gradient(mol, model, qvec, p, alpha, beta, gradient)
+subroutine fixed_charge_gradient(mol, model, qvec, p, alpha, beta, gradient, virial)
 
    !> Molecular structure data
    type(structure_type), intent(in) :: mol
@@ -1498,19 +1557,24 @@ subroutine fixed_charge_gradient(mol, model, qvec, p, alpha, beta, gradient)
    !> Gradient of the expression
    real(wp), intent(out) :: gradient(:, :)
 
+   !> Optional virial of the expression
+   real(wp), intent(out), optional :: virial(3, 3)
+
    type(mchrg_cache), allocatable :: cache
    real(wp), parameter :: trans(3, 1) = 0.0_wp
    real(wp) :: sigma(3, 3)
 
    allocate(cache)
-   call model%update(mol, cache, trans, grad=.true.)
+   call model%update(mol, cache, trans)
    call model%get_capacitance_matrix(mol, mol%nat, cache)
+   call model%get_capacitance_derivs(mol, cache)
    call model%get_xvec(mol, mol%nat, cache)
    cache%vrhs = qvec
 
    gradient(:, :) = 0.0_wp
    sigma(:, :) = 0.0_wp
    call model%get_grad(mol, cache, p, gradient, sigma, alpha=alpha, beta=beta)
+   if (present(virial)) virial(:, :) = sigma
 
 end subroutine fixed_charge_gradient
 
@@ -1533,7 +1597,9 @@ subroutine test_implicit_hessian(error, mol, model)
    integer :: iat, ic, ndim
    real(wp), parameter :: trans(3, 1) = 0.0_wp
    real(wp), parameter :: step = 1.0e-6_wp
-   real(wp) :: xorig
+   real(wp) :: xorig, elst(3, 3, 3, 3), refelst(3, 3, 3, 3)
+   real(wp), allocatable :: rc(:, :)
+   integer :: jat, ib, id
    real(wp), allocatable :: qr(:), ql(:), gr(:, :), gl(:, :)
    real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :), hessian(:, :), numhess(:, :)
 
@@ -1555,11 +1621,11 @@ subroutine test_implicit_hessian(error, mol, model)
       do ic = 1, 3
          xorig = mol%xyz(ic, iat)
          mol%xyz(ic, iat) = xorig + step
-         call model%update(mol, cache, trans, grad=.false.)
+         call model%update(mol, cache, trans)
          call model%solve(mol, solver, cache, error, qvec=qr, unit=output_unit)
          if (allocated(error)) return
          mol%xyz(ic, iat) = xorig - step
-         call model%update(mol, cache, trans, grad=.false.)
+         call model%update(mol, cache, trans)
          call model%solve(mol, solver, cache, error, qvec=ql, unit=output_unit)
          if (allocated(error)) return
          mol%xyz(ic, iat) = xorig
@@ -1570,19 +1636,42 @@ subroutine test_implicit_hessian(error, mol, model)
       end do
    end do
 
-   call model%update(mol, cache, trans, grad=.false., dqdr=.true.)
-   call model%solve(mol, solver, cache, error, dqdr=dqdr, dqdL=dqdL, &
-      & unit=output_unit)
+   call model%update(mol, cache, trans)
+   call model%update(mol, cache, trans, qcp=.true.)
+   call model%solve(mol, solver, cache, error, unit=output_unit)
+   if (.not. allocated(error)) call model%get_charge_derivs(mol, solver, cache, &
+      & error, dqdr=dqdr, dqdL=dqdL, unit=output_unit)
    if (allocated(error)) return
 
    hessian(:, :) = 0.0_wp
    select type (model)
     type is (eeqbc_model)
-      call model%get_implicit_hessian(mol, cache, hessian, dqdr=dqdr)
+      elst(:, :, :, :) = 0.0_wp
+      call model%get_implicit_hessian(mol, cache, hessian, elst, dqdr=dqdr, &
+         & dqdL=dqdL)
     class default
       call test_failed(error, "Implicit Hessian requires the EEQBC model")
       return
    end select
+
+   ! For a molecule the strain Hessian contracts the Hessian with the positions
+   rc = mol%xyz - spread(sum(mol%xyz, dim=2) / mol%nat, 2, mol%nat)
+   refelst(:, :, :, :) = 0.0_wp
+   do iat = 1, mol%nat
+      do jat = 1, mol%nat
+         do id = 1, 3
+            do ib = 1, 3
+               refelst(:, ib, :, id) = refelst(:, ib, :, id) + rc(ib, iat) &
+                  & * rc(id, jat) * hessian(3*iat-2:3*iat, 3*jat-2:3*jat)
+            end do
+         end do
+      end do
+   end do
+   if (any(abs(elst - refelst) > thr1)) then
+      call test_failed(error, "Implicit strain Hessian does not match")
+      print'(3es21.12)', elst - refelst
+      return
+   end if
 
    if (any(abs(hessian - numhess) > thr2)) then
       call test_failed(error, "Implicit Hessian does not match")
@@ -1636,11 +1725,12 @@ subroutine test_hessian(error, mol, model, cg, plain_solve)
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
    type(mchrg_cache), allocatable :: cache
-   integer :: iat, ic, ndim
+   integer :: iat, ic, id, ndim
    real(wp), parameter :: trans(3, 1) = 0.0_wp
    real(wp), parameter :: step = 1.0e-6_wp
-   real(wp) :: xorig, sr(3, 3), sl(3, 3)
+   real(wp) :: xorig, sr(3, 3), sl(3, 3), shess(3, 3), strain(3, 3)
    real(wp), allocatable :: gr(:, :), gl(:, :), hessian(:, :), numhess(:, :)
+   real(wp), allocatable :: ghess(:, :), xyz(:, :), elst(:, :, :, :), numelst(:, :, :, :)
    real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
    logical :: use_cg
 
@@ -1686,20 +1776,64 @@ subroutine test_hessian(error, mol, model, cg, plain_solve)
 
    allocate(cache)
    allocate(dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat))
-   call model%update(mol, cache, trans, grad=.false., hess=.true.)
+   call model%update(mol, cache, trans)
+   call model%update(mol, cache, trans, qcp=.true.)
    if (present(plain_solve)) then
       if (plain_solve) then
          call model%solve(mol, solver, cache, error)
       else
-         call model%solve(mol, solver, cache, error, dqdr=dqdr, dqdL=dqdL)
+         call model%solve(mol, solver, cache, error)
+         if (.not. allocated(error)) call model%get_charge_derivs(mol, solver, &
+            & cache, error, dqdr=dqdr, dqdL=dqdL)
       end if
    else
-      call model%solve(mol, solver, cache, error, dqdr=dqdr, dqdL=dqdL)
+      call model%solve(mol, solver, cache, error)
+      if (.not. allocated(error)) call model%get_charge_derivs(mol, solver, cache, &
+         & error, dqdr=dqdr, dqdL=dqdL)
    end if
    if (allocated(error)) return
 
-   call model%get_hessian(mol, solver, cache, error, hessian)
+   allocate(elst(3, 3, 3, 3), numelst(3, 3, 3, 3), source=0.0_wp)
+   allocate(ghess(3, mol%nat), source=0.0_wp)
+   shess(:, :) = 0.0_wp
+   call model%get_electrostatic_hessian(mol, solver, cache, error, hessian, &
+      & elst=elst, gradient=ghess, sigma=shess)
    if (allocated(error)) return
+
+   ! Gradient returned with the Hessian
+   call displaced_gradient(mol, model, solver, error, gr, sr)
+   if (allocated(error)) return
+   if (any(abs(ghess - gr) > thr1) .or. any(abs(shess - sr) > thr1)) then
+      call test_failed(error, "Gradient of the Hessian call does not match")
+      print'(2es21.12)', maxval(abs(ghess - gr)), maxval(abs(shess - sr))
+      return
+   end if
+
+   ! Strain Hessian from central differences of the virial
+   xyz = mol%xyz
+   do id = 1, 3
+      do ic = 1, 3
+         strain(:, :) = 0.0_wp
+         do iat = 1, 3
+            strain(iat, iat) = 1.0_wp
+         end do
+         strain(ic, id) = strain(ic, id) + step
+         mol%xyz(:, :) = matmul(strain, xyz)
+         call displaced_gradient(mol, model, solver, error, gr, sr)
+         if (allocated(error)) return
+         strain(ic, id) = strain(ic, id) - 2*step
+         mol%xyz(:, :) = matmul(strain, xyz)
+         call displaced_gradient(mol, model, solver, error, gl, sl)
+         if (allocated(error)) return
+         numelst(:, :, ic, id) = 0.5_wp*(sr - sl)/step
+      end do
+   end do
+   mol%xyz(:, :) = xyz
+   if (any(abs(elst - numelst) > thr2)) then
+      call test_failed(error, "Strain Hessian does not match")
+      print'(3es21.12)', elst - numelst
+      return
+   end if
 
    if (any(abs(hessian - numhess) > thr2)) then
       call test_failed(error, "Hessian does not match")
@@ -1810,7 +1944,7 @@ subroutine displaced_external_gradient(mol, model, solver, error, gradient)
       & dfdrdq(3, mol%nat, mol%nat), d2fdr2(3*mol%nat, 3*mol%nat))
 
    allocate(cache)
-   call model%update(mol, cache, trans, .true.)
+   call model%update(mol, cache, trans)
    call model%solve(mol, solver, cache, error, qvec=qvec, unit=output_unit)
    if (allocated(error)) return
 
@@ -1849,7 +1983,8 @@ subroutine test_external_hessian(error, mol, model, cg)
    real(wp), allocatable :: gr(:, :), gl(:, :), hessian(:, :), numhess(:, :)
    real(wp), allocatable :: dqdr(:, :, :), dqdL(:, :, :)
    real(wp), allocatable :: qvec(:), dfdq(:), d2fdq2(:, :), dfdrdq(:, :, :)
-   real(wp), allocatable :: dfdr(:, :), d2fdr2(:, :)
+   real(wp), allocatable :: dfdr(:, :), d2fdr2(:, :), gext(:, :), gref(:, :)
+   real(wp) :: sext(3, 3), sref(3, 3)
    logical :: use_cg
 
    real(wp) :: elst(3, 3, 3, 3)
@@ -1884,7 +2019,7 @@ subroutine test_external_hessian(error, mol, model, cg)
 
    ! Derivatives of the external function at the charges of the structure
    allocate(cache)
-   call model%update(mol, cache, trans, .false.)
+   call model%update(mol, cache, trans)
    call model%solve(mol, solver, cache, error, qvec=qvec, unit=output_unit)
    if (allocated(error)) return
    call external_function_derivs(mol, qvec, dfdq, d2fdq2, dfdrdq, dfdr, d2fdr2)
@@ -1907,12 +2042,32 @@ subroutine test_external_hessian(error, mol, model, cg)
 
    allocate(cache)
    allocate(dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat))
-   call model%update(mol, cache, trans, grad=.false., hess=.true.)
-   call model%solve(mol, solver, cache, error, dqdr=dqdr, dqdL=dqdL)
+   call model%update(mol, cache, trans)
+   call model%update(mol, cache, trans, qcp=.true.)
+   call model%solve(mol, solver, cache, error)
+   if (.not. allocated(error)) call model%get_charge_derivs(mol, solver, cache, &
+      & error, dqdr=dqdr, dqdL=dqdL)
    if (allocated(error)) return
+   allocate(gext(3, mol%nat), gref(3, mol%nat), source=0.0_wp)
+   sext(:, :) = 0.0_wp
+   sref(:, :) = 0.0_wp
    call model%get_external_hessian(mol, solver, cache, error, dfdq, d2fdq2, &
-      & dfdrdq, hessian, elst)
+      & dfdrdq, hessian, elst, gradient=gext, sigma=sext)
    if (allocated(error)) return
+
+   ! Gradient returned with the Hessian
+   deallocate(cache)
+   allocate(cache)
+   call model%update(mol, cache, trans)
+   call model%solve(mol, solver, cache, error)
+   if (.not. allocated(error)) call model%get_external_gradient(mol, solver, cache, &
+      & error, dfdq, gref, sref)
+   if (allocated(error)) return
+   if (any(abs(gext - gref) > thr1) .or. any(abs(sext - sref) > thr1)) then
+      call test_failed(error, "Gradient of the external Hessian call does not match")
+      print'(2es21.12)', maxval(abs(gext - gref)), maxval(abs(sext - sref))
+      return
+   end if
    hessian(:, :) = hessian + d2fdr2
 
    if (any(abs(hessian - numhess) > thr2)) then
@@ -3553,9 +3708,10 @@ subroutine test_eeqbc_dqdr_no_update(error)
 
    allocate(dqdr(3, mol%nat, mol%nat), dqdL(3, 3, mol%nat))
    allocate(cache)
-   call model%update(mol, cache, trans, grad=.true.)
-   call model%solve(mol, solver, cache, solve_error, dqdr=dqdr, dqdL=dqdL, &
-      & unit=output_unit)
+   call model%update(mol, cache, trans)
+   call model%solve(mol, solver, cache, solve_error, unit=output_unit)
+   if (.not. allocated(solve_error)) call model%get_charge_derivs(mol, solver, &
+      & cache, solve_error, dqdr=dqdr, dqdL=dqdL, unit=output_unit)
    if (.not. allocated(solve_error)) then
       call test_failed(error, "Charge derivatives without CN derivatives did not fail")
    end if

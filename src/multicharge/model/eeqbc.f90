@@ -39,10 +39,11 @@ module multicharge_model_eeqbc
    use multicharge_wignerseitz, only : new_wignerseitz_cell
    use multicharge_model_type, only : get_dir_trans, mchrg_model_type, mchrg_hessian
    use multicharge_blas, only : gemm, gemv, symv
-   use multicharge_linal, only : add_chain_products, get_transposed_positions
+   use multicharge_linal, only : add_chain_products, get_transposed_positions, &
+      & add_strain_block, add_strain_virial
    use multicharge_ncoord, only : local_charge, update_ncoord_list, &
       & get_cn_entries_list
-   use multicharge_model_cache, only : mchrg_cache
+   use multicharge_model_cache, only : mchrg_cache, clear_cache_derivs
    implicit none
    private
 
@@ -69,6 +70,8 @@ module multicharge_model_eeqbc
       procedure :: update
       !> Calculate capacitance matrix
       procedure :: get_capacitance_matrix
+      !> Calculate capacitance matrix derivatives
+      procedure :: get_capacitance_derivs
       !> Calculate Coulomb matrix
       procedure :: get_coulomb_matrix
       !> Add alpha * dA/dR*p
@@ -205,8 +208,8 @@ subroutine new_eeqbc_model(self, mol, error, chi, rad, &
 
 end subroutine new_eeqbc_model
 
-!> Update coordination numbers, local charges and their derivatives
-subroutine update(self, mol, cache, trans, grad, list, dqdr, hess)
+!> Update CN and local charges, qcp adds their missing derivatives
+subroutine update(self, mol, cache, trans, list, qcp)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Structure type
@@ -215,65 +218,56 @@ subroutine update(self, mol, cache, trans, grad, list, dqdr, hess)
    type(mchrg_cache), intent(inout) :: cache
    !> Lattice vectors
    real(wp), intent(in) :: trans(:, :)
-   !> Flag to compute derivatives
-   logical, intent(in) :: grad
    !> Multicharge neighborlist type
    type(csr_list), intent(in), optional :: list
-   !> Flag for the charge derivatives w.r.t. positions and strain
-   logical, intent(in), optional :: dqdr
-   !> Flag for the Hessian
-   logical, intent(in), optional :: hess
+   !> Flag for the CN derivatives of the charge response
+   logical, intent(in), optional :: qcp
 
-   logical :: deriv
+   logical :: deriv, fresh
 
    deriv = .false.
-   if (present(dqdr)) deriv = dqdr
-   if (present(hess)) deriv = deriv .or. hess
+   if (present(qcp)) deriv = qcp
+
+   ! A plain update starts over for a new structure
+   if (.not. deriv) call clear_cache_derivs(cache)
+   fresh = .not. (deriv .and. allocated(cache%cn))
 
    cache%trans = trans
-
-   ! Refer CN and local charge arrays in cache
-   if (.not. allocated(cache%cn)) then
-      allocate(cache%cn(mol%nat))
-   end if
-   if (.not. allocated(cache%qloc)) then
-      allocate(cache%qloc(mol%nat))
-   end if
-
-   ! The charge derivatives and the Hessian also need the capacitance derivatives
-   cache%grad = grad .or. deriv
-
-   if (deriv) then
-      if (.not. allocated(cache%dcndL)) allocate(cache%dcndL(3, 3, mol%nat))
-      if (.not. allocated(cache%dqlocdL)) allocate(cache%dqlocdL(3, 3, mol%nat))
-   end if
+   if (.not. allocated(cache%cn)) allocate(cache%cn(mol%nat))
+   if (.not. allocated(cache%qloc)) allocate(cache%qloc(mol%nat))
 
    if (present(list)) then
-      call update_ncoord_list(self%ncoord, self%ncoord_en, mol, cache, trans, &
-         & deriv, list)
+      if (deriv .and. .not. allocated(cache%dcndrlist)) then
+         if (.not. allocated(cache%dcndL)) allocate(cache%dcndL(3, 3, mol%nat))
+         if (.not. allocated(cache%dqlocdL)) allocate(cache%dqlocdL(3, 3, mol%nat))
+         call update_ncoord_list(self%ncoord, self%ncoord_en, mol, cache, trans, &
+            & .true., list)
+      else if (fresh) then
+         call update_ncoord_list(self%ncoord, self%ncoord_en, mol, cache, trans, &
+            & .false., list)
+      end if
    else
-      if (deriv) then
-         if (.not. allocated(cache%dcndr)) allocate(cache%dcndr(3, mol%nat, mol%nat))
-         if (.not. allocated(cache%dqlocdr)) allocate(cache%dqlocdr(3, mol%nat, mol%nat))
+      if (deriv .and. .not. allocated(cache%dcndr)) then
+         allocate(cache%dcndr(3, mol%nat, mol%nat), cache%dqlocdr(3, mol%nat, mol%nat))
+         allocate(cache%dcndL(3, 3, mol%nat), cache%dqlocdL(3, 3, mol%nat))
          call self%ncoord%get_coordination_number(mol, trans, cache%cn, &
             & dcndr=cache%dcndr, dcndL=cache%dcndL)
          call local_charge(self%ncoord_en, mol, trans, cache%qloc, &
             & dqlocdr=cache%dqlocdr, dqlocdL=cache%dqlocdL)
-      else
+      else if (fresh) then
          call self%ncoord%get_coordination_number(mol, trans, cache%cn)
          call local_charge(self%ncoord_en, mol, trans, qloc=cache%qloc)
       end if
    end if
 
-   if (any(mol%periodic) .and. .not. present(list)) then
-      ! Create WSC
+   if (fresh .and. any(mol%periodic) .and. .not. present(list)) then
       call new_wignerseitz_cell(cache%wsc, mol)
    end if
 
 end subroutine update
 
 
-!> Compute the capacitance matrix (and its derivatives if needed).
+!> Compute the capacitance matrix
 subroutine get_capacitance_matrix(self, mol, ndim, cache, list)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
@@ -286,60 +280,64 @@ subroutine get_capacitance_matrix(self, mol, ndim, cache, list)
    !> Multicharge neighborlist type
    type(csr_list), intent(in), optional :: list
 
-   if (cache%grad) then
-      if (present(list)) then
-         if (.not. allocated(cache%dcdrdiag)) allocate(cache%dcdrdiag(3, mol%nat))
-         if (.not. allocated(cache%dcdL)) allocate(cache%dcdL(3, 3, mol%nat))
-      else
-         if (.not. allocated(cache%dcdr)) allocate(cache%dcdr(3, mol%nat, ndim))
-         if (.not. allocated(cache%dcdL)) allocate(cache%dcdL(3, 3, ndim))
-      end if
-   end if
-
    if (present(list)) then
-      ! Allocate cmat on the list, only its upper triangle is used
+      ! Only the upper triangle of cmat on the list is used
       if (allocated(cache%clist)) then
          if (size(cache%clist, kind=i8) /= size(list%nlat, kind=i8)) &
             & deallocate(cache%clist)
       end if
       if (.not. allocated(cache%clist)) &
          & allocate(cache%clist(size(list%nlat, kind=i8)))
-      ! neighborlist routines
       if (any(mol%periodic)) then
          call get_cmat_3d_list(self, mol, list, cache)
-         ! Capacitance-matrix gradients
-         if (cache%grad) then
-            call get_dcmat_3d_list(self, mol, list, cache)
-         end if
       else
          call get_cmat_0d_list(self, mol, list, cache)
-         ! Capacitance-matrix gradients
-         if (cache%grad) then
-            call get_dcmat_0d_list(self, mol, list, cache)
-         end if
       end if
    else
-      ! Allocate cmat
-      if (.not. allocated(cache%cmat)) then
-         allocate(cache%cmat(ndim, ndim))
-      end if
-      ! Direct routines
+      if (.not. allocated(cache%cmat)) allocate(cache%cmat(ndim, ndim))
       if (any(mol%periodic)) then
-         ! Get full cmat sum over all WSC images (for get_xvec and xvec_derivs)
+         ! Full cmat summed over all WSC images
          call get_cmat_3d(self, mol, cache%wsc, cache%cmat)
-         if (cache%grad) then
-            call get_dcmat_3d(self, mol, cache%wsc, cache%dcdr, cache%dcdL)
-         end if
       else
          call get_cmat_0d(self, mol, cache%cmat)
-         ! Capacitance-matrix gradients
-         if (cache%grad) then
-            call get_dcmat_0d(self, mol, cache%dcdr, cache%dcdL)
-         end if
       end if
    end if
 
 end subroutine get_capacitance_matrix
+
+
+!> Derivatives of the capacitance matrix, formed only if not in the cache
+subroutine get_capacitance_derivs(self, mol, cache, list)
+   !> EEQBC model type
+   class(eeqbc_model), intent(in) :: self
+   !> Structure type
+   type(structure_type), intent(in) :: mol
+   !> Multicharge cache
+   type(mchrg_cache), intent(inout) :: cache
+   !> Multicharge neighborlist type of the update
+   type(csr_list), intent(in), optional :: list
+
+   if (present(list)) then
+      if (allocated(cache%dcdrdiag)) return
+      if (allocated(cache%dcdL)) deallocate(cache%dcdL)
+      allocate(cache%dcdrdiag(3, mol%nat), cache%dcdL(3, 3, mol%nat))
+      if (any(mol%periodic)) then
+         call get_dcmat_3d_list(self, mol, list, cache)
+      else
+         call get_dcmat_0d_list(self, mol, list, cache)
+      end if
+   else
+      if (allocated(cache%dcdr)) return
+      if (allocated(cache%dcdL)) deallocate(cache%dcdL)
+      allocate(cache%dcdr(3, mol%nat, mol%nat), cache%dcdL(3, 3, mol%nat))
+      if (any(mol%periodic)) then
+         call get_dcmat_3d(self, mol, cache%wsc, cache%dcdr, cache%dcdL)
+      else
+         call get_dcmat_0d(self, mol, cache%dcdr, cache%dcdL)
+      end if
+   end if
+
+end subroutine get_capacitance_derivs
 
 !> Build the electronegativity vector, including local-charge corrections
 subroutine get_xvec(self, mol, ndim, cache, list, efield)
@@ -3601,8 +3599,8 @@ subroutine get_d2cmat_0d_list(self, mol, list, cache)
 end subroutine get_d2cmat_0d_list
 
 !> Explicit part of the molecular nuclear Hessian
-subroutine get_explicit_hessian_dense(self, mol, cache, p, hessian, error, alpha, &
-   & beta)
+subroutine get_explicit_hessian_dense(self, mol, cache, p, hessian, elst, error, &
+   & alpha, beta)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Molecular structure data
@@ -3613,6 +3611,8 @@ subroutine get_explicit_hessian_dense(self, mol, cache, p, hessian, error, alpha
    real(wp), intent(in) :: p(:)
    !> Molecular nuclear Hessian
    real(wp), intent(inout) :: hessian(:, :)
+   !> Strain Hessian x -> (1 + eps) x, element (a, b, c, d) is eps_ab, eps_cd
+   real(wp), intent(inout) :: elst(:, :, :, :)
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
    !> Optional Coulomb matrix prefactor
@@ -3620,24 +3620,26 @@ subroutine get_explicit_hessian_dense(self, mol, cache, p, hessian, error, alpha
    !> Optional electronegativity prefactor
    real(wp), intent(in), optional :: beta
 
+   ! The virial term of the strain Hessian needs the capacitance derivatives
+   call self%get_capacitance_derivs(mol, cache)
    if (any(mol%periodic)) then
       if (.not. allocated(cache%wsc%nimg)) then
          call fatal_error(error, "The Wigner-Seitz cell is not in the cache, "// &
             & "update the cache without neighborlist first")
          return
       end if
-      call get_explicit_hessian_3d(self, mol, cache, p, hessian, alphain=alpha, &
-         & betain=beta)
+      call get_explicit_hessian_3d(self, mol, cache, p, hessian, elst, &
+         & alphain=alpha, betain=beta)
    else
-      call get_explicit_hessian_0d(self, mol, cache, p, hessian, alphain=alpha, &
-         & betain=beta)
+      call get_explicit_hessian_0d(self, mol, cache, p, hessian, elst, &
+         & alphain=alpha, betain=beta)
    end if
 
 end subroutine get_explicit_hessian_dense
 
 !> Explicit part of the molecular nuclear Hessian on a neighborlist
-subroutine get_explicit_hessian_list(self, mol, cache, p, hessian, error, list, &
-   & alpha, beta)
+subroutine get_explicit_hessian_list(self, mol, cache, p, hessian, elst, error, &
+   & list, alpha, beta)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Molecular structure data
@@ -3648,6 +3650,8 @@ subroutine get_explicit_hessian_list(self, mol, cache, p, hessian, error, list, 
    real(wp), intent(in) :: p(:)
    !> Molecular nuclear Hessian in compressed storage with allocated blocks
    type(mchrg_hessian), intent(inout) :: hessian
+   !> Strain Hessian x -> (1 + eps) x, element (a, b, c, d) is eps_ab, eps_cd
+   real(wp), intent(inout) :: elst(:, :, :, :)
    !> Error handling
    type(error_type), allocatable, intent(out) :: error
    !> Multicharge neighborlist type (sorted complete)
@@ -3703,13 +3707,17 @@ subroutine get_explicit_hessian_list(self, mol, cache, p, hessian, error, list, 
          call get_cn_entries_list(mol, list, cache, tpos, cache%cninl, cache%cnpos)
       end if
    end if
-   call get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
+
+   ! The virial term of the strain Hessian needs the capacitance derivatives
+   call self%get_capacitance_derivs(mol, cache, hessian%list)
+   call get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, elst, &
       & alphain=alpha, betain=beta)
 
 end subroutine get_explicit_hessian_list
 
 !> Explicit part of the molecular nuclear Hessian (dense kernel)
-subroutine get_explicit_hessian_0d(self, mol, cache, p, hessian, alphain, betain)
+subroutine get_explicit_hessian_0d(self, mol, cache, p, hessian, elst, alphain, &
+   & betain)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
 
@@ -3725,6 +3733,9 @@ subroutine get_explicit_hessian_0d(self, mol, cache, p, hessian, alphain, betain
    !> Molecular nuclear Hessian
    real(wp), intent(inout) :: hessian(:,:)
 
+   !> Strain Hessian
+   real(wp), intent(inout) :: elst(:, :, :, :)
+
    !> Alpha parameter
    real(wp), intent(in), optional :: alphain
 
@@ -3732,7 +3743,9 @@ subroutine get_explicit_hessian_0d(self, mol, cache, p, hessian, alphain, betain
    real(wp), intent(in), optional :: betain
 
    real(wp) :: alpha, beta
-   real(wp) :: elst(3, 3, 3, 3)
+   real(wp) :: el4(3, 3, 3, 3), el9(9, 9), elst_local(3, 3, 3, 3)
+   real(wp), allocatable :: mlcn(:, :, :), mlq(:, :, :), mlcn_local(:, :, :)
+   real(wp), allocatable :: mlq_local(:, :, :)
    integer :: iat, jat, izp, jzp, ii, jj
    real(wp) :: vec(3), norm_cn_i, radi, dradi, d2radi, capi, capj, rvdw
    real(wp) :: tqeta, hardi, dhdcni, d2hdcni2, detai, d2etai
@@ -3764,6 +3777,8 @@ subroutine get_explicit_hessian_0d(self, mol, cache, p, hessian, alphain, betain
 
    allocate(dcnacc(3, mol%nat, mol%nat), dqlocacc(3, mol%nat, mol%nat), &
       & source=0.0_wp)
+   allocate(mlcn(3, 3, mol%nat), mlq(3, 3, mol%nat), source=0.0_wp)
+   el4(:, :, :, :) = 0.0_wp
    allocate(diagonal(3, 3, mol%nat), dcndiag(3, mol%nat), &
       & dqlocdiag(3, mol%nat), source=0.0_wp)
    allocate(d2cnacc(mol%nat, mol%nat), d2cndiag(mol%nat), d2qlocacc(mol%nat), &
@@ -3818,10 +3833,13 @@ subroutine get_explicit_hessian_0d(self, mol, cache, p, hessian, alphain, betain
    !$omp private(wq_ij, wq_ji, kii, kjj, kij, d2pair) &
    !$omp shared(diagonal, dcndiag, dqlocdiag, cnacc, d2cndiag) &
    !$omp private(diagonal_local, dcndiag_local, dqlocdiag_local) &
-   !$omp private(cnacc_local, d2cndiag_local)
+   !$omp private(cnacc_local, d2cndiag_local) &
+   !$omp shared(el4, mlcn, mlq) private(elst_local, mlcn_local, mlq_local)
    allocate(diagonal_local(3, 3, mol%nat), dcndiag_local(3, mol%nat), &
       & dqlocdiag_local(3, mol%nat), source=0.0_wp)
    allocate(cnacc_local(mol%nat), d2cndiag_local(mol%nat), source=0.0_wp)
+   allocate(mlcn_local(3, 3, mol%nat), mlq_local(3, 3, mol%nat), source=0.0_wp)
+   elst_local(:, :, :, :) = 0.0_wp
    !$omp do schedule(runtime)
    do iat = 1, mol%nat
       izp = mol%id(iat)
@@ -3872,6 +3890,13 @@ subroutine get_explicit_hessian_0d(self, mol, cache, p, hessian, alphain, betain
          d2cndiag_local(jat) = d2cndiag_local(jat) + kjj
          d2cnacc(iat, jat) = kij
          d2cnacc(jat, iat) = kij
+
+         ! Strain counterparts of the pair block and the mixed CN weights
+         call add_strain_block(d2pair, vec, elst_local)
+         mlcn_local(:, :, iat) = mlcn_local(:, :, iat) + wk_ij * outerprod(vec, vec)
+         mlcn_local(:, :, jat) = mlcn_local(:, :, jat) + wk_ji * outerprod(vec, vec)
+         mlq_local(:, :, iat) = mlq_local(:, :, iat) + wq_ij * outerprod(vec, vec)
+         mlq_local(:, :, jat) = mlq_local(:, :, jat) + wq_ji * outerprod(vec, vec)
       end do
    end do
    !$omp end do
@@ -3882,15 +3907,18 @@ subroutine get_explicit_hessian_0d(self, mol, cache, p, hessian, alphain, betain
    dqlocdiag(:, :) = dqlocdiag + dqlocdiag_local
    cnacc(:) = cnacc + cnacc_local
    d2cndiag(:) = d2cndiag + d2cndiag_local
+   el4(:, :, :, :) = el4 + elst_local
+   mlcn(:, :, :) = mlcn + mlcn_local
+   mlq(:, :, :) = mlq + mlq_local
    !$omp end critical (get_explicit_hessian_0d_)
    deallocate(diagonal_local, dcndiag_local, dqlocdiag_local, cnacc_local, &
-      & d2cndiag_local)
+      & d2cndiag_local, mlcn_local, mlq_local)
    !$omp end parallel
    deallocate(radius, rdrad, drdrad, wcap, wcn, wqloc)
 
    !$omp parallel do default(none) schedule(static) &
    !$omp shared(mol, cache, hessian, diagonal, dcnacc, dqlocacc, dcndiag) &
-   !$omp shared(dqlocdiag, d2cnacc, d2cndiag, d2qlocacc) &
+   !$omp shared(dqlocdiag, d2cnacc, d2cndiag, d2qlocacc, mlq) &
    !$omp private(iat, ii)
    do iat = 1, mol%nat
       ii = 3 * (iat - 1)
@@ -3901,21 +3929,28 @@ subroutine get_explicit_hessian_0d(self, mol, cache, p, hessian, alphain, betain
       d2cnacc(iat, iat) = d2cndiag(iat)
       dqlocacc(:, :, iat) = dqlocacc(:, :, iat) &
          & + 0.5_wp * d2qlocacc(iat) * cache%dqlocdr(:, :, iat)
+      mlq(:, :, iat) = mlq(:, :, iat) &
+         & + 0.5_wp * d2qlocacc(iat) * cache%dqlocdL(:, :, iat)
    end do
    !$omp end parallel do
 
    ! Half of the symmetric product of the CN derivatives in their vector weights
    call gemm(cache%dcndr, d2cnacc, dcnacc, alpha=0.5_wp, beta=1.0_wp)
+   call gemm(cache%dcndL, d2cnacc, mlcn, alpha=0.5_wp, beta=1.0_wp)
 
    ! Products of the CN and local charge derivatives with their vector weights
    call add_chain_products(cache%dcndr, dcnacc, hessian)
    call add_chain_products(cache%dqlocdr, dqlocacc, hessian)
+   el9(:, :) = 0.0_wp
+   call add_chain_products(cache%dcndL, mlcn, el9)
+   call add_chain_products(cache%dqlocdL, mlq, el9)
+   el4(:, :, :, :) = el4 + reshape(el9, [3, 3, 3, 3])
 
-   ! The strain Hessian of the contraction is evaluated by the caller
-   elst(:, :, :, :) = 0.0_wp
-   call self%ncoord%add_coordination_number_hessian(mol, dtrans, cnacc, hessian, elst)
+   call self%ncoord%add_coordination_number_hessian(mol, dtrans, cnacc, hessian, el4)
    call self%ncoord_en%add_coordination_number_hessian(mol, dtrans, qlocacc, &
-      & hessian, elst)
+      & hessian, el4)
+   call add_explicit_virial(self, mol, cache, p, alpha, beta, el4, cnacc, qlocacc)
+   elst(:, :, :, :) = elst + el4
 
    deallocate(qlocacc, cnacc, dcnacc, dqlocacc, d2cnacc, d2cndiag, d2qlocacc, &
       & diagonal, dcndiag, dqlocdiag, dtrans, v, ptmp)
@@ -3923,7 +3958,8 @@ subroutine get_explicit_hessian_0d(self, mol, cache, p, hessian, alphain, betain
 end subroutine get_explicit_hessian_0d
 
 !> Explicit part of the nuclear Hessian of a periodic system (dense kernel)
-subroutine get_explicit_hessian_3d(self, mol, cache, p, hessian, alphain, betain)
+subroutine get_explicit_hessian_3d(self, mol, cache, p, hessian, elst, alphain, &
+   & betain)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
 
@@ -3939,6 +3975,9 @@ subroutine get_explicit_hessian_3d(self, mol, cache, p, hessian, alphain, betain
    !> Nuclear Hessian
    real(wp), intent(inout) :: hessian(:,:)
 
+   !> Strain Hessian
+   real(wp), intent(inout) :: elst(:, :, :, :)
+
    !> Alpha parameter
    real(wp), intent(in), optional :: alphain
 
@@ -3946,7 +3985,12 @@ subroutine get_explicit_hessian_3d(self, mol, cache, p, hessian, alphain, betain
    real(wp), intent(in), optional :: betain
 
    real(wp) :: alpha, beta
-   real(wp) :: elst(3, 3, 3, 3)
+   real(wp) :: el4(3, 3, 3, 3), el9(9, 9), elst_local(3, 3, 3, 3)
+   real(wp), allocatable :: mlcn(:, :, :), mlq(:, :, :), mlcn_local(:, :, :)
+   real(wp), allocatable :: mlq_local(:, :, :), wcapa(:), wcna(:), wqa(:)
+   real(wp) :: elp(3, 3, 3, 3), sk_ij(3, 3), sk_ji(3, 3), sq_ij(3, 3), sq_ji(3, 3)
+   real(wp) :: tvec(3), d2c(3, 3), dgc(3), dsc(3, 3)
+   integer :: itr
    integer :: iat, jat, izp, jzp, ii, jj, img
    real(wp) :: rij(3), norm_cn_i, radi, dradi, d2radi, capi, capj, rvdw, wsw
    real(wp) :: tqeta, hardi, dhdcni, d2hdcni2, detai, d2etai, ctmp
@@ -3978,17 +4022,21 @@ subroutine get_explicit_hessian_3d(self, mol, cache, p, hessian, alphain, betain
 
    allocate(dcnacc(3, mol%nat, mol%nat), dqlocacc(3, mol%nat, mol%nat), &
       & source=0.0_wp)
+   allocate(mlcn(3, 3, mol%nat), mlq(3, 3, mol%nat), source=0.0_wp)
+   el4(:, :, :, :) = 0.0_wp
    allocate(diagonal(3, 3, mol%nat), dcndiag(3, mol%nat), &
       & dqlocdiag(3, mol%nat), source=0.0_wp)
    allocate(d2cnacc(mol%nat, mol%nat), d2cndiag(mol%nat), d2qlocacc(mol%nat), &
       & source=0.0_wp)
    allocate(radius(mol%nat), rdrad(mol%nat), drdrad(mol%nat), wcap(mol%nat), &
       & wcn(mol%nat), wqloc(mol%nat), source=0.0_wp)
+   allocate(wcapa(mol%nat), wcna(mol%nat), wqa(mol%nat), source=0.0_wp)
 
    ! Precompute atomic radii, hardness derivatives, and diagonal weights
    !$omp parallel do default(none) schedule(runtime) &
    !$omp shared(cache, mol, self, p, v, alpha, beta, cnacc, qlocacc, d2cndiag) &
    !$omp shared(d2qlocacc, radius, rdrad, drdrad, wcap, wcn, wqloc, dtrans) &
+   !$omp shared(wcapa, wcna, wqa) &
    !$omp private(iat, izp, norm_cn_i, radi, dradi, d2radi, tqeta, hardi, dhdcni) &
    !$omp private(d2hdcni2, detai, d2etai, W_ii, cij, capi, rvdw, wsw, img, ctmp)
    do iat = 1, mol%nat
@@ -4017,6 +4065,9 @@ subroutine get_explicit_hessian_3d(self, mol, cache, p, hessian, alphain, betain
       end do
 
       W_ii = p(iat) * cache%vrhs(iat)
+      wcapa(iat) = alpha * W_ii * hardi
+      wcna(iat) = alpha * W_ii * dhdcni
+      wqa(iat) = alpha * W_ii * detai
 
       radius(iat) = radi
       rdrad(iat) = radi * dradi
@@ -4043,10 +4094,15 @@ subroutine get_explicit_hessian_3d(self, mol, cache, p, hessian, alphain, betain
    !$omp private(gk_ij, gk_ji, gq_ij, gq_ji, kii, kjj, kij, d2pair) &
    !$omp shared(diagonal, dcndiag, dqlocdiag, cnacc, d2cndiag) &
    !$omp private(diagonal_local, dcndiag_local, dqlocdiag_local) &
-   !$omp private(cnacc_local, d2cndiag_local)
+   !$omp private(cnacc_local, d2cndiag_local) &
+   !$omp shared(el4, mlcn, mlq, wcapa, wcna, wqa) &
+   !$omp private(elst_local, mlcn_local, mlq_local, elp, sk_ij, sk_ji, sq_ij, sq_ji) &
+   !$omp private(itr, tvec, d2c, dgc, dsc)
    allocate(diagonal_local(3, 3, mol%nat), dcndiag_local(3, mol%nat), &
       & dqlocdiag_local(3, mol%nat), source=0.0_wp)
    allocate(cnacc_local(mol%nat), d2cndiag_local(mol%nat), source=0.0_wp)
+   allocate(mlcn_local(3, 3, mol%nat), mlq_local(3, 3, mol%nat), source=0.0_wp)
+   elst_local(:, :, :, :) = 0.0_wp
    !$omp do schedule(runtime)
    do iat = 1, mol%nat
       izp = mol%id(iat)
@@ -4077,7 +4133,14 @@ subroutine get_explicit_hessian_3d(self, mol, cache, p, hessian, alphain, betain
                & radius(iat), radius(jat), rdrad(iat), rdrad(jat), &
                & drdrad(iat), drdrad(jat), wsw * aWij, wsw * wcap_sum, &
                & wsw * wcni, wsw * wcnj, wsw * wqloci, wsw * wqlocj, d2pair, &
-               & cni, cnj, gk_ij, gk_ji, gq_ij, gq_ji, kii, kjj, kij)
+               & cni, cnj, gk_ij, gk_ji, gq_ij, gq_ji, kii, kjj, kij, &
+               & elp, sk_ij, sk_ji, sq_ij, sq_ji)
+
+            elst_local(:, :, :, :) = elst_local + elp
+            mlcn_local(:, :, iat) = mlcn_local(:, :, iat) + sk_ij
+            mlcn_local(:, :, jat) = mlcn_local(:, :, jat) + sk_ji
+            mlq_local(:, :, iat) = mlq_local(:, :, iat) + sq_ij
+            mlq_local(:, :, jat) = mlq_local(:, :, jat) + sq_ji
 
             hessian(ii+1:ii+3, jj+1:jj+3) = hessian(ii+1:ii+3, jj+1:jj+3) - d2pair
             hessian(jj+1:jj+3, ii+1:ii+3) = hessian(jj+1:jj+3, ii+1:ii+3) - d2pair
@@ -4116,10 +4179,29 @@ subroutine get_explicit_hessian_3d(self, mol, cache, p, hessian, alphain, betain
             & radius(iat), radius(iat), rdrad(iat), rdrad(iat), &
             & drdrad(iat), drdrad(iat), wsw * alpha * W_ii, 0.0_wp, &
             & 0.0_wp, 0.0_wp, 0.0_wp, 0.0_wp, d2pair, &
-            & cni, cnj, gk_ij, gk_ji, gq_ij, gq_ji, kii, kjj, kij)
+            & cni, cnj, gk_ij, gk_ji, gq_ij, gq_ji, kii, kjj, kij, &
+            & elp, sk_ij, sk_ji, sq_ij, sq_ji)
 
          cnacc_local(iat) = cnacc_local(iat) + cni + cnj
          d2cndiag_local(iat) = d2cndiag_local(iat) + kii + kjj + 2.0_wp * kij
+
+         ! The own images move with the strain only
+         elst_local(:, :, :, :) = elst_local + elp
+         mlcn_local(:, :, iat) = mlcn_local(:, :, iat) + sk_ij + sk_ji
+         mlq_local(:, :, iat) = mlq_local(:, :, iat) + sq_ij + sq_ji
+
+         ! Capacitance to the own images in the diagonal of the Coulomb matrix
+         do itr = 1, size(dtrans, 2)
+            tvec = rij + dtrans(:, itr)
+            if (norm2(tvec) < eps) cycle
+            call get_d2cpair(self%kbc, tvec, rvdw, capi, capi, d2c)
+            call get_dcpair(self%kbc, tvec, rvdw, capi, capi, dgc, dsc)
+            call add_strain_block(wsw * wcapa(iat) * d2c, tvec, elst_local)
+            mlcn_local(:, :, iat) = mlcn_local(:, :, iat) &
+               & + wsw * wcna(iat) * outerprod(dgc, tvec)
+            mlq_local(:, :, iat) = mlq_local(:, :, iat) &
+               & + wsw * wqa(iat) * outerprod(dgc, tvec)
+         end do
       end do
    end do
    !$omp end do
@@ -4130,15 +4212,18 @@ subroutine get_explicit_hessian_3d(self, mol, cache, p, hessian, alphain, betain
    dqlocdiag(:, :) = dqlocdiag + dqlocdiag_local
    cnacc(:) = cnacc + cnacc_local
    d2cndiag(:) = d2cndiag + d2cndiag_local
+   el4(:, :, :, :) = el4 + elst_local
+   mlcn(:, :, :) = mlcn + mlcn_local
+   mlq(:, :, :) = mlq + mlq_local
    !$omp end critical (get_explicit_hessian_3d_)
    deallocate(diagonal_local, dcndiag_local, dqlocdiag_local, cnacc_local, &
-      & d2cndiag_local)
+      & d2cndiag_local, mlcn_local, mlq_local)
    !$omp end parallel
    deallocate(radius, rdrad, drdrad, wcap, wcn, wqloc)
 
    !$omp parallel do default(none) schedule(static) &
    !$omp shared(mol, cache, hessian, diagonal, dcnacc, dqlocacc, dcndiag) &
-   !$omp shared(dqlocdiag, d2cnacc, d2cndiag, d2qlocacc) &
+   !$omp shared(dqlocdiag, d2cnacc, d2cndiag, d2qlocacc, mlq) &
    !$omp private(iat, ii)
    do iat = 1, mol%nat
       ii = 3 * (iat - 1)
@@ -4149,27 +4234,76 @@ subroutine get_explicit_hessian_3d(self, mol, cache, p, hessian, alphain, betain
       d2cnacc(iat, iat) = d2cndiag(iat)
       dqlocacc(:, :, iat) = dqlocacc(:, :, iat) &
          & + 0.5_wp * d2qlocacc(iat) * cache%dqlocdr(:, :, iat)
+      mlq(:, :, iat) = mlq(:, :, iat) &
+         & + 0.5_wp * d2qlocacc(iat) * cache%dqlocdL(:, :, iat)
    end do
    !$omp end parallel do
 
    ! Half of the symmetric product of the CN derivatives in their vector weights
    call gemm(cache%dcndr, d2cnacc, dcnacc, alpha=0.5_wp, beta=1.0_wp)
+   call gemm(cache%dcndL, d2cnacc, mlcn, alpha=0.5_wp, beta=1.0_wp)
 
    ! Products of the CN and local charge derivatives with their vector weights
    call add_chain_products(cache%dcndr, dcnacc, hessian)
    call add_chain_products(cache%dqlocdr, dqlocacc, hessian)
+   el9(:, :) = 0.0_wp
+   call add_chain_products(cache%dcndL, mlcn, el9)
+   call add_chain_products(cache%dqlocdL, mlq, el9)
+   el4(:, :, :, :) = el4 + reshape(el9, [3, 3, 3, 3])
 
-   ! The strain Hessian of the contraction is evaluated by the caller
-   elst(:, :, :, :) = 0.0_wp
    call self%ncoord%add_coordination_number_hessian(mol, cache%trans, cnacc, &
-      & hessian, elst)
+      & hessian, el4)
    call self%ncoord_en%add_coordination_number_hessian(mol, cache%trans, qlocacc, &
-      & hessian, elst)
+      & hessian, el4)
+   call add_explicit_virial(self, mol, cache, p, alpha, beta, el4, cnacc, qlocacc)
+   elst(:, :, :, :) = elst + el4
 
    deallocate(qlocacc, cnacc, dcnacc, dqlocacc, d2cnacc, d2cndiag, d2qlocacc, &
       & diagonal, dcndiag, dqlocdiag, dtrans, v, ptmp)
 
 end subroutine get_explicit_hessian_3d
+
+
+!> Virial term of the explicit strain Hessian, the CN part is set by the CN Hessian
+subroutine add_explicit_virial(self, mol, cache, p, alpha, beta, elst, cnacc, &
+   & qlocacc, list)
+   !> EEQBC model type
+   class(eeqbc_model), intent(in) :: self
+   !> Molecular structure data
+   type(structure_type), intent(in) :: mol
+   !> Cache with the capacitance derivatives
+   type(mchrg_cache), intent(in) :: cache
+   !> Charge-like contraction vector
+   real(wp), intent(in) :: p(:)
+   !> Coulomb matrix prefactor
+   real(wp), intent(in) :: alpha
+   !> Electronegativity prefactor
+   real(wp), intent(in) :: beta
+   !> Strain Hessian
+   real(wp), intent(inout) :: elst(3, 3, 3, 3)
+   !> Optional weights of the CN, their virial is set by the CN Hessian
+   real(wp), intent(in), optional :: cnacc(:)
+   !> Optional weights of the local charges, their virial is set by the CN Hessian
+   real(wp), intent(in), optional :: qlocacc(:)
+   !> Optional sorted neighborlist of the update
+   type(csr_list), intent(in), optional :: list
+
+   integer :: iat
+   real(wp) :: sigma(3, 3)
+   real(wp), allocatable :: gtmp(:, :)
+
+   allocate(gtmp(3, mol%nat), source=0.0_wp)
+   sigma(:, :) = 0.0_wp
+   call self%get_grad(mol, cache, p, gtmp, sigma, alpha=alpha, beta=beta, list=list)
+   if (present(cnacc) .and. present(qlocacc)) then
+      do iat = 1, mol%nat
+         sigma(:, :) = sigma - cnacc(iat) * cache%dcndL(:, :, iat) &
+            & - qlocacc(iat) * cache%dqlocdL(:, :, iat)
+      end do
+   end if
+   call add_strain_virial(sigma, elst)
+
+end subroutine add_explicit_virial
 
 !> Pairwise radial Coulomb and bond-capacitance second-derivative quantities
 pure subroutine get_hessian_pair_0d(vec, kbc, rvdw, capi, capj, radi, radj, &
@@ -4273,7 +4407,8 @@ end subroutine get_hessian_pair_0d
 !> position-CN and position-qloc weights are returned as vectors
 subroutine get_hessian_pair_3d(rij, trans, kbc, rvdw, capi, capj, radi, radj, &
    & rdradi, rdradj, drdradi, drdradj, aWij, wcap_sum, wcni, wcnj, wqloci, &
-   & wqlocj, d2pair, cni, cnj, gk_ij, gk_ji, gq_ij, gq_ji, kii, kjj, kij)
+   & wqlocj, d2pair, cni, cnj, gk_ij, gk_ji, gq_ij, gq_ji, kii, kjj, kij, &
+   & elp, sk_ij, sk_ji, sq_ij, sq_ji)
    !> Distance vector R_j - R_i of the Wigner-Seitz image
    real(wp), intent(in) :: rij(3)
    !> Direct lattice translation vectors (3 × N)
@@ -4308,6 +4443,12 @@ subroutine get_hessian_pair_3d(rij, trans, kbc, rvdw, capi, capj, radi, radj, &
    real(wp), intent(out) :: gq_ij(3), gq_ji(3)
    !> Second derivatives w.r.t. CN_i^2, CN_j^2, and CN_i * CN_j
    real(wp), intent(out) :: kii, kjj, kij
+   !> Strain Hessian of the pair blocks
+   real(wp), intent(out) :: elp(3, 3, 3, 3)
+   !> Mixed strain-CN weights of i and j
+   real(wp), intent(out) :: sk_ij(3, 3), sk_ji(3, 3)
+   !> Mixed strain-qloc weights of i and j
+   real(wp), intent(out) :: sq_ij(3, 3), sq_ji(3, 3)
 
    integer :: itr
    real(wp) :: vec(3), r1, cpair, d2tmp(3, 3), cnitmp, cnjtmp
@@ -4323,6 +4464,11 @@ subroutine get_hessian_pair_3d(rij, trans, kbc, rvdw, capi, capj, radi, radj, &
    kii = 0.0_wp
    kjj = 0.0_wp
    kij = 0.0_wp
+   elp(:, :, :, :) = 0.0_wp
+   sk_ij(:, :) = 0.0_wp
+   sk_ji(:, :) = 0.0_wp
+   sq_ij(:, :) = 0.0_wp
+   sq_ji(:, :) = 0.0_wp
 
    do itr = 1, size(trans, 2)
       vec(:) = rij + trans(:, itr)
@@ -4346,13 +4492,18 @@ subroutine get_hessian_pair_3d(rij, trans, kbc, rvdw, capi, capj, radi, radj, &
       kii = kii + kiitmp
       kjj = kjj + kjjtmp
       kij = kij + kijtmp
+      call add_strain_block(d2tmp, vec, elp)
+      sk_ij(:, :) = sk_ij + wk_ij * outerprod(vec, vec)
+      sk_ji(:, :) = sk_ji + wk_ji * outerprod(vec, vec)
+      sq_ij(:, :) = sq_ij + wq_ij * outerprod(vec, vec)
+      sq_ji(:, :) = sq_ji + wq_ji * outerprod(vec, vec)
    end do
 
 end subroutine get_hessian_pair_3d
 
 !> Explicit part of the molecular nuclear Hessian on a neighborlist
 subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
-   & alphain, betain)
+   & elst, alphain, betain)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
 
@@ -4371,6 +4522,9 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    !> Molecular nuclear Hessian with allocated blocks on its list, which holds
    !> the rows cache%hinl of the pair arrays
    type(mchrg_hessian), intent(inout) :: hessian
+
+   !> Strain Hessian
+   real(wp), intent(inout) :: elst(:, :, :, :)
 
    !> Alpha parameter
    real(wp), intent(in), optional :: alphain
@@ -4398,6 +4552,9 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    real(wp), allocatable :: diagonal_local(:, :, :), dcndiag_local(:, :)
    real(wp), allocatable :: dqlocdiag_local(:, :), cnacc_local(:)
    real(wp), allocatable :: d2cndiag_local(:)
+   real(wp) :: el4(3, 3, 3, 3), el9(9, 9), elst_local(3, 3, 3, 3)
+   real(wp), allocatable :: mlcn(:, :, :), mlq(:, :, :), mlcn_local(:, :, :)
+   real(wp), allocatable :: mlq_local(:, :, :)
 
    alpha = 1.0_wp
    if (present(alphain)) alpha = alphain
@@ -4416,6 +4573,8 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
       & diagonal(3, 3, mol%nat), source=0.0_wp)
 
    allocate(wpair(3, size(list%nlat, kind=i8)), source=0.0_wp)
+   allocate(mlcn(3, 3, mol%nat), mlq(3, 3, mol%nat), source=0.0_wp)
+   el4(:, :, :, :) = 0.0_wp
    call get_transposed_positions(list, tpos)
 
    ! Precompute atomic radii, hardness derivatives, and diagonal weights
@@ -4466,10 +4625,13 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    !$omp private(wk_ij, wk_ji, wq_ij, wq_ji, kii, kjj, kij, d2pair) &
    !$omp shared(diagonal, dcndiag, dqlocdiag, cnacc, d2cndiag) &
    !$omp private(diagonal_local, dcndiag_local, dqlocdiag_local) &
-   !$omp private(cnacc_local, d2cndiag_local)
+   !$omp private(cnacc_local, d2cndiag_local) &
+   !$omp shared(el4, mlcn, mlq) private(elst_local, mlcn_local, mlq_local)
    allocate(diagonal_local(3, 3, mol%nat), dcndiag_local(3, mol%nat), &
       & dqlocdiag_local(3, mol%nat), source=0.0_wp)
    allocate(cnacc_local(mol%nat), d2cndiag_local(mol%nat), source=0.0_wp)
+   allocate(mlcn_local(3, 3, mol%nat), mlq_local(3, 3, mol%nat), source=0.0_wp)
+   elst_local(:, :, :, :) = 0.0_wp
    !$omp do schedule(runtime)
    do iat = 1, mol%nat
       izp = mol%id(iat)
@@ -4523,6 +4685,13 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
          wpair(1, tat) = wk_ji
          wpair(2, tat) = wq_ji
          wpair(3, tat) = kij
+
+         ! Strain counterparts of the pair block and the mixed CN weights
+         call add_strain_block(d2pair, vec, elst_local)
+         mlcn_local(:, :, iat) = mlcn_local(:, :, iat) + wk_ij * outerprod(vec, vec)
+         mlcn_local(:, :, jat) = mlcn_local(:, :, jat) + wk_ji * outerprod(vec, vec)
+         mlq_local(:, :, iat) = mlq_local(:, :, iat) + wq_ij * outerprod(vec, vec)
+         mlq_local(:, :, jat) = mlq_local(:, :, jat) + wq_ji * outerprod(vec, vec)
       end do
    end do
    !$omp end do
@@ -4533,9 +4702,12 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    dqlocdiag(:, :) = dqlocdiag + dqlocdiag_local
    cnacc(:) = cnacc + cnacc_local
    d2cndiag(:) = d2cndiag + d2cndiag_local
+   el4(:, :, :, :) = el4 + elst_local
+   mlcn(:, :, :) = mlcn + mlcn_local
+   mlq(:, :, :) = mlq + mlq_local
    !$omp end critical (get_explicit_hessian_0d_list_)
    deallocate(diagonal_local, dcndiag_local, dqlocdiag_local, cnacc_local, &
-      & d2cndiag_local)
+      & d2cndiag_local, mlcn_local, mlq_local)
    !$omp end parallel
 
    ! Add accumulated diagonal pair blocks
@@ -4674,12 +4846,32 @@ subroutine get_explicit_hessian_0d_list(self, mol, list, cache, p, hessian, &
    deallocate(gcn, gqloc, mark, touch, hmap)
    !$omp end parallel
 
+   ! Strain counterparts of the CN-CN and qloc-qloc couplings
+   do iat = 1, mol%nat
+      mlcn(:, :, iat) = mlcn(:, :, iat) + 0.5_wp * d2cndiag(iat) * cache%dcndL(:, :, iat)
+      mlq(:, :, iat) = mlq(:, :, iat) + 0.5_wp * d2qlocacc(iat) * cache%dqlocdL(:, :, iat)
+      do kat = list%inl(iat) + 1, find_lower_start(list, iat) - 1
+         jat = list%nlat(kat)
+         mlcn(:, :, iat) = mlcn(:, :, iat) &
+            & + 0.5_wp * wpair(3, kat) * cache%dcndL(:, :, jat)
+         mlcn(:, :, jat) = mlcn(:, :, jat) &
+            & + 0.5_wp * wpair(3, kat) * cache%dcndL(:, :, iat)
+      end do
+   end do
+   el9(:, :) = 0.0_wp
+   call add_chain_products(cache%dcndL, mlcn, el9)
+   call add_chain_products(cache%dqlocdL, mlq, el9)
+   el4(:, :, :, :) = el4 + reshape(el9, [3, 3, 3, 3])
+
    deallocate(v, dcndiag, dqlocdiag, d2cndiag, d2qlocacc, wpair, tpos)
 
    call self%ncoord%add_coordination_number_hessian_list(mol, dtrans, cnacc, &
-      & hessian%list, hessian%hesslist)
+      & hessian%list, hessian%hesslist, el4)
    call self%ncoord_en%add_coordination_number_hessian_list(mol, dtrans, &
-      & qlocacc, hessian%list, hessian%hesslist)
+      & qlocacc, hessian%list, hessian%hesslist, el4)
+   call add_explicit_virial(self, mol, cache, p, alpha, beta, el4, cnacc, qlocacc, &
+      & hessian%list)
+   elst(:, :, :, :) = elst + el4
 
    deallocate(cnacc, qlocacc)
 

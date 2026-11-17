@@ -44,7 +44,7 @@ program main
    type(mchrg_cache), allocatable :: cache
    class(mchrg_solver_type), allocatable :: solver
    class(mchrg_solver_input), allocatable :: solver_input
-   logical :: grad, egrad, qgrad, json, exist, use_nlist, numeric_hessian
+   logical :: egrad, qgrad, json, exist, use_nlist, numeric_hessian
    logical :: analytic_hessian, full_list
    real(wp), allocatable :: trans(:, :)
    real(wp), allocatable :: energy(:), gradient(:, :), sigma(:, :)
@@ -184,11 +184,8 @@ program main
       if (.not. use_nlist) allocate(dqdr(3, mol%nat, mol%nat), source=0.0_wp)
    end if
 
-   grad = egrad .or. qgrad
-
    call timer%push("update")
-   call model%update(mol, cache, trans, grad, list, dqdr=qgrad, &
-   & hess=analytic_hessian)
+   call model%update(mol, cache, trans, list)
    call timer%pop
    if (verbosity > 1) then
       write(output_unit, '(a, 1x, a)') "Get coordination number time : ", &
@@ -208,23 +205,27 @@ program main
          & format_time(timer%get("numhess"))
       end if
    else if (analytic_hessian .and. use_nlist) then
-      allocate(hesslist)
+      allocate(hesslist, press(3, 3, 3, 3))
+      press(:, :, :, :) = 0.0_wp
       call timer%push("hess")
-      call model%solve(mol, solver, cache, error, energy, gradient, sigma, &
-      & qvec, list=list, efield=efield, verbosity=verbosity, unit=output_unit)
+      call model%solve(mol, solver, cache, error, energy, qvec, list, efield=efield, &
+      & verbosity=verbosity, unit=output_unit)
       if (allocated(error)) then
          write(error_unit, '(a)') error%message
          error stop
       end if
+      call model%update(mol, cache, trans, list, qcp=.true.)
       if (allocated(full)) then
          ! The blocks are formed on the half list of the update
          call move_alloc(list, hesslist%list)
-         call model%get_hessian(mol, solver, cache, error, hesslist, full, &
-         & unit=output_unit, verbosity=verbosity)
+         call model%get_electrostatic_hessian(mol, solver, cache, error, hesslist, &
+         & press, full, gradient=gradient, sigma=sigma, unit=output_unit, &
+         & verbosity=verbosity)
          deallocate(full)
       else
-         call model%get_hessian(mol, solver, cache, error, hesslist, list, &
-         & unit=output_unit, verbosity=verbosity)
+         call model%get_electrostatic_hessian(mol, solver, cache, error, hesslist, &
+         & press, list, gradient=gradient, sigma=sigma, unit=output_unit, &
+         & verbosity=verbosity)
       end if
       call timer%pop
       if (verbosity > 1) then
@@ -232,16 +233,18 @@ program main
          & format_time(timer%get("hess"))
       end if
    else if (analytic_hessian) then
-      allocate(hessian(3 * mol%nat, 3 * mol%nat))
+      allocate(hessian(3 * mol%nat, 3 * mol%nat), press(3, 3, 3, 3))
+      press(:, :, :, :) = 0.0_wp
       call timer%push("hess")
-      call model%solve(mol, solver, cache, error, energy, gradient, sigma, &
-      & qvec, efield=efield, verbosity=verbosity, unit=output_unit)
+      call model%solve(mol, solver, cache, error, energy, qvec, efield=efield, &
+      & verbosity=verbosity, unit=output_unit)
       if (allocated(error)) then
          write(error_unit, '(a)') error%message
          error stop
       end if
-      call model%get_hessian(mol, solver, cache, error, hessian, &
-      & unit=output_unit, verbosity=verbosity)
+      call model%update(mol, cache, trans, qcp=.true.)
+      call model%get_electrostatic_hessian(mol, solver, cache, error, hessian, &
+      & press, gradient=gradient, sigma=sigma, unit=output_unit, verbosity=verbosity)
       call timer%pop
       if (verbosity > 1) then
          write(output_unit, '(a, 1x, a)') "Get analytical Hessian time : ", &
@@ -257,9 +260,17 @@ program main
          end do
       end do
    else
-      call model%solve(mol, solver, cache, error, &
-      & energy, gradient, sigma, qvec, dqdr, dqdL, list, efield=efield, &
+      call model%solve(mol, solver, cache, error, energy, qvec, list, efield=efield, &
       & verbosity=verbosity, unit=output_unit)
+      if (.not. allocated(error) .and. egrad) then
+         call model%get_electrostatic_gradient(mol, cache, error, gradient, sigma, &
+         & list, output_unit, verbosity)
+      end if
+      if (.not. allocated(error) .and. qgrad) then
+         call model%update(mol, cache, trans, list, qcp=.true.)
+         call model%get_charge_derivs(mol, solver, cache, error, dqdr=dqdr, &
+         & dqdL=dqdL, list=list, unit=output_unit, verbosity=verbosity)
+      end if
    end if
 
    if (allocated(error)) then
