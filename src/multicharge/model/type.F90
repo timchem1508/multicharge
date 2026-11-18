@@ -489,10 +489,10 @@ module multicharge_model_type
          real(wp), intent(inout) :: elst(:, :, :, :)
 
          !> Optional gradient of the energy, added to
-         real(wp), intent(inout), optional :: gradient(:, :)
+         real(wp), intent(inout), optional, contiguous :: gradient(:, :)
 
          !> Optional virial of the energy, added to
-         real(wp), intent(inout), optional :: sigma(:, :)
+         real(wp), intent(inout), optional, contiguous :: sigma(:, :)
 
          !> Output unit
          integer, intent(in), optional :: unit
@@ -531,10 +531,10 @@ module multicharge_model_type
          type(csr_list), intent(in) :: list
 
          !> Optional gradient of the energy, added to
-         real(wp), intent(inout), optional :: gradient(:, :)
+         real(wp), intent(inout), optional, contiguous :: gradient(:, :)
 
          !> Optional virial of the energy, added to
-         real(wp), intent(inout), optional :: sigma(:, :)
+         real(wp), intent(inout), optional, contiguous :: sigma(:, :)
 
          !> Output unit
          integer, intent(in), optional :: unit
@@ -642,10 +642,10 @@ module multicharge_model_type
          real(wp), intent(inout) :: elst(:, :, :, :)
 
          !> Optional gradient of the external function, added to
-         real(wp), intent(inout), optional :: gradient(:, :)
+         real(wp), intent(inout), optional, contiguous :: gradient(:, :)
 
          !> Optional virial of the external function, added to
-         real(wp), intent(inout), optional :: sigma(:, :)
+         real(wp), intent(inout), optional, contiguous :: sigma(:, :)
 
          !> Output unit
          integer, intent(in), optional :: unit
@@ -699,10 +699,10 @@ module multicharge_model_type
          type(csr_list), intent(in) :: list
 
          !> Optional gradient of the external function, added to
-         real(wp), intent(inout), optional :: gradient(:, :)
+         real(wp), intent(inout), optional, contiguous :: gradient(:, :)
 
          !> Optional virial of the external function, added to
-         real(wp), intent(inout), optional :: sigma(:, :)
+         real(wp), intent(inout), optional, contiguous :: sigma(:, :)
 
          !> Output unit
          integer, intent(in), optional :: unit

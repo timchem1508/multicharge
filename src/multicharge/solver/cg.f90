@@ -656,7 +656,7 @@ subroutine invert(self, amat, ainv, new_unit, error)
    real(wp), allocatable :: bsub(:, :), xsub(:, :)
    ! Storage of the dense trailing matrix A_UU
    real(wp), allocatable, target :: abuf(:)
-   real(wp), pointer :: asub(:, :)
+   real(wp), pointer, contiguous :: asub(:, :)
 
    ! Dimensions check
    ndim = size(ainv, 1)
@@ -930,8 +930,8 @@ subroutine invert_block(solver, alist, list, hlist, hfin, cols, loc, col_id, sid
    real(wp), intent(inout) :: subval(:)
 
    !> Preallocated block-CG vector buffers
-   real(wp), target, intent(inout) :: work_x(:), work_r(:), work_z(:)
-   real(wp), target, intent(inout) :: work_p(:), work_q(:)
+   real(wp), target, contiguous, intent(inout) :: work_x(:), work_r(:), work_z(:)
+   real(wp), target, contiguous, intent(inout) :: work_p(:), work_q(:)
 
    !> Inverse on the list of the values, the rows of the block atoms are set
    real(wp), intent(inout) :: ainvlist(:)
@@ -953,7 +953,7 @@ subroutine invert_block(solver, alist, list, hlist, hfin, cols, loc, col_id, sid
 
    integer :: ncol, isub, iat, jat, ivec
    integer(i8) :: kat, tick(4), rate
-   real(wp), pointer :: xsub(:, :), rsub(:, :)
+   real(wp), pointer, contiguous :: xsub(:, :), rsub(:, :)
    type(error_type), allocatable :: blkerror
 
    call system_clock(tick(1), rate)
@@ -1061,7 +1061,7 @@ subroutine solve_sub_block(self, alist, list, ufin, cols, nsub, sidx, loc, &
    real(wp), contiguous, intent(inout) :: res(:, :)
 
    !> Preallocated workspace for preconditioned residuals, search directions and A*P
-   real(wp), target, intent(inout) :: work_z(:), work_p(:), work_q(:)
+   real(wp), target, contiguous, intent(inout) :: work_z(:), work_p(:), work_q(:)
 
    !> Number of iterations until convergence
    integer, intent(out) :: niter
@@ -1075,8 +1075,8 @@ subroutine solve_sub_block(self, alist, list, ufin, cols, nsub, sidx, loc, &
    real(wp), target :: dtad_buf(block_size_def * block_size_def)
    real(wp), target :: step_buf(block_size_def * block_size_def)
    real(wp), target :: updfact_buf(block_size_def * block_size_def)
-   real(wp), pointer :: precres(:, :), dir(:, :), adir(:, :)
-   real(wp), pointer :: dtad(:, :), step(:, :), updfact(:, :)
+   real(wp), pointer, contiguous :: precres(:, :), dir(:, :), adir(:, :)
+   real(wp), pointer, contiguous :: dtad(:, :), step(:, :), updfact(:, :)
 
    niter = 0
    ncol = size(cols)
@@ -1383,7 +1383,7 @@ subroutine orthonormalize_rows(ncol, nsub, vec, out_buf, nrank, error)
    real(wp), contiguous, intent(in) :: vec(:, :)
 
    !> Output buffer for the orthonormal basis of shape (nrank, nsub)
-   real(wp), target, intent(inout) :: out_buf(:)
+   real(wp), target, contiguous, intent(inout) :: out_buf(:)
 
    !> Rank of the block of vectors
    integer, intent(out) :: nrank
@@ -1396,7 +1396,7 @@ subroutine orthonormalize_rows(ncol, nsub, vec, out_buf, nrank, error)
    real(wp), target :: gram_buf(block_size_def * block_size_def)
    real(wp), target :: eval_buf(block_size_def)
    real(wp), target :: evec_buf(block_size_def * block_size_def)
-   real(wp), pointer :: gram(:, :), eval(:), evec(:, :), outvec(:, :)
+   real(wp), pointer, contiguous :: gram(:, :), eval(:), evec(:, :), outvec(:, :)
 
    gram(1:ncol, 1:ncol) => gram_buf(1:ncol * ncol)
    eval(1:ncol) => eval_buf(1:ncol)
