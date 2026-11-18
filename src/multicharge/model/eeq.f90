@@ -497,50 +497,33 @@ end subroutine get_xvec_derivs
 
 
 !> Add the Coulomb matrix derivatives contracted with a vector
-subroutine get_coulomb_derivs(self, mol, ndim, cache, alpha, p, list, dafdr)
+subroutine get_coulomb_derivs(self, mol, ndim, cache, alpha, p, list, dadr, &
+   & dadrlist, dadL)
    !> EEQ model type
    class(eeq_model), intent(in) :: self
    !> Structure type
    type(structure_type), intent(in) :: mol
    !> System size
    integer, intent(in) :: ndim
-   !> Multicharge cache (stores the derivatives)
+   !> Multicharge cache
    type(mchrg_cache), intent(inout) :: cache
    !> dA/dR*p multiplier
    real(wp), intent(in) :: alpha
    !> Vector contracted with the Coulomb matrix derivatives
    real(wp), intent(in) :: p(:)
-   !> Multicharge neighborlist type
+   !> Geometrical derivatives of the Coulomb matrix multiplied p
+   real(wp), intent(inout), optional :: dadr(:, :, :)
+   !> Compressed geometrical derivatives of the Coulomb matrix multiplied by p
+   real(wp), intent(inout), optional :: dadrlist(:, :)
+   !> Lattice derivatives of the Coulomb matrix multiplied p
+   real(wp), intent(inout) :: dadL(:, :, :)
+   !> Multicharge neighborlist type (sorted complete)
    type(csr_list), intent(in), optional :: list
-   !> Add to dafdr instead
-   logical, intent(in), optional :: dafdr
-
-   logical :: ext
-   real(wp), allocatable :: dadr(:, :, :), dadL(:, :, :)
-
-   ext = .false.
-   if (present(dafdr)) ext = dafdr
-
-   if (ext) then
-      call move_alloc(cache%dafdr, dadr)
-      allocate(dadL(3, 3, ndim), source=0.0_wp)
-   else
-      call move_alloc(cache%dabdr, dadr)
-      call move_alloc(cache%dabdL, dadL)
-   end if
 
    if (any(mol%periodic)) then
       call get_damat_3d(self, mol, cache, alpha, p, dadr, dadL)
    else
       call get_damat_0d(self, mol, cache, alpha, p, dadr, dadL)
-   end if
-
-   if (ext) then
-      call move_alloc(dadr, cache%dafdr)
-      call move_alloc(dadL, cache%dafdL)
-   else
-      call move_alloc(dadr, cache%dabdr)
-      call move_alloc(dadL, cache%dabdL)
    end if
 
 end subroutine get_coulomb_derivs

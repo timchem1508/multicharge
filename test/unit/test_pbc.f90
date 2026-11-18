@@ -713,7 +713,8 @@ subroutine test_dadr(error, mol, model)
    call model%get_capacitance_matrix(mol, ndim, cache)
    call model%get_capacitance_derivs(mol, cache)
    call new_partial_derivs(mol, ndim, cache)
-   call model%get_coulomb_derivs(mol, ndim, cache, alpha=1.0_wp, p=qvec)
+   call model%get_coulomb_derivs(mol, ndim, cache, alpha=1.0_wp, p=qvec, &
+      & dadr=cache%dabdr, dadL=cache%dabdL)
 
    if (any(abs(cache%dabdr(:, :, :) - numgrad(:, :, :)) > thr2_local)) then
       call test_failed(error, "Derivative of the A matrix does not match")
@@ -830,7 +831,8 @@ subroutine test_dadL(error, mol, model)
    call model%get_capacitance_matrix(mol, ndim, cache)
    call model%get_capacitance_derivs(mol, cache)
    call new_partial_derivs(mol, ndim, cache)
-   call model%get_coulomb_derivs(mol, ndim, cache, alpha=1.0_wp, p=qvec)
+   call model%get_coulomb_derivs(mol, ndim, cache, alpha=1.0_wp, p=qvec, &
+      & dadr=cache%dabdr, dadL=cache%dabdL)
    if (allocated(error)) return
 
    if (any(abs(cache%dabdL(:, :, :) - numsigma(:, :, :)) > thr2)) then

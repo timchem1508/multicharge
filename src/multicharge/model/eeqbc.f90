@@ -888,7 +888,8 @@ subroutine get_xvec_derivs_3d_list(self, mol, list, cache, beta)
 end subroutine get_xvec_derivs_3d_list
 
 !> Add the Coulomb matrix derivatives contracted with a vector
-subroutine get_coulomb_derivs(self, mol, ndim, cache, alpha, p, list, dafdr)
+subroutine get_coulomb_derivs(self, mol, ndim, cache, alpha, p, list, dadr, &
+   & dadrlist, dadL)
    !> EEQBC model type
    class(eeqbc_model), intent(in) :: self
    !> Structure type
@@ -901,52 +902,34 @@ subroutine get_coulomb_derivs(self, mol, ndim, cache, alpha, p, list, dafdr)
    real(wp), intent(in) :: alpha
    !> Vector contracted with the Coulomb matrix derivatives
    real(wp), intent(in) :: p(:)
+   !> Geometrical derivatives of the Coulomb matrix multiplied p
+   real(wp), intent(inout), optional :: dadr(:, :, :)
+   !> Compressed geometrical derivatives of the Coulomb matrix multiplied by p
+   real(wp), intent(inout), optional :: dadrlist(:, :)
+   !> Lattice derivatives of the Coulomb matrix multiplied p
+   real(wp), intent(inout) :: dadL(:, :, :)
    !> Multicharge neighborlist type (sorted complete)
    type(csr_list), intent(in), optional :: list
-   !> Add to dafdr (dafdrlist with a neighborlist) instead
-   logical, intent(in), optional :: dafdr
 
-   logical :: ext
-   real(wp), allocatable :: dadr(:, :, :), dlist(:, :), dadL(:, :, :)
+   logical :: sparse
 
-   ext = .false.
-   if (present(dafdr)) ext = dafdr
+   sparse = present(dadrlist) .and. present(list)
 
-   if (ext) then
-      call move_alloc(cache%dafdr, dadr)
-      call move_alloc(cache%dafdrlist, dlist)
-      allocate(dadL(3, 3, ndim), source=0.0_wp)
-   else
-      call move_alloc(cache%dabdr, dadr)
-      call move_alloc(cache%dabdrlist, dlist)
-      call move_alloc(cache%dabdL, dadL)
-   end if
-
-   if (present(list)) then
+   if (sparse) then
       if (.not. allocated(cache%tpos)) call get_transposed_positions(list, cache%tpos)
       if (.not. allocated(cache%cninl)) call get_cn_entries_list(mol, list, cache, &
          & cache%tpos, cache%cninl, cache%cnpos)
       if (any(mol%periodic)) then
-         call get_damat_3d_list(self, mol, list, cache, alpha, p, dlist, dadL)
+         call get_damat_3d_list(self, mol, list, cache, alpha, p, dadrlist, dadL)
       else
-         call get_damat_0d_list(self, mol, list, cache, alpha, p, dlist, dadL)
+         call get_damat_0d_list(self, mol, list, cache, alpha, p, dadrlist, dadL)
       end if
-   else
+   else if (present(dadr)) then
       if (any(mol%periodic)) then
          call get_damat_3d(self, mol, cache, alpha, p, dadr, dadL)
       else
          call get_damat_0d(self, mol, cache, alpha, p, dadr, dadL)
       end if
-   end if
-
-   if (ext) then
-      call move_alloc(dadr, cache%dafdr)
-      call move_alloc(dlist, cache%dafdrlist)
-      call move_alloc(dadL, cache%dafdL)
-   else
-      call move_alloc(dadr, cache%dabdr)
-      call move_alloc(dlist, cache%dabdrlist)
-      call move_alloc(dadL, cache%dabdL)
    end if
 
 end subroutine get_coulomb_derivs

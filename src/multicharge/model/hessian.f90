@@ -654,7 +654,7 @@ module procedure get_external_hessian_dense
    ! Mixed derivatives of the Lagrangian, G^T = d2f/dRdq - dA/dR*p
    call new_partial_derivs(mol, size(padj), cache, dafdr=.true.)
    call self%get_coulomb_derivs(mol, size(padj), cache, alpha=-1.0_wp, &
-      & p=padj(:mol%nat), dafdr=.true.)
+      & p=padj(:mol%nat), dadr=cache%dafdr, dadL=cache%dafdL)
    cache%dafdr = cache%dafdr + dfdrdq
 
    call gemm(reshape(cache%dafdr, [ndim, mol%nat]), &
@@ -732,7 +732,7 @@ module procedure get_external_hessian_list
    call ensure_partial_derivs(self, mol, cache, list)
    call new_partial_derivs(mol, mol%nat, cache, list, dafdr=.true.)
    call self%get_coulomb_derivs(mol, mol%nat, cache, alpha=-1.0_wp, p=padj, &
-      & list=list, dafdr=.true.)
+      & list=list, dadrlist=cache%dafdrlist, dadL=cache%dafdL)
    call add_list_derivs(mol%nat, list, cache%dafdrlist, dfdrdq_list, dfdrdq)
    call timer%pop
    if (allocated(cache%tpos)) deallocate(cache%tpos)

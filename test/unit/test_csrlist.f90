@@ -1367,11 +1367,12 @@ subroutine test_partial_derivs(error, mol, model)
       call new_partial_derivs(mol, ndim, cache1)
       call model%get_xvec_derivs(mol, ndim, cache1, scales(2, iscale))
       call model%get_coulomb_derivs(mol, ndim, cache1, scales(1, iscale), &
-         & cache1%vrhs(:mol%nat))
+         & cache1%vrhs(:mol%nat), dadr=cache1%dabdr, dadL=cache1%dabdL)
       call new_partial_derivs(mol, ndim, cache2, list)
       call model%get_xvec_derivs(mol, ndim, cache2, scales(2, iscale), list=list)
       call model%get_coulomb_derivs(mol, ndim, cache2, scales(1, iscale), &
-         & cache2%vrhs(:mol%nat), list=list)
+         & cache2%vrhs(:mol%nat), list=list, dadrlist=cache2%dabdrlist, &
+         & dadL=cache2%dabdL)
       call expand_partial_derivs(mol, list, cache2%dabdrlist, dabdr)
 
       if (any(abs(dabdr - cache1%dabdr) > thr2)) then
@@ -1391,10 +1392,11 @@ subroutine test_partial_derivs(error, mol, model)
       pvec(jat) = cos(real(jat, wp)) - 0.3_wp
    end do
    call new_partial_derivs(mol, ndim, cache1, dafdr=.true.)
-   call model%get_coulomb_derivs(mol, ndim, cache1, 0.5_wp, pvec, dafdr=.true.)
+   call model%get_coulomb_derivs(mol, ndim, cache1, 0.5_wp, pvec, &
+      & dadr=cache1%dafdr, dadL=cache1%dafdL)
    call new_partial_derivs(mol, ndim, cache2, list, dafdr=.true.)
    call model%get_coulomb_derivs(mol, ndim, cache2, 0.5_wp, pvec, list=list, &
-      & dafdr=.true.)
+      & dadrlist=cache2%dafdrlist, dadL=cache2%dafdL)
    call expand_partial_derivs(mol, list, cache2%dafdrlist, dabdr)
    if (any(abs(dabdr - cache1%dafdr) > thr1)) then
       call test_failed(error, "Coulomb matrix derivatives times p do not match")

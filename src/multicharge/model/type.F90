@@ -277,7 +277,8 @@ module multicharge_model_type
       end subroutine get_coulomb_matrix
 
       !> Coulomb matrix derivatives contracted with a vector, alpha * dA/dR*p
-      subroutine get_coulomb_derivs(self, mol, ndim, cache, alpha, p, list, dafdr)
+      subroutine get_coulomb_derivs(self, mol, ndim, cache, alpha, p, &
+         & list, dadr, dadrlist, dadL)
          import :: mchrg_model_type, structure_type, mchrg_cache, csr_list, wp
 
          !> Multicharge model type
@@ -289,20 +290,26 @@ module multicharge_model_type
          !> System size
          integer, intent(in) :: ndim
 
-         !> Multicharge cache holding the partial derivatives
+         !> Multicharge cache holding the Coulomb matrix
          type(mchrg_cache), intent(inout) :: cache
 
-         !> Multiplier of the Coulomb matrix derivatives
+         !> dA/dR*p multiplier
          real(wp), intent(in) :: alpha
 
          !> Vector contracted with the Coulomb matrix derivatives
          real(wp), intent(in) :: p(:)
 
-         !> Multicharge neighborlist type (sorted complete)
-         type(csr_list), intent(in), optional :: list
+         !> Derivatives w.r.t. positions, dadr(:, x, b) of component b w.r.t. atom x
+         real(wp), intent(inout), optional :: dadr(:, :, :)
 
-         !> Add to dafdr for an external vector instead
-         logical, intent(in), optional :: dafdr
+         !> Compressed geometrical derivatives of the Coulomb matrix multiplied by p
+         real(wp), intent(inout), optional :: dadrlist(:, :)
+
+         !> Lattice derivatives of the Coulomb matrix multiplied p
+         real(wp), intent(inout) :: dadL(:, :, :)
+
+         !> Multicharge neighborlist type
+         type(csr_list), intent(in), optional :: list
       end subroutine get_coulomb_derivs
 
       !> Electronegativity vector derivatives, beta * dX/dR
@@ -1285,7 +1292,8 @@ subroutine ensure_partial_derivs(self, mol, cache, list)
    call new_partial_derivs(mol, mol%nat, cache, list)
    call self%get_xvec_derivs(mol, mol%nat, cache, beta=1.0_wp, list=list)
    call self%get_coulomb_derivs(mol, mol%nat, cache, alpha=-1.0_wp, &
-      & p=cache%vrhs(:mol%nat), list=list)
+      & p=cache%vrhs(:mol%nat), list=list, dadr=cache%dabdr, &
+      & dadrlist=cache%dabdrlist, dadL=cache%dabdL)
 
 end subroutine ensure_partial_derivs
 
@@ -1560,7 +1568,10 @@ subroutine new_partial_derivs(mol, ndim, cache, list, dafdr)
       if (allocated(cache%dabdr)) deallocate(cache%dabdr)
       allocate(cache%dabdr(3, mol%nat, ndim), source=0.0_wp)
    end if
-   if (.not. ext) then
+   if (ext) then
+      if (allocated(cache%dafdL)) deallocate(cache%dafdL)
+      allocate(cache%dafdL(3, 3, ndim), source=0.0_wp)
+   else
       if (allocated(cache%dabdL)) deallocate(cache%dabdL)
       allocate(cache%dabdL(3, 3, ndim), source=0.0_wp)
    end if
